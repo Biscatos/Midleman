@@ -7,6 +7,7 @@ const config = loadConfig();
 console.log(`🚀 Bun-Forwarder starting...`);
 console.log(`📌 Target URL: ${config.targetUrl}`);
 console.log(`🔐 Authentication: ${config.authToken ? 'Enabled' : 'DISABLED ⚠️'}`);
+console.log(`🔀 Forward Path: ${config.forwardPath ? 'Enabled' : 'DISABLED (Fixed URL mode)'}`);
 
 /**
  * Main HTTP server using Bun.serve
@@ -48,8 +49,22 @@ const server = Bun.serve({
 
             const pathWithQuery = url.pathname + url.search;
 
-            // Construct target URL
-            const targetUrl = config.targetUrl + pathWithQuery;
+            // Construct target URL based on forwardPath setting
+            let targetUrl: string;
+
+            if (config.forwardPath) {
+                // Default behavior: append path and query to target
+                targetUrl = config.targetUrl + pathWithQuery;
+            } else {
+                // Fixed URL mode: always use TARGET_URL as-is
+                targetUrl = config.targetUrl;
+
+                // Preserve original URL in query parameter if not already present
+                if (!url.searchParams.has('original_url')) {
+                    const separator = config.targetUrl.includes('?') ? '&' : '?';
+                    targetUrl += `${separator}original_url=${encodeURIComponent(pathWithQuery)}`;
+                }
+            }
 
             // Prepare headers (exclude Host as it's auto-handled by fetch)
             const forwardHeaders = new Headers();
@@ -61,6 +76,11 @@ const server = Bun.serve({
 
             // Remove the authentication header before forwarding
             forwardHeaders.delete('X-Forward-Token');
+
+            // If not forwarding path, add original URL as custom header
+            if (!config.forwardPath) {
+                forwardHeaders.set('X-Original-URL', pathWithQuery);
+            }
 
             // Forward the request to target
             // Use req.body directly to avoid blocking on arrayBuffer()

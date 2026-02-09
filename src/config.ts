@@ -9,6 +9,7 @@ export function loadConfig(): Config {
     const port = process.env.PORT || '3000';
     const targetUrl = process.env.TARGET_URL;
     const authToken = process.env.AUTH_TOKEN;
+    const forwardPath = process.env.FORWARD_PATH !== 'false'; // Default: true
 
     // Validate required environment variables
     if (!targetUrl) {
@@ -32,5 +33,6 @@ export function loadConfig(): Config {
         port: parseInt(port, 10),
         targetUrl: targetUrl.endsWith('/') ? targetUrl.slice(0, -1) : targetUrl,
         authToken,
+        forwardPath,
     };
 }

@@ -5,6 +5,7 @@ export interface Config {
   port: number;
   targetUrl: string;
   authToken?: string; // Optional: if not set, authentication is disabled
+  forwardPath: boolean; // If false, don't append path to target URL
 }
 
 /**
