@@ -6,7 +6,7 @@ const config = loadConfig();
 
 console.log(`🚀 Bun-Forwarder starting...`);
 console.log(`📌 Target URL: ${config.targetUrl}`);
-console.log(`🔐 Authentication: Enabled`);
+console.log(`🔐 Authentication: ${config.authToken ? 'Enabled' : 'DISABLED ⚠️'}`);
 
 /**
  * Main HTTP server using Bun.serve
@@ -19,18 +19,20 @@ const server = Bun.serve({
         const startTime = performance.now();
 
         try {
-            // Security: Validate authentication token
-            const authHeader = req.headers.get('X-Forward-Token');
+            // Security: Validate authentication token (only if configured)
+            if (config.authToken) {
+                const authHeader = req.headers.get('X-Forward-Token');
 
-            if (authHeader !== config.authToken) {
-                console.warn(`❌ Unauthorized request from ${req.headers.get('X-Forwarded-For') || 'unknown'}`);
-                return new Response(JSON.stringify({
-                    error: 'Unauthorized',
-                    message: 'Valid X-Forward-Token header is required'
-                }), {
-                    status: 401,
-                    headers: { 'Content-Type': 'application/json' }
-                });
+                if (authHeader !== config.authToken) {
+                    console.warn(`❌ Unauthorized request from ${req.headers.get('X-Forwarded-For') || 'unknown'}`);
+                    return new Response(JSON.stringify({
+                        error: 'Unauthorized',
+                        message: 'Valid X-Forward-Token header is required'
+                    }), {
+                        status: 401,
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                }
             }
 
             // Parse incoming request URL

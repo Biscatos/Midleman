@@ -14,8 +14,10 @@ export function loadConfig(): Config {
         throw new ConfigError('TARGET_URL environment variable is required');
     }
 
+    // AUTH_TOKEN is optional - if not provided, authentication is disabled
     if (!authToken) {
-        throw new ConfigError('AUTH_TOKEN environment variable is required');
+        console.warn('⚠️  AUTH_TOKEN not set - authentication is DISABLED');
+        console.warn('⚠️  All incoming requests will be forwarded without authentication checks');
     }
 
     // Validate TARGET_URL format

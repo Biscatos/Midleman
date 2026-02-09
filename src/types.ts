@@ -4,7 +4,7 @@
 export interface Config {
   port: number;
   targetUrl: string;
-  authToken: string;
+  authToken?: string; // Optional: if not set, authentication is disabled
 }
 
 /**
