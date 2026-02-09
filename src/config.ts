@@ -5,6 +5,7 @@ import { ConfigError } from './types';
  * Load and validate environment configuration
  */
 export function loadConfig(): Config {
+
     const port = process.env.PORT || '3000';
     const targetUrl = process.env.TARGET_URL;
     const authToken = process.env.AUTH_TOKEN;
