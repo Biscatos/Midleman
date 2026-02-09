@@ -1,0 +1,24 @@
+{
+  "name": "bun-forwarder",
+  "version": "1.0.0",
+  "description": "High-performance HTTP request forwarder using Bun runtime",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir ./dist --target bun",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "keywords": [
+    "bun",
+    "proxy",
+    "forwarder",
+    "http",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

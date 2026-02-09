@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  bun-forwarder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bun-forwarder
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - PORT=3000
+      - TARGET_URL=${TARGET_URL}
+      - AUTH_TOKEN=${AUTH_TOKEN}
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:3000/health" ]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # Example: Development mode with volume mounting for hot reload
+  bun-forwarder-dev:
+    image: oven/bun:1
+    container_name: bun-forwarder-dev
+    working_dir: /app
+    volumes:
+      - ./src:/app/src
+      - ./package.json:/app/package.json
+      - ./tsconfig.json:/app/tsconfig.json
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - TARGET_URL=${TARGET_URL}
+      - AUTH_TOKEN=${AUTH_TOKEN}
+    command: bun run --watch src/index.ts
+    profiles:
+      - dev

@@ -1,0 +1,35 @@
+# Environment files
+.env
+.env.*
+
+# Git
+.git
+.gitignore
+
+# Dependencies
+node_modules
+
+# Documentation
+README.md
+*.md
+
+# Build artifacts
+dist
+build
+
+# Logs
+logs
+*.log
+
+# IDE
+.vscode
+.idea
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files
+Dockerfile
+docker-compose.yml
+.dockerignore
