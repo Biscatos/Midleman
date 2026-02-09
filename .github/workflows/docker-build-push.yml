@@ -13,6 +13,7 @@ jobs:
     - name: Log in to DigitalOcean Container Registry
       run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login registry.biscatos.com -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
     
+      
     - name: Build the Docker image - Midleman API
       run: docker build -f Dockerfile . --tag registry.biscatos.com/midleman/api-midleman:${{ secrets.MAJOR }}.${{ secrets.MINOR }}
     
