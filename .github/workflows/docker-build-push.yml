@@ -1,0 +1,28 @@
+name: Docker Image CI Master
+
+on:
+  push:
+    branches: [ master ]
+    
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Log in to DigitalOcean Container Registry
+      run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login registry.biscatos.com -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+    
+    - name: Build the Docker image - Midleman API
+      run: docker build -f Dockerfile . --tag registry.biscatos.com/midleman/api-midleman:${{ secrets.MAJOR }}.${{ secrets.MINOR }}
+    
+    - name: Push Docker Image to DigitalOcean Container Registry
+      run: docker push registry.biscatos.com/midleman/api-midleman:${{ secrets.MAJOR }}.${{ secrets.MINOR }}
+    
+    - name: Update Minor version
+      uses: hmanzur/actions-set-secret@v2.0.0
+      with:
+        name: 'MINOR'
+        value: $((${{ secrets.MINOR }}+1))
+        repository: ${{ secrets.PROJECT_NAME }}
+        token: ${{ secrets.REPO_ACCESS_TOKEN }}
