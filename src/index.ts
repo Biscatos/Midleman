@@ -19,24 +19,33 @@ const server = Bun.serve({
         const startTime = performance.now();
 
         try {
+            // Parse incoming request URL
+            const url = new URL(req.url);
+
             // Security: Validate authentication token (only if configured)
+            // Support both header and query parameter authentication
             if (config.authToken) {
                 const authHeader = req.headers.get('X-Forward-Token');
+                const authQuery = url.searchParams.get('token');
 
-                if (authHeader !== config.authToken) {
+                // Use header if provided, otherwise use query parameter
+                const providedToken = authHeader || authQuery;
+
+                if (providedToken !== config.authToken) {
                     console.warn(`❌ Unauthorized request from ${req.headers.get('X-Forwarded-For') || 'unknown'}`);
                     return new Response(JSON.stringify({
                         error: 'Unauthorized',
-                        message: 'Valid X-Forward-Token header is required'
+                        message: 'Valid X-Forward-Token header or ?token=xxx query parameter is required'
                     }), {
                         status: 401,
                         headers: { 'Content-Type': 'application/json' }
                     });
                 }
+
+                // Remove token from query parameters before forwarding
+                url.searchParams.delete('token');
             }
 
-            // Parse incoming request URL
-            const url = new URL(req.url);
             const pathWithQuery = url.pathname + url.search;
 
             // Construct target URL

@@ -4,7 +4,7 @@ High-performance HTTP request forwarder built with [Bun](https://bun.sh) runtime
 
 ## ✨ Features
 
-- **🔐 Secure**: Token-based authentication via `X-Forward-Token` header
+- **🔐 Secure**: Token-based authentication via `X-Forward-Token` header or `?token=xxx` query parameter
 - **⚡ Fast**: Sub-5ms processing overhead using Bun's native HTTP server
 - **🔄 Complete Forwarding**: Preserves all HTTP methods, headers, and payloads
 - **📦 Binary-Safe**: Handles files, images, and binary data without corruption
@@ -60,7 +60,7 @@ Edit `.env`:
 ```env
 PORT=3000
 TARGET_URL=https://api.example.com
-AUTH_TOKEN=your_secret_token_here
+AUTH_TOKEN=your_secret_token_here  # Optional - leave empty to disable auth
 ```
 
 ### 3. Run Locally
@@ -126,6 +126,20 @@ curl -X GET "http://localhost:3000/api/users?page=1&limit=10" \
   -H "X-Forward-Token: your_secret_token"
 ```
 
+### Authentication via Query Parameter
+
+**For systems that don't support custom headers** (webhooks, notifications, etc.):
+
+```bash
+# Basic usage
+curl "http://localhost:3000/api/webhook?token=your_secret_token"
+
+# Combined with other parameters
+curl "http://localhost:3000/api/users?page=1&token=your_secret_token"
+```
+
+> **Note**: The `token` query parameter is automatically removed before forwarding to the target URL.
+
 ### Unauthorized Request (No Token)
 
 ```bash
@@ -139,14 +153,24 @@ curl http://localhost:3000/api/users
 |----------|----------|---------|-------------|
 | `PORT` | No | `3000` | Port where the server will listen |
 | `TARGET_URL` | Yes | - | Base URL where requests will be forwarded |
-| `AUTH_TOKEN` | Yes | - | Token required in `X-Forward-Token` header |
+| `AUTH_TOKEN` | No | - | Token for authentication (via header or query param). If not set, auth is disabled |
 
 ## 🔒 Security
 
-- **Authentication**: All requests must include `X-Forward-Token` header matching `AUTH_TOKEN`
+- **Authentication**: Optional token-based auth via:
+  - `X-Forward-Token` header (recommended)
+  - `?token=xxx` query parameter (for systems without header support)
+  - Leave `AUTH_TOKEN` empty to disable authentication (development only)
 - **HTTPS Support**: Fully compatible with HTTPS target URLs
-- **Token Removal**: The authentication token is removed before forwarding to prevent leakage
+- **Token Removal**: Authentication tokens are removed before forwarding to prevent leakage
 - **Stateless**: No session data or credentials stored
+
+### Use Cases for Query Parameter Authentication
+
+- **Webhook integrations**: Discord, Slack, and other services without custom header support
+- **Third-party APIs**: Legacy systems or APIs that can't send custom headers
+- **Direct links**: OAuth callbacks or shareable authenticated URLs
+- **Notification systems**: Email or SMS-based webhooks
 
 ## 📊 Performance
 
