@@ -1,5 +1,6 @@
 import { loadConfig } from './config';
 import { UnauthorizedError } from './types';
+import { handleProxyRequest } from './proxy';
 
 // Load configuration
 const config = loadConfig();
@@ -8,6 +9,13 @@ console.log(`🚀 Bun-Forwarder starting...`);
 console.log(`📌 Target URL: ${config.targetUrl}`);
 console.log(`🔐 Authentication: ${config.authToken ? 'Enabled' : 'DISABLED ⚠️'}`);
 console.log(`🔀 Forward Path: ${config.forwardPath ? 'Enabled' : 'DISABLED (Fixed URL mode)'}`);
+
+
+if (config.proxyProfiles.length > 0) {
+    console.log(`🔓 Proxy Profiles: ${config.proxyProfiles.map(p => p.name).join(', ')}`);
+} else {
+    console.log(`🔓 Proxy Profiles: None configured`);
+}
 
 /**
  * Main HTTP server using Bun.serve
@@ -23,6 +31,26 @@ const server = Bun.serve({
             // Parse incoming request URL
             const url = new URL(req.url);
 
+            // Silently ignore favicon requests
+            if (url.pathname === '/favicon.ico') {
+                return new Response(null, { status: 204 });
+            }
+
+            // Handle proxy bypass requests (before auth validation)
+            if (url.pathname.startsWith('/proxy/')) {
+                if (config.proxyProfiles.length === 0) {
+                    return new Response(JSON.stringify({
+                        error: 'Not Found',
+                        message: 'No proxy profiles configured'
+                    }), {
+                        status: 404,
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                }
+                return handleProxyRequest(req, url, config.proxyProfiles, startTime);
+            }
+
+
             // Security: Validate authentication token (only if configured)
             // Support both header and query parameter authentication
             if (config.authToken) {
@@ -33,7 +61,7 @@ const server = Bun.serve({
                 const providedToken = authHeader || authQuery;
 
                 if (providedToken !== config.authToken) {
-                    console.warn(`❌ Unauthorized request from ${req.headers.get('X-Forwarded-For') || 'unknown'}`);
+                    console.warn(`❌ Unauthorized ${req.method} ${url.pathname} from ${req.headers.get('X-Forwarded-For') || 'unknown'}`);
                     return new Response(JSON.stringify({
                         error: 'Unauthorized',
                         message: 'Valid X-Forward-Token header or ?token=xxx query parameter is required'
@@ -108,8 +136,7 @@ const server = Bun.serve({
                 });
             }
 
-            // Mirror the response from target
-            const responseBody = await targetResponse.arrayBuffer();
+            // Stream the response directly — no buffering in memory
             const responseHeaders = new Headers(targetResponse.headers);
 
             // Remove compression headers as fetch automatically decompresses
@@ -133,7 +160,8 @@ const server = Bun.serve({
                 `${statusEmoji} ${req.method} ${pathWithQuery} → ${targetResponse.status} ${targetResponse.statusText} (${overhead}ms)`
             );
 
-            return new Response(responseBody, {
+            // Stream body directly instead of await arrayBuffer()
+            return new Response(targetResponse.body, {
                 status: targetResponse.status,
                 statusText: targetResponse.statusText,
                 headers: responseHeaders,

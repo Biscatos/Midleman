@@ -149,11 +149,25 @@ curl http://localhost:3000/api/users
 
 ## ⚙️ Environment Variables
 
+### Core
+
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `PORT` | No | `3000` | Port where the server will listen |
 | `TARGET_URL` | Yes | - | Base URL where requests will be forwarded |
 | `AUTH_TOKEN` | No | - | Token for authentication (via header or query param). If not set, auth is disabled |
+| `FORWARD_PATH` | No | `true` | Set to `false` for fixed webhook URLs |
+
+### Proxy Bypass Profiles
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `PROXY_{NAME}_URL` | Yes | Base URL of the upstream service |
+| `PROXY_{NAME}_KEY` | Yes | API key for the upstream service |
+| `PROXY_{NAME}_HEADER` | Yes | Header name for the API key (e.g., `Authorization`) |
+| `PROXY_{NAME}_PREFIX` | No | Auth prefix (e.g., `Bearer`, `App`) |
+| `PROXY_{NAME}_ACCESS` | No | Access key to protect the public link |
+
 
 ## 🔒 Security
 
@@ -211,6 +225,51 @@ ab -n 1000 -c 100 \
   http://localhost:3000/api/test
 ```
 
+## 🔓 Proxy Bypass
+
+Share authenticated resources with colleagues via public links. The Midleman handles upstream API authentication so your colleagues don't need to.
+
+### Setup
+
+Add proxy profiles to your `.env`:
+
+```env
+# Infobip example
+PROXY_INFOBIP_URL=https://api.infobip.com
+PROXY_INFOBIP_KEY=your_infobip_api_key
+PROXY_INFOBIP_HEADER=Authorization
+PROXY_INFOBIP_PREFIX=App
+PROXY_INFOBIP_ACCESS=optional_shared_secret
+```
+
+### Usage
+
+```bash
+# Public link — share this with colleagues:
+curl http://localhost:3000/proxy/infobip/path/to/file.jpg
+
+# With access key protection:
+curl "http://localhost:3000/proxy/infobip/path/to/file.jpg?key=optional_shared_secret"
+```
+
+### How It Works
+
+```
+Colleague (no API key)
+    ↓
+GET /proxy/infobip/path/to/file.jpg
+    ↓
+[Access Key Check (optional)]
+    ↓
+[Add API Key to request headers]
+    ↓
+GET https://api.infobip.com/path/to/file.jpg
+    + Authorization: App your_infobip_api_key
+    ↓
+[Return response to colleague]
+```
+
+
 ## 🛠️ Development
 
 ### Project Structure
@@ -220,6 +279,7 @@ bun-forwarder/
 ├── src/
 │   ├── index.ts      # Main application entry
 │   ├── config.ts     # Environment configuration
+│   ├── proxy.ts      # Proxy bypass handler
 │   └── types.ts      # TypeScript definitions
 ├── Dockerfile        # Docker image definition
 ├── docker-compose.yml # Docker orchestration
@@ -227,6 +287,7 @@ bun-forwarder/
 ├── tsconfig.json     # TypeScript configuration
 └── .env.example      # Environment template
 ```
+
 
 ### Type Checking
 
