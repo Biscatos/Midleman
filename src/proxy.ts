@@ -1,5 +1,48 @@
 import type { ProxyProfile } from './types';
 
+/** Lightweight MIME → extension map (common types only, zero dependency) */
+const MIME_TO_EXT: Record<string, string> = {
+    // Images
+    'image/jpeg': '.jpg',
+    'image/png': '.png',
+    'image/gif': '.gif',
+    'image/webp': '.webp',
+    'image/svg+xml': '.svg',
+    'image/bmp': '.bmp',
+    'image/tiff': '.tiff',
+    'image/avif': '.avif',
+    'image/ico': '.ico',
+    'image/x-icon': '.ico',
+    // Video
+    'video/mp4': '.mp4',
+    'video/webm': '.webm',
+    'video/ogg': '.ogg',
+    'video/quicktime': '.mov',
+    // Audio
+    'audio/mpeg': '.mp3',
+    'audio/ogg': '.ogg',
+    'audio/wav': '.wav',
+    'audio/webm': '.weba',
+    // Documents
+    'application/pdf': '.pdf',
+    'application/json': '.json',
+    'application/xml': '.xml',
+    'text/plain': '.txt',
+    'text/html': '.html',
+    'text/css': '.css',
+    'text/csv': '.csv',
+    // Archives
+    'application/zip': '.zip',
+    'application/gzip': '.gz',
+    'application/x-tar': '.tar',
+    // Office
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+    'application/msword': '.doc',
+    'application/vnd.ms-excel': '.xls',
+};
+
 // Pre-computed profile map for O(1) lookup + cached auth values
 interface CachedProfile extends ProxyProfile {
     computedAuthValue: string;
@@ -78,6 +121,18 @@ export async function handleProxyRequest(
         url.searchParams.delete('key');
     }
 
+    // Check if extension is blocked (fast path: from URL)
+    if (profile.blockedExtensions && profile.blockedExtensions.size > 0) {
+        const urlExt = getExtFromPath(remainingPath);
+        if (urlExt && profile.blockedExtensions.has(urlExt)) {
+            console.warn(`🚫 Proxy "${profileName}": blocked extension "${urlExt}" for ${remainingPath}`);
+            return jsonResponse(403, {
+                error: 'Forbidden',
+                message: `File type "${urlExt}" is not allowed`,
+            });
+        }
+    }
+
     // Build the target URL
     const queryString = url.search;
     const targetUrl = profile.targetUrl + remainingPath + queryString;
@@ -126,6 +181,36 @@ export async function handleProxyRequest(
     // Use Transfer-Encoding chunked for streaming
     responseHeaders.set('Connection', 'close');
 
+    // Block by Content-Type if URL had no extension (fallback check)
+    if (profile.blockedExtensions && profile.blockedExtensions.size > 0) {
+        const contentType = responseHeaders.get('content-type')?.split(';')[0]?.trim();
+        if (contentType) {
+            const ext = MIME_TO_EXT[contentType];
+            if (ext && profile.blockedExtensions.has(ext)) {
+                console.warn(`🚫 Proxy "${profileName}": blocked type "${ext}" (${contentType}) for ${remainingPath}`);
+                return jsonResponse(403, {
+                    error: 'Forbidden',
+                    message: `File type "${ext}" is not allowed`,
+                });
+            }
+        }
+    }
+
+    // Infer file extension from Content-Type and set Content-Disposition
+    // so browsers can identify the file even without extension in the URL
+    if (!responseHeaders.has('content-disposition')) {
+        const contentType = responseHeaders.get('content-type')?.split(';')[0]?.trim();
+        if (contentType) {
+            const ext = MIME_TO_EXT[contentType];
+            if (ext) {
+                // Extract a filename hint from the URL path, or use "file"
+                const urlFilename = remainingPath.split('/').pop() || 'file';
+                const baseName = urlFilename.includes('.') ? urlFilename : `${urlFilename}${ext}`;
+                responseHeaders.set('Content-Disposition', `inline; filename="${baseName}"`);
+            }
+        }
+    }
+
     const overhead = (performance.now() - startTime).toFixed(2);
     const statusEmoji = targetResponse.status < 400 ? '🔓' : '⚠️';
     console.log(
@@ -149,3 +234,14 @@ function jsonResponse(status: number, body: Record<string, unknown>): Response {
         headers: { 'Content-Type': 'application/json' },
     });
 }
+
+/**
+ * Extract file extension from a URL path (e.g., "/path/to/file.jpg" → ".jpg")
+ */
+function getExtFromPath(path: string): string | null {
+    const filename = path.split('/').pop() || '';
+    const dotIndex = filename.lastIndexOf('.');
+    if (dotIndex <= 0) return null;
+    return filename.substring(dotIndex).toLowerCase();
+}
+

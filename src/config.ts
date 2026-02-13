@@ -41,6 +41,11 @@ function loadProxyProfiles(): ProxyProfile[] {
             case 'ACCESS':
                 profile.accessKey = value;
                 break;
+            case 'BLOCKED':
+                profile.blockedExtensions = new Set(
+                    value.split(',').map(e => e.trim().toLowerCase().replace(/^\.?/, '.'))
+                );
+                break;
         }
     }
 

@@ -8,6 +8,7 @@ export interface ProxyProfile {
   authHeader: string;     // Header name for the API key (e.g., "Authorization")
   authPrefix?: string;    // Optional prefix (e.g., "Bearer", "App")
   accessKey?: string;     // Optional key to protect the public link
+  blockedExtensions?: Set<string>; // Optional set of blocked file extensions
 }
 
 /**
