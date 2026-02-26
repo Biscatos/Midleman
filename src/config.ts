@@ -1,11 +1,50 @@
 import type { Config, ProxyProfile } from './types';
 import { ConfigError } from './types';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+5
+/**
+ * Re-read .env file and update process.env with new/changed values.
+ * Only updates PROXY_* variables to avoid changing core config at runtime.
+ */
+export function reloadEnvFile(): void {
+    try {
+        const envPath = resolve(process.cwd(), '.env');
+        const content = readFileSync(envPath, 'utf-8');
+
+        // Clear existing PROXY_* env vars first
+        for (const key of Object.keys(process.env)) {
+            if (key.startsWith('PROXY_')) {
+                delete process.env[key];
+            }
+        }
+
+        // Parse and set new values
+        for (const line of content.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) continue;
+
+            const eqIndex = trimmed.indexOf('=');
+            if (eqIndex === -1) continue;
+
+            const key = trimmed.substring(0, eqIndex).trim();
+            const value = trimmed.substring(eqIndex + 1).trim();
+
+            // Only reload PROXY_* variables
+            if (key.startsWith('PROXY_')) {
+                process.env[key] = value;
+            }
+        }
+    } catch (err) {
+        console.warn('⚠️  Could not reload .env file:', err instanceof Error ? err.message : err);
+    }
+}
 
 /**
  * Scan environment variables for proxy profiles.
  * Pattern: PROXY_{NAME}_URL, PROXY_{NAME}_KEY, PROXY_{NAME}_HEADER, etc.
  */
-function loadProxyProfiles(): ProxyProfile[] {
+export function loadProxyProfiles(): ProxyProfile[] {
     const profiles = new Map<string, Partial<ProxyProfile>>();
 
     for (const [key, value] of Object.entries(process.env)) {

@@ -51,6 +51,13 @@ interface CachedProfile extends ProxyProfile {
 let profileMap: Map<string, CachedProfile> | null = null;
 
 /**
+ * Invalidate the cached profile map (call after config reload).
+ */
+export function invalidateProfileCache(): void {
+    profileMap = null;
+}
+
+/**
  * Build a Map from profiles array for O(1) lookup.
  * Pre-computes auth header values to avoid string concatenation per request.
  */

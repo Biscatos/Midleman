@@ -270,6 +270,44 @@ GET https://api.infobip.com/path/to/file.jpg
 ```
 
 
+## 🛡️ Admin API
+
+The Bun-Forwarder includes an Admin API for runtime management. All admin endpoints require authentication.
+
+### Discovery
+
+Access the base admin endpoint to see available commands:
+
+```bash
+curl http://localhost:3000/admin \
+  -H "X-Forward-Token: your_secret_token"
+```
+
+### Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/admin` | GET | API discovery and system status |
+| `/admin/profiles` | GET | List all active proxy profiles |
+| `/admin/profiles` | POST | Create or update a profile (persisted to `profiles.json`) |
+| `/admin/profiles/:name` | DELETE | Remove a profile (persisted to `profiles.json`) |
+| `/admin/reload` | POST | Force reload of `.env` and `profiles.json` |
+
+### Example: Creating a Profile
+
+```bash
+curl -X POST http://localhost:3000/admin/profiles \
+  -H "X-Forward-Token: your_secret_token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "new-api",
+    "targetUrl": "https://api.example.com",
+    "apiKey": "top-secret",
+    "authHeader": "X-API-Key"
+  }'
+```
+
+
 ## 🛠️ Development
 
 ### Project Structure

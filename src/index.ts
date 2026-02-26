@@ -1,6 +1,7 @@
-import { loadConfig } from './config';
+import { loadConfig, reloadEnvFile, loadProxyProfiles } from './config';
 import { UnauthorizedError } from './types';
-import { handleProxyRequest } from './proxy';
+import { handleProxyRequest, invalidateProfileCache } from './proxy';
+import { loadPersistedProfiles, persistProfiles, mergeProfiles, validateProfileInput } from './store';
 
 // Track server start time for health checks
 const startedAt = Date.now();
@@ -10,16 +11,39 @@ let isShuttingDown = false;
 // Load configuration
 const config = loadConfig();
 
+// Merge env profiles with persisted profiles (JSON file takes precedence)
+const persistedProfiles = loadPersistedProfiles();
+config.proxyProfiles = mergeProfiles(config.proxyProfiles, persistedProfiles);
+
 console.log(`🚀 Bun-Forwarder starting...`);
 console.log(`📌 Target URL: ${config.targetUrl}`);
 console.log(`🔐 Authentication: ${config.authToken ? 'Enabled' : 'DISABLED ⚠️'}`);
 console.log(`🔀 Forward Path: ${config.forwardPath ? 'Enabled' : 'DISABLED (Fixed URL mode)'}`);
-
-
 if (config.proxyProfiles.length > 0) {
     console.log(`🔓 Proxy Profiles: ${config.proxyProfiles.map(p => p.name).join(', ')}`);
 } else {
     console.log(`🔓 Proxy Profiles: None configured`);
+}
+
+/** Shorthand for JSON responses */
+function jsonRes(status: number, body: Record<string, unknown>): Response {
+    return new Response(JSON.stringify(body), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+    });
+}
+
+/**
+ * Validates admin auth token. Returns error Response or null if authorized.
+ */
+function checkAdminAuth(req: Request, url: URL): Response | null {
+    if (!config.authToken) return null;
+    const token = req.headers.get('X-Forward-Token') || url.searchParams.get('token');
+    if (token === config.authToken) return null;
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' }
+    });
 }
 
 /**
@@ -64,6 +88,120 @@ const server = Bun.serve({
                     status: 200,
                     headers: { 'Content-Type': 'application/json' }
                 });
+            }
+
+            // ===== Admin API =====
+            const isAdminPath = url.pathname === '/admin' || url.pathname.startsWith('/admin/');
+            if (isAdminPath) {
+                const authError = checkAdminAuth(req, url);
+                if (authError) return authError;
+
+                // GET /admin or /admin/ — API Discovery & Status
+                if ((url.pathname === '/admin' || url.pathname === '/admin/') && req.method === 'GET') {
+                    return jsonRes(200, {
+                        status: 'Bun-Forwarder Admin API',
+                        version: '1.0.0',
+                        endpoints: {
+                            'GET /admin/profiles': 'List all active profiles',
+                            'POST /admin/profiles': 'Create or update a profile (body: name, targetUrl, apiKey, authHeader, etc.)',
+                            'DELETE /admin/profiles/:name': 'Remove a profile',
+                            'POST /admin/reload': 'Reload .env and profiles.json',
+                            'GET /health': 'System health check'
+                        },
+                        config: {
+                            targetUrl: config.targetUrl,
+                            forwardPath: config.forwardPath,
+                            authEnabled: !!config.authToken,
+                        },
+                        activeProfiles: config.proxyProfiles.length
+                    });
+                }
+
+                // POST /admin/reload — re-read .env + persisted JSON
+                if (url.pathname === '/admin/reload' && req.method === 'POST') {
+                    reloadEnvFile();
+                    const envProfiles = loadProxyProfiles();
+                    const persisted = loadPersistedProfiles();
+                    config.proxyProfiles = mergeProfiles(envProfiles, persisted);
+                    invalidateProfileCache();
+
+                    const names = config.proxyProfiles.map(p => p.name);
+                    console.log(`🔄 Profiles reloaded: ${names.join(', ') || 'none'}`);
+                    return jsonRes(200, { status: 'reloaded', profiles: names });
+                }
+
+                // GET /admin/profiles — list all active profiles (keys masked)
+                if (url.pathname === '/admin/profiles' && req.method === 'GET') {
+                    const profiles = config.proxyProfiles.map(p => ({
+                        name: p.name,
+                        targetUrl: p.targetUrl,
+                        authHeader: p.authHeader,
+                        authPrefix: p.authPrefix,
+                        hasAccessKey: !!p.accessKey,
+                        blockedExtensions: p.blockedExtensions ? Array.from(p.blockedExtensions) : [],
+                    }));
+                    return jsonRes(200, { profiles });
+                }
+
+                // POST /admin/profiles — create or update a profile (persisted)
+                if (url.pathname === '/admin/profiles' && req.method === 'POST') {
+                    let body: unknown;
+                    try {
+                        body = await req.json();
+                    } catch {
+                        return jsonRes(400, { error: 'Invalid JSON body' });
+                    }
+
+                    const error = validateProfileInput(body);
+                    if (error) return jsonRes(400, { error });
+
+                    const input = body as Record<string, unknown>;
+                    const profile = {
+                        name: (input.name as string).toLowerCase(),
+                        targetUrl: (input.targetUrl as string).replace(/\/$/, ''),
+                        apiKey: input.apiKey as string,
+                        authHeader: input.authHeader as string,
+                        authPrefix: input.authPrefix as string | undefined,
+                        accessKey: input.accessKey as string | undefined,
+                        blockedExtensions: input.blockedExtensions
+                            ? new Set((input.blockedExtensions as string[]).map(e => e.trim().toLowerCase().replace(/^\.?/, '.')))
+                            : undefined,
+                    };
+
+                    // Update or add
+                    const idx = config.proxyProfiles.findIndex(p => p.name === profile.name);
+                    if (idx >= 0) {
+                        config.proxyProfiles[idx] = profile;
+                    } else {
+                        config.proxyProfiles.push(profile);
+                    }
+
+                    // Persist and invalidate cache
+                    persistProfiles(config.proxyProfiles);
+                    invalidateProfileCache();
+
+                    const action = idx >= 0 ? 'updated' : 'created';
+                    console.log(`✅ Profile "${profile.name}" ${action} (persisted)`);
+                    return jsonRes(200, { status: action, profile: profile.name });
+                }
+
+                // DELETE /admin/profiles/:name — remove a profile (persisted)
+                if (url.pathname.startsWith('/admin/profiles/') && req.method === 'DELETE') {
+                    const name = url.pathname.split('/')[3]?.toLowerCase();
+                    if (!name) return jsonRes(400, { error: 'Profile name required' });
+
+                    const idx = config.proxyProfiles.findIndex(p => p.name === name);
+                    if (idx === -1) return jsonRes(404, { error: `Profile "${name}" not found` });
+
+                    config.proxyProfiles.splice(idx, 1);
+                    persistProfiles(config.proxyProfiles);
+                    invalidateProfileCache();
+
+                    console.log(`🗑️  Profile "${name}" deleted (persisted)`);
+                    return jsonRes(200, { status: 'deleted', profile: name });
+                }
+
+                return jsonRes(404, { error: 'Admin endpoint not found' });
             }
 
             // Handle proxy bypass requests (before auth validation)
