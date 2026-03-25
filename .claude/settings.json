@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -L https://payments.ucall.co.ao/)",
+      "Bash(curl -s -L https://payments.ucall.co.ao/js/app.07be1d15.js)",
+      "Bash(grep -oP '.{0,50}\\(mode|base|history|createWeb|VueRouter|Router\\\\\\(\\).{0,80}')",
+      "Bash(grep -oE '.{0,40}\\(mode.{0,5}history|base.{0,5}process|VueRouter|new Router|createRouter|createWeb\\).{0,60}')",
+      "Bash(grep -oE 'mode:.{0,10}history.{0,100}base:.{0,40}')",
+      "Bash(grep -oE '.{0,30}\\(redirect|replace\\\\\\(|push\\\\\\(.{0,5}/|location.{0,20}=\\).{0,50}')",
+      "Bash(grep -oE 'a=window\\\\.location\\\\.href\\\\.replace.{0,100}')",
+      "Bash(grep -oE 'urlPath.{0,5}[,;]|redirect.{0,60}')",
+      "Bash(grep -oE '.{0,30}\\(beforeEach|window\\\\.location\\\\.href\\\\s*=|window\\\\.location\\\\s*=|\\\\.replace\\\\\\(\\\\s*[\"\"\"\"'\"''''\"']/[^c]\\).{0,60}')",
+      "Bash(grep -oE 'n\\\\.t0\\\\.url.{0,100}')"
+    ]
+  }
+}

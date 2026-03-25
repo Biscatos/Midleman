@@ -2,6 +2,8 @@ import { loadConfig, reloadEnvFile, loadProxyProfiles } from './config';
 import { UnauthorizedError } from './types';
 import { handleProxyRequest, invalidateProfileCache } from './proxy';
 import { loadPersistedProfiles, persistProfiles, mergeProfiles, validateProfileInput } from './store';
+import { readFileSync, writeFileSync } from 'fs';
+import { resolve } from 'path';
 
 // Track server start time for health checks
 const startedAt = Date.now();
@@ -90,6 +92,16 @@ const server = Bun.serve({
                 });
             }
 
+            // ===== Dashboard =====
+            if (url.pathname === '/dashboard' || url.pathname === '/dashboard/') {
+                const htmlPath = resolve(import.meta.dir, 'dashboard.html');
+                const html = readFileSync(htmlPath, 'utf-8');
+                return new Response(html, {
+                    status: 200,
+                    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                });
+            }
+
             // ===== Admin API =====
             const isAdminPath = url.pathname === '/admin' || url.pathname.startsWith('/admin/');
             if (isAdminPath) {
@@ -102,8 +114,12 @@ const server = Bun.serve({
                         status: 'Bun-Forwarder Admin API',
                         version: '1.0.0',
                         endpoints: {
+                            'GET /dashboard': 'Web dashboard for managing the server',
+                            'GET /admin/config': 'Get current configuration',
+                            'PUT /admin/config': 'Update .env configuration',
                             'GET /admin/profiles': 'List all active profiles',
-                            'POST /admin/profiles': 'Create or update a profile (body: name, targetUrl, apiKey, authHeader, etc.)',
+                            'GET /admin/profiles/:name': 'Get full profile details',
+                            'POST /admin/profiles': 'Create or update a profile',
                             'DELETE /admin/profiles/:name': 'Remove a profile',
                             'POST /admin/reload': 'Reload .env and profiles.json',
                             'GET /health': 'System health check'
@@ -128,6 +144,97 @@ const server = Bun.serve({
                     const names = config.proxyProfiles.map(p => p.name);
                     console.log(`🔄 Profiles reloaded: ${names.join(', ') || 'none'}`);
                     return jsonRes(200, { status: 'reloaded', profiles: names });
+                }
+
+                // GET /admin/config — return current configuration
+                if (url.pathname === '/admin/config' && req.method === 'GET') {
+                    return jsonRes(200, {
+                        port: config.port,
+                        targetUrl: config.targetUrl,
+                        authToken: config.authToken || '',
+                        forwardPath: config.forwardPath,
+                    });
+                }
+
+                // PUT /admin/config — update .env file
+                if (url.pathname === '/admin/config' && req.method === 'PUT') {
+                    let body: unknown;
+                    try {
+                        body = await req.json();
+                    } catch {
+                        return jsonRes(400, { error: 'Invalid JSON body' });
+                    }
+
+                    const input = body as Record<string, unknown>;
+                    const envPath = resolve(process.cwd(), '.env');
+
+                    try {
+                        // Read current .env to preserve comments and proxy settings
+                        let envContent = '';
+                        try {
+                            envContent = readFileSync(envPath, 'utf-8');
+                        } catch {}
+
+                        // Parse existing lines, update core values
+                        const lines = envContent.split('\n');
+                        const coreKeys = new Map<string, string>();
+                        if (input.port !== undefined) coreKeys.set('PORT', String(input.port));
+                        if (input.targetUrl !== undefined) coreKeys.set('TARGET_URL', String(input.targetUrl));
+                        if (input.authToken !== undefined) coreKeys.set('AUTH_TOKEN', String(input.authToken));
+                        if (input.forwardPath !== undefined) coreKeys.set('FORWARD_PATH', String(input.forwardPath));
+
+                        const updatedKeys = new Set<string>();
+                        const newLines = lines.map(line => {
+                            const trimmed = line.trim();
+                            if (!trimmed || trimmed.startsWith('#')) return line;
+                            const eqIdx = trimmed.indexOf('=');
+                            if (eqIdx === -1) return line;
+                            const key = trimmed.substring(0, eqIdx).trim();
+                            if (coreKeys.has(key)) {
+                                updatedKeys.add(key);
+                                return `${key}=${coreKeys.get(key)}`;
+                            }
+                            return line;
+                        });
+
+                        // Add any keys that weren't found in the file
+                        for (const [key, value] of coreKeys) {
+                            if (!updatedKeys.has(key)) {
+                                newLines.unshift(`${key}=${value}`);
+                            }
+                        }
+
+                        writeFileSync(envPath, newLines.join('\n'), 'utf-8');
+                        console.log('✅ .env file updated via dashboard');
+
+                        return jsonRes(200, {
+                            status: 'saved',
+                            message: 'Configuration saved to .env. Restart the server to apply core changes.',
+                        });
+                    } catch (err) {
+                        return jsonRes(500, { error: 'Failed to write .env: ' + (err instanceof Error ? err.message : String(err)) });
+                    }
+                }
+
+                // GET /admin/profiles/:name — return full profile data (for editing)
+                if (url.pathname.startsWith('/admin/profiles/') && req.method === 'GET') {
+                    const name = url.pathname.split('/')[3]?.toLowerCase();
+                    if (!name) return jsonRes(400, { error: 'Profile name required' });
+
+                    const profile = config.proxyProfiles.find(p => p.name === name);
+                    if (!profile) return jsonRes(404, { error: `Profile "${name}" not found` });
+
+                    return jsonRes(200, {
+                        profile: {
+                            name: profile.name,
+                            targetUrl: profile.targetUrl,
+                            apiKey: profile.apiKey,
+                            authHeader: profile.authHeader,
+                            authPrefix: profile.authPrefix || '',
+                            accessKey: profile.accessKey || '',
+                            blockedExtensions: profile.blockedExtensions ? Array.from(profile.blockedExtensions) : [],
+                        },
+                    });
                 }
 
                 // GET /admin/profiles — list all active profiles (keys masked)
@@ -217,7 +324,6 @@ const server = Bun.serve({
                 }
                 return handleProxyRequest(req, url, config.proxyProfiles, startTime);
             }
-
 
             // Security: Validate authentication token (only if configured)
             // Support both header and query parameter authentication
@@ -384,6 +490,7 @@ const server = Bun.serve({
 console.log(`✨ Server running on http://localhost:${server.port}`);
 console.log(`📡 Forwarding to: ${config.targetUrl}`);
 console.log(`💚 Health check: http://localhost:${server.port}/health`);
+console.log(`🖥️  Dashboard: http://localhost:${server.port}/dashboard`);
 console.log(`\n⚡ Ready to proxy requests!\n`);
 
 // Graceful shutdown handler

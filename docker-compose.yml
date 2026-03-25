@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   bun-forwarder:
     build:
@@ -12,15 +10,20 @@ services:
       - PORT=3000
       - TARGET_URL=${TARGET_URL}
       - AUTH_TOKEN=${AUTH_TOKEN}
+      - FORWARD_PATH=${FORWARD_PATH:-true}
+      - DATA_DIR=/app/data
+    volumes:
+      - midleman-data:/app/data
+      - ./.env:/app/.env:ro
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:3000/health" ]
+      test: [ "CMD", "bun", "run", "-e", "fetch('http://localhost:3000/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))" ]
       interval: 30s
       timeout: 3s
       retries: 3
       start_period: 5s
 
-  # Example: Development mode with volume mounting for hot reload
+  # Development mode with hot reload
   bun-forwarder-dev:
     image: oven/bun:1
     container_name: bun-forwarder-dev
@@ -29,12 +32,20 @@ services:
       - ./src:/app/src
       - ./package.json:/app/package.json
       - ./tsconfig.json:/app/tsconfig.json
+      - midleman-data:/app/data
+      - ./.env:/app/.env:ro
     ports:
       - "3000:3000"
     environment:
       - PORT=3000
       - TARGET_URL=${TARGET_URL}
       - AUTH_TOKEN=${AUTH_TOKEN}
+      - FORWARD_PATH=${FORWARD_PATH:-true}
+      - DATA_DIR=/app/data
     command: bun run --watch src/index.ts
     profiles:
       - dev
+
+volumes:
+  midleman-data:
+    name: midleman-data
