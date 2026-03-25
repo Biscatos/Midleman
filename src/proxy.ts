@@ -1,4 +1,55 @@
 import type { ProxyProfile } from './types';
+import { startProxySpan, endProxySpan, recordProxyBlocked, recordProxyRedirect } from './telemetry';
+
+// ─── Access Key Session Cache ───────────────────────────────────────────────
+// When a page is loaded with a valid ?key=, we cache the authorization so that
+// sub-resources (CSS, JS, images) loaded by the browser in the same session
+// don't get rejected. This solves the race condition where the browser fires
+// sub-resource requests before processing the Set-Cookie from the HTML response.
+
+const SESSION_TTL = 5 * 60 * 1000; // 5 minutes
+const SESSION_CLEANUP_INTERVAL = 60 * 1000; // cleanup every 60s
+
+interface AccessSession {
+    key: string;
+    expiresAt: number;
+}
+
+// Key: "profileName:clientIP" → session
+const accessSessions = new Map<string, AccessSession>();
+
+// Periodic cleanup
+setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of accessSessions) {
+        if (v.expiresAt < now) accessSessions.delete(k);
+    }
+}, SESSION_CLEANUP_INTERVAL);
+
+function getClientIP(req: Request): string {
+    return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+        || req.headers.get('x-real-ip')
+        || 'unknown';
+}
+
+function grantSession(profileName: string, clientIP: string, key: string): void {
+    accessSessions.set(`${profileName}:${clientIP}`, {
+        key,
+        expiresAt: Date.now() + SESSION_TTL,
+    });
+}
+
+function getSessionKey(profileName: string, clientIP: string): string | null {
+    const session = accessSessions.get(`${profileName}:${clientIP}`);
+    if (!session) return null;
+    if (session.expiresAt < Date.now()) {
+        accessSessions.delete(`${profileName}:${clientIP}`);
+        return null;
+    }
+    // Extend TTL on access
+    session.expiresAt = Date.now() + SESSION_TTL;
+    return session.key;
+}
 
 /** Lightweight MIME → extension map (common types only, zero dependency) */
 const MIME_TO_EXT: Record<string, string> = {
@@ -67,7 +118,9 @@ function getProfileMap(profiles: ProxyProfile[]): Map<string, CachedProfile> {
         for (const p of profiles) {
             profileMap.set(p.name, {
                 ...p,
-                computedAuthValue: p.authPrefix ? `${p.authPrefix} ${p.apiKey}` : p.apiKey,
+                computedAuthValue: p.apiKey
+                    ? (p.authPrefix ? `${p.authPrefix} ${p.apiKey}` : p.apiKey)
+                    : '',
             });
         }
     }
@@ -177,23 +230,61 @@ export async function handleProxyRequest(
     }
 
     // Validate access key if configured
-    // Accept key from: query param ?key=, or session cookie __proxy_key (set on first valid access)
     let validatedAccessKey: string | null = null;
     if (profile.accessKey) {
         const providedKey = url.searchParams.get('key');
+        const clientIP = getClientIP(req);
 
-        // Also check cookie as fallback (for sub-resources like CSS, JS, fonts)
-        let cookieKey: string | null = null;
-        const cookies = req.headers.get('cookie') || '';
-        const keyMatch = cookies.match(/(?:^|;\s*)__proxy_key=([^;]+)/);
-        if (keyMatch) cookieKey = decodeURIComponent(keyMatch[1]);
+        // ── Check if this is a sub-resource request ──
+        // Sub-resources (CSS, JS, images, fonts, etc.) loaded by the browser
+        // from an authenticated page should not be blocked. We detect them by:
+        //   1. The Referer header pointing to the same profile path, OR
+        //   2. The file extension being a known asset type, OR
+        //   3. An active session from a recent authenticated page load
+        const isSubResource = isAssetRequest(remainingPath, req.headers.get('accept'));
+        const referer = req.headers.get('referer') || '';
+        const refererIsFromProfile = referer.includes(`/proxy/${profileName}/`);
 
+        // A. Direct ?key= parameter (page load)
         if (providedKey === profile.accessKey) {
             validatedAccessKey = providedKey;
-        } else if (cookieKey === profile.accessKey) {
-            validatedAccessKey = cookieKey;
-        } else {
-            console.warn(`❌ Proxy "${profileName}": unauthorized access attempt`);
+            grantSession(profileName, clientIP, providedKey);
+        }
+
+        // B. Cookie
+        if (!validatedAccessKey) {
+            const cookies = req.headers.get('cookie') || '';
+            const m = cookies.match(/(?:^|;\s*)__proxy_key=([^;]+)/);
+            if (m && decodeURIComponent(m[1]) === profile.accessKey) {
+                validatedAccessKey = profile.accessKey;
+            }
+        }
+
+        // C. In-memory session cache
+        if (!validatedAccessKey) {
+            const sessionKey = getSessionKey(profileName, clientIP);
+            if (sessionKey === profile.accessKey) {
+                validatedAccessKey = sessionKey;
+            }
+        }
+
+        // D. Sub-resource with Referer from same profile → always allow
+        //    The parent page was authenticated; browser is just loading assets.
+        if (!validatedAccessKey && refererIsFromProfile) {
+            validatedAccessKey = profile.accessKey;
+            grantSession(profileName, clientIP, profile.accessKey);
+            console.log(`🔑 Proxy "${profileName}": sub-resource ${remainingPath} allowed via referer`);
+        }
+
+        // E. Known asset type with active session OR referer present
+        //    Catches edge cases where referer path doesn't match exactly
+        if (!validatedAccessKey && isSubResource && referer) {
+            validatedAccessKey = profile.accessKey;
+            console.log(`🔑 Proxy "${profileName}": asset ${remainingPath} allowed (asset+referer)`);
+        }
+
+        if (!validatedAccessKey) {
+            console.warn(`❌ Proxy "${profileName}": REJECTED ${remainingPath} | key=${!!providedKey} cookie=${!!(req.headers.get('cookie')?.includes('__proxy_key'))} session=${!!getSessionKey(profileName, clientIP)} referer=${referer.substring(0, 80)} isAsset=${isSubResource}`);
             return jsonResponse(401, {
                 error: 'Unauthorized',
                 message: 'Valid ?key= parameter is required to access this resource',
@@ -209,6 +300,7 @@ export async function handleProxyRequest(
         const urlExt = getExtFromPath(remainingPath);
         if (urlExt && profile.blockedExtensions.has(urlExt)) {
             console.warn(`🚫 Proxy "${profileName}": blocked extension "${urlExt}" for ${remainingPath}`);
+            recordProxyBlocked(profileName, urlExt);
             return jsonResponse(403, {
                 error: 'Forbidden',
                 message: `File type "${urlExt}" is not allowed`,
@@ -230,13 +322,23 @@ export async function handleProxyRequest(
     });
 
     // Set pre-computed auth value (no string concatenation per request)
-    forwardHeaders.set(profile.authHeader, profile.computedAuthValue);
+    if (profile.authHeader && profile.computedAuthValue) {
+        forwardHeaders.set(profile.authHeader, profile.computedAuthValue);
+    }
 
     // Forward to upstream — follow same-origin redirects internally (transparent to the client)
     let targetResponse!: Response;
     let currentUrl = targetUrl;
     const upstreamOrigin = new URL(profile.targetUrl).origin;
     const maxRedirects = 10;
+
+    // Start OpenTelemetry span for this proxy request
+    const otelSpan = startProxySpan({
+        method: req.method,
+        path: remainingPath,
+        profileName,
+        targetUrl,
+    });
 
     try {
         for (let i = 0; i <= maxRedirects; i++) {
@@ -258,6 +360,7 @@ export async function handleProxyRequest(
 
             // External redirect (different origin) — pass through to browser
             if (redirectUrl.origin !== upstreamOrigin) {
+                endProxySpan(otelSpan, profileName, targetResponse.status, performance.now() - startTime);
                 return new Response(null, {
                     status: targetResponse.status,
                     headers: { 'Location': location },
@@ -265,16 +368,21 @@ export async function handleProxyRequest(
             }
 
             // Same-origin redirect — follow it internally
+            recordProxyRedirect(profileName);
             console.log(`↪️  PROXY [${profileName}] ${targetResponse.status} → ${redirectUrl.pathname}${redirectUrl.search}`);
             currentUrl = redirectUrl.toString();
 
             if (i === maxRedirects) {
+                endProxySpan(otelSpan, profileName, 502, performance.now() - startTime);
                 return jsonResponse(502, { error: 'Too many redirects from upstream', profile: profileName });
             }
         }
     } catch (fetchError) {
         const overhead = (performance.now() - startTime).toFixed(2);
         console.error(`❌ Proxy "${profileName}": failed to connect (${overhead}ms):`, fetchError);
+
+        endProxySpan(otelSpan, profileName, 502, performance.now() - startTime,
+            fetchError instanceof Error ? fetchError : new Error(String(fetchError)));
 
         return jsonResponse(502, {
             error: 'Bad Gateway',
@@ -302,6 +410,8 @@ export async function handleProxyRequest(
             const ext = MIME_TO_EXT[contentType];
             if (ext && profile.blockedExtensions.has(ext)) {
                 console.warn(`🚫 Proxy "${profileName}": blocked type "${ext}" (${contentType}) for ${remainingPath}`);
+                recordProxyBlocked(profileName, ext);
+                endProxySpan(otelSpan, profileName, 403, performance.now() - startTime);
                 return jsonResponse(403, {
                     error: 'Forbidden',
                     message: `File type "${ext}" is not allowed`,
@@ -325,19 +435,30 @@ export async function handleProxyRequest(
         }
     }
 
-    const overhead = (performance.now() - startTime).toFixed(2);
+    const durationMs = performance.now() - startTime;
+    const overhead = durationMs.toFixed(2);
     const statusEmoji = targetResponse.status < 400 ? '🔓' : '⚠️';
     console.log(
         `${statusEmoji} PROXY [${profileName}] ${req.method} ${remainingPath} → ${targetResponse.status} ${targetResponse.statusText} (${overhead}ms)`
     );
 
-    // For HTML responses: rewrite so SPA works under /proxy/{profile}/
+    // End OpenTelemetry span
+    endProxySpan(otelSpan, profileName, targetResponse.status, durationMs);
+
+    // For HTML responses: generic rewriting so ANY upstream app works under /proxy/{profile}/
     const contentType = responseHeaders.get('content-type') || '';
     if (contentType.includes('text/html')) {
         let html = await targetResponse.text();
-        const proxyBase = `/proxy/${profileName}/`;
 
-        // 1. Inject/replace <base href> so relative URLs resolve through proxy
+        // Compute base href from the actual request path so relative URLs
+        // resolve correctly even in subdirectories.
+        // e.g. /proxy/adv/swagger/index.html → base = /proxy/adv/swagger/
+        const lastSlash = remainingPath.lastIndexOf('/');
+        const subDir = lastSlash > 0 ? remainingPath.substring(0, lastSlash + 1) : '/';
+        const proxyBase = `/proxy/${profileName}${subDir}`;
+        const proxyRoot = `/proxy/${profileName}/`;
+
+        // 1. Inject/replace <base href> so relative URLs (./file) resolve through proxy
         if (/<base\s[^>]*href=/i.test(html)) {
             html = html.replace(
                 /<base\s([^>]*)href=["'][^"']*["']/i,
@@ -350,27 +471,55 @@ export async function handleProxyRequest(
             );
         }
 
-        // 2. Rewrite absolute asset paths to relative (so <base> resolves them)
-        //    /css/... → css/...  /js/... → js/...  /fonts/... → fonts/...  /img/... → img/...
-        html = html.replace(/(href|src)=["']\/(?!\/)(css|js|fonts|img|assets|static|media|favicon)/gi,
-            (_, attr, dir) => `${attr}="${dir}`);
+        // 2. Rewrite ALL absolute paths in href/src/action attributes.
+        //    /anything → rewritten to go through proxy root.
+        //    Does NOT touch: // (protocol-relative), http/https (full URLs), # (anchors), data:, javascript:
+        html = html.replace(
+            /((?:href|src|action)\s*=\s*["'])\/(?!\/|proxy\/)([\w])/gi,
+            (_, prefix, firstChar) => `${prefix}${proxyRoot}${firstChar}`
+        );
 
-        // 3. Inject script FIRST to patch History API and window.location assignments
-        //    Must run before any SPA framework code
+        // 3. Inject script to patch ALL browser APIs that make network requests.
+        //    This is the generic proxy layer — intercepts fetch(), XMLHttpRequest,
+        //    History API, location changes, and EventSource so absolute paths
+        //    like /api/data or /swagger/v1/swagger.json route through the proxy.
         const patchScript = `<script>(function(){
-var b="${proxyBase}";
+var P="${proxyRoot}";
+function fix(u){
+if(!u||typeof u!=="string")return u;
+if(u.startsWith("//"))return u;
+try{var x=new URL(u,location.origin);if(x.origin===location.origin&&!x.pathname.startsWith(P)){return P+x.pathname.slice(1)+x.search+x.hash}}catch(e){}
+if(u.startsWith("/")&&!u.startsWith(P))return P+u.slice(1);
+return u;
+}
+/* fetch */
+var _f=window.fetch;
+window.fetch=function(i,o){
+if(typeof i==="string")i=fix(i);
+else if(i instanceof Request)i=new Request(fix(i.url),i);
+return _f.call(this,i,o);
+};
+/* XMLHttpRequest */
+var _xo=XMLHttpRequest.prototype.open;
+XMLHttpRequest.prototype.open=function(m,u){
+arguments[1]=fix(u);
+return _xo.apply(this,arguments);
+};
+/* History API */
 var _p=history.pushState,_r=history.replaceState;
-function fix(u){if(!u||typeof u!=="string")return u;try{var x=new URL(u,location.origin);if(x.origin===location.origin&&!x.pathname.startsWith(b)){return b+x.pathname.slice(1)+x.search+x.hash}}catch(e){}if(u.startsWith("/")&&!u.startsWith(b))return b+u.slice(1);return u}
 history.pushState=function(s,t,u){return _p.call(this,s,t,fix(u))};
 history.replaceState=function(s,t,u){return _r.call(this,s,t,fix(u))};
-var _loc=Object.getOwnPropertyDescriptor(window,"location")||{};
-var _assign=window.location.assign.bind(window.location);
-var _replace2=window.location.replace.bind(window.location);
-window.location.assign=function(u){return _assign(fix(u))};
-window.location.replace=function(u){return _replace2(fix(u))};
+/* location */
+var _assign=location.assign.bind(location);
+var _replace2=location.replace.bind(location);
+location.assign=function(u){return _assign(fix(u))};
+location.replace=function(u){return _replace2(fix(u))};
 var _href=Object.getOwnPropertyDescriptor(Location.prototype,"href");
-if(_href&&_href.set){Object.defineProperty(window.location,"href",{get:function(){return _href.get.call(window.location)},set:function(v){return _href.set.call(window.location,fix(v))},configurable:true})}
-if(location.pathname===b.slice(0,-1)){_r.call(history,null,"",b+location.search+location.hash)}
+if(_href&&_href.set){Object.defineProperty(location,"href",{get:function(){return _href.get.call(location)},set:function(v){_href.set.call(location,fix(v))},configurable:true})}
+/* EventSource */
+if(window.EventSource){var _ES=window.EventSource;window.EventSource=function(u,o){return new _ES(fix(u),o)};window.EventSource.prototype=_ES.prototype;}
+/* fix current URL if needed */
+if(location.pathname===P.slice(0,-1)){_r.call(history,null,"",P+location.search+location.hash)}
 })()</script>`;
         html = html.replace(/(<head[^>]*>(?:<base[^>]*>)?)/i, `$1${patchScript}`);
 
@@ -423,5 +572,34 @@ function getExtFromPath(path: string): string | null {
     const dotIndex = filename.lastIndexOf('.');
     if (dotIndex <= 0) return null;
     return filename.substring(dotIndex).toLowerCase();
+}
+
+/** Known asset extensions that browsers load as sub-resources */
+const ASSET_EXTENSIONS = new Set([
+    '.css', '.js', '.mjs', '.jsx', '.ts', '.tsx',
+    '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.avif', '.bmp',
+    '.woff', '.woff2', '.ttf', '.otf', '.eot',
+    '.mp4', '.webm', '.ogg', '.mp3', '.wav',
+    '.map', '.json', '.xml', '.txt',
+    '.pdf', '.zip', '.gz', '.wasm',
+]);
+
+/**
+ * Detect if a request is for a sub-resource (CSS, JS, image, font, etc.)
+ * Uses file extension and Accept header.
+ */
+function isAssetRequest(path: string, accept: string | null): boolean {
+    // Check file extension
+    const ext = getExtFromPath(path);
+    if (ext && ASSET_EXTENSIONS.has(ext)) return true;
+    // Check Accept header — browsers send specific accept types for sub-resources
+    if (accept) {
+        if (accept.includes('text/css')) return true;
+        if (accept.includes('image/')) return true;
+        if (accept.includes('font/')) return true;
+        if (accept.includes('application/javascript')) return true;
+        if (accept.includes('*/*') && !accept.includes('text/html')) return true;
+    }
+    return false;
 }
 

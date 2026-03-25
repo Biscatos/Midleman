@@ -9,8 +9,8 @@ import { dirname, resolve } from 'path';
 interface StoredProfile {
     name: string;
     targetUrl: string;
-    apiKey: string;
-    authHeader: string;
+    apiKey?: string;
+    authHeader?: string;
     authPrefix?: string;
     accessKey?: string;
     blockedExtensions?: string[];
@@ -36,11 +36,11 @@ function toRuntime(stored: StoredProfile): ProxyProfile {
     const profile: ProxyProfile = {
         name: stored.name.toLowerCase(),
         targetUrl: stored.targetUrl.endsWith('/') ? stored.targetUrl.slice(0, -1) : stored.targetUrl,
-        apiKey: stored.apiKey,
-        authHeader: stored.authHeader,
         authPrefix: stored.authPrefix,
         accessKey: stored.accessKey,
     };
+    if (stored.apiKey) profile.apiKey = stored.apiKey;
+    if (stored.authHeader) profile.authHeader = stored.authHeader;
 
     if (stored.blockedExtensions && stored.blockedExtensions.length > 0) {
         profile.blockedExtensions = new Set(
@@ -58,9 +58,9 @@ function toStored(profile: ProxyProfile): StoredProfile {
     const stored: StoredProfile = {
         name: profile.name,
         targetUrl: profile.targetUrl,
-        apiKey: profile.apiKey,
-        authHeader: profile.authHeader,
     };
+    if (profile.apiKey) stored.apiKey = profile.apiKey;
+    if (profile.authHeader) stored.authHeader = profile.authHeader;
 
     if (profile.authPrefix) stored.authPrefix = profile.authPrefix;
     if (profile.accessKey) stored.accessKey = profile.accessKey;
@@ -83,7 +83,7 @@ export function loadPersistedProfiles(): ProxyProfile[] {
         const stored: StoredProfile[] = JSON.parse(raw);
 
         return stored
-            .filter(p => p.name && p.targetUrl && p.apiKey && p.authHeader)
+            .filter(p => p.name && p.targetUrl)
             .map(toRuntime);
     } catch (err) {
         console.warn('⚠️  Could not load profiles.json:', err instanceof Error ? err.message : err);
@@ -136,8 +136,8 @@ export function validateProfileInput(input: unknown): string | null {
 
     if (!p.name || typeof p.name !== 'string') return '"name" is required (string)';
     if (!p.targetUrl || typeof p.targetUrl !== 'string') return '"targetUrl" is required (string)';
-    if (!p.apiKey || typeof p.apiKey !== 'string') return '"apiKey" is required (string)';
-    if (!p.authHeader || typeof p.authHeader !== 'string') return '"authHeader" is required (string)';
+    if (p.apiKey !== undefined && typeof p.apiKey !== 'string') return '"apiKey" must be a string';
+    if (p.authHeader !== undefined && typeof p.authHeader !== 'string') return '"authHeader" must be a string';
 
     // Validate URL
     try {

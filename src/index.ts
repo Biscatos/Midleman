@@ -1,7 +1,8 @@
 import { loadConfig, reloadEnvFile, loadProxyProfiles } from './config';
-import { UnauthorizedError } from './types';
+import { UnauthorizedError, type ProxyProfile } from './types';
 import { handleProxyRequest, invalidateProfileCache } from './proxy';
 import { loadPersistedProfiles, persistProfiles, mergeProfiles, validateProfileInput } from './store';
+import { initTelemetry, shutdownTelemetry, startTargetSpan, endTargetSpan, getTelemetryConfig, getMetricsSnapshot } from './telemetry';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 
@@ -16,6 +17,32 @@ const config = loadConfig();
 // Merge env profiles with persisted profiles (JSON file takes precedence)
 const persistedProfiles = loadPersistedProfiles();
 config.proxyProfiles = mergeProfiles(config.proxyProfiles, persistedProfiles);
+
+// Initialize OpenTelemetry
+initTelemetry(config.otel);
+
+// Load templates & assets
+const errorTemplate = readFileSync(resolve(import.meta.dir, 'error.html'), 'utf-8');
+const landingPage = readFileSync(resolve(import.meta.dir, 'landing.html'), 'utf-8');
+let logoSvg: Uint8Array | null = null;
+try {
+    logoSvg = new Uint8Array(readFileSync(resolve(import.meta.dir, 'logo.svg')));
+} catch (err) {
+    console.warn('⚠️  Logo not found in src/logo.svg');
+}
+
+function renderErrorPage(statusCode: number, title: string, message: string): Response {
+    const html = errorTemplate
+        .replace(/\{\{STATUS\}\}/g, `${statusCode} — ${title}`)
+        .replace(/\{\{STATUS_CODE\}\}/g, String(statusCode))
+        .replace(/\{\{STATUS_CLASS\}\}/g, `c${statusCode}`)
+        .replace(/\{\{TITLE\}\}/g, title)
+        .replace(/\{\{MESSAGE\}\}/g, message);
+    return new Response(html, {
+        status: statusCode,
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+}
 
 console.log(`🚀 Bun-Forwarder starting...`);
 console.log(`📌 Target URL: ${config.targetUrl}`);
@@ -74,18 +101,39 @@ const server = Bun.serve({
             // Parse incoming request URL
             const url = new URL(req.url);
 
-            // Silently ignore favicon requests
-            if (url.pathname === '/favicon.ico') {
+            // Serve logo/favicon requests
+            if (url.pathname === '/logo.svg' || url.pathname === '/favicon.ico' || url.pathname === '/favicon.png') {
+                if (logoSvg) {
+                    return new Response(logoSvg, {
+                        headers: { 
+                            'Content-Type': 'image/svg+xml',
+                            'Cache-Control': 'public, max-age=31536000'
+                        }
+                    });
+                }
                 return new Response(null, { status: 204 });
+            }
+
+            // Landing page — only for browsers without auth token
+            if (url.pathname === '/' && !req.headers.get('X-Forward-Token') && !url.searchParams.get('token')) {
+                const accept = req.headers.get('Accept') || '';
+                if (accept.includes('text/html')) {
+                    return new Response(landingPage, {
+                        status: 200,
+                        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                    });
+                }
             }
 
             // Health check endpoint for load balancers / k8s
             if (url.pathname === '/health') {
+                const otelConfig = getTelemetryConfig();
                 return new Response(JSON.stringify({
                     status: 'ok',
                     uptime: Math.floor((Date.now() - startedAt) / 1000),
                     activeRequests,
                     proxyProfiles: config.proxyProfiles.length,
+                    telemetry: { enabled: otelConfig.enabled, endpoint: otelConfig.endpoint },
                 }), {
                     status: 200,
                     headers: { 'Content-Type': 'application/json' }
@@ -122,6 +170,7 @@ const server = Bun.serve({
                             'POST /admin/profiles': 'Create or update a profile',
                             'DELETE /admin/profiles/:name': 'Remove a profile',
                             'POST /admin/reload': 'Reload .env and profiles.json',
+                            'GET /admin/telemetry': 'Live telemetry data (target + per-profile)',
                             'GET /health': 'System health check'
                         },
                         config: {
@@ -129,6 +178,7 @@ const server = Bun.serve({
                             forwardPath: config.forwardPath,
                             authEnabled: !!config.authToken,
                         },
+                        telemetry: getTelemetryConfig(),
                         activeProfiles: config.proxyProfiles.length
                     });
                 }
@@ -144,6 +194,11 @@ const server = Bun.serve({
                     const names = config.proxyProfiles.map(p => p.name);
                     console.log(`🔄 Profiles reloaded: ${names.join(', ') || 'none'}`);
                     return jsonRes(200, { status: 'reloaded', profiles: names });
+                }
+
+                // GET /admin/telemetry — return in-memory telemetry data
+                if (url.pathname === '/admin/telemetry' && req.method === 'GET') {
+                    return jsonRes(200, getMetricsSnapshot() as unknown as Record<string, unknown>);
                 }
 
                 // GET /admin/config — return current configuration
@@ -263,17 +318,19 @@ const server = Bun.serve({
                     if (error) return jsonRes(400, { error });
 
                     const input = body as Record<string, unknown>;
-                    const profile = {
+                    const profile: ProxyProfile = {
                         name: (input.name as string).toLowerCase(),
                         targetUrl: (input.targetUrl as string).replace(/\/$/, ''),
-                        apiKey: input.apiKey as string,
-                        authHeader: input.authHeader as string,
-                        authPrefix: input.authPrefix as string | undefined,
-                        accessKey: input.accessKey as string | undefined,
-                        blockedExtensions: input.blockedExtensions
-                            ? new Set((input.blockedExtensions as string[]).map(e => e.trim().toLowerCase().replace(/^\.?/, '.')))
-                            : undefined,
                     };
+                    if (input.apiKey) profile.apiKey = input.apiKey as string;
+                    if (input.authHeader) profile.authHeader = input.authHeader as string;
+                    if (input.authPrefix) profile.authPrefix = input.authPrefix as string;
+                    if (input.accessKey) profile.accessKey = input.accessKey as string;
+                    if (input.blockedExtensions) {
+                        profile.blockedExtensions = new Set(
+                            (input.blockedExtensions as string[]).map(e => e.trim().toLowerCase().replace(/^\.?/, '.'))
+                        );
+                    }
 
                     // Update or add
                     const idx = config.proxyProfiles.findIndex(p => p.name === profile.name);
@@ -308,12 +365,20 @@ const server = Bun.serve({
                     return jsonRes(200, { status: 'deleted', profile: name });
                 }
 
+                const accept = req.headers.get('Accept') || '';
+                if (accept.includes('text/html')) {
+                    return renderErrorPage(404, 'Not Found', 'The admin endpoint you requested does not exist. Check the <a href="/dashboard" style="color:#6c5ce7">Dashboard</a> for available options.');
+                }
                 return jsonRes(404, { error: 'Admin endpoint not found' });
             }
 
             // Handle proxy bypass requests (before auth validation)
             if (url.pathname.startsWith('/proxy/')) {
                 if (config.proxyProfiles.length === 0) {
+                    const accept = req.headers.get('Accept') || '';
+                    if (accept.includes('text/html')) {
+                        return renderErrorPage(404, 'Not Found', 'No proxy profiles are configured yet. Visit the <a href="/dashboard" style="color:#6c5ce7">Dashboard</a> to create one.');
+                    }
                     return new Response(JSON.stringify({
                         error: 'Not Found',
                         message: 'No proxy profiles configured'
@@ -336,6 +401,10 @@ const server = Bun.serve({
 
                 if (providedToken !== config.authToken) {
                     console.warn(`❌ Unauthorized ${req.method} ${url.pathname} from ${req.headers.get('X-Forwarded-For') || 'unknown'}`);
+                    const accept = req.headers.get('Accept') || '';
+                    if (accept.includes('text/html')) {
+                        return renderErrorPage(401, 'Unauthorized', 'Authentication is required to access this resource. Provide a valid token via the <strong>X-Forward-Token</strong> header or <strong>?token=</strong> query parameter.');
+                    }
                     return new Response(JSON.stringify({
                         error: 'Unauthorized',
                         message: 'Valid X-Forward-Token header or ?token=xxx query parameter is required'
@@ -391,6 +460,14 @@ const server = Bun.serve({
             // Use req.body directly to avoid blocking on arrayBuffer()
             let targetResponse: Response;
 
+            // Start OpenTelemetry span for target forwarding
+            const otelSpan = startTargetSpan({
+                method: req.method,
+                path: pathWithQuery,
+                targetUrl,
+                requestId,
+            });
+
             try {
                 targetResponse = await fetch(targetUrl, {
                     method: req.method,
@@ -399,9 +476,13 @@ const server = Bun.serve({
                 });
             } catch (fetchError) {
                 const endTime = performance.now();
-                const overhead = (endTime - startTime).toFixed(2);
+                const durationMs = endTime - startTime;
+                const overhead = durationMs.toFixed(2);
 
                 console.error(`❌ Failed to connect to target (${overhead}ms):`, fetchError);
+
+                endTargetSpan(otelSpan, 502, durationMs,
+                    fetchError instanceof Error ? fetchError : new Error(String(fetchError)));
 
                 return new Response(JSON.stringify({
                     error: 'Failed to connect to target server',
@@ -429,13 +510,17 @@ const server = Bun.serve({
             responseHeaders.set('Connection', 'close');
 
             const endTime = performance.now();
-            const overhead = (endTime - startTime).toFixed(2);
+            const durationMs = endTime - startTime;
+            const overhead = durationMs.toFixed(2);
 
             // Log with appropriate emoji based on status
             const statusEmoji = targetResponse.status < 400 ? '✅' : '⚠️';
             console.log(
                 `${statusEmoji} ${req.method} ${pathWithQuery} → ${targetResponse.status} ${targetResponse.statusText} (${overhead}ms)`
             );
+
+            // End OpenTelemetry span
+            endTargetSpan(otelSpan, targetResponse.status, durationMs);
 
             // Add request ID to response for tracing
             responseHeaders.set('X-Request-ID', requestId);
@@ -452,6 +537,10 @@ const server = Bun.serve({
             const overhead = (endTime - startTime).toFixed(2);
 
             if (error instanceof UnauthorizedError) {
+                const accept = req.headers.get('Accept') || '';
+                if (accept.includes('text/html')) {
+                    return renderErrorPage(401, 'Unauthorized', 'Authentication is required to access this resource. Provide a valid token via the <strong>X-Forward-Token</strong> header or <strong>?token=</strong> query parameter.');
+                }
                 return new Response(JSON.stringify({
                     error: 'Unauthorized',
                     message: 'Valid X-Forward-Token header is required'
@@ -510,6 +599,9 @@ const shutdown = async (signal: string) => {
     if (activeRequests > 0) {
         console.warn(`   ⚠️  Forcing shutdown with ${activeRequests} request(s) still active`);
     }
+
+    // Flush pending telemetry data before stopping
+    await shutdownTelemetry();
 
     server.stop();
     console.log('👋 Server stopped.');

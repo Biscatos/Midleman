@@ -91,8 +91,8 @@ export function loadProxyProfiles(): ProxyProfile[] {
     const validProfiles: ProxyProfile[] = [];
 
     for (const [name, profile] of profiles) {
-        if (!profile.targetUrl || !profile.apiKey || !profile.authHeader) {
-            console.warn(`⚠️  Proxy profile "${name}" is incomplete (needs URL, KEY, and HEADER). Skipping.`);
+        if (!profile.targetUrl) {
+            console.warn(`⚠️  Proxy profile "${name}" is incomplete (needs URL). Skipping.`);
             continue;
         }
 
@@ -141,12 +141,21 @@ export function loadConfig(): Config {
     // Load proxy profiles
     const proxyProfiles = loadProxyProfiles();
 
+    // OpenTelemetry configuration
+    const otel = {
+        enabled: process.env.OTEL_ENABLED === 'true',
+        endpoint: process.env.OTEL_ENDPOINT || 'http://localhost:4318',
+        serviceName: process.env.OTEL_SERVICE_NAME || 'midleman',
+        metricsInterval: parseInt(process.env.OTEL_METRICS_INTERVAL || '15000', 10),
+    };
+
     return {
         port: parseInt(port, 10),
         targetUrl: targetUrl.endsWith('/') ? targetUrl.slice(0, -1) : targetUrl,
         authToken,
         forwardPath,
         proxyProfiles,
+        otel,
     };
 }
 

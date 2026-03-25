@@ -10,7 +10,20 @@
       "Bash(grep -oE 'a=window\\\\.location\\\\.href\\\\.replace.{0,100}')",
       "Bash(grep -oE 'urlPath.{0,5}[,;]|redirect.{0,60}')",
       "Bash(grep -oE '.{0,30}\\(beforeEach|window\\\\.location\\\\.href\\\\s*=|window\\\\.location\\\\s*=|\\\\.replace\\\\\\(\\\\s*[\"\"\"\"'\"''''\"']/[^c]\\).{0,60}')",
-      "Bash(grep -oE 'n\\\\.t0\\\\.url.{0,100}')"
+      "Bash(grep -oE 'n\\\\.t0\\\\.url.{0,100}')",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(bun add:*)",
+      "Bash(npm install:*)",
+      "Bash(bunx tsc:*)",
+      "Bash(docker compose:*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"http://localhost:3000/health\")",
+      "Bash(curl -s \"http://localhost:3000/proxy/advsync/\")",
+      "Bash(curl -s \"http://localhost:3000/admin/profiles\" -H \"X-Forward-Token: \")",
+      "Read(//dev/**)",
+      "Bash(docker exec:*)",
+      "Bash(curl -s \"http://localhost:3000/proxy/adv/swagger/index.html?key=a24d546365994a8382d1d78c945e33c2\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"http://localhost:3000/proxy/adv/swagger/swagger-ui.css?key=a24d546365994a8382d1d78c945e33c2\")",
+      "Bash(DOCKER_BUILDKIT=1 docker build -t midleman-bun-forwarder .)"
     ]
   }
 }

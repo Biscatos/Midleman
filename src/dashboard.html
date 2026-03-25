@@ -3,57 +3,214 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/svg+xml" href="/logo.svg">
 <title>Midleman Dashboard</title>
 <style>
   :root {
     --bg: #0f1117;
-    --surface: #1a1d27;
-    --surface2: #232733;
-    --border: #2e3344;
-    --text: #e1e4ed;
-    --text2: #8b90a0;
+    --bg2: #161822;
+    --surface: #1c1e2b;
+    --surface2: #242736;
+    --surface3: #2c2f42;
+    --border: #2e3148;
+    --border2: #3a3d55;
+    --text: #e4e6f0;
+    --text2: #8b8fa7;
+    --text3: #5d6180;
     --accent: #6c5ce7;
-    --accent2: #a29bfe;
+    --accent2: #8577ed;
+    --accent-bg: rgba(108,92,231,0.12);
     --green: #00b894;
+    --green-bg: rgba(0,184,148,0.12);
     --red: #e17055;
+    --red-bg: rgba(225,112,85,0.12);
     --orange: #fdcb6e;
-    --radius: 10px;
+    --orange-bg: rgba(253,203,110,0.12);
+    --blue: #74b9ff;
+    --blue-bg: rgba(116,185,255,0.12);
+    --radius: 12px;
+    --radius-sm: 8px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.2);
+    --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
   }
-  .header {
-    background: var(--surface);
+
+  /* ─── Layout ──────────────────────────────────────────────────────────────── */
+  .layout {
+    display: flex;
+    min-height: 100vh;
+  }
+  .sidebar {
+    width: 240px;
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 50;
+    transition: transform var(--transition);
+  }
+  .sidebar-brand {
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
     border-bottom: 1px solid var(--border);
-    padding: 16px 24px;
+  }
+  .sidebar-brand img { width: 36px; height: 36px; border-radius: 10px; }
+  .sidebar-brand h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+  .sidebar-brand span { color: var(--accent2); }
+
+  .sidebar-nav {
+    flex: 1;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .nav-section {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 16px 12px 8px;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    color: var(--text2);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all var(--transition);
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+  }
+  .nav-item:hover { background: var(--surface); color: var(--text); }
+  .nav-item.active { background: var(--accent-bg); color: var(--accent2); }
+  .nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
+  .nav-badge {
+    margin-left: auto;
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: var(--surface3);
+    color: var(--text2);
+    font-weight: 600;
+  }
+
+  .sidebar-footer {
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .status-dot.online { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .status-dot.offline { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  .sidebar-footer-text { font-size: 12px; color: var(--text2); }
+
+  .main {
+    flex: 1;
+    margin-left: 240px;
+    min-height: 100vh;
+  }
+
+  /* ─── Top Bar ─────────────────────────────────────────────────────────────── */
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: rgba(15, 17, 23, 0.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 32px;
+    height: 56px;
     display: flex;
     align-items: center;
     justify-content: space-between;
   }
-  .header h1 { font-size: 20px; font-weight: 600; }
-  .header h1 span { color: var(--accent2); }
-  .header-actions { display: flex; gap: 8px; }
-  .status-badge {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 4px 12px; border-radius: 20px; font-size: 13px; font-weight: 500;
+  .topbar-title {
+    font-size: 15px;
+    font-weight: 600;
   }
-  .status-badge.online { background: rgba(0,184,148,0.15); color: var(--green); }
-  .status-badge.offline { background: rgba(225,112,85,0.15); color: var(--red); }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; }
-  .status-badge.online .status-dot { background: var(--green); }
-  .status-badge.offline .status-dot { background: var(--red); }
+  .topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .topbar-stat {
+    font-size: 12px;
+    color: var(--text2);
+    padding: 4px 10px;
+    background: var(--surface);
+    border-radius: 6px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
 
-  .container { max-width: 960px; margin: 0 auto; padding: 24px; }
+  .mobile-toggle {
+    display: none;
+    background: none;
+    border: none;
+    color: var(--text);
+    cursor: pointer;
+    padding: 4px;
+  }
 
+  /* ─── Content ─────────────────────────────────────────────────────────────── */
+  .content {
+    padding: 28px 32px;
+    max-width: 1200px;
+  }
+
+  .page { display: none; }
+  .page.active { display: block; }
+
+  .page-header {
+    margin-bottom: 24px;
+  }
+  .page-header h2 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    margin-bottom: 6px;
+  }
+  .page-header p {
+    font-size: 14px;
+    color: var(--text2);
+  }
+
+  /* ─── Cards ───────────────────────────────────────────────────────────────── */
   .card {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     margin-bottom: 20px;
+    box-shadow: var(--shadow);
   }
   .card-header {
     padding: 16px 20px;
@@ -62,225 +219,608 @@
     align-items: center;
     justify-content: space-between;
   }
-  .card-header h2 { font-size: 16px; font-weight: 600; }
+  .card-header h3 { font-size: 14px; font-weight: 600; }
   .card-body { padding: 20px; }
 
-  .stats {
+  /* ─── Stats Grid ──────────────────────────────────────────────────────────── */
+  .stats-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 12px;
-    margin-bottom: 20px;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
   }
-  .stat {
-    background: var(--surface2);
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 16px;
+    padding: 20px;
+    box-shadow: var(--shadow);
+    transition: border-color var(--transition);
   }
-  .stat-label { font-size: 12px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-  .stat-value { font-size: 20px; font-weight: 700; }
+  .stat-card:hover { border-color: var(--border2); }
+  .stat-icon {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 14px;
+    font-size: 18px;
+  }
+  .stat-icon.purple { background: var(--accent-bg); }
+  .stat-icon.green { background: var(--green-bg); }
+  .stat-icon.red { background: var(--red-bg); }
+  .stat-icon.blue { background: var(--blue-bg); }
+  .stat-icon.orange { background: var(--orange-bg); }
+  .stat-label {
+    font-size: 12px;
+    color: var(--text2);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+  .stat-value {
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    line-height: 1;
+  }
+  .stat-sub {
+    font-size: 12px;
+    color: var(--text3);
+    margin-top: 6px;
+  }
 
+  /* ─── Buttons ─────────────────────────────────────────────────────────────── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition);
+    white-space: nowrap;
+  }
+  .btn:hover { background: var(--surface3); border-color: var(--border2); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent2); border-color: var(--accent2); }
+  .btn-danger { background: transparent; border-color: var(--red); color: var(--red); }
+  .btn-danger:hover { background: var(--red-bg); }
+  .btn-ghost { background: transparent; border-color: transparent; }
+  .btn-ghost:hover { background: var(--surface2); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .btn-icon { padding: 6px; width: 32px; height: 32px; justify-content: center; }
+  .btn svg { width: 15px; height: 15px; }
+
+  /* ─── Forms ───────────────────────────────────────────────────────────────── */
   .form-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 16px;
   }
-  .form-grid.full { grid-template-columns: 1fr; }
   .form-group { display: flex; flex-direction: column; gap: 6px; }
   .form-group.span-2 { grid-column: span 2; }
   .form-group label {
-    font-size: 13px; font-weight: 500; color: var(--text2);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text2);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
   }
   .form-group input, .form-group select {
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
     color: var(--text);
     font-size: 14px;
     outline: none;
-    transition: border-color 0.2s;
+    transition: border-color var(--transition);
+    font-family: inherit;
   }
-  .form-group input:focus, .form-group select:focus {
-    border-color: var(--accent);
-  }
-  .form-group input::placeholder { color: var(--text2); opacity: 0.5; }
+  .form-group input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+  .form-group input::placeholder { color: var(--text3); }
+  .form-group input:disabled { opacity: 0.5; cursor: not-allowed; }
 
-  .btn {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 8px 16px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    background: var(--surface2);
-    color: var(--text);
-    font-size: 13px; font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-  .btn:hover { background: var(--border); }
-  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .btn-primary:hover { background: #5b4bd5; }
-  .btn-danger { background: transparent; border-color: var(--red); color: var(--red); }
-  .btn-danger:hover { background: rgba(225,112,85,0.15); }
-  .btn-sm { padding: 5px 10px; font-size: 12px; }
-
-  .profile-list { display: flex; flex-direction: column; gap: 12px; }
-  .profile-item {
-    background: var(--surface2);
-    border-radius: var(--radius);
-    padding: 16px;
+  .checkbox-group {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
   }
-  .profile-info { flex: 1; min-width: 0; }
-  .profile-name { font-weight: 600; font-size: 15px; margin-bottom: 4px; }
-  .profile-url { font-size: 13px; color: var(--text2); word-break: break-all; }
-  .profile-meta { display: flex; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
-  .profile-tag {
-    font-size: 11px; padding: 3px 8px; border-radius: 4px;
-    background: var(--bg); color: var(--text2);
+  .checkbox-group input[type="checkbox"] {
+    width: 18px; height: 18px;
+    accent-color: var(--accent);
   }
-  .profile-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .checkbox-group label { font-size: 14px !important; text-transform: none !important; color: var(--text) !important; }
 
+  .form-section {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 16px 0 10px;
+    border-top: 1px solid var(--border);
+    margin-top: 8px;
+  }
+
+  /* ─── Profiles Table ──────────────────────────────────────────────────────── */
+  .profiles-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .profile-row {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    transition: border-color var(--transition);
+  }
+  .profile-row:hover { border-color: var(--border2); }
+  .profile-row-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .profile-row-name {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .profile-avatar {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    background: var(--accent-bg);
+    color: var(--accent2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 14px;
+    text-transform: uppercase;
+  }
+  .profile-name { font-weight: 600; font-size: 15px; }
+  .profile-url { font-size: 12px; color: var(--text2); margin-top: 2px; font-family: 'SF Mono', Monaco, monospace; }
+  .profile-row-actions { display: flex; gap: 6px; }
+  .profile-details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px;
+  }
+  .profile-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .profile-detail-label {
+    font-size: 10px;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+  }
+  .profile-detail-value { font-size: 13px; word-break: break-all; }
+
+  .empty-state {
+    text-align: center;
+    padding: 48px 20px;
+    color: var(--text3);
+  }
+  .empty-state svg { margin-bottom: 12px; opacity: 0.3; }
+  .empty-state p { margin-top: 8px; font-size: 14px; }
+
+  /* ─── Modal ───────────────────────────────────────────────────────────────── */
   .modal-overlay {
-    display: none; position: fixed; inset: 0;
-    background: rgba(0,0,0,0.6); z-index: 100;
-    align-items: center; justify-content: center;
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(4px);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
   }
   .modal-overlay.active { display: flex; }
   .modal {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    width: 100%; max-width: 540px;
-    max-height: 90vh; overflow-y: auto;
+    width: 100%;
+    max-width: 560px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
   }
   .modal-header {
-    padding: 16px 20px;
+    padding: 20px 24px;
     border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: space-between;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
-  .modal-header h3 { font-size: 16px; font-weight: 600; }
-  .modal-body { padding: 20px; }
+  .modal-header h3 { font-size: 16px; font-weight: 700; }
+  .modal-body { padding: 24px; }
   .modal-footer {
-    padding: 16px 20px;
+    padding: 16px 24px;
     border-top: 1px solid var(--border);
-    display: flex; justify-content: flex-end; gap: 8px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
   }
   .close-btn {
-    background: none; border: none; color: var(--text2); cursor: pointer;
-    font-size: 20px; line-height: 1;
+    background: none;
+    border: none;
+    color: var(--text3);
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+    padding: 4px;
+    border-radius: 6px;
+    transition: all var(--transition);
   }
-  .close-btn:hover { color: var(--text); }
+  .close-btn:hover { color: var(--text); background: var(--surface2); }
 
+  /* ─── Toast ───────────────────────────────────────────────────────────────── */
   .toast {
-    position: fixed; bottom: 24px; right: 24px; z-index: 200;
-    padding: 12px 20px; border-radius: 8px;
-    font-size: 14px; font-weight: 500;
-    transform: translateY(80px); opacity: 0;
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 200;
+    padding: 12px 20px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    font-weight: 500;
+    transform: translateY(80px);
+    opacity: 0;
     transition: all 0.3s ease;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
   }
   .toast.show { transform: translateY(0); opacity: 1; }
   .toast.success { background: var(--green); color: #fff; }
   .toast.error { background: var(--red); color: #fff; }
 
-  .empty-state {
-    text-align: center; padding: 40px 20px; color: var(--text2);
+  /* ─── Telemetry ───────────────────────────────────────────────────────────── */
+  .telem-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
   }
-  .empty-state p { margin-top: 8px; font-size: 14px; }
+  .telem-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+  }
+  .telem-card-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; margin-bottom: 6px; }
+  .telem-card-value { font-size: 24px; font-weight: 800; }
+  .telem-card-sub { font-size: 12px; color: var(--text3); margin-top: 4px; }
 
-  .checkbox-group {
-    display: flex; align-items: center; gap: 8px;
+  .telem-profile-section {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 12px;
   }
-  .checkbox-group input[type="checkbox"] {
-    width: 18px; height: 18px; accent-color: var(--accent);
+  .telem-profile-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .telem-profile-name { font-weight: 700; font-size: 15px; }
+  .telem-health-badge {
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-weight: 600;
+  }
+  .telem-health-badge.healthy { background: var(--green-bg); color: var(--green); }
+  .telem-health-badge.warning { background: var(--orange-bg); color: var(--orange); }
+  .telem-health-badge.degraded { background: var(--red-bg); color: var(--red); }
+
+  .metrics-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .metric-box {
+    text-align: center;
+    padding: 10px 6px;
+    background: var(--surface);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+  }
+  .metric-val { font-size: 18px; font-weight: 700; }
+  .metric-lbl { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.3px; font-weight: 600; margin-top: 2px; }
+
+  .mini-chart {
+    width: 100%;
+    height: 52px;
+    background: var(--surface);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .mini-chart svg { width: 100%; height: 100%; }
+
+  .status-chips {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .status-chip {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-weight: 600;
+    font-family: 'SF Mono', Monaco, monospace;
+  }
+  .status-chip.s2xx { color: var(--green); border-color: rgba(0,184,148,0.3); }
+  .status-chip.s3xx { color: var(--blue); border-color: rgba(116,185,255,0.3); }
+  .status-chip.s4xx { color: var(--orange); border-color: rgba(253,203,110,0.3); }
+  .status-chip.s5xx { color: var(--red); border-color: rgba(225,112,85,0.3); }
+
+  .telem-tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 20px;
+    background: var(--bg2);
+    border-radius: var(--radius-sm);
+    padding: 3px;
+    border: 1px solid var(--border);
+  }
+  .telem-tab {
+    flex: 1;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    background: none;
+    color: var(--text2);
+    border-radius: 6px;
+    transition: all var(--transition);
+    text-align: center;
+  }
+  .telem-tab:hover { color: var(--text); }
+  .telem-tab.active { background: var(--surface); color: var(--accent2); box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+
+  .telem-section { display: none; }
+  .telem-section.active { display: block; }
+
+  .chart-label {
+    font-size: 10px;
+    color: var(--text3);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
   }
 
-  @media (max-width: 640px) {
+  /* ─── Responsive ──────────────────────────────────────────────────────────── */
+  @media (max-width: 768px) {
+    .sidebar { transform: translateX(-100%); }
+    .sidebar.open { transform: translateX(0); }
+    .main { margin-left: 0; }
+    .mobile-toggle { display: block; }
+    .content { padding: 20px 16px; }
     .form-grid { grid-template-columns: 1fr; }
     .form-group.span-2 { grid-column: span 1; }
-    .stats { grid-template-columns: 1fr 1fr; }
-    .profile-item { flex-direction: column; }
+    .stats-grid { grid-template-columns: 1fr 1fr; }
+    .profile-row-top { flex-direction: column; gap: 12px; align-items: flex-start; }
+    .topbar { padding: 0 16px; }
+    .telem-grid { grid-template-columns: 1fr 1fr; }
   }
 </style>
 </head>
 <body>
 
-<div class="header">
-  <h1><span>Midleman</span> Dashboard</h1>
-  <div class="header-actions">
-    <span id="statusBadge" class="status-badge offline">
-      <span class="status-dot"></span>
-      <span id="statusText">Connecting...</span>
-    </span>
-  </div>
-</div>
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <img src="/logo.svg" alt="Midleman">
+      <h1><span>Midleman</span></h1>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section">Main</div>
+      <button class="nav-item active" onclick="navigate('overview')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+        Overview
+      </button>
+      <button class="nav-item" onclick="navigate('telemetry')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Telemetry
+        <span class="nav-badge" id="navTelemBadge" style="display:none">0</span>
+      </button>
 
-<div class="container">
-  <!-- Stats -->
-  <div class="stats">
-    <div class="stat">
-      <div class="stat-label">Uptime</div>
-      <div class="stat-value" id="statUptime">--</div>
+      <div class="nav-section">Management</div>
+      <button class="nav-item" onclick="navigate('profiles')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+        Profiles
+        <span class="nav-badge" id="navProfileBadge">0</span>
+      </button>
+      <button class="nav-item" onclick="navigate('settings')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        Settings
+      </button>
+    </nav>
+    <div class="sidebar-footer">
+      <span class="status-dot offline" id="sidebarDot"></span>
+      <span class="sidebar-footer-text" id="sidebarStatus">Connecting...</span>
     </div>
-    <div class="stat">
-      <div class="stat-label">Active Requests</div>
-      <div class="stat-value" id="statRequests">--</div>
-    </div>
-    <div class="stat">
-      <div class="stat-label">Profiles</div>
-      <div class="stat-value" id="statProfiles">--</div>
-    </div>
-    <div class="stat">
-      <div class="stat-label">Port</div>
-      <div class="stat-value" id="statPort">--</div>
-    </div>
-  </div>
+  </aside>
 
-  <!-- Core Config -->
-  <div class="card">
-    <div class="card-header">
-      <h2>Core Configuration</h2>
-      <button class="btn btn-primary btn-sm" onclick="saveConfig()">Save & Restart Required</button>
-    </div>
-    <div class="card-body">
-      <div class="form-grid">
-        <div class="form-group">
-          <label>Port</label>
-          <input type="number" id="cfgPort" placeholder="3000">
+  <!-- Main -->
+  <div class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="mobile-toggle" onclick="toggleSidebar()">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <span class="topbar-title" id="topbarTitle">Overview</span>
+      </div>
+      <div class="topbar-actions">
+        <span class="topbar-stat" id="topUptime">--</span>
+        <span class="topbar-stat" id="topActive">0 active</span>
+      </div>
+    </header>
+
+    <div class="content">
+      <!-- ═══ OVERVIEW PAGE ═══ -->
+      <div class="page active" id="pageOverview">
+        <div class="page-header">
+          <h2>Dashboard</h2>
+          <p>Real-time overview of your Midleman proxy server.</p>
         </div>
-        <div class="form-group">
-          <label>Auth Token</label>
-          <input type="text" id="cfgAuthToken" placeholder="Leave empty to disable auth">
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-icon green">&#9889;</div>
+            <div class="stat-label">Status</div>
+            <div class="stat-value" id="ovStatus" style="color:var(--text3)">--</div>
+            <div class="stat-sub" id="ovUptime"></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon purple">&#9679;</div>
+            <div class="stat-label">Active Requests</div>
+            <div class="stat-value" id="ovActive">--</div>
+            <div class="stat-sub">currently in-flight</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon blue">&#128279;</div>
+            <div class="stat-label">Proxy Profiles</div>
+            <div class="stat-value" id="ovProfiles">--</div>
+            <div class="stat-sub" id="ovProfileNames"></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon orange">&#128274;</div>
+            <div class="stat-label">Auth</div>
+            <div class="stat-value" id="ovAuth" style="font-size:20px">--</div>
+            <div class="stat-sub" id="ovPort"></div>
+          </div>
         </div>
-        <div class="form-group span-2">
-          <label>Target URL</label>
-          <input type="url" id="cfgTargetUrl" placeholder="https://example.com/webhook/...">
-        </div>
-        <div class="form-group">
-          <div class="checkbox-group">
-            <input type="checkbox" id="cfgForwardPath">
-            <label for="cfgForwardPath" style="color:var(--text)">Forward Path (append path to target URL)</label>
+
+        <!-- Quick telemetry preview -->
+        <div class="card">
+          <div class="card-header">
+            <h3>Quick Metrics</h3>
+            <button class="btn btn-sm btn-ghost" onclick="navigate('telemetry')">View details &rarr;</button>
+          </div>
+          <div class="card-body" id="ovQuickMetrics">
+            <div class="empty-state"><p>Loading metrics...</p></div>
           </div>
         </div>
       </div>
-    </div>
-  </div>
 
-  <!-- Proxy Profiles -->
-  <div class="card">
-    <div class="card-header">
-      <h2>Proxy Profiles</h2>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-sm" onclick="reloadProfiles()">Reload</button>
-        <button class="btn btn-primary btn-sm" onclick="openProfileModal()">+ New Profile</button>
+      <!-- ═══ TELEMETRY PAGE ═══ -->
+      <div class="page" id="pageTelemetry">
+        <div class="page-header">
+          <h2>Telemetry</h2>
+          <p>Live request metrics, latency percentiles, and error tracking.</p>
+        </div>
+
+        <div id="telemEmpty" class="card" style="display:none">
+          <div class="card-body">
+            <div class="empty-state">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              <p>No telemetry data yet.<br>Metrics will appear after the first request is proxied.</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="telemContent" style="display:none">
+          <div class="telem-grid" id="telemOverviewStats"></div>
+
+          <div class="telem-tabs">
+            <button class="telem-tab active" onclick="switchTelemTab('target',this)">Target</button>
+            <button class="telem-tab" onclick="switchTelemTab('profiles',this)">Profiles</button>
+          </div>
+
+          <div id="telemTarget" class="telem-section active"></div>
+          <div id="telemProfiles" class="telem-section"></div>
+        </div>
       </div>
-    </div>
-    <div class="card-body">
-      <div id="profileList" class="profile-list">
-        <div class="empty-state">
-          <p>Loading profiles...</p>
+
+      <!-- ═══ PROFILES PAGE ═══ -->
+      <div class="page" id="pageProfiles">
+        <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <h2>Proxy Profiles</h2>
+            <p>Manage public proxy bypass endpoints for upstream APIs.</p>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm" onclick="reloadProfiles()">Reload</button>
+            <button class="btn btn-primary btn-sm" onclick="openProfileModal()">+ New Profile</button>
+          </div>
+        </div>
+
+        <div id="profileList" class="profiles-grid">
+          <div class="empty-state"><p>Loading profiles...</p></div>
+        </div>
+      </div>
+
+      <!-- ═══ SETTINGS PAGE ═══ -->
+      <div class="page" id="pageSettings">
+        <div class="page-header">
+          <h2>Settings</h2>
+          <p>Core server configuration. Changes are saved to <code style="background:var(--surface2);padding:2px 6px;border-radius:4px;font-size:13px">.env</code> and require a restart.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3>Server Configuration</h3>
+            <button class="btn btn-primary btn-sm" onclick="saveConfig()">Save Changes</button>
+          </div>
+          <div class="card-body">
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Port</label>
+                <input type="number" id="cfgPort" placeholder="3000">
+              </div>
+              <div class="form-group">
+                <label>Auth Token</label>
+                <input type="text" id="cfgAuthToken" placeholder="Leave empty to disable">
+              </div>
+              <div class="form-group span-2">
+                <label>Target URL</label>
+                <input type="url" id="cfgTargetUrl" placeholder="https://example.com/webhook/...">
+              </div>
+              <div class="form-group span-2">
+                <div class="checkbox-group">
+                  <input type="checkbox" id="cfgForwardPath">
+                  <label for="cfgForwardPath">Forward path — append incoming path to target URL</label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3>OpenTelemetry</h3>
+          </div>
+          <div class="card-body">
+            <div id="otelInfo" style="font-size:14px;color:var(--text2)">Loading...</div>
+          </div>
         </div>
       </div>
     </div>
@@ -300,28 +840,34 @@
           <label>Profile Name *</label>
           <input type="text" id="pName" placeholder="e.g. infobip">
         </div>
-        <div class="form-group">
-          <label>Auth Header *</label>
-          <input type="text" id="pAuthHeader" placeholder="e.g. Authorization">
-        </div>
         <div class="form-group span-2">
           <label>Target URL *</label>
           <input type="url" id="pTargetUrl" placeholder="https://api.example.com">
         </div>
-        <div class="form-group span-2">
-          <label>API Key *</label>
-          <input type="text" id="pApiKey" placeholder="Your API key">
+      </div>
+      <div class="form-section">Authentication (optional)</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Auth Header</label>
+          <input type="text" id="pAuthHeader" placeholder="e.g. Authorization">
         </div>
         <div class="form-group">
           <label>Auth Prefix</label>
           <input type="text" id="pAuthPrefix" placeholder="e.g. Bearer, App">
         </div>
+        <div class="form-group span-2">
+          <label>API Key</label>
+          <input type="text" id="pApiKey" placeholder="Your API key">
+        </div>
+      </div>
+      <div class="form-section">Access Control</div>
+      <div class="form-grid">
         <div class="form-group">
           <label>Access Key</label>
-          <input type="text" id="pAccessKey" placeholder="Optional shared secret">
+          <input type="text" id="pAccessKey" placeholder="Optional — protects public link">
         </div>
-        <div class="form-group span-2">
-          <label>Blocked Extensions (comma-separated)</label>
+        <div class="form-group">
+          <label>Blocked Extensions</label>
           <input type="text" id="pBlocked" placeholder=".exe, .bat, .sh">
         </div>
       </div>
@@ -337,26 +883,50 @@
 <div class="toast" id="toast"></div>
 
 <script>
+// ─── State ──────────────────────────────────────────────────────────────────
 const TOKEN_KEY = 'midleman_token';
 let authToken = localStorage.getItem(TOKEN_KEY) || '';
 let editingProfile = null;
+let telemData = null;
+let currentPage = 'overview';
 
-// On load, prompt for token if not set
+// ─── Init ───────────────────────────────────────────────────────────────────
 (async function init() {
   if (!authToken) {
     authToken = prompt('Enter your Auth Token (X-Forward-Token):') || '';
     if (authToken) localStorage.setItem(TOKEN_KEY, authToken);
   }
   await refreshAll();
-  setInterval(fetchHealth, 10000);
+  setInterval(fetchHealth, 5000);
+  setInterval(fetchTelemetry, 5000);
 })();
 
-function headers() {
-  return { 'Content-Type': 'application/json', 'X-Forward-Token': authToken };
+// ─── Navigation ─────────────────────────────────────────────────────────────
+function navigate(page) {
+  currentPage = page;
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const pageEl = document.getElementById('page' + page.charAt(0).toUpperCase() + page.slice(1));
+  if (pageEl) pageEl.classList.add('active');
+  const titles = { overview: 'Overview', telemetry: 'Telemetry', profiles: 'Profiles', settings: 'Settings' };
+  document.getElementById('topbarTitle').textContent = titles[page] || page;
+  // Highlight nav
+  document.querySelectorAll('.nav-item').forEach(n => {
+    if (n.textContent.trim().toLowerCase().startsWith(page)) n.classList.add('active');
+  });
+  // Close sidebar on mobile
+  document.getElementById('sidebar').classList.remove('open');
 }
 
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+}
+
+// ─── API Helpers ────────────────────────────────────────────────────────────
+function hdrs() { return { 'Content-Type': 'application/json', 'X-Forward-Token': authToken }; }
+
 async function api(path, opts = {}) {
-  const res = await fetch(path, { ...opts, headers: { ...headers(), ...(opts.headers || {}) } });
+  const res = await fetch(path, { ...opts, headers: { ...hdrs(), ...(opts.headers || {}) } });
   if (res.status === 401) {
     authToken = prompt('Unauthorized. Enter a valid Auth Token:') || '';
     if (authToken) localStorage.setItem(TOKEN_KEY, authToken);
@@ -374,26 +944,47 @@ function toast(msg, type = 'success') {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-function formatUptime(seconds) {
-  if (seconds < 60) return seconds + 's';
-  if (seconds < 3600) return Math.floor(seconds / 60) + 'm ' + (seconds % 60) + 's';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return h + 'h ' + m + 'm';
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function fmtNum(n) { if (n >= 1e6) return (n/1e6).toFixed(1)+'M'; if (n >= 1e3) return (n/1e3).toFixed(1)+'K'; return String(n); }
+function fmtMs(ms) { if (!ms) return '0ms'; if (ms < 1) return ms.toFixed(2)+'ms'; if (ms < 1000) return Math.round(ms)+'ms'; return (ms/1000).toFixed(2)+'s'; }
+function fmtTime(d) { return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0'); }
+function fmtUptime(s) { if(s<60)return s+'s'; if(s<3600)return Math.floor(s/60)+'m '+s%60+'s'; const h=Math.floor(s/3600),m=Math.floor(s%3600/60); return h+'h '+m+'m'; }
+
+// ─── Data Fetch ─────────────────────────────────────────────────────────────
+async function refreshAll() {
+  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchTelemetry()]);
 }
 
 async function fetchHealth() {
   try {
     const res = await fetch('/health');
-    const data = await res.json();
-    document.getElementById('statUptime').textContent = formatUptime(data.uptime);
-    document.getElementById('statRequests').textContent = data.activeRequests;
-    document.getElementById('statProfiles').textContent = data.proxyProfiles;
-    document.getElementById('statusBadge').className = 'status-badge online';
-    document.getElementById('statusText').textContent = 'Online';
+    const d = await res.json();
+    // Sidebar
+    document.getElementById('sidebarDot').className = 'status-dot online';
+    document.getElementById('sidebarStatus').textContent = 'Online — ' + fmtUptime(d.uptime);
+    // Topbar
+    document.getElementById('topUptime').textContent = fmtUptime(d.uptime);
+    document.getElementById('topActive').textContent = d.activeRequests + ' active';
+    // Overview stats
+    document.getElementById('ovStatus').textContent = 'Online';
+    document.getElementById('ovStatus').style.color = 'var(--green)';
+    document.getElementById('ovUptime').textContent = 'Uptime: ' + fmtUptime(d.uptime);
+    document.getElementById('ovActive').textContent = d.activeRequests;
+    document.getElementById('ovProfiles').textContent = d.proxyProfiles;
+    // Telem badge
+    if (d.telemetry) {
+      const otelEl = document.getElementById('otelInfo');
+      if (d.telemetry.enabled) {
+        otelEl.innerHTML = '<span style="color:var(--green)">&#9679;</span> OTLP export enabled &rarr; <code style="background:var(--surface2);padding:2px 8px;border-radius:4px">' + esc(d.telemetry.endpoint) + '</code>';
+      } else {
+        otelEl.innerHTML = '<span style="color:var(--text3)">&#9679;</span> OTLP export disabled. In-memory metrics are always active in the dashboard. Set <code style="background:var(--surface2);padding:2px 8px;border-radius:4px">OTEL_ENABLED=true</code> to export.';
+      }
+    }
   } catch {
-    document.getElementById('statusBadge').className = 'status-badge offline';
-    document.getElementById('statusText').textContent = 'Offline';
+    document.getElementById('sidebarDot').className = 'status-dot offline';
+    document.getElementById('sidebarStatus').textContent = 'Offline';
+    document.getElementById('ovStatus').textContent = 'Offline';
+    document.getElementById('ovStatus').style.color = 'var(--red)';
   }
 }
 
@@ -401,12 +992,14 @@ async function fetchConfig() {
   try {
     const res = await api('/admin/config');
     if (!res.ok) return;
-    const data = await res.json();
-    document.getElementById('cfgPort').value = data.port || '';
-    document.getElementById('cfgTargetUrl').value = data.targetUrl || '';
-    document.getElementById('cfgAuthToken').value = data.authToken || '';
-    document.getElementById('cfgForwardPath').checked = data.forwardPath !== false;
-    document.getElementById('statPort').textContent = data.port || '--';
+    const d = await res.json();
+    document.getElementById('cfgPort').value = d.port || '';
+    document.getElementById('cfgTargetUrl').value = d.targetUrl || '';
+    document.getElementById('cfgAuthToken').value = d.authToken || '';
+    document.getElementById('cfgForwardPath').checked = d.forwardPath !== false;
+    document.getElementById('ovAuth').textContent = d.authToken ? 'Enabled' : 'Disabled';
+    document.getElementById('ovAuth').style.color = d.authToken ? 'var(--green)' : 'var(--orange)';
+    document.getElementById('ovPort').textContent = 'Port ' + (d.port || 3000);
   } catch {}
 }
 
@@ -414,51 +1007,53 @@ async function fetchProfiles() {
   try {
     const res = await api('/admin/profiles');
     if (!res.ok) return;
-    const data = await res.json();
-    renderProfiles(data.profiles || []);
+    const d = await res.json();
+    const profiles = d.profiles || [];
+    renderProfiles(profiles);
+    document.getElementById('navProfileBadge').textContent = profiles.length;
+    document.getElementById('ovProfileNames').textContent = profiles.map(p => p.name).join(', ') || 'none configured';
   } catch {}
 }
 
 function renderProfiles(profiles) {
-  const container = document.getElementById('profileList');
+  const c = document.getElementById('profileList');
   if (profiles.length === 0) {
-    container.innerHTML = '<div class="empty-state"><p>No proxy profiles configured. Click "+ New Profile" to add one.</p></div>';
+    c.innerHTML = '<div class="empty-state"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/></svg><p>No proxy profiles configured yet.<br>Click "+ New Profile" to add one.</p></div>';
     return;
   }
-  container.innerHTML = profiles.map(p => `
-    <div class="profile-item">
-      <div class="profile-info">
-        <div class="profile-name">${esc(p.name)}</div>
-        <div class="profile-url">${esc(p.targetUrl)}</div>
-        <div class="profile-meta">
-          <span class="profile-tag">${esc(p.authHeader)}${p.authPrefix ? ' (' + esc(p.authPrefix) + ')' : ''}</span>
-          ${p.hasAccessKey ? '<span class="profile-tag" style="color:var(--orange)">Access Key</span>' : ''}
-          ${(p.blockedExtensions && p.blockedExtensions.length) ? '<span class="profile-tag" style="color:var(--red)">Blocked: ' + esc(p.blockedExtensions.join(', ')) + '</span>' : ''}
-          ${p.apiKey ? '' : '<span class="profile-tag" style="color:var(--text2)">Key: hidden</span>'}
+  c.innerHTML = profiles.map(p => {
+    const hasAuth = p.authHeader;
+    const initials = p.name.substring(0, 2);
+    return `
+    <div class="profile-row">
+      <div class="profile-row-top">
+        <div class="profile-row-name">
+          <div class="profile-avatar">${esc(initials)}</div>
+          <div>
+            <div class="profile-name">${esc(p.name)}</div>
+            <div class="profile-url">${esc(p.targetUrl)}</div>
+          </div>
+        </div>
+        <div class="profile-row-actions">
+          <a class="btn btn-sm" href="${location.origin}/proxy/${encodeURIComponent(p.name)}/" target="_blank" style="text-decoration:none">Open</a>
+          <button class="btn btn-sm" onclick="copyProxyUrl('${esc(p.name)}')">Copy URL</button>
+          <button class="btn btn-sm" onclick="editProfile('${esc(p.name)}')">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteProfile('${esc(p.name)}')">Delete</button>
         </div>
       </div>
-      <div class="profile-actions">
-        <a class="btn btn-sm" href="${location.origin}/proxy/${encodeURIComponent(p.name)}/" target="_blank" style="text-decoration:none">Open</a>
-        <button class="btn btn-sm" onclick="copyProxyUrl('${esc(p.name)}')">Copy URL</button>
-        <button class="btn btn-sm" onclick="editProfile('${esc(p.name)}')">Edit</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteProfile('${esc(p.name)}')">Delete</button>
+      <div class="profile-details">
+        <div class="profile-detail">
+          <span class="profile-detail-label">Auth</span>
+          <span class="profile-detail-value">${hasAuth ? esc(p.authHeader) + (p.authPrefix ? ' <span style="color:var(--text3)">(' + esc(p.authPrefix) + ')</span>' : '') : '<span style="color:var(--text3)">Passthrough</span>'}</span>
+        </div>
+        ${p.hasAccessKey ? '<div class="profile-detail"><span class="profile-detail-label">Access</span><span class="profile-detail-value" style="color:var(--orange)">Protected</span></div>' : ''}
+        ${p.blockedExtensions && p.blockedExtensions.length ? '<div class="profile-detail"><span class="profile-detail-label">Blocked</span><span class="profile-detail-value" style="color:var(--red)">' + esc(p.blockedExtensions.join(', ')) + '</span></div>' : ''}
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
-function esc(s) {
-  if (!s) return '';
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
-
-async function refreshAll() {
-  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles()]);
-}
-
-// Config save — writes .env via admin API
+// ─── Config ─────────────────────────────────────────────────────────────────
 async function saveConfig() {
   try {
     const res = await api('/admin/config', {
@@ -470,24 +1065,16 @@ async function saveConfig() {
         forwardPath: document.getElementById('cfgForwardPath').checked,
       }),
     });
-    const data = await res.json();
+    const d = await res.json();
     if (res.ok) {
-      toast(data.message || 'Config saved! Restart to apply core changes.');
-      // Update the stored token if it changed
+      toast(d.message || 'Config saved! Restart to apply.');
       const newToken = document.getElementById('cfgAuthToken').value;
-      if (newToken && newToken !== authToken) {
-        authToken = newToken;
-        localStorage.setItem(TOKEN_KEY, authToken);
-      }
-    } else {
-      toast(data.error || 'Failed to save config', 'error');
-    }
-  } catch (e) {
-    toast('Error: ' + e.message, 'error');
-  }
+      if (newToken && newToken !== authToken) { authToken = newToken; localStorage.setItem(TOKEN_KEY, authToken); }
+    } else toast(d.error || 'Failed to save config', 'error');
+  } catch(e) { toast('Error: '+e.message, 'error'); }
 }
 
-// Profile CRUD
+// ─── Profile CRUD ───────────────────────────────────────────────────────────
 function openProfileModal(profile = null) {
   editingProfile = profile;
   document.getElementById('modalTitle').textContent = profile ? 'Edit Profile' : 'New Profile';
@@ -495,109 +1082,227 @@ function openProfileModal(profile = null) {
   document.getElementById('pName').disabled = !!profile;
   document.getElementById('pTargetUrl').value = profile ? profile.targetUrl : '';
   document.getElementById('pApiKey').value = profile ? (profile.apiKey || '') : '';
-  document.getElementById('pAuthHeader').value = profile ? profile.authHeader : '';
+  document.getElementById('pAuthHeader').value = profile ? (profile.authHeader || '') : '';
   document.getElementById('pAuthPrefix').value = profile ? (profile.authPrefix || '') : '';
   document.getElementById('pAccessKey').value = profile ? (profile.accessKey || '') : '';
-  document.getElementById('pBlocked').value = profile && profile.blockedExtensions
-    ? profile.blockedExtensions.join(', ') : '';
+  document.getElementById('pBlocked').value = profile && profile.blockedExtensions ? profile.blockedExtensions.join(', ') : '';
   document.getElementById('profileModal').classList.add('active');
 }
-
-function closeProfileModal() {
-  document.getElementById('profileModal').classList.remove('active');
-  editingProfile = null;
-}
+function closeProfileModal() { document.getElementById('profileModal').classList.remove('active'); editingProfile = null; }
 
 async function saveProfile() {
-  const body = {
-    name: document.getElementById('pName').value.trim(),
-    targetUrl: document.getElementById('pTargetUrl').value.trim(),
-    apiKey: document.getElementById('pApiKey').value.trim(),
-    authHeader: document.getElementById('pAuthHeader').value.trim(),
-  };
-  const prefix = document.getElementById('pAuthPrefix').value.trim();
-  if (prefix) body.authPrefix = prefix;
-  const accessKey = document.getElementById('pAccessKey').value.trim();
-  if (accessKey) body.accessKey = accessKey;
-  const blocked = document.getElementById('pBlocked').value.trim();
-  if (blocked) body.blockedExtensions = blocked.split(',').map(s => s.trim()).filter(Boolean);
-
+  const body = { name: document.getElementById('pName').value.trim(), targetUrl: document.getElementById('pTargetUrl').value.trim() };
+  const apiKey = document.getElementById('pApiKey').value.trim(); if (apiKey) body.apiKey = apiKey;
+  const authHeader = document.getElementById('pAuthHeader').value.trim(); if (authHeader) body.authHeader = authHeader;
+  const prefix = document.getElementById('pAuthPrefix').value.trim(); if (prefix) body.authPrefix = prefix;
+  const accessKey = document.getElementById('pAccessKey').value.trim(); if (accessKey) body.accessKey = accessKey;
+  const blocked = document.getElementById('pBlocked').value.trim(); if (blocked) body.blockedExtensions = blocked.split(',').map(s=>s.trim()).filter(Boolean);
   try {
     const res = await api('/admin/profiles', { method: 'POST', body: JSON.stringify(body) });
-    const data = await res.json();
-    if (res.ok) {
-      toast('Profile ' + (data.status || 'saved'));
-      closeProfileModal();
-      await fetchProfiles();
-      await fetchHealth();
-    } else {
-      toast(data.error || 'Failed to save profile', 'error');
-    }
-  } catch (e) {
-    toast('Error: ' + e.message, 'error');
-  }
+    const d = await res.json();
+    if (res.ok) { toast('Profile ' + (d.status || 'saved')); closeProfileModal(); await fetchProfiles(); await fetchHealth(); }
+    else toast(d.error || 'Failed to save profile', 'error');
+  } catch(e) { toast('Error: '+e.message, 'error'); }
 }
 
 async function editProfile(name) {
   try {
     const res = await api('/admin/profiles/' + encodeURIComponent(name));
     if (!res.ok) { toast('Profile not found', 'error'); return; }
-    const data = await res.json();
-    openProfileModal(data.profile);
-  } catch (e) {
-    toast('Error: ' + e.message, 'error');
-  }
+    const d = await res.json();
+    openProfileModal(d.profile);
+  } catch(e) { toast('Error: '+e.message, 'error'); }
 }
 
 async function deleteProfile(name) {
   if (!confirm('Delete profile "' + name + '"?')) return;
   try {
     const res = await api('/admin/profiles/' + encodeURIComponent(name), { method: 'DELETE' });
-    const data = await res.json();
-    if (res.ok) {
-      toast('Profile deleted');
-      await fetchProfiles();
-      await fetchHealth();
-    } else {
-      toast(data.error || 'Failed to delete', 'error');
-    }
-  } catch (e) {
-    toast('Error: ' + e.message, 'error');
-  }
+    if (res.ok) { toast('Profile deleted'); await fetchProfiles(); await fetchHealth(); }
+    else { const d = await res.json(); toast(d.error || 'Failed to delete', 'error'); }
+  } catch(e) { toast('Error: '+e.message, 'error'); }
 }
 
 function copyProxyUrl(name) {
   const url = location.origin + '/proxy/' + encodeURIComponent(name) + '/';
-  navigator.clipboard.writeText(url).then(() => toast('Copied: ' + url)).catch(() => {
-    prompt('Copy this URL:', url);
-  });
+  navigator.clipboard.writeText(url).then(() => toast('Copied: ' + url)).catch(() => prompt('Copy this URL:', url));
 }
 
 async function reloadProfiles() {
   try {
     const res = await api('/admin/reload', { method: 'POST' });
-    const data = await res.json();
-    if (res.ok) {
-      toast('Profiles reloaded: ' + (data.profiles || []).join(', '));
-      await fetchProfiles();
-      await fetchHealth();
-    } else {
-      toast(data.error || 'Reload failed', 'error');
-    }
-  } catch (e) {
-    toast('Error: ' + e.message, 'error');
+    const d = await res.json();
+    if (res.ok) { toast('Profiles reloaded: ' + (d.profiles || []).join(', ')); await fetchProfiles(); await fetchHealth(); }
+    else toast(d.error || 'Reload failed', 'error');
+  } catch(e) { toast('Error: '+e.message, 'error'); }
+}
+
+// ─── Telemetry ──────────────────────────────────────────────────────────────
+async function fetchTelemetry() {
+  try {
+    const res = await api('/admin/telemetry');
+    if (!res.ok) return;
+    telemData = await res.json();
+    renderTelemetry();
+    renderQuickMetrics();
+  } catch {}
+}
+
+function switchTelemTab(tab, btn) {
+  document.querySelectorAll('.telem-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.telem-section').forEach(s => s.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('telem' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
+}
+
+function renderTelemetry() {
+  if (!telemData) return;
+  const d = telemData;
+  const profileNames = Object.keys(d.profiles);
+  const hasData = d.target.requests > 0 || profileNames.some(n => d.profiles[n].requests > 0);
+
+  document.getElementById('telemEmpty').style.display = hasData ? 'none' : 'block';
+  document.getElementById('telemContent').style.display = hasData ? 'block' : 'none';
+
+  // Badge
+  const totalReqs = d.target.requests + profileNames.reduce((s,n) => s + d.profiles[n].requests, 0);
+  if (totalReqs > 0) {
+    document.getElementById('navTelemBadge').style.display = '';
+    document.getElementById('navTelemBadge').textContent = fmtNum(totalReqs);
+  }
+
+  if (!hasData) return;
+
+  const totalErrors = d.target.errors + profileNames.reduce((s,n) => s + d.profiles[n].errors, 0);
+  const totalActive = d.target.active + profileNames.reduce((s,n) => s + d.profiles[n].active, 0);
+  const errorRate = totalReqs > 0 ? (totalErrors / totalReqs * 100).toFixed(1) : '0.0';
+
+  document.getElementById('telemOverviewStats').innerHTML = `
+    <div class="telem-card">
+      <div class="telem-card-label">Total Requests</div>
+      <div class="telem-card-value">${fmtNum(totalReqs)}</div>
+      <div class="telem-card-sub">Target: ${fmtNum(d.target.requests)} / Proxy: ${fmtNum(totalReqs - d.target.requests)}</div>
+    </div>
+    <div class="telem-card">
+      <div class="telem-card-label">Error Rate</div>
+      <div class="telem-card-value" style="color:${parseFloat(errorRate)>5?'var(--red)':parseFloat(errorRate)>0?'var(--orange)':'var(--green)'}">${errorRate}%</div>
+      <div class="telem-card-sub">${fmtNum(totalErrors)} errors</div>
+    </div>
+    <div class="telem-card">
+      <div class="telem-card-label">Active</div>
+      <div class="telem-card-value">${totalActive}</div>
+      <div class="telem-card-sub">in-flight right now</div>
+    </div>
+    <div class="telem-card">
+      <div class="telem-card-label">Avg Latency</div>
+      <div class="telem-card-value">${d.target.requests > 0 ? fmtMs(d.target.avgLatencyMs) : '--'}</div>
+      <div class="telem-card-sub">p95: ${fmtMs(d.target.p95LatencyMs)}</div>
+    </div>
+  `;
+
+  // Target
+  document.getElementById('telemTarget').innerHTML = renderMetricsBlock('Main Target', d.target);
+
+  // Profiles
+  if (profileNames.length === 0) {
+    document.getElementById('telemProfiles').innerHTML = '<div class="empty-state"><p>No proxy profile data yet.</p></div>';
+  } else {
+    document.getElementById('telemProfiles').innerHTML = profileNames.map(n => renderMetricsBlock(n, d.profiles[n])).join('');
   }
 }
 
-// Close modal on overlay click
-document.getElementById('profileModal').addEventListener('click', function(e) {
-  if (e.target === this) closeProfileModal();
-});
+function renderQuickMetrics() {
+  if (!telemData) return;
+  const d = telemData;
+  const profileNames = Object.keys(d.profiles);
+  const totalReqs = d.target.requests + profileNames.reduce((s,n) => s + d.profiles[n].requests, 0);
 
-// Close modal on Escape
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') closeProfileModal();
-});
+  if (totalReqs === 0) {
+    document.getElementById('ovQuickMetrics').innerHTML = '<div style="color:var(--text3);font-size:14px;text-align:center;padding:20px">No requests recorded yet. Metrics appear automatically.</div>';
+    return;
+  }
+
+  const totalErrors = d.target.errors + profileNames.reduce((s,n) => s + d.profiles[n].errors, 0);
+  const errorRate = totalReqs > 0 ? (totalErrors / totalReqs * 100).toFixed(1) : '0.0';
+
+  document.getElementById('ovQuickMetrics').innerHTML = `
+    <div class="metrics-row">
+      <div class="metric-box"><div class="metric-val">${fmtNum(totalReqs)}</div><div class="metric-lbl">Requests</div></div>
+      <div class="metric-box"><div class="metric-val" style="color:${totalErrors?'var(--red)':'var(--green)'}">${fmtNum(totalErrors)}</div><div class="metric-lbl">Errors</div></div>
+      <div class="metric-box"><div class="metric-val">${errorRate}%</div><div class="metric-lbl">Error Rate</div></div>
+      <div class="metric-box"><div class="metric-val">${fmtMs(d.target.avgLatencyMs)}</div><div class="metric-lbl">Avg</div></div>
+      <div class="metric-box"><div class="metric-val">${fmtMs(d.target.p50LatencyMs)}</div><div class="metric-lbl">p50</div></div>
+      <div class="metric-box"><div class="metric-val">${fmtMs(d.target.p95LatencyMs)}</div><div class="metric-lbl">p95</div></div>
+    </div>
+    ${d.target.timeline.length >= 2 ? renderTimeline(d.target.timeline) : ''}
+  `;
+}
+
+function renderMetricsBlock(name, m) {
+  const errorRate = m.requests > 0 ? (m.errors / m.requests * 100).toFixed(1) : '0.0';
+  const cls = parseFloat(errorRate) > 5 ? 'degraded' : parseFloat(errorRate) > 0 ? 'warning' : 'healthy';
+  const label = cls === 'degraded' ? 'Degraded' : cls === 'warning' ? 'Warning' : 'Healthy';
+
+  return `
+  <div class="telem-profile-section">
+    <div class="telem-profile-header">
+      <span class="telem-profile-name">${esc(name)}</span>
+      <span class="telem-health-badge ${cls}">${label} &mdash; ${errorRate}% errors</span>
+    </div>
+    <div class="metrics-row">
+      <div class="metric-box"><div class="metric-val">${fmtNum(m.requests)}</div><div class="metric-lbl">Requests</div></div>
+      <div class="metric-box"><div class="metric-val" style="color:${m.errors?'var(--red)':'var(--green)'}">${fmtNum(m.errors)}</div><div class="metric-lbl">Errors</div></div>
+      <div class="metric-box"><div class="metric-val">${m.active}</div><div class="metric-lbl">Active</div></div>
+      <div class="metric-box"><div class="metric-val">${fmtMs(m.avgLatencyMs)}</div><div class="metric-lbl">Avg</div></div>
+      <div class="metric-box"><div class="metric-val">${fmtMs(m.p50LatencyMs)}</div><div class="metric-lbl">p50</div></div>
+      <div class="metric-box"><div class="metric-val">${fmtMs(m.p95LatencyMs)}</div><div class="metric-lbl">p95</div></div>
+      <div class="metric-box"><div class="metric-val">${fmtMs(m.p99LatencyMs)}</div><div class="metric-lbl">p99</div></div>
+      ${m.blocked > 0 ? `<div class="metric-box"><div class="metric-val" style="color:var(--orange)">${m.blocked}</div><div class="metric-lbl">Blocked</div></div>` : ''}
+      ${m.redirects > 0 ? `<div class="metric-box"><div class="metric-val">${m.redirects}</div><div class="metric-lbl">Redirects</div></div>` : ''}
+    </div>
+    ${renderStatusCodes(m.statusCodes)}
+    ${renderTimeline(m.timeline)}
+  </div>`;
+}
+
+function renderStatusCodes(codes) {
+  const entries = Object.entries(codes).sort(([a],[b]) => Number(a)-Number(b));
+  if (!entries.length) return '';
+  return `
+    <div style="margin-bottom:14px">
+      <div class="chart-label">Status Codes</div>
+      <div class="status-chips">
+        ${entries.map(([code,count]) => {
+          const c = Number(code);
+          const cls = c<300?'s2xx':c<400?'s3xx':c<500?'s4xx':'s5xx';
+          return `<span class="status-chip ${cls}">${code}: ${count}</span>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
+function renderTimeline(timeline) {
+  if (!timeline || timeline.length < 2) return '';
+  const maxCount = Math.max(...timeline.map(b => b.count), 1);
+  const w = 100 / timeline.length;
+  const bars = timeline.map((b, i) => {
+    const h = (b.count / maxCount) * 90;
+    const errH = b.count > 0 ? (b.errors / b.count) * h : 0;
+    const x = i * w;
+    return `<rect x="${x}%" y="${100-h}%" width="${w*0.8}%" height="${h}%" fill="url(#barGrad)" rx="1"/>` +
+      (errH > 0 ? `<rect x="${x}%" y="${100-errH}%" width="${w*0.8}%" height="${errH}%" fill="var(--red)" opacity="0.9" rx="1"/>` : '');
+  }).join('');
+  const first = new Date(timeline[0].ts);
+  const last = new Date(timeline[timeline.length-1].ts);
+  return `
+    <div class="chart-label"><span>Requests / min</span><span>${fmtTime(first)} — ${fmtTime(last)}</span></div>
+    <div class="mini-chart">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+        <defs><linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--accent2)"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0.4"/></linearGradient></defs>
+        ${bars}
+      </svg>
+    </div>`;
+}
 </script>
 </body>
 </html>

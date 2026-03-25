@@ -4,8 +4,8 @@
 export interface ProxyProfile {
   name: string;           // Profile identifier (e.g., "infobip")
   targetUrl: string;      // Base URL of the upstream service
-  apiKey: string;         // API key for upstream authentication
-  authHeader: string;     // Header name for the API key (e.g., "Authorization")
+  apiKey?: string;        // API key for upstream authentication (optional — omit for no-auth targets)
+  authHeader?: string;    // Header name for the API key (e.g., "Authorization")
   authPrefix?: string;    // Optional prefix (e.g., "Bearer", "App")
   accessKey?: string;     // Optional key to protect the public link
   blockedExtensions?: Set<string>; // Optional set of blocked file extensions
@@ -20,6 +20,12 @@ export interface Config {
   authToken?: string; // Optional: if not set, authentication is disabled
   forwardPath: boolean; // If false, don't append path to target URL
   proxyProfiles: ProxyProfile[]; // Configured proxy bypass profiles
+  otel: {
+    enabled: boolean;
+    endpoint: string;
+    serviceName: string;
+    metricsInterval: number;
+  };
 }
 
 /**
