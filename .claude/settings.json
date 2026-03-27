@@ -23,7 +23,29 @@
       "Bash(docker exec:*)",
       "Bash(curl -s \"http://localhost:3000/proxy/adv/swagger/index.html?key=a24d546365994a8382d1d78c945e33c2\")",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"http://localhost:3000/proxy/adv/swagger/swagger-ui.css?key=a24d546365994a8382d1d78c945e33c2\")",
-      "Bash(DOCKER_BUILDKIT=1 docker build -t midleman-bun-forwarder .)"
+      "Bash(DOCKER_BUILDKIT=1 docker build -t midleman-bun-forwarder .)",
+      "Bash(timeout 5 bun run src/index.ts)",
+      "Bash(curl -s http://localhost:3000/admin/requests/2)",
+      "Bash(python3 -m json.tool)",
+      "Bash(kill %1)",
+      "Bash(pkill -f \"bun run src/index.ts\")",
+      "Bash(powershell.exe -Command \"Get-Process ''Docker Desktop'' -ErrorAction SilentlyContinue | Select-Object -First 1 | Format-List Name,Id\")",
+      "Bash(powershell.exe -Command \"Get-Service com.docker.service -ErrorAction SilentlyContinue | Format-List Status\")",
+      "Bash(docker info:*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" -H \"X-Forward-Token: 123456\" \"http://localhost:3000/test\")",
+      "Bash(curl -s -H \"X-Forward-Token: 123456\" \"http://localhost:3000/test\")",
+      "Bash(curl -s -X POST -H \"X-Forward-Token: 123456\" -H \"Content-Type: application/json\" -d '{\"\"test\"\": true}' \"http://localhost:3000/\")",
+      "Bash(curl -s -H \"X-Forward-Token: 123456\" \"http://localhost:3000/admin/targets\")",
+      "Bash(curl -s -w \"\\\\nHTTP Status: %{http_code}\\\\n\" -X POST -H \"Content-Type: application/json\" -d '{\"\"hello\"\":\"\"from midleman named target\"\"}' \"http://localhost:3002/\")",
+      "Bash(__NEW_LINE_f7326fcda64fb02f__ echo:*)",
+      "Bash(curl -s -w \"\\\\nHTTP Status: %{http_code}\\\\n\" \"http://localhost:3002/\")",
+      "Bash(curl -s -w \"\\\\nHTTP Status: %{http_code}\\\\n\" -X POST -H \"X-Forward-Token: 123456\" -H \"Content-Type: application/json\" -d '{\"\"test\"\":true}' \"http://localhost:3000/\")",
+      "Bash(__NEW_LINE_932ebdd40aa00f66__ echo:*)",
+      "Bash(curl -s -w \"\\\\nHTTP: %{http_code}\" -X POST -H \"X-Forward-Token: 123456\" -H \"Content-Type: application/json\" -d '{\"\"test\"\":true}' \"http://localhost:3000/\")",
+      "Bash(curl -s -w \"\\\\nHTTP: %{http_code}\" -X POST -H \"Content-Type: application/json\" -d '{\"\"hello\"\":\"\"target test\"\"}' \"http://localhost:3002/\")",
+      "Bash(docker cp:*)",
+      "Bash(docker restart:*)",
+      "Bash(curl -s -H \"X-Forward-Token: 123456\" \"http://localhost:3000/admin/requests?limit=5\")"
     ]
   }
 }

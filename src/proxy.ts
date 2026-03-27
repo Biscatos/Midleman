@@ -1,5 +1,6 @@
 import type { ProxyProfile } from './types';
 import { startProxySpan, endProxySpan, recordProxyBlocked, recordProxyRedirect } from './telemetry';
+import { logRequest, captureRequestBody, captureResponseBody, headersToRecord } from './request-log';
 
 // ─── Access Key Session Cache ───────────────────────────────────────────────
 // When a page is loaded with a valid ?key=, we cache the authorization so that
@@ -326,6 +327,11 @@ export async function handleProxyRequest(
         forwardHeaders.set(profile.authHeader, profile.computedAuthValue);
     }
 
+    // Capture request body for logging before forwarding
+    const reqCapture = await captureRequestBody(req);
+    const requestId = req.headers.get('X-Request-ID') || crypto.randomUUID();
+    const clientIp = getClientIP(req);
+
     // Forward to upstream — follow same-origin redirects internally (transparent to the client)
     let targetResponse!: Response;
     let currentUrl = targetUrl;
@@ -340,12 +346,16 @@ export async function handleProxyRequest(
         targetUrl,
     });
 
+    // Build request body for forwarding
+    const forwardBody = reqCapture.body && req.method !== 'GET' && req.method !== 'HEAD'
+        ? reqCapture.body : undefined;
+
     try {
         for (let i = 0; i <= maxRedirects; i++) {
             targetResponse = await fetch(currentUrl, {
                 method: i === 0 ? req.method : 'GET', // Redirects become GET
                 headers: forwardHeaders,
-                body: i === 0 ? req.body : undefined,
+                body: i === 0 ? forwardBody : undefined,
                 redirect: 'manual',
             });
 
@@ -378,11 +388,30 @@ export async function handleProxyRequest(
             }
         }
     } catch (fetchError) {
-        const overhead = (performance.now() - startTime).toFixed(2);
+        const durationMs = performance.now() - startTime;
+        const overhead = durationMs.toFixed(2);
         console.error(`❌ Proxy "${profileName}": failed to connect (${overhead}ms):`, fetchError);
 
-        endProxySpan(otelSpan, profileName, 502, performance.now() - startTime,
+        endProxySpan(otelSpan, profileName, 502, durationMs,
             fetchError instanceof Error ? fetchError : new Error(String(fetchError)));
+
+        // Log failed proxy request
+        logRequest({
+            requestId,
+            type: 'proxy',
+            profileName,
+            method: req.method,
+            path: remainingPath,
+            targetUrl,
+            clientIp,
+            reqHeaders: headersToRecord(forwardHeaders),
+            reqBody: reqCapture.body,
+            reqBodySize: reqCapture.size,
+            resStatus: 502,
+            resStatusText: 'Bad Gateway',
+            durationMs,
+            error: fetchError instanceof Error ? fetchError.message : String(fetchError),
+        });
 
         return jsonResponse(502, {
             error: 'Bad Gateway',
@@ -445,10 +474,33 @@ export async function handleProxyRequest(
     // End OpenTelemetry span
     endProxySpan(otelSpan, profileName, targetResponse.status, durationMs);
 
+    // Capture response body for request logging
+    const resCapture = await captureResponseBody(targetResponse);
+
+    // Log proxy request to SQLite
+    logRequest({
+        requestId,
+        type: 'proxy',
+        profileName,
+        method: req.method,
+        path: remainingPath,
+        targetUrl: currentUrl,
+        clientIp,
+        reqHeaders: headersToRecord(forwardHeaders),
+        reqBody: reqCapture.body,
+        reqBodySize: reqCapture.size,
+        resStatus: targetResponse.status,
+        resStatusText: targetResponse.statusText,
+        resHeaders: headersToRecord(responseHeaders),
+        resBody: resCapture.body,
+        resBodySize: resCapture.size,
+        durationMs,
+    });
+
     // For HTML responses: generic rewriting so ANY upstream app works under /proxy/{profile}/
     const contentType = responseHeaders.get('content-type') || '';
     if (contentType.includes('text/html')) {
-        let html = await targetResponse.text();
+        let html = resCapture.body || '';
 
         // Compute base href from the actual request path so relative URLs
         // resolve correctly even in subdirectories.
@@ -546,8 +598,8 @@ if(location.pathname===P.slice(0,-1)){_r.call(history,null,"",P+location.search+
         responseHeaders.append('Set-Cookie', `__proxy_key=${encodeURIComponent(validatedAccessKey)}; Path=/proxy/; SameSite=Lax`);
     }
 
-    // Stream body directly for non-HTML responses
-    return new Response(targetResponse.body, {
+    // Return captured body for non-HTML responses
+    return new Response(resCapture.body, {
         status: targetResponse.status,
         statusText: targetResponse.statusText,
         headers: responseHeaders,

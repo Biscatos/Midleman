@@ -12,6 +12,17 @@ export interface ProxyProfile {
 }
 
 /**
+ * Named target — each gets its own Bun.serve() on a dedicated port.
+ */
+export interface ProxyTarget {
+  name: string;           // Unique identifier (e.g., "api", "webhook")
+  targetUrl: string;      // Upstream URL to forward to
+  port: number;           // Dedicated listening port
+  authToken?: string;     // Per-target auth token (optional)
+  forwardPath: boolean;   // Whether to append incoming path to target URL
+}
+
+/**
  * Application configuration interface
  */
 export interface Config {
@@ -20,12 +31,29 @@ export interface Config {
   authToken?: string; // Optional: if not set, authentication is disabled
   forwardPath: boolean; // If false, don't append path to target URL
   proxyProfiles: ProxyProfile[]; // Configured proxy bypass profiles
+  proxyTargets: ProxyTarget[];   // Named targets with dedicated ports
   otel: {
     enabled: boolean;
     endpoint: string;
     serviceName: string;
     metricsInterval: number;
   };
+  requestLog: {
+    enabled: boolean;
+    dataDir: string;
+    retentionDays: number;
+    maxBodySize: number;
+  };
+  auth: {
+    sessionMaxAge: number;
+    cookieName: string;
+  };
+}
+
+export interface AuthUser {
+  id: number;
+  username: string;
+  createdAt: string;
 }
 
 /**

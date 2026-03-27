@@ -1,20 +1,20 @@
-import type { Config, ProxyProfile } from './types';
+import type { Config, ProxyProfile, ProxyTarget } from './types';
 import { ConfigError } from './types';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-5
+
 /**
  * Re-read .env file and update process.env with new/changed values.
- * Only updates PROXY_* variables to avoid changing core config at runtime.
+ * Reloads PROXY_* and TARGET_* variables to avoid changing core config at runtime.
  */
 export function reloadEnvFile(): void {
     try {
         const envPath = resolve(process.cwd(), '.env');
         const content = readFileSync(envPath, 'utf-8');
 
-        // Clear existing PROXY_* env vars first
+        // Clear existing PROXY_* and TARGET_* env vars first
         for (const key of Object.keys(process.env)) {
-            if (key.startsWith('PROXY_')) {
+            if (key.startsWith('PROXY_') || (key.startsWith('TARGET_') && key !== 'TARGET_URL')) {
                 delete process.env[key];
             }
         }
@@ -30,8 +30,8 @@ export function reloadEnvFile(): void {
             const key = trimmed.substring(0, eqIndex).trim();
             const value = trimmed.substring(eqIndex + 1).trim();
 
-            // Only reload PROXY_* variables
-            if (key.startsWith('PROXY_')) {
+            // Reload PROXY_* and TARGET_* variables
+            if (key.startsWith('PROXY_') || (key.startsWith('TARGET_') && key !== 'TARGET_URL')) {
                 process.env[key] = value;
             }
         }
@@ -111,19 +111,84 @@ export function loadProxyProfiles(): ProxyProfile[] {
 }
 
 /**
+ * Scan environment variables for named targets.
+ * Pattern: TARGET_{NAME}_URL, TARGET_{NAME}_PORT, etc.
+ * Note: TARGET_URL (no name) is the legacy single-target var and is NOT parsed here.
+ */
+export function loadProxyTargets(): ProxyTarget[] {
+    const targets = new Map<string, Partial<ProxyTarget>>();
+
+    for (const [key, value] of Object.entries(process.env)) {
+        if (!key.startsWith('TARGET_') || !value) continue;
+
+        // Skip the legacy TARGET_URL variable
+        if (key === 'TARGET_URL') continue;
+
+        // Parse: TARGET_{NAME}_{FIELD}
+        const parts = key.substring(7).split('_'); // Remove "TARGET_"
+        if (parts.length < 2) continue;
+
+        // The last part is the field, everything before is the target name
+        const field = parts[parts.length - 1];
+        const name = parts.slice(0, -1).join('_').toLowerCase();
+
+        if (!targets.has(name)) {
+            targets.set(name, { name, forwardPath: true });
+        }
+
+        const target = targets.get(name)!;
+
+        switch (field) {
+            case 'URL':
+                target.targetUrl = value.endsWith('/') ? value.slice(0, -1) : value;
+                break;
+            case 'PORT':
+                target.port = parseInt(value, 10);
+                break;
+            case 'AUTH':
+                target.authToken = value;
+                break;
+            case 'FWDPATH':
+                target.forwardPath = value !== 'false';
+                break;
+        }
+    }
+
+    const validTargets: ProxyTarget[] = [];
+
+    for (const [name, target] of targets) {
+        if (!target.targetUrl) {
+            console.warn(`⚠️  Target "${name}" is incomplete (needs URL). Skipping.`);
+            continue;
+        }
+        if (!target.port) {
+            console.warn(`⚠️  Target "${name}" is incomplete (needs PORT). Skipping.`);
+            continue;
+        }
+
+        // Validate URL format
+        try {
+            new URL(target.targetUrl);
+        } catch {
+            console.warn(`⚠️  Target "${name}" has an invalid URL: ${target.targetUrl}. Skipping.`);
+            continue;
+        }
+
+        validTargets.push(target as ProxyTarget);
+    }
+
+    return validTargets;
+}
+
+/**
  * Load and validate environment configuration
  */
 export function loadConfig(): Config {
 
     const port = process.env.PORT || '3000';
-    const targetUrl = process.env.TARGET_URL;
+    const targetUrl = process.env.TARGET_URL || '';
     const authToken = process.env.AUTH_TOKEN;
     const forwardPath = process.env.FORWARD_PATH !== 'false'; // Default: true
-
-    // Validate required environment variables
-    if (!targetUrl) {
-        throw new ConfigError('TARGET_URL environment variable is required');
-    }
 
     // AUTH_TOKEN is optional - if not provided, authentication is disabled
     if (!authToken) {
@@ -131,15 +196,23 @@ export function loadConfig(): Config {
         console.warn('⚠️  All incoming requests will be forwarded without authentication checks');
     }
 
-    // Validate TARGET_URL format
-    try {
-        new URL(targetUrl);
-    } catch {
-        throw new ConfigError('TARGET_URL must be a valid URL');
+    // Validate TARGET_URL format if provided
+    if (targetUrl) {
+        try {
+            new URL(targetUrl);
+        } catch {
+            throw new ConfigError('TARGET_URL must be a valid URL');
+        }
     }
 
-    // Load proxy profiles
+    // Load proxy profiles and targets
     const proxyProfiles = loadProxyProfiles();
+    const proxyTargets = loadProxyTargets();
+
+    // Warn if no target and no targets defined
+    if (!targetUrl && proxyTargets.length === 0) {
+        console.warn('⚠️  No TARGET_URL or named targets configured — main forwarding is disabled');
+    }
 
     // OpenTelemetry configuration
     const otel = {
@@ -149,13 +222,29 @@ export function loadConfig(): Config {
         metricsInterval: parseInt(process.env.OTEL_METRICS_INTERVAL || '15000', 10),
     };
 
+    // Request logging configuration
+    const dataDir = process.env.DATA_DIR || './data';
+    const requestLog = {
+        enabled: process.env.REQUEST_LOG_ENABLED !== 'false', // default: true
+        dataDir,
+        retentionDays: parseInt(process.env.REQUEST_LOG_RETENTION_DAYS || '7', 10),
+        maxBodySize: parseInt(process.env.REQUEST_LOG_MAX_BODY_SIZE || String(64 * 1024), 10),
+    };
+
+    const auth = {
+        sessionMaxAge: parseInt(process.env.SESSION_MAX_AGE || '86400', 10),
+        cookieName: 'midleman_session',
+    };
+
     return {
         port: parseInt(port, 10),
-        targetUrl: targetUrl.endsWith('/') ? targetUrl.slice(0, -1) : targetUrl,
+        targetUrl: targetUrl ? (targetUrl.endsWith('/') ? targetUrl.slice(0, -1) : targetUrl) : '',
         authToken,
         forwardPath,
         proxyProfiles,
+        proxyTargets,
         otel,
+        requestLog,
+        auth,
     };
 }
-

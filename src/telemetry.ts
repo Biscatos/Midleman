@@ -225,6 +225,7 @@ function getProxyMetrics(profileName: string): InternalMetrics {
 /** Snapshot returned by getMetricsSnapshot() */
 export interface MetricsSnapshot {
     target: MetricsSummary;
+    targets: Record<string, MetricsSummary>;
     profiles: Record<string, MetricsSummary>;
     otel: { enabled: boolean; endpoint: string };
 }
@@ -265,12 +266,17 @@ function summarize(m: InternalMetrics): MetricsSummary {
 }
 
 export function getMetricsSnapshot(): MetricsSnapshot {
+    const targets: Record<string, MetricsSummary> = {};
+    for (const [name, m] of targetMetricsMap) {
+        targets[name] = summarize(m);
+    }
     const profiles: Record<string, MetricsSummary> = {};
     for (const [name, m] of proxyMetricsMap) {
         profiles[name] = summarize(m);
     }
     return {
         target: summarize(targetMetrics),
+        targets,
         profiles,
         otel: { enabled: telemetryConfig.enabled, endpoint: telemetryConfig.endpoint },
     };
@@ -283,10 +289,24 @@ export interface TargetSpanOptions {
     path: string;
     targetUrl: string;
     requestId: string;
+    targetName?: string;    // named target identifier
+}
+
+// Per-named-target metrics map
+const targetMetricsMap = new Map<string, InternalMetrics>();
+
+function getTargetMetrics(targetName: string): InternalMetrics {
+    let m = targetMetricsMap.get(targetName);
+    if (!m) {
+        m = newMetrics();
+        targetMetricsMap.set(targetName, m);
+    }
+    return m;
 }
 
 export function startTargetSpan(opts: TargetSpanOptions): Span {
-    const span = tracer.startSpan('target.forward', {
+    const spanName = opts.targetName ? `target.forward.${opts.targetName}` : 'target.forward';
+    const span = tracer.startSpan(spanName, {
         kind: SpanKind.CLIENT,
         attributes: {
             'http.method': opts.method,
@@ -294,19 +314,21 @@ export function startTargetSpan(opts: TargetSpanOptions): Span {
             'http.route': opts.path,
             'request.id': opts.requestId,
             'midleman.type': 'target',
+            ...(opts.targetName ? { 'midleman.target': opts.targetName } : {}),
         },
     });
 
     targetActiveRequests.add(1);
     targetRequestCounter.add(1, { 'http.method': opts.method });
 
-    // In-memory
+    // In-memory — global + per-target
     targetMetrics.active++;
+    if (opts.targetName) getTargetMetrics(opts.targetName).active++;
 
     return span;
 }
 
-export function endTargetSpan(span: Span, statusCode: number, durationMs: number, error?: Error): void {
+export function endTargetSpan(span: Span, statusCode: number, durationMs: number, error?: Error, targetName?: string): void {
     targetActiveRequests.add(-1);
 
     const attrs: Attributes = { 'http.status_code': statusCode };
@@ -323,7 +345,7 @@ export function endTargetSpan(span: Span, statusCode: number, durationMs: number
     span.setAttribute('duration_ms', durationMs);
     span.end();
 
-    // In-memory
+    // In-memory — global
     const now = Date.now();
     targetMetrics.active--;
     targetMetrics.requests++;
@@ -335,6 +357,21 @@ export function endTargetSpan(span: Span, statusCode: number, durationMs: number
     bucket.count++;
     bucket.totalMs += durationMs;
     if (statusCode >= 400 || error) bucket.errors++;
+
+    // In-memory — per-target
+    if (targetName) {
+        const m = getTargetMetrics(targetName);
+        m.active--;
+        m.requests++;
+        m.totalDurationMs += durationMs;
+        m.statusCodes[statusCode] = (m.statusCodes[statusCode] || 0) + 1;
+        pushRing(m.latency, durationMs);
+        if (statusCode >= 400 || error) m.errors++;
+        const tb = getTimelineBucket(m, now);
+        tb.count++;
+        tb.totalMs += durationMs;
+        if (statusCode >= 400 || error) tb.errors++;
+    }
 }
 
 // ─── Proxy instrumentation ──────────────────────────────────────────────────

@@ -7,6 +7,7 @@ services:
     container_name: midleman
     ports:
       - "${PORT:-3000}:3000"
+      - "3001-3010:3001-3010"  # Named target ports
     environment:
       - PORT=3000
       - TARGET_URL=${TARGET_URL}
@@ -21,9 +22,9 @@ services:
       - midleman-data:/app/data
       - ./.env:/app/.env:ro
     restart: unless-stopped
-    depends_on:
-      otel-collector:
-        condition: service_started
+    # depends_on:
+      # otel-collector:
+      #   condition: service_started
     healthcheck:
       test: [ "CMD", "bun", "run", "-e", "fetch('http://localhost:3000/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))" ]
       interval: 30s
@@ -31,50 +32,6 @@ services:
       retries: 3
       start_period: 5s
 
-  # ─── OpenTelemetry Collector ────────────────────────────────────────────────
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.96.0
-    container_name: midleman-otel
-    command: ["--config=/etc/otelcol/config.yaml"]
-    volumes:
-      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
-    ports:
-      - "4318:4318"     # OTLP HTTP receiver
-    restart: unless-stopped
-
-  # ─── Prometheus (Metrics Backend) ───────────────────────────────────────────
-  prometheus:
-    image: prom/prometheus:v2.51.0
-    container_name: midleman-prometheus
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
-    ports:
-      - "9090:9090"
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.retention.time=7d'
-      - '--web.enable-lifecycle'
-    restart: unless-stopped
-    depends_on:
-      - otel-collector
-
-  # ─── Grafana (Dashboards & Visualization) ──────────────────────────────────
-  grafana:
-    image: grafana/grafana:10.4.0
-    container_name: midleman-grafana
-    ports:
-      - "3001:3000"
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-midleman}
-      - GF_USERS_ALLOW_SIGN_UP=false
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-    restart: unless-stopped
-    depends_on:
-      - prometheus
 
   # ─── Development Mode (hot reload) ─────────────────────────────────────────
   bun-forwarder-dev:
