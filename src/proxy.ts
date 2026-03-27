@@ -8,48 +8,13 @@ import { logRequest, captureRequestBody, captureResponseBody, headersToRecord } 
 // don't get rejected. This solves the race condition where the browser fires
 // sub-resource requests before processing the Set-Cookie from the HTML response.
 
-const SESSION_TTL = 5 * 60 * 1000; // 5 minutes
-const SESSION_CLEANUP_INTERVAL = 60 * 1000; // cleanup every 60s
-
-interface AccessSession {
-    key: string;
-    expiresAt: number;
-}
-
-// Key: "profileName:clientIP" → session
-const accessSessions = new Map<string, AccessSession>();
-
-// Periodic cleanup
-setInterval(() => {
-    const now = Date.now();
-    for (const [k, v] of accessSessions) {
-        if (v.expiresAt < now) accessSessions.delete(k);
-    }
-}, SESSION_CLEANUP_INTERVAL);
+// Cookie max-age for access key sessions (5 minutes)
+const SESSION_TTL = 5 * 60 * 1000;
 
 function getClientIP(req: Request): string {
     return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
         || req.headers.get('x-real-ip')
         || 'unknown';
-}
-
-function grantSession(profileName: string, clientIP: string, key: string): void {
-    accessSessions.set(`${profileName}:${clientIP}`, {
-        key,
-        expiresAt: Date.now() + SESSION_TTL,
-    });
-}
-
-function getSessionKey(profileName: string, clientIP: string): string | null {
-    const session = accessSessions.get(`${profileName}:${clientIP}`);
-    if (!session) return null;
-    if (session.expiresAt < Date.now()) {
-        accessSessions.delete(`${profileName}:${clientIP}`);
-        return null;
-    }
-    // Extend TTL on access
-    session.expiresAt = Date.now() + SESSION_TTL;
-    return session.key;
 }
 
 /** Lightweight MIME → extension map (common types only, zero dependency) */
@@ -246,13 +211,23 @@ export async function handleProxyRequest(
         const referer = req.headers.get('referer') || '';
         const refererIsFromProfile = referer.includes(`/proxy/${profileName}/`);
 
-        // A. Direct ?key= parameter (page load)
+        // A. Direct ?key= — redirect to strip key from URL and set cookie first.
+        //    The browser receives the cookie BEFORE loading the page, so all
+        //    sub-resources (CSS, JS, fonts) automatically include it. No race condition.
         if (providedKey === profile.accessKey) {
-            validatedAccessKey = providedKey;
-            grantSession(profileName, clientIP, providedKey);
+            const clean = new URL(url.toString());
+            clean.searchParams.delete('key');
+            return new Response(null, {
+                status: 302,
+                headers: {
+                    'Location': clean.pathname + clean.search,
+                    'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(providedKey)}; Path=/proxy/${profileName}/; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
+                },
+            });
         }
 
-        // B. Profile-scoped cookie (cookie name includes profileName to prevent cross-proxy auth)
+        // B. Profile-scoped cookie — the only valid credential after the initial redirect.
+        //    Cookie name includes profileName so different proxies never share auth state.
         if (!validatedAccessKey) {
             const cookies = req.headers.get('cookie') || '';
             const m = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${profileName}=([^;]+)`));
@@ -261,35 +236,13 @@ export async function handleProxyRequest(
             }
         }
 
-        // C. In-memory session cache (scoped to profileName:clientIP — no cross-proxy leakage)
         if (!validatedAccessKey) {
-            const sessionKey = getSessionKey(profileName, clientIP);
-            if (sessionKey === profile.accessKey) {
-                validatedAccessKey = sessionKey;
-            }
-        }
-
-        // D. Sub-resource from an authenticated session
-        //    Allows CSS/JS/fonts loaded by the browser after the user authenticated at least once.
-        //    Requires an active session — prevents cold requests from bypassing auth.
-        if (!validatedAccessKey && isSubResource) {
-            const sessionKey = getSessionKey(profileName, clientIP);
-            if (sessionKey === profile.accessKey) {
-                validatedAccessKey = sessionKey;
-                console.log(`🔑 Proxy "${profileName}": sub-resource ${remainingPath} allowed via session`);
-            }
-        }
-
-        if (!validatedAccessKey) {
-            console.warn(`❌ Proxy "${profileName}": REJECTED ${remainingPath} | key=${!!providedKey} cookie=${!!(req.headers.get('cookie')?.includes(`__pk_${profileName}`))} session=${!!getSessionKey(profileName, clientIP)} referer=${referer.substring(0, 80)} isAsset=${isSubResource}`);
+            console.warn(`❌ Proxy "${profileName}": REJECTED ${remainingPath} | cookie=${!!(req.headers.get('cookie')?.includes(`__pk_${profileName}`))} isAsset=${isSubResource}`);
             return jsonResponse(401, {
                 error: 'Unauthorized',
                 message: 'Valid ?key= parameter is required to access this resource',
             });
         }
-
-        // Remove the key from query params before forwarding to upstream
-        url.searchParams.delete('key');
     }
 
     // Check if extension is blocked (fast path: from URL)
@@ -634,39 +587,28 @@ export async function handleDirectProxy(
         const providedKey = url.searchParams.get('key');
         const clientIP = getClientIP(req);
 
-        // A. Direct ?key= parameter
+        // A. Direct ?key= — redirect to strip key from URL and set cookie first.
+        //    Cookie is received by the browser BEFORE the page loads, so all
+        //    sub-resources (CSS, JS, fonts) automatically include it. No race condition.
         if (providedKey === profile.accessKey) {
-            validatedAccessKey = providedKey;
-            grantSession(profileName, clientIP, providedKey);
+            const clean = new URL(url.toString());
+            clean.searchParams.delete('key');
+            return new Response(null, {
+                status: 302,
+                headers: {
+                    'Location': clean.pathname + clean.search,
+                    'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(providedKey)}; Path=/; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
+                },
+            });
         }
 
-        // B. Profile-scoped cookie (cookie name includes profileName to prevent cross-proxy auth)
+        // B. Profile-scoped cookie — the only valid credential after the initial redirect.
+        //    Cookie name includes profileName so different proxies never share auth state.
         if (!validatedAccessKey) {
             const cookies = req.headers.get('cookie') || '';
             const m = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${profileName}=([^;]+)`));
             if (m && decodeURIComponent(m[1]) === profile.accessKey) {
                 validatedAccessKey = profile.accessKey;
-            }
-        }
-
-        // C. In-memory session cache (scoped to profileName:clientIP — no cross-proxy leakage)
-        if (!validatedAccessKey) {
-            const sessionKey = getSessionKey(profileName, clientIP);
-            if (sessionKey === profile.accessKey) {
-                validatedAccessKey = sessionKey;
-            }
-        }
-
-        // D. Sub-resource from an authenticated session
-        //    Allows CSS/JS/fonts loaded by the browser after the user authenticated at least once.
-        //    Requires an active session — prevents cold requests from bypassing auth.
-        if (!validatedAccessKey) {
-            const isSubResource = isAssetRequest(url.pathname, req.headers.get('accept'));
-            if (isSubResource) {
-                const sessionKey = getSessionKey(profileName, clientIP);
-                if (sessionKey === profile.accessKey) {
-                    validatedAccessKey = sessionKey;
-                }
             }
         }
 
