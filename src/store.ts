@@ -171,7 +171,7 @@ export function loadPersistedTargets(): ProxyTarget[] {
         const stored: StoredTarget[] = JSON.parse(raw);
 
         return stored
-            .filter(t => t.name && t.targetUrl && t.port)
+            .filter(t => t.name && t.targetUrl)
             .map(t => ({
                 name: t.name.toLowerCase(),
                 targetUrl: t.targetUrl.endsWith('/') ? t.targetUrl.slice(0, -1) : t.targetUrl,
@@ -232,7 +232,9 @@ export function validateTargetInput(input: unknown): string | null {
 
     if (!t.name || typeof t.name !== 'string') return '"name" is required (string)';
     if (!t.targetUrl || typeof t.targetUrl !== 'string') return '"targetUrl" is required (string)';
-    if (!t.port || typeof t.port !== 'number' || t.port < 1 || t.port > 65535) return '"port" is required (number 1-65535)';
+    if (t.port !== undefined && t.port !== null && t.port !== 0) {
+        if (typeof t.port !== 'number' || t.port < 1 || t.port > 65535) return '"port" must be a number between 1 and 65535 (or 0/omitted for auto-assign)';
+    }
 
     try {
         new URL(t.targetUrl as string);

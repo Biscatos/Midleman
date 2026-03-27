@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun run:*)",
+      "Bash(bun --eval \"import ''''./src/dashboard.html''''\")"
+    ]
+  }
+}

@@ -14,8 +14,8 @@
     --text: #e4e6f0;
     --text2: #8b8fa7;
     --text3: #5d6180;
-    --accent: #6c5ce7;
-    --accent2: #8577ed;
+    --accent: #0078d4;
+    --accent2: #2899f5;
     --green: #00b894;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -45,8 +45,8 @@
     position: absolute;
     inset: 0;
     background-image:
-      linear-gradient(rgba(108,92,231,0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(108,92,231,0.03) 1px, transparent 1px);
+      linear-gradient(rgba(0,120,212,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,120,212,0.03) 1px, transparent 1px);
     background-size: 60px 60px;
     pointer-events: none;
   }
@@ -60,7 +60,7 @@
     transform: translateX(-50%);
     width: 600px;
     height: 400px;
-    background: radial-gradient(ellipse, rgba(108,92,231,0.12) 0%, transparent 70%);
+    background: radial-gradient(ellipse, rgba(0,120,212,0.12) 0%, transparent 70%);
     pointer-events: none;
   }
 
@@ -71,7 +71,7 @@
     height: 72px;
     border-radius: 18px;
     margin-bottom: 28px;
-    box-shadow: 0 4px 24px rgba(108,92,231,0.3);
+    box-shadow: 0 4px 24px rgba(0,120,212,0.3);
   }
 
   h1 {
@@ -125,7 +125,7 @@
     background: var(--accent);
     border-color: var(--accent);
     color: #fff;
-    box-shadow: 0 4px 16px rgba(108,92,231,0.3);
+    box-shadow: 0 4px 16px rgba(0,120,212,0.3);
   }
   .btn-primary:hover { background: var(--accent2); border-color: var(--accent2); }
 
@@ -155,7 +155,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(108,92,231,0.1);
+    background: rgba(0,120,212,0.1);
   }
   .feature h3 {
     font-size: 13px;
@@ -209,17 +209,17 @@
 
     <div class="features">
       <div class="feature">
-        <div class="feature-icon">&#9889;</div>
+        <div class="feature-icon"></div>
         <h3>Fast Proxy</h3>
         <p>Stream-based forwarding with zero buffering on Bun runtime.</p>
       </div>
       <div class="feature">
-        <div class="feature-icon">&#128274;</div>
+        <div class="feature-icon"></div>
         <h3>Auth Bypass</h3>
         <p>Per-profile API key injection for public access to protected APIs.</p>
       </div>
       <div class="feature">
-        <div class="feature-icon">&#128200;</div>
+        <div class="feature-icon"></div>
         <h3>Telemetry</h3>
         <p>Built-in metrics with OpenTelemetry export and live dashboard.</p>
       </div>

@@ -11,7 +11,7 @@
     --bg: #0f1117; --bg2: #161822; --surface: #1c1e2b; --surface2: #242736; --surface3: #2c2f42;
     --border: #2e3148; --border2: #3a3d55;
     --text: #e4e6f0; --text2: #8b8fa7; --text3: #5d6180;
-    --accent: #6c5ce7; --accent2: #8577ed; --accent-bg: rgba(108,92,231,0.12);
+    --accent: #0078d4; --accent2: #2899f5; --accent-bg: rgba(0,120,212,0.12);
     --green: #00b894; --green-bg: rgba(0,184,148,0.12);
     --red: #e17055; --red-bg: rgba(225,112,85,0.12);
     --orange: #fdcb6e; --orange-bg: rgba(253,203,110,0.12);
@@ -24,7 +24,7 @@
     --bg: #f0f2f5; --bg2: #ffffff; --surface: #ffffff; --surface2: #f5f6fa; --surface3: #eceef4;
     --border: #dde1eb; --border2: #c8cdd9;
     --text: #1a1d27; --text2: #6b7185; --text3: #9096a9;
-    --accent: #6c5ce7; --accent2: #5b4bd5; --accent-bg: rgba(108,92,231,0.08);
+    --accent: #0078d4; --accent2: #005ea6; --accent-bg: rgba(0,120,212,0.08);
     --green: #00a17d; --green-bg: rgba(0,161,125,0.08);
     --red: #d35400; --red-bg: rgba(211,84,0,0.08);
     --orange: #c8980a; --orange-bg: rgba(200,152,10,0.08);
@@ -44,56 +44,64 @@
   }
 
   /* ─── Layout ──────────────────────────────────────────────────────────────── */
-  .layout { display: flex; min-height: 100vh; }
-  .sidebar {
-    width: 240px; background: var(--bg2); border-right: 1px solid var(--border);
-    display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0;
-    z-index: 50; transition: transform var(--transition), background var(--transition);
-  }
-  .sidebar-brand { padding: 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); }
-  .sidebar-brand img { width: 36px; height: 36px; border-radius: 10px; }
-  .sidebar-brand h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
-  .sidebar-brand span { color: var(--accent2); }
-  .sidebar-nav { flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 2px; }
-  .nav-section { font-size: 10px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; padding: 16px 12px 8px; }
-  .nav-item {
-    display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm);
-    color: var(--text2); cursor: pointer; font-size: 14px; font-weight: 500;
-    transition: all var(--transition); border: none; background: none; width: 100%; text-align: left;
-  }
-  .nav-item:hover { background: var(--surface); color: var(--text); }
-  .nav-item.active { background: var(--accent-bg); color: var(--accent2); }
-  .nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
-  .nav-badge { margin-left: auto; font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--surface3); color: var(--text2); font-weight: 600; }
-  .sidebar-footer { padding: 16px 20px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .status-dot.online { background: var(--green); box-shadow: 0 0 8px var(--green); }
-  .status-dot.offline { background: var(--red); box-shadow: 0 0 8px var(--red); }
-  .sidebar-footer-text { font-size: 12px; color: var(--text2); }
-  .main { flex: 1; margin-left: 240px; min-height: 100vh; }
+  .app { display: flex; flex-direction: column; min-height: 100vh; }
 
-  /* ─── Top Bar ─────────────────────────────────────────────────────────────── */
-  .topbar {
-    position: sticky; top: 0; z-index: 40; background: var(--topbar-bg);
-    backdrop-filter: blur(12px); border-bottom: 1px solid var(--border);
-    padding: 0 32px; height: 56px; display: flex; align-items: center; justify-content: space-between;
+  /* ─── Navbar ──────────────────────────────────────────────────────────────── */
+  .navbar {
+    position: sticky; top: 0; z-index: 50;
+    background: var(--topbar-bg); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
     transition: background var(--transition);
   }
-  .topbar-title { font-size: 15px; font-weight: 600; }
-  .topbar-actions { display: flex; align-items: center; gap: 8px; }
-  .topbar-stat { font-size: 12px; color: var(--text2); padding: 4px 10px; background: var(--surface); border-radius: 6px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
-  .mobile-toggle { display: none; background: none; border: none; color: var(--text); cursor: pointer; padding: 4px; }
-
-  /* ─── Theme Toggle ────────────────────────────────────────────────────────── */
+  .navbar-inner {
+    max-width: 1280px; margin: 0 auto; padding: 0 24px;
+    height: 60px; display: flex; align-items: center; gap: 0;
+  }
+  .navbar-brand {
+    display: flex; align-items: center; gap: 10px; margin-right: 32px; flex-shrink: 0;
+    text-decoration: none; color: inherit;
+  }
+  .navbar-brand img { width: 32px; height: 32px; border-radius: 8px; }
+  .navbar-brand-name { font-size: 16px; font-weight: 700; letter-spacing: -0.3px; color: var(--text); }
+  .navbar-brand-name span { color: var(--accent2); }
+  .navbar-nav { display: flex; align-items: stretch; flex: 1; height: 60px; gap: 0; }
+  .nav-link {
+    display: flex; align-items: center; gap: 7px; padding: 0 16px;
+    font-size: 13.5px; font-weight: 500; color: var(--text2);
+    border: none; background: none; cursor: pointer;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+    transition: color var(--transition), border-color var(--transition);
+    white-space: nowrap;
+  }
+  .nav-link:hover { color: var(--text); }
+  .nav-link.active { color: var(--accent2); border-bottom-color: var(--accent2); }
+  .nav-link svg { width: 15px; height: 15px; flex-shrink: 0; }
+  .nav-badge {
+    font-size: 10px; padding: 1px 6px; border-radius: 10px;
+    background: var(--surface3); color: var(--text3); font-weight: 600;
+  }
+  .nav-link.active .nav-badge { background: var(--accent-bg); color: var(--accent2); }
+  .navbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .status-dot.online { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .status-dot.offline { background: var(--red); }
+  .navbar-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); padding: 4px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; }
+  .navbar-user { font-size: 12px; font-weight: 600; color: var(--accent2); padding: 4px 10px; background: var(--accent-bg); border-radius: 6px; }
   .theme-toggle {
     background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm);
     padding: 6px 8px; cursor: pointer; color: var(--text2); display: flex; align-items: center;
-    transition: all var(--transition); font-size: 16px; line-height: 1;
+    transition: all var(--transition); font-size: 15px; line-height: 1;
   }
   .theme-toggle:hover { background: var(--surface3); color: var(--text); }
+  .logout-btn {
+    background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    color: var(--text3); cursor: pointer; padding: 6px 8px; display: flex; align-items: center;
+    transition: all var(--transition); font-size: 13px;
+  }
+  .logout-btn:hover { border-color: var(--red); color: var(--red); background: var(--red-bg); }
 
   /* ─── Content ─────────────────────────────────────────────────────────────── */
-  .content { padding: 28px 32px; max-width: 1200px; }
+  .content { padding: 28px 24px; max-width: 1280px; margin: 0 auto; width: 100%; }
   .page { display: none; } .page.active { display: block; }
   .page-header { margin-bottom: 24px; }
   .page-header h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin-bottom: 6px; }
@@ -141,19 +149,45 @@
   .form-section { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.8px; padding: 16px 0 10px; border-top: 1px solid var(--border); margin-top: 8px; }
 
   /* ─── Profiles / Targets Grid ──────────────────────────────────────────────── */
-  .profiles-grid { display: flex; flex-direction: column; gap: 10px; }
-  .profile-row { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; transition: border-color var(--transition); }
-  .profile-row:hover { border-color: var(--border2); }
-  .profile-row-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-  .profile-row-name { display: flex; align-items: center; gap: 10px; }
-  .profile-avatar { width: 36px; height: 36px; border-radius: 10px; background: var(--accent-bg); color: var(--accent2); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; text-transform: uppercase; }
-  .profile-name { font-weight: 600; font-size: 15px; }
-  .profile-url { font-size: 12px; color: var(--text2); margin-top: 2px; font-family: 'SF Mono', Monaco, monospace; }
-  .profile-row-actions { display: flex; gap: 6px; }
-  .profile-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-  .profile-detail { display: flex; flex-direction: column; gap: 2px; }
+  .profiles-grid { display: flex; flex-direction: column; gap: 12px; }
+  .profile-row {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 0; transition: border-color var(--transition), box-shadow var(--transition);
+    overflow: hidden;
+  }
+  .profile-row:hover { border-color: var(--border2); box-shadow: var(--shadow); }
+  .profile-row-top {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+  }
+  .profile-row-name { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .profile-avatar {
+    width: 38px; height: 38px; border-radius: 10px; background: var(--accent-bg);
+    color: var(--accent2); display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 14px; text-transform: uppercase; flex-shrink: 0;
+  }
+  .profile-avatar.green-avatar { background: var(--green-bg); color: var(--green); }
+  .profile-name-wrap { min-width: 0; }
+  .profile-name { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .profile-url { font-size: 12px; color: var(--text2); margin-top: 3px; font-family: 'SF Mono', Monaco, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 420px; }
+  .profile-status-badge {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600;
+    padding: 2px 8px; border-radius: 20px;
+  }
+  .profile-status-badge.running { background: var(--green-bg); color: var(--green); }
+  .profile-status-badge.stopped { background: var(--red-bg); color: var(--red); }
+  .profile-row-actions { display: flex; gap: 6px; flex-shrink: 0; margin-left: 12px; }
+  .profile-details {
+    display: flex; flex-wrap: wrap; gap: 0;
+    padding: 0; background: var(--surface2);
+  }
+  .profile-detail {
+    display: flex; flex-direction: column; gap: 3px;
+    padding: 12px 20px; border-right: 1px solid var(--border); flex: 1; min-width: 120px;
+  }
+  .profile-detail:last-child { border-right: none; }
   .profile-detail-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
-  .profile-detail-value { font-size: 13px; word-break: break-all; }
+  .profile-detail-value { font-size: 13px; font-weight: 500; word-break: break-all; }
   .empty-state { text-align: center; padding: 48px 20px; color: var(--text3); }
   .empty-state svg { margin-bottom: 12px; opacity: 0.3; }
   .empty-state p { margin-top: 8px; font-size: 14px; }
@@ -214,16 +248,22 @@
 
   /* ─── Responsive ──────────────────────────────────────────────────────────── */
   @media (max-width: 768px) {
-    .sidebar { transform: translateX(-100%); } .sidebar.open { transform: translateX(0); }
-    .main { margin-left: 0; } .mobile-toggle { display: block; }
-    .content { padding: 20px 16px; }
+    .navbar-inner { padding: 0 16px; gap: 0; }
+    .navbar-brand { margin-right: 12px; }
+    .navbar-brand-name { display: none; }
+    .nav-link { padding: 0 10px; font-size: 12px; gap: 4px; }
+    .nav-link svg { display: none; }
+    .navbar-status { display: none; }
+    .navbar-user { display: none; }
+    .content { padding: 16px; }
     .form-grid { grid-template-columns: 1fr; } .form-group.span-2 { grid-column: span 1; }
     .stats-grid { grid-template-columns: 1fr 1fr; }
     .profile-row-top { flex-direction: column; gap: 12px; align-items: flex-start; }
-    .topbar { padding: 0 16px; }
+    .profile-row-actions { margin-left: 0; flex-wrap: wrap; }
+    .profile-url { max-width: 100%; }
+    .profile-detail { min-width: 100px; }
   }
 </style>
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
 </head>
 <body>
 
@@ -268,76 +308,54 @@
   </div>
 </div>
 
-<div class="layout">
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-brand">
-      <img src="/logo.svg" alt="Midleman">
-      <div>
-        <h1><span>Midleman</span></h1>
-        <div style="font-size:10px;color:var(--text3);font-weight:500;letter-spacing:0.5px;margin-top:2px">PROXY GATEWAY</div>
+<div class="app" style="display:none">
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <a class="navbar-brand" href="/dashboard">
+        <img src="/logo.svg" alt="Midleman">
+        <span class="navbar-brand-name"><span>Mid</span>leman</span>
+      </a>
+
+      <div class="navbar-nav">
+        <button class="nav-link active" onclick="navigate('overview')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+          Overview
+        </button>
+        <button class="nav-link" onclick="navigate('requests')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          Requests
+          <span class="nav-badge" id="navReqBadge">0</span>
+        </button>
+        <button class="nav-link" onclick="navigate('targets')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          Targets
+          <span class="nav-badge" id="navTargetBadge">0</span>
+        </button>
+        <button class="nav-link" onclick="navigate('profiles')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/></svg>
+          Profiles
+          <span class="nav-badge" id="navProfileBadge">0</span>
+        </button>
+        <button class="nav-link" onclick="navigate('settings')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          Settings
+        </button>
       </div>
-    </div>
-    <nav class="sidebar-nav">
-      <div class="nav-section">Monitor</div>
-      <button class="nav-item active" onclick="navigate('overview')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
-        Overview
-      </button>
-      <button class="nav-item" onclick="navigate('requests')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        Request Log
-        <span class="nav-badge" id="navReqBadge">0</span>
-      </button>
 
-      <div class="nav-section">Infrastructure</div>
-      <button class="nav-item" onclick="navigate('targets')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-        Targets
-        <span class="nav-badge" id="navTargetBadge">0</span>
-      </button>
-      <button class="nav-item" onclick="navigate('profiles')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/></svg>
-        Proxy Profiles
-        <span class="nav-badge" id="navProfileBadge">0</span>
-      </button>
-
-      <div class="nav-section">System</div>
-      <button class="nav-item" onclick="navigate('settings')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-        Settings
-      </button>
-    </nav>
-    <div class="sidebar-footer" style="flex-direction:column;align-items:flex-start;gap:10px">
-      <div style="display:flex;align-items:center;justify-content:space-between;width:100%">
-        <div style="display:flex;align-items:center;gap:8px">
-          <span class="status-dot offline" id="sidebarDot"></span>
-          <span class="sidebar-footer-text" id="sidebarStatus">Connecting...</span>
+      <div class="navbar-right">
+        <div class="navbar-status">
+          <span class="status-dot offline" id="navDot"></span>
+          <span id="navStatus">Connecting...</span>
+          <span id="navUptime" style="color:var(--text3)"></span>
         </div>
-        <button onclick="doLogout()" title="Logout" style="background:none;border:none;cursor:pointer;color:var(--text3);padding:4px;border-radius:4px;transition:color 0.2s" onmouseenter="this.style.color='var(--red)'" onmouseleave="this.style.color='var(--text3)'">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        <span class="navbar-user" id="navUser"></span>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeBtn">&#9790;</button>
+        <button class="logout-btn" onclick="doLogout()" title="Logout">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         </button>
-      </div>
-      <div style="font-size:10px;color:var(--text3);width:100%;display:flex;justify-content:space-between">
-        <span id="sidebarUser" style="color:var(--accent2)"></span>
-        <span>v2.0.0 <span id="sidebarPort"></span></span>
       </div>
     </div>
-  </aside>
-
-  <div class="main">
-    <header class="topbar">
-      <div style="display:flex;align-items:center;gap:12px">
-        <button class="mobile-toggle" onclick="toggleSidebar()">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-        </button>
-        <span class="topbar-title" id="topbarTitle">Overview</span>
-      </div>
-      <div class="topbar-actions">
-        <span class="topbar-stat" id="topUptime">--</span>
-        <span class="topbar-stat" id="topActive">0 active</span>
-        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeBtn">&#9790;</button>
-      </div>
-    </header>
+  </nav>
 
     <div class="content">
       <!-- ═══ OVERVIEW ═══ -->
@@ -348,7 +366,7 @@
         </div>
         <div class="stats-grid">
           <div class="stat-card">
-            <div class="stat-icon green">&#9889;</div>
+            <div class="stat-icon green"></div>
             <div class="stat-label">Status</div>
             <div class="stat-value" id="ovStatus" style="color:var(--text3)">--</div>
             <div class="stat-sub" id="ovUptime"></div>
@@ -360,13 +378,13 @@
             <div class="stat-sub">currently in-flight</div>
           </div>
           <div class="stat-card">
-            <div class="stat-icon blue">&#128279;</div>
+            <div class="stat-icon blue"></div>
             <div class="stat-label">Profiles + Targets</div>
             <div class="stat-value" id="ovProfiles">--</div>
             <div class="stat-sub" id="ovProfileNames"></div>
           </div>
           <div class="stat-card">
-            <div class="stat-icon orange">&#128274;</div>
+            <div class="stat-icon orange"></div>
             <div class="stat-label">Auth</div>
             <div class="stat-value" id="ovAuth" style="font-size:20px">--</div>
             <div class="stat-sub" id="ovPort"></div>
@@ -469,13 +487,15 @@
       </div>
 
       <!-- Request Detail Modal -->
-      <div id="reqDetailModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);overflow-y:auto">
-        <div style="max-width:900px;margin:40px auto;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)">
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border)">
-            <h3 id="reqDetailTitle" style="font-size:16px;font-weight:600">Request Detail</h3>
-            <button onclick="closeReqDetail()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
+      <div id="reqDetailModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);overflow-y:auto">
+        <div class="rdm-panel">
+          <div class="rdm-header">
+            <div class="rdm-header-left">
+              <h3 id="reqDetailTitle" class="rdm-title">Request Detail</h3>
+            </div>
+            <button onclick="closeReqDetail()" class="rdm-close">&times;</button>
           </div>
-          <div id="reqDetailContent" style="padding:20px"></div>
+          <div id="reqDetailContent" class="rdm-body"></div>
         </div>
       </div>
 
@@ -499,7 +519,7 @@
             <div class="form-grid" style="gap:12px">
               <div class="form-group"><label>Name</label><input type="text" id="tName" placeholder="api"></div>
               <div class="form-group"><label>Target URL</label><input type="text" id="tTargetUrl" placeholder="https://api.example.com"></div>
-              <div class="form-group"><label>Port</label><input type="number" id="tPort" placeholder="3001"></div>
+              <div class="form-group"><label>Port (optional, 0 = auto-assign)</label><input type="number" id="tPort" placeholder="Auto-assign" min="0" max="65535"></div>
               <div class="form-group"><label>Auth Token (optional)</label><input type="text" id="tAuthToken" placeholder="Leave empty for no auth"></div>
               <div class="form-group" style="display:flex;align-items:center;gap:8px">
                 <input type="checkbox" id="tForwardPath" checked> <label for="tForwardPath" style="margin:0">Forward Path</label>
@@ -532,14 +552,13 @@
           <div class="card-header"><h3>Server Configuration</h3><button class="btn btn-primary btn-sm" onclick="saveConfig()">Save Changes</button></div>
           <div class="card-body">
             <div class="form-grid">
-              <div class="form-group"><label>Port</label><input type="number" id="cfgPort" placeholder="3000"></div>
+              <div class="form-group"><label>Admin Port</label><input type="number" id="cfgPort" value="3000" disabled title="Port 3000 is reserved for administration"><div style="font-size:11px;color:var(--text3);margin-top:4px">Port 3000 is reserved exclusively for administration. Proxies and targets use auto-assigned ports.</div></div>
               <div class="form-group"><label>Auth Token</label><input type="text" id="cfgAuthToken" placeholder="Leave empty to disable"></div>
             </div>
           </div>
         </div>
       </div>
     </div>
-  </div>
 </div>
 
 <!-- Profile Modal -->
@@ -605,20 +624,20 @@ initTheme();
 
     if (status.needsSetup) {
       document.getElementById('authSetup').classList.add('active');
-      document.querySelector('.layout').style.display = 'none';
+      document.querySelector('.app').style.display = 'none';
       return;
     }
 
     if (!status.loggedIn) {
       document.getElementById('authLogin').classList.add('active');
-      document.querySelector('.layout').style.display = 'none';
+      document.querySelector('.app').style.display = 'none';
       return;
     }
 
     // Authenticated
     loggedInUser = status.username;
-    document.getElementById('sidebarUser').textContent = loggedInUser;
-    document.querySelector('.layout').style.display = 'flex';
+    document.getElementById('navUser').textContent = loggedInUser;
+    document.querySelector('.app').style.display = 'flex';
     await refreshAll();
     setInterval(fetchHealth, 5000);
     setInterval(fetchRecentRequests, 3000);
@@ -652,10 +671,16 @@ async function setupStep2() {
     setupTotpSecret = data.secret;
     const qrContainer = document.getElementById('setupQrContainer');
     qrContainer.innerHTML = '';
-    QRCode.toCanvas(data.otpauthUrl, { width: 200, margin: 1 }, function(err, canvas) {
-      if (err) { qrContainer.textContent = 'Failed to generate QR code'; return; }
-      qrContainer.appendChild(canvas);
-    });
+    if (data.qrDataUrl) {
+      const img = document.createElement('img');
+      img.src = data.qrDataUrl;
+      img.width = 200;
+      img.height = 200;
+      img.alt = 'QR Code 2FA';
+      qrContainer.appendChild(img);
+    } else {
+      qrContainer.textContent = 'Failed to generate QR code';
+    }
     document.getElementById('setupSecretDisplay').textContent = data.secret;
     document.getElementById('setupStep1').classList.remove('active');
     document.getElementById('setupStep2').classList.add('active');
@@ -706,19 +731,15 @@ async function doLogout() {
 function navigate(page) {
   currentPage = page;
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
   const pageEl = document.getElementById('page' + page.charAt(0).toUpperCase() + page.slice(1));
   if (pageEl) pageEl.classList.add('active');
-  const titles = { overview: 'Overview', requests: 'Request Log', targets: 'Targets', profiles: 'Profiles', settings: 'Settings' };
-  document.getElementById('topbarTitle').textContent = titles[page] || page;
-  document.querySelectorAll('.nav-item').forEach(n => {
-    if (n.textContent.trim().toLowerCase().startsWith(page)) n.classList.add('active');
+  document.querySelectorAll('.nav-link').forEach(n => {
+    if (n.textContent.trim().toLowerCase().startsWith(page === 'requests' ? 'req' : page)) n.classList.add('active');
   });
-  document.getElementById('sidebar').classList.remove('open');
   if (page === 'requests') { rlPage = 1; fetchRequestLogs(); }
   if (page === 'targets') fetchTargets();
 }
-function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 function hdrs() { return { 'Content-Type': 'application/json' }; }
@@ -746,18 +767,18 @@ async function refreshAll() {
 async function fetchHealth() {
   try {
     const res = await fetch('/health'); const d = await res.json();
-    document.getElementById('sidebarDot').className = 'status-dot online';
-    document.getElementById('sidebarStatus').textContent = 'Online - ' + fmtUptime(d.uptime);
-    document.getElementById('topUptime').textContent = fmtUptime(d.uptime);
-    document.getElementById('topActive').textContent = d.activeRequests + ' active';
+    document.getElementById('navDot').className = 'status-dot online';
+    document.getElementById('navStatus').textContent = 'Online';
+    document.getElementById('navUptime').textContent = fmtUptime(d.uptime);
     document.getElementById('ovStatus').textContent = 'Online';
     document.getElementById('ovStatus').style.color = 'var(--green)';
     document.getElementById('ovUptime').textContent = 'Uptime: ' + fmtUptime(d.uptime);
     document.getElementById('ovActive').textContent = d.activeRequests;
     document.getElementById('ovProfiles').textContent = (d.proxyProfiles || 0) + (d.proxyTargets || 0);
   } catch {
-    document.getElementById('sidebarDot').className = 'status-dot offline';
-    document.getElementById('sidebarStatus').textContent = 'Offline';
+    document.getElementById('navDot').className = 'status-dot offline';
+    document.getElementById('navStatus').textContent = 'Offline';
+    document.getElementById('navUptime').textContent = '';
     document.getElementById('ovStatus').textContent = 'Offline';
     document.getElementById('ovStatus').style.color = 'var(--red)';
   }
@@ -839,7 +860,6 @@ async function fetchConfig() {
     document.getElementById('ovAuth').textContent = d.authToken ? 'Enabled' : 'Disabled';
     document.getElementById('ovAuth').style.color = d.authToken ? 'var(--green)' : 'var(--orange)';
     document.getElementById('ovPort').textContent = 'Port ' + (d.port || 3000);
-    document.getElementById('sidebarPort').textContent = ':' + (d.port || 3000);
   } catch {}
 }
 
@@ -858,19 +878,35 @@ function renderProfiles(profiles) {
   if (profiles.length === 0) { c.innerHTML = '<div class="empty-state"><p>No profiles yet. Click "+ New Profile".</p></div>'; return; }
   c.innerHTML = profiles.map(p => {
     const hasAuth = p.authHeader;
-    return `<div class="profile-row"><div class="profile-row-top"><div class="profile-row-name">
-      <div class="profile-avatar">${esc(p.name.substring(0,2))}</div>
-      <div><div class="profile-name">${esc(p.name)}</div><div class="profile-url">${esc(p.targetUrl)}</div></div>
-    </div><div class="profile-row-actions">
-      <a class="btn btn-sm" href="${location.origin}/proxy/${encodeURIComponent(p.name)}/" target="_blank" style="text-decoration:none">Open</a>
-      <button class="btn btn-sm" onclick="copyProxyUrl('${esc(p.name)}')">Copy URL</button>
-      <button class="btn btn-sm" onclick="editProfile('${esc(p.name)}')">Edit</button>
-      <button class="btn btn-danger btn-sm" onclick="deleteProfile('${esc(p.name)}')">Delete</button>
-    </div></div><div class="profile-details">
-      <div class="profile-detail"><span class="profile-detail-label">Auth</span><span class="profile-detail-value">${hasAuth ? esc(p.authHeader) + (p.authPrefix ? ' <span style="color:var(--text3)">(' + esc(p.authPrefix) + ')</span>' : '') : '<span style="color:var(--text3)">Passthrough</span>'}</span></div>
-      ${p.hasAccessKey ? '<div class="profile-detail"><span class="profile-detail-label">Access</span><span class="profile-detail-value" style="color:var(--orange)">Protected</span></div>' : ''}
-      ${p.blockedExtensions?.length ? '<div class="profile-detail"><span class="profile-detail-label">Blocked</span><span class="profile-detail-value" style="color:var(--red)">' + esc(p.blockedExtensions.join(', ')) + '</span></div>' : ''}
-    </div></div>`;
+    const authVal = hasAuth
+      ? esc(p.authHeader) + (p.authPrefix ? ` <span style="color:var(--text3);font-weight:400">(${esc(p.authPrefix)})</span>` : '')
+      : '<span style="color:var(--text3)">Passthrough</span>';
+    const portDisplay = p.port ? `:${p.port}` : '';
+    return `<div class="profile-row">
+      <div class="profile-row-top">
+        <div class="profile-row-name">
+          <div class="profile-avatar">${esc(p.name.substring(0,2))}</div>
+          <div class="profile-name-wrap">
+            <div class="profile-name">${esc(p.name)} ${p.port ? `<span style="color:var(--text3);font-weight:400;font-size:13px">${portDisplay}</span>` : ''}</div>
+            <div class="profile-url">${esc(p.targetUrl)}</div>
+          </div>
+        </div>
+        <div class="profile-row-actions">
+          ${p.port ? `<a class="btn btn-sm" href="${location.protocol}//${location.hostname}:${p.port}/" target="_blank" style="text-decoration:none">Open :${p.port}</a>` : '<span class="btn btn-sm" style="opacity:0.5">No port</span>'}
+          <button class="btn btn-sm" onclick="copyProxyUrl('${esc(p.name)}', ${p.port || 0})">Copy URL</button>
+          <button class="btn btn-sm" onclick="editProfile('${esc(p.name)}')">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteProfile('${esc(p.name)}')">Delete</button>
+        </div>
+      </div>
+      <div class="profile-details">
+        <div class="profile-detail"><span class="profile-detail-label">Port</span><span class="profile-detail-value">${p.port || '<span style="color:var(--text3)">N/A</span>'}</span></div>
+        <div class="profile-detail"><span class="profile-detail-label">Auth Header</span><span class="profile-detail-value">${authVal}</span></div>
+        <div class="profile-detail"><span class="profile-detail-label">Access</span><span class="profile-detail-value">${p.hasAccessKey ? '<span style="color:var(--orange)">Protected</span>' : '<span style="color:var(--text3)">Public</span>'}</span></div>
+        ${p.blockedExtensions?.length
+          ? `<div class="profile-detail"><span class="profile-detail-label">Blocked Ext.</span><span class="profile-detail-value" style="color:var(--red)">${esc(p.blockedExtensions.join(', '))}</span></div>`
+          : ''}
+      </div>
+    </div>`;
   }).join('');
 }
 
@@ -921,8 +957,9 @@ async function deleteProfile(name) {
   if (!confirm('Delete "' + name + '"?')) return;
   try { const res = await api('/admin/profiles/' + encodeURIComponent(name), { method: 'DELETE' }); if (res.ok) { toast('Deleted'); await fetchProfiles(); } } catch(e) { toast('Error: '+e.message,'error'); }
 }
-function copyProxyUrl(name) {
-  const url = location.origin + '/proxy/' + encodeURIComponent(name) + '/';
+function copyProxyUrl(name, port) {
+  if (!port || port <= 0) { toast('No port assigned for "' + name + '"', 'error'); return; }
+  const url = location.protocol + '//' + location.hostname + ':' + port + '/';
   navigator.clipboard.writeText(url).then(() => toast('Copied: ' + url)).catch(() => prompt('Copy:', url));
 }
 async function reloadProfiles() {
@@ -939,20 +976,31 @@ function renderTargets(targets) {
   const c = document.getElementById('targetList');
   if (targets.length === 0) { c.innerHTML = '<div class="empty-state"><p>No targets yet. Click "+ New Target".</p></div>'; return; }
   c.innerHTML = targets.map(t => {
-    const dot = t.running ? '<span style="color:var(--green)">&#9679;</span>' : '<span style="color:var(--red)">&#9679;</span>';
-    return `<div class="profile-row"><div class="profile-row-top"><div class="profile-row-name">
-      <div class="profile-avatar">${esc(t.name.substring(0,2))}</div>
-      <div><div class="profile-name">${dot} ${esc(t.name)} <span style="color:var(--text3);font-weight:400">:${t.port}</span></div><div class="profile-url">${esc(t.targetUrl)}</div></div>
-    </div><div class="profile-row-actions">
-      <button class="btn btn-sm" onclick="restartTargetAction('${esc(t.name)}')">Restart</button>
-      <button class="btn btn-sm" onclick="editTarget('${esc(t.name)}')">Edit</button>
-      <button class="btn btn-danger btn-sm" onclick="deleteTarget('${esc(t.name)}')">Delete</button>
-    </div></div><div class="profile-details">
-      <div class="profile-detail"><span class="profile-detail-label">Port</span><span class="profile-detail-value">${t.port}</span></div>
-      <div class="profile-detail"><span class="profile-detail-label">Forward Path</span><span class="profile-detail-value">${t.forwardPath?'Yes':'No'}</span></div>
-      <div class="profile-detail"><span class="profile-detail-label">Auth</span><span class="profile-detail-value">${t.hasAuth?'<span style="color:var(--green)">Enabled</span>':'<span style="color:var(--text3)">Disabled</span>'}</span></div>
-      ${t.active>0?'<div class="profile-detail"><span class="profile-detail-label">Active</span><span class="profile-detail-value" style="color:var(--accent2)">'+t.active+' in-flight</span></div>':''}
-    </div></div>`;
+    const statusBadge = t.running
+      ? '<span class="profile-status-badge running">&#9679; Running</span>'
+      : '<span class="profile-status-badge stopped">&#9679; Stopped</span>';
+    return `<div class="profile-row">
+      <div class="profile-row-top">
+        <div class="profile-row-name">
+          <div class="profile-avatar${t.running ? ' green-avatar' : ''}">${esc(t.name.substring(0,2))}</div>
+          <div class="profile-name-wrap">
+            <div class="profile-name">${esc(t.name)} <span style="color:var(--text3);font-weight:400;font-size:13px">:${t.port}</span> ${statusBadge}</div>
+            <div class="profile-url">${esc(t.targetUrl)}</div>
+          </div>
+        </div>
+        <div class="profile-row-actions">
+          <button class="btn btn-sm" onclick="restartTargetAction('${esc(t.name)}')">Restart</button>
+          <button class="btn btn-sm" onclick="editTarget('${esc(t.name)}')">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteTarget('${esc(t.name)}')">Delete</button>
+        </div>
+      </div>
+      <div class="profile-details">
+        <div class="profile-detail"><span class="profile-detail-label">Port</span><span class="profile-detail-value">${t.port} <span style="color:var(--text3);font-size:11px">${t.port ? '' : '(auto)'}</span></span></div>
+        <div class="profile-detail"><span class="profile-detail-label">Forward Path</span><span class="profile-detail-value">${t.forwardPath ? 'Yes' : 'No'}</span></div>
+        <div class="profile-detail"><span class="profile-detail-label">Auth Token</span><span class="profile-detail-value">${t.hasAuth ? '<span style="color:var(--green)">Enabled</span>' : '<span style="color:var(--text3)">Disabled</span>'}</span></div>
+        ${t.active > 0 ? `<div class="profile-detail"><span class="profile-detail-label">In-Flight</span><span class="profile-detail-value" style="color:var(--accent2)">${t.active} requests</span></div>` : ''}
+      </div>
+    </div>`;
   }).join('');
 }
 function openTargetModal(target = null) {
@@ -1034,45 +1082,368 @@ function reqLogPrevPage() { if (rlPage > 1) { rlPage--; fetchRequestLogs(); } }
 function reqLogNextPage() { if (rlData && rlPage < rlData.totalPages) { rlPage++; fetchRequestLogs(); } }
 
 async function openReqDetail(id) {
-  document.getElementById('reqDetailModal').style.display = 'block';
-  document.getElementById('reqDetailContent').innerHTML = '<div style="text-align:center;padding:30px;color:var(--text3)">Loading...</div>';
+  const modal = document.getElementById('reqDetailModal');
+  modal.style.display = 'block';
+  document.getElementById('reqDetailContent').innerHTML = '<div class="rdm-loading"><div class="rdm-spinner"></div><span>Loading request details…</span></div>';
   try {
-    const res = await api('/admin/requests/' + id); if (!res.ok) { document.getElementById('reqDetailContent').innerHTML = '<div style="color:var(--red)">Failed to load.</div>'; return; }
+    const res = await api('/admin/requests/' + id);
+    if (!res.ok) { document.getElementById('reqDetailContent').innerHTML = '<div class="rdm-error">Failed to load request details.</div>'; return; }
     renderReqDetail(await res.json());
-  } catch(e) { document.getElementById('reqDetailContent').innerHTML = '<div style="color:var(--red)">Error: '+esc(e.message)+'</div>'; }
+  } catch(e) { document.getElementById('reqDetailContent').innerHTML = '<div class="rdm-error">Error: '+esc(e.message)+'</div>'; }
 }
 function closeReqDetail() { document.getElementById('reqDetailModal').style.display = 'none'; }
+
 function renderReqDetail(d) {
   const sc = d.resStatus;
-  const statusCls = !sc ? 'var(--text3)' : sc < 300 ? 'var(--green)' : sc < 400 ? 'var(--blue)' : sc < 500 ? 'var(--orange)' : 'var(--red)';
+  const statusCls = !sc ? 'rdm-st-unknown' : sc < 300 ? 'rdm-st-ok' : sc < 400 ? 'rdm-st-redirect' : sc < 500 ? 'rdm-st-client' : 'rdm-st-server';
   const ts = new Date(d.timestamp + 'Z');
   let reqH = ''; try { reqH = JSON.stringify(JSON.parse(d.reqHeaders||'{}'),null,2); } catch { reqH = d.reqHeaders||''; }
   let resH = ''; try { resH = JSON.stringify(JSON.parse(d.resHeaders||'{}'),null,2); } catch { resH = d.resHeaders||''; }
-  document.getElementById('reqDetailTitle').textContent = d.method + ' ' + d.path;
+
+  const methodColors = { GET:'var(--green)', POST:'var(--blue)', PUT:'var(--orange)', PATCH:'var(--orange)', DELETE:'var(--red)', HEAD:'var(--text3)', OPTIONS:'var(--text3)' };
+  const mColor = methodColors[d.method] || 'var(--text2)';
+
+  // Duration performance bar (relative to 5000ms)
+  const durPct = d.durationMs ? Math.min((d.durationMs / 5000) * 100, 100) : 0;
+  const durColor = d.durationMs < 200 ? 'var(--green)' : d.durationMs < 1000 ? 'var(--orange)' : 'var(--red)';
+
+  // Type badge
+  const typeBadge = d.type === 'proxy'
+    ? `<span class="rdm-badge rdm-badge-proxy">Proxy${d.profileName ? ' &middot; '+esc(d.profileName) : ''}</span>`
+    : `<span class="rdm-badge rdm-badge-target">Target${d.targetName ? ' &middot; '+esc(d.targetName) : ''}</span>`;
+
+  // Request header count
+  let reqHCount = 0; try { reqHCount = Object.keys(JSON.parse(d.reqHeaders||'{}')).length; } catch {}
+  let resHCount = 0; try { resHCount = Object.keys(JSON.parse(d.resHeaders||'{}')).length; } catch {}
+
+  document.getElementById('reqDetailTitle').innerHTML = `<span style="color:${mColor};font-weight:700">${esc(d.method)}</span> <span style="font-weight:400;color:var(--text2)">${esc(d.path)}</span>`;
+
   document.getElementById('reqDetailContent').innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
-      <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px"><div style="font-size:11px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Request ID</div><div style="font-size:12px;font-family:monospace;word-break:break-all">${esc(d.requestId)}</div></div>
-      <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px"><div style="font-size:11px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Timestamp</div><div style="font-size:13px">${esc(ts.toLocaleString())}</div></div>
-      <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px"><div style="font-size:11px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Status</div><div style="font-size:18px;font-weight:700;color:${statusCls}">${sc||'N/A'} ${esc(d.resStatusText||'')}</div></div>
-      <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px"><div style="font-size:11px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Duration</div><div style="font-size:18px;font-weight:700">${d.durationMs?fmtMs(d.durationMs):'-'}</div></div>
-      <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px"><div style="font-size:11px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Type</div><div style="font-size:13px">${d.type}${d.profileName?' / '+esc(d.profileName):''}${d.targetName?' / '+esc(d.targetName):''}</div></div>
-      <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px"><div style="font-size:11px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Client IP</div><div style="font-size:13px;font-family:monospace">${esc(d.clientIp||'unknown')}</div></div>
+    <!-- Hero Status Bar -->
+    <div class="rdm-hero ${statusCls}">
+      <div class="rdm-hero-main">
+        <div class="rdm-status-code">${sc||'—'}</div>
+        <div class="rdm-status-info">
+          <div class="rdm-status-text">${esc(d.resStatusText||'No Response')}</div>
+          <div class="rdm-status-meta">${typeBadge}</div>
+        </div>
+      </div>
+      <div class="rdm-hero-metrics">
+        <div class="rdm-metric">
+          <div class="rdm-metric-val">${d.durationMs ? fmtMs(d.durationMs) : '—'}</div>
+          <div class="rdm-metric-lbl">Duration</div>
+          ${d.durationMs ? `<div class="rdm-perf-bar"><div class="rdm-perf-fill" style="width:${durPct}%;background:${durColor}"></div></div>` : ''}
+        </div>
+        <div class="rdm-metric">
+          <div class="rdm-metric-val">${fmtBytes((d.reqBodySize||0)+(d.resBodySize||0))}</div>
+          <div class="rdm-metric-lbl">Total Size</div>
+        </div>
+      </div>
     </div>
-    <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:12px"><div style="font-size:11px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Target URL</div><div style="font-size:13px;font-family:monospace;word-break:break-all">${esc(d.targetUrl)}</div></div>
-    ${d.error?`<div style="background:var(--red-bg);border:1px solid rgba(225,112,85,0.3);border-radius:var(--radius-sm);padding:12px;margin-bottom:12px"><div style="font-size:11px;color:var(--red);text-transform:uppercase;margin-bottom:4px">Error</div><div style="font-size:13px;color:var(--red)">${esc(d.error)}</div></div>`:''}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-      <div><h4 style="font-size:14px;font-weight:600;margin-bottom:10px;color:var(--accent2)">Request</h4>
-        <div style="margin-bottom:10px"><div style="font-size:11px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Headers</div><pre style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;font-size:12px;max-height:250px;overflow:auto;white-space:pre-wrap;word-break:break-all">${esc(reqH)}</pre></div>
-        <div><div style="font-size:11px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Body (${fmtBytes(d.reqBodySize||0)})</div><pre style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;font-size:12px;max-height:350px;overflow:auto;white-space:pre-wrap;word-break:break-all">${esc(fmtBody(d.reqBody))}</pre></div>
+
+    <!-- Metadata Grid -->
+    <div class="rdm-meta-grid">
+      <div class="rdm-meta-item">
+        <div><div class="rdm-meta-lbl">Timestamp</div><div class="rdm-meta-val">${esc(ts.toLocaleString())}</div></div>
       </div>
-      <div><h4 style="font-size:14px;font-weight:600;margin-bottom:10px;color:var(--green)">Response</h4>
-        <div style="margin-bottom:10px"><div style="font-size:11px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Headers</div><pre style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;font-size:12px;max-height:250px;overflow:auto;white-space:pre-wrap;word-break:break-all">${esc(resH)}</pre></div>
-        <div><div style="font-size:11px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Body (${fmtBytes(d.resBodySize||0)})</div><pre style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;font-size:12px;max-height:350px;overflow:auto;white-space:pre-wrap;word-break:break-all">${esc(fmtBody(d.resBody))}</pre></div>
+      <div class="rdm-meta-item">
+        <div><div class="rdm-meta-lbl">Client IP</div><div class="rdm-meta-val" style="font-family:'SF Mono',ui-monospace,monospace">${esc(d.clientIp||'unknown')}</div></div>
       </div>
-    </div>`;
+      <div class="rdm-meta-item rdm-meta-wide">
+        <div style="min-width:0;flex:1">
+          <div class="rdm-meta-lbl">Request ID</div>
+          <div class="rdm-meta-val rdm-mono-val" title="${esc(d.requestId)}">${esc(d.requestId)}</div>
+        </div>
+        <button class="rdm-copy-btn" onclick="navigator.clipboard.writeText('${esc(d.requestId)}').then(()=>toast('Copied ID'))" title="Copy ID">Copy</button>
+      </div>
+      <div class="rdm-meta-item rdm-meta-wide">
+        <div style="min-width:0;flex:1">
+          <div class="rdm-meta-lbl">Target URL</div>
+          <div class="rdm-meta-val rdm-mono-val" title="${esc(d.targetUrl)}">${esc(d.targetUrl)}</div>
+        </div>
+        <button class="rdm-copy-btn" onclick="navigator.clipboard.writeText('${esc(d.targetUrl)}').then(()=>toast('Copied URL'))" title="Copy URL">Copy</button>
+      </div>
+    </div>
+
+    ${d.error?`<div class="rdm-error-banner"><div><div style="font-weight:600;margin-bottom:2px">Error</div><div>${esc(d.error)}</div></div></div>`:''}
+
+    <!-- Request / Response Tabs -->
+    <div class="rdm-tabs">
+      <button class="rdm-tab active" onclick="rdmSwitchTab(this,'rdmReqPanel')">
+        <span style="color:${mColor};font-weight:600">${esc(d.method)}</span> Request
+        <span class="rdm-tab-badge">${fmtBytes(d.reqBodySize||0)}</span>
+      </button>
+      <button class="rdm-tab" onclick="rdmSwitchTab(this,'rdmResPanel')">
+        <span style="color:${statusCls === 'rdm-st-ok' ? 'var(--green)' : statusCls === 'rdm-st-redirect' ? 'var(--blue)' : statusCls === 'rdm-st-client' ? 'var(--orange)' : statusCls === 'rdm-st-server' ? 'var(--red)' : 'var(--text3)'};font-weight:600">${sc||'—'}</span> Response
+        <span class="rdm-tab-badge">${fmtBytes(d.resBodySize||0)}</span>
+      </button>
+    </div>
+
+    <!-- Request Panel -->
+    <div id="rdmReqPanel" class="rdm-tab-panel active">
+      <div class="rdm-section">
+        <div class="rdm-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+          <span class="rdm-section-chevron">&#9660;</span>
+          <span class="rdm-section-title">Headers</span>
+          <span class="rdm-section-count">${reqHCount}</span>
+        </div>
+        <div class="rdm-section-body">
+          <div class="rdm-code-block">
+            <button class="rdm-copy-btn rdm-copy-code" onclick="rdmCopyCode(this)" title="Copy">Copy</button>
+            <pre>${rdmSyntaxHL(reqH)}</pre>
+          </div>
+        </div>
+      </div>
+      <div class="rdm-section">
+        <div class="rdm-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+          <span class="rdm-section-chevron">&#9660;</span>
+          <span class="rdm-section-title">Body</span>
+          <span class="rdm-section-count">${fmtBytes(d.reqBodySize||0)}</span>
+        </div>
+        <div class="rdm-section-body">
+          <div class="rdm-code-block">
+            <button class="rdm-copy-btn rdm-copy-code" onclick="rdmCopyCode(this)" title="Copy">Copy</button>
+            <pre>${rdmSyntaxHL(fmtBody(d.reqBody))}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Response Panel -->
+    <div id="rdmResPanel" class="rdm-tab-panel">
+      <div class="rdm-section">
+        <div class="rdm-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+          <span class="rdm-section-chevron">&#9660;</span>
+          <span class="rdm-section-title">Headers</span>
+          <span class="rdm-section-count">${resHCount}</span>
+        </div>
+        <div class="rdm-section-body">
+          <div class="rdm-code-block">
+            <button class="rdm-copy-btn rdm-copy-code" onclick="rdmCopyCode(this)" title="Copy">Copy</button>
+            <pre>${rdmSyntaxHL(resH)}</pre>
+          </div>
+        </div>
+      </div>
+      <div class="rdm-section">
+        <div class="rdm-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+          <span class="rdm-section-chevron">&#9660;</span>
+          <span class="rdm-section-title">Body</span>
+          <span class="rdm-section-count">${fmtBytes(d.resBodySize||0)}</span>
+        </div>
+        <div class="rdm-section-body">
+          <div class="rdm-code-block">
+            <button class="rdm-copy-btn rdm-copy-code" onclick="rdmCopyCode(this)" title="Copy">Copy</button>
+            <pre>${rdmSyntaxHL(fmtBody(d.resBody))}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
 }
+
+// Tab switching
+function rdmSwitchTab(btn, panelId) {
+  btn.closest('.rdm-tabs').querySelectorAll('.rdm-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  const panels = btn.closest('.rdm-body').querySelectorAll('.rdm-tab-panel');
+  panels.forEach(p => p.classList.remove('active'));
+  document.getElementById(panelId).classList.add('active');
+}
+
+// Copy code block
+function rdmCopyCode(btn) {
+  const pre = btn.parentElement.querySelector('pre');
+  navigator.clipboard.writeText(pre.textContent).then(() => toast('Copied to clipboard'));
+}
+
+// Minimal JSON syntax highlighting
+function rdmSyntaxHL(str) {
+  if (!str || str === '(empty)') return '<span style="color:var(--text3);font-style:italic">(empty)</span>';
+  return esc(str)
+    .replace(/("[^"]*")\s*:/g, '<span style="color:var(--blue)">$1</span>:')
+    .replace(/:\s*("[^"]*")/g, ': <span style="color:var(--green)">$1</span>')
+    .replace(/:\s*(\d+\.?\d*)/g, ': <span style="color:var(--orange)">$1</span>')
+    .replace(/:\s*(true|false)/g, ': <span style="color:var(--accent2)">$1</span>')
+    .replace(/:\s*(null)/g, ': <span style="color:var(--text3)">$1</span>');
+}
+
 function fmtBody(body) { if (!body) return '(empty)'; try { return JSON.stringify(JSON.parse(body),null,2); } catch { return body; } }
 </script>
-<style>@keyframes flash { 0% { background: var(--accent-bg); } 100% { background: transparent; } }</style>
+
+<!-- Request Detail Modal Styles -->
+<style>
+/* Modal panel */
+.rdm-panel {
+  max-width:960px; margin:30px auto; background:var(--surface);
+  border-radius:16px; border:1px solid var(--border);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.03);
+  animation: rdmSlideIn 0.25s ease-out;
+  overflow:hidden;
+}
+@keyframes rdmSlideIn { from { transform:translateY(20px);opacity:0; } to { transform:translateY(0);opacity:1; } }
+
+.rdm-header {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:16px 24px; border-bottom:1px solid var(--border);
+  background:var(--surface2);
+}
+.rdm-header-left { display:flex; align-items:center; gap:10px; min-width:0; }
+.rdm-title { font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rdm-close {
+  background:none; border:1px solid var(--border); color:var(--text2);
+  cursor:pointer; font-size:18px; width:32px; height:32px;
+  border-radius:8px; display:flex; align-items:center; justify-content:center;
+  transition:all 0.15s;
+}
+.rdm-close:hover { background:var(--red-bg); color:var(--red); border-color:var(--red); }
+
+.rdm-body { padding:20px 24px 24px; }
+
+/* Loading & Error */
+.rdm-loading { display:flex; align-items:center; justify-content:center; gap:12px; padding:60px 0; color:var(--text3); font-size:14px; }
+.rdm-spinner {
+  width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent2);
+  border-radius:50%;animation:rdmSpin 0.8s linear infinite;
+}
+@keyframes rdmSpin { to { transform:rotate(360deg); } }
+.rdm-error { text-align:center; padding:40px; color:var(--red); font-size:14px; }
+
+/* Hero bar */
+.rdm-hero {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:16px 20px; border-radius:12px; margin-bottom:16px;
+  border:1px solid var(--border);
+}
+.rdm-hero.rdm-st-ok      { background:rgba(0,184,148,0.06); border-color:rgba(0,184,148,0.2); }
+.rdm-hero.rdm-st-redirect { background:rgba(116,185,255,0.06); border-color:rgba(116,185,255,0.2); }
+.rdm-hero.rdm-st-client   { background:rgba(253,203,110,0.06); border-color:rgba(253,203,110,0.2); }
+.rdm-hero.rdm-st-server   { background:rgba(225,112,85,0.06); border-color:rgba(225,112,85,0.2); }
+.rdm-hero.rdm-st-unknown  { background:var(--surface2); }
+
+.rdm-hero-main { display:flex; align-items:center; gap:14px; }
+.rdm-status-code {
+  font-size:28px; font-weight:800; line-height:1;
+  font-family:'SF Mono',ui-monospace,monospace;
+}
+.rdm-st-ok .rdm-status-code      { color:var(--green); }
+.rdm-st-redirect .rdm-status-code { color:var(--blue); }
+.rdm-st-client .rdm-status-code   { color:var(--orange); }
+.rdm-st-server .rdm-status-code   { color:var(--red); }
+.rdm-st-unknown .rdm-status-code  { color:var(--text3); }
+
+.rdm-status-text { font-size:14px; font-weight:500; margin-bottom:2px; }
+.rdm-status-meta { font-size:12px; color:var(--text3); }
+
+.rdm-badge {
+  display:inline-flex; align-items:center; padding:2px 10px;
+  border-radius:6px; font-size:11px; font-weight:600; letter-spacing:0.3px;
+}
+.rdm-badge-proxy  { background:var(--accent-bg); color:var(--accent2); }
+.rdm-badge-target { background:var(--blue-bg); color:var(--blue); }
+
+.rdm-hero-metrics { display:flex; gap:24px; }
+.rdm-metric { text-align:right; min-width:80px; }
+.rdm-metric-val { font-size:16px; font-weight:700; margin-bottom:2px; }
+.rdm-metric-lbl { font-size:10px; color:var(--text3); text-transform:uppercase; letter-spacing:0.5px; }
+
+.rdm-perf-bar {
+  height:3px; width:80px; background:var(--surface3); border-radius:2px;
+  margin-top:6px; overflow:hidden; margin-left:auto;
+}
+.rdm-perf-fill { height:100%; border-radius:2px; transition:width 0.6s ease; }
+
+/* Metadata grid */
+.rdm-meta-grid {
+  display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:16px;
+}
+.rdm-meta-item {
+  display:flex; align-items:flex-start; gap:10px;
+  background:var(--surface2); padding:10px 14px; border-radius:8px;
+  border:1px solid transparent; transition:border-color 0.15s;
+}
+.rdm-meta-item:hover { border-color:var(--border2); }
+.rdm-meta-wide { grid-column:1 / -1; }
+.rdm-meta-lbl { font-size:10px; text-transform:uppercase; color:var(--text3); letter-spacing:0.5px; margin-bottom:2px; }
+.rdm-meta-val { font-size:13px; }
+.rdm-mono-val {
+  font-family:'SF Mono',ui-monospace,monospace; font-size:12px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.rdm-copy-btn {
+  background:none; border:1px solid var(--border); color:var(--text3);
+  cursor:pointer; font-size:12px; padding:3px 7px; border-radius:6px;
+  flex-shrink:0; transition:all 0.15s; line-height:1;
+}
+.rdm-copy-btn:hover { background:var(--accent-bg); color:var(--accent2); border-color:var(--accent); }
+
+/* Error banner */
+.rdm-error-banner {
+  display:flex; align-items:flex-start; gap:10px;
+  background:var(--red-bg); border:1px solid rgba(225,112,85,0.25);
+  border-radius:10px; padding:12px 16px; margin-bottom:16px;
+  color:var(--red); font-size:13px;
+}
+
+/* Tabs */
+.rdm-tabs {
+  display:flex; gap:4px; margin-bottom:0;
+  background:var(--surface2); padding:4px; border-radius:10px;
+}
+.rdm-tab {
+  flex:1; padding:8px 16px; border:none; background:none;
+  color:var(--text2); font-size:13px; font-weight:500;
+  border-radius:8px; cursor:pointer; transition:all 0.15s;
+  display:flex; align-items:center; justify-content:center; gap:8px;
+}
+.rdm-tab:hover { color:var(--text); }
+.rdm-tab.active { background:var(--surface); color:var(--text); box-shadow:0 1px 4px rgba(0,0,0,0.12); }
+.rdm-tab-badge {
+  font-size:10px; padding:1px 6px; border-radius:4px;
+  background:var(--surface3); color:var(--text3);
+}
+
+/* Tab panels */
+.rdm-tab-panel { display:none; padding-top:12px; }
+.rdm-tab-panel.active { display:block; animation:rdmFadeIn 0.2s ease; }
+@keyframes rdmFadeIn { from { opacity:0; } to { opacity:1; } }
+
+/* Collapsible sections */
+.rdm-section { margin-bottom:8px; border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+.rdm-section-header {
+  display:flex; align-items:center; gap:8px;
+  padding:10px 14px; cursor:pointer;
+  background:var(--surface2); user-select:none;
+  transition:background 0.15s;
+}
+.rdm-section-header:hover { background:var(--surface3); }
+.rdm-section-chevron { font-size:10px; color:var(--text3); transition:transform 0.2s; }
+.rdm-section.collapsed .rdm-section-chevron { transform:rotate(-90deg); }
+.rdm-section-title { font-size:13px; font-weight:600; flex:1; }
+.rdm-section-count {
+  font-size:11px; padding:1px 8px; border-radius:4px;
+  background:var(--surface3); color:var(--text3);
+}
+.rdm-section-body { transition:max-height 0.25s ease; }
+.rdm-section.collapsed .rdm-section-body { display:none; }
+
+/* Code block */
+.rdm-code-block {
+  position:relative; background:var(--bg); margin:0;
+  border-top:1px solid var(--border);
+}
+.rdm-code-block pre {
+  margin:0; padding:14px 16px; font-size:12px; line-height:1.6;
+  font-family:'SF Mono',ui-monospace,SFMono-Regular,'Cascadia Code',monospace;
+  max-height:380px; overflow:auto;
+  white-space:pre-wrap; word-break:break-all; color:var(--text);
+}
+.rdm-copy-code {
+  position:absolute; top:8px; right:8px;
+  opacity:0; transition:opacity 0.15s;
+}
+.rdm-code-block:hover .rdm-copy-code { opacity:1; }
+
+@keyframes flash { 0% { background: var(--accent-bg); } 100% { background: transparent; } }
+</style>
 </body>
 </html>

@@ -17,7 +17,7 @@ export interface ProxyProfile {
 export interface ProxyTarget {
   name: string;           // Unique identifier (e.g., "api", "webhook")
   targetUrl: string;      // Upstream URL to forward to
-  port: number;           // Dedicated listening port
+  port: number;           // Dedicated listening port (0 = auto-assign)
   authToken?: string;     // Per-target auth token (optional)
   forwardPath: boolean;   // Whether to append incoming path to target URL
 }

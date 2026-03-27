@@ -607,6 +607,256 @@ if(location.pathname===P.slice(0,-1)){_r.call(history,null,"",P+location.search+
 }
 
 /**
+ * Handle proxy requests on a dedicated port — no /proxy/{name} prefix needed.
+ * The profile is already known from the server instance.
+ * Transparent proxying: requests are forwarded as-is to the upstream.
+ */
+export async function handleDirectProxy(
+    req: Request,
+    profile: ProxyProfile,
+    startTime: number,
+): Promise<Response> {
+    const url = new URL(req.url);
+    const pathWithSearch = url.pathname + url.search;
+    const profileName = profile.name;
+
+    // Pre-compute auth value
+    const computedAuthValue = profile.apiKey
+        ? (profile.authPrefix ? `${profile.authPrefix} ${profile.apiKey}` : profile.apiKey)
+        : '';
+
+    // ── Access key validation ──
+    let validatedAccessKey: string | null = null;
+    if (profile.accessKey) {
+        const providedKey = url.searchParams.get('key');
+        const clientIP = getClientIP(req);
+
+        // A. Direct ?key= parameter
+        if (providedKey === profile.accessKey) {
+            validatedAccessKey = providedKey;
+            grantSession(profileName, clientIP, providedKey);
+        }
+
+        // B. Cookie
+        if (!validatedAccessKey) {
+            const cookies = req.headers.get('cookie') || '';
+            const m = cookies.match(/(?:^|;\s*)__proxy_key=([^;]+)/);
+            if (m && decodeURIComponent(m[1]) === profile.accessKey) {
+                validatedAccessKey = profile.accessKey;
+            }
+        }
+
+        // C. In-memory session cache
+        if (!validatedAccessKey) {
+            const sessionKey = getSessionKey(profileName, clientIP);
+            if (sessionKey === profile.accessKey) {
+                validatedAccessKey = sessionKey;
+            }
+        }
+
+        // D. Sub-resource: any request with referer from same host is allowed
+        //    (on a dedicated port, all referers from this host are ours)
+        if (!validatedAccessKey) {
+            const referer = req.headers.get('referer') || '';
+            const isSubResource = isAssetRequest(url.pathname, req.headers.get('accept'));
+            if (referer || isSubResource) {
+                validatedAccessKey = profile.accessKey;
+                grantSession(profileName, clientIP, profile.accessKey);
+            }
+        }
+
+        if (!validatedAccessKey) {
+            return jsonResponse(401, {
+                error: 'Unauthorized',
+                message: 'Valid ?key= parameter is required to access this resource',
+            });
+        }
+
+        url.searchParams.delete('key');
+    }
+
+    // ── Blocked extensions (from URL) ──
+    if (profile.blockedExtensions && profile.blockedExtensions.size > 0) {
+        const urlExt = getExtFromPath(url.pathname);
+        if (urlExt && profile.blockedExtensions.has(urlExt)) {
+            console.warn(`🚫 Proxy "${profileName}": blocked extension "${urlExt}" for ${url.pathname}`);
+            recordProxyBlocked(profileName, urlExt);
+            return jsonResponse(403, {
+                error: 'Forbidden',
+                message: `File type "${urlExt}" is not allowed`,
+            });
+        }
+    }
+
+    // ── Build target URL (transparent: path goes directly to upstream) ──
+    const targetUrl = profile.targetUrl + url.pathname + url.search;
+
+    // ── Build headers ──
+    const forwardHeaders = new Headers();
+    req.headers.forEach((value, key) => {
+        const lower = key.toLowerCase();
+        if (lower !== 'host' && lower !== 'x-forward-token') {
+            forwardHeaders.set(key, value);
+        }
+    });
+
+    if (profile.authHeader && computedAuthValue) {
+        forwardHeaders.set(profile.authHeader, computedAuthValue);
+    }
+
+    // ── Capture request body ──
+    const reqCapture = await captureRequestBody(req);
+    const requestId = req.headers.get('X-Request-ID') || crypto.randomUUID();
+    const clientIp = getClientIP(req);
+
+    const forwardBody = reqCapture.body && req.method !== 'GET' && req.method !== 'HEAD'
+        ? reqCapture.body : undefined;
+
+    // ── Telemetry ──
+    const otelSpan = startProxySpan({
+        method: req.method,
+        path: url.pathname,
+        profileName,
+        targetUrl,
+    });
+
+    // ── Fetch with redirect following ──
+    let targetResponse!: Response;
+    let currentUrl = targetUrl;
+    const upstreamOrigin = new URL(profile.targetUrl).origin;
+    const maxRedirects = 10;
+
+    try {
+        for (let i = 0; i <= maxRedirects; i++) {
+            targetResponse = await fetch(currentUrl, {
+                method: i === 0 ? req.method : 'GET',
+                headers: forwardHeaders,
+                body: i === 0 ? forwardBody : undefined,
+                redirect: 'manual',
+            });
+
+            if (targetResponse.status < 300 || targetResponse.status >= 400) break;
+
+            const location = targetResponse.headers.get('location');
+            if (!location) break;
+
+            const redirectUrl = new URL(location, currentUrl);
+
+            // External redirect → pass through to browser
+            if (redirectUrl.origin !== upstreamOrigin) {
+                endProxySpan(otelSpan, profileName, targetResponse.status, performance.now() - startTime);
+                return new Response(null, {
+                    status: targetResponse.status,
+                    headers: { 'Location': location },
+                });
+            }
+
+            // Same-origin → follow internally
+            recordProxyRedirect(profileName);
+            console.log(`↪️  PROXY [${profileName}] ${targetResponse.status} → ${redirectUrl.pathname}${redirectUrl.search}`);
+            currentUrl = redirectUrl.toString();
+
+            if (i === maxRedirects) {
+                endProxySpan(otelSpan, profileName, 502, performance.now() - startTime);
+                return jsonResponse(502, { error: 'Too many redirects from upstream', profile: profileName });
+            }
+        }
+    } catch (fetchError) {
+        const durationMs = performance.now() - startTime;
+        console.error(`❌ Proxy "${profileName}": failed to connect (${durationMs.toFixed(2)}ms):`, fetchError);
+
+        endProxySpan(otelSpan, profileName, 502, durationMs,
+            fetchError instanceof Error ? fetchError : new Error(String(fetchError)));
+
+        logRequest({
+            requestId, type: 'proxy', profileName,
+            method: req.method, path: url.pathname, targetUrl, clientIp,
+            reqHeaders: headersToRecord(forwardHeaders),
+            reqBody: reqCapture.body, reqBodySize: reqCapture.size,
+            resStatus: 502, resStatusText: 'Bad Gateway', durationMs,
+            error: fetchError instanceof Error ? fetchError.message : String(fetchError),
+        });
+
+        return jsonResponse(502, {
+            error: 'Bad Gateway',
+            message: fetchError instanceof Error ? fetchError.message : 'Failed to connect to upstream',
+            profile: profileName,
+        });
+    }
+
+    // ── Process response ──
+    const responseHeaders = new Headers(targetResponse.headers);
+    responseHeaders.delete('content-encoding');
+    responseHeaders.delete('Content-Encoding');
+    responseHeaders.delete('content-length');
+    responseHeaders.delete('Content-Length');
+    responseHeaders.set('Connection', 'close');
+
+    // Block by Content-Type (fallback check)
+    if (profile.blockedExtensions && profile.blockedExtensions.size > 0) {
+        const contentType = responseHeaders.get('content-type')?.split(';')[0]?.trim();
+        if (contentType) {
+            const ext = MIME_TO_EXT[contentType];
+            if (ext && profile.blockedExtensions.has(ext)) {
+                console.warn(`🚫 Proxy "${profileName}": blocked type "${ext}" (${contentType}) for ${url.pathname}`);
+                recordProxyBlocked(profileName, ext);
+                endProxySpan(otelSpan, profileName, 403, performance.now() - startTime);
+                return jsonResponse(403, {
+                    error: 'Forbidden',
+                    message: `File type "${ext}" is not allowed`,
+                });
+            }
+        }
+    }
+
+    // Content-Disposition for files
+    if (!responseHeaders.has('content-disposition')) {
+        const contentType = responseHeaders.get('content-type')?.split(';')[0]?.trim();
+        if (contentType) {
+            const ext = MIME_TO_EXT[contentType];
+            if (ext) {
+                const urlFilename = url.pathname.split('/').pop() || 'file';
+                const baseName = urlFilename.includes('.') ? urlFilename : `${urlFilename}${ext}`;
+                responseHeaders.set('Content-Disposition', `inline; filename="${baseName}"`);
+            }
+        }
+    }
+
+    const durationMs = performance.now() - startTime;
+    const statusEmoji = targetResponse.status < 400 ? '🔓' : '⚠️';
+    console.log(
+        `${statusEmoji} PROXY [${profileName}] ${req.method} ${url.pathname} → ${targetResponse.status} ${targetResponse.statusText} (${durationMs.toFixed(2)}ms)`
+    );
+
+    endProxySpan(otelSpan, profileName, targetResponse.status, durationMs);
+
+    // Capture response for logging
+    const resCapture = await captureResponseBody(targetResponse);
+
+    logRequest({
+        requestId, type: 'proxy', profileName,
+        method: req.method, path: url.pathname, targetUrl: currentUrl, clientIp,
+        reqHeaders: headersToRecord(forwardHeaders),
+        reqBody: reqCapture.body, reqBodySize: reqCapture.size,
+        resStatus: targetResponse.status, resStatusText: targetResponse.statusText,
+        resHeaders: headersToRecord(responseHeaders),
+        resBody: resCapture.body, resBodySize: resCapture.size,
+        durationMs,
+    });
+
+    // Set access key cookie for session persistence
+    if (validatedAccessKey) {
+        responseHeaders.append('Set-Cookie', `__proxy_key=${encodeURIComponent(validatedAccessKey)}; Path=/; SameSite=Lax`);
+    }
+
+    return new Response(resCapture.body, {
+        status: targetResponse.status,
+        statusText: targetResponse.statusText,
+        headers: responseHeaders,
+    });
+}
+
+/**
  * Helper to create JSON error responses
  */
 function jsonResponse(status: number, body: Record<string, unknown>): Response {

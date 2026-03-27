@@ -1,13 +1,16 @@
 import { loadConfig, reloadEnvFile, loadProxyProfiles, loadProxyTargets } from './config';
 import { UnauthorizedError, type ProxyProfile, type ProxyTarget } from './types';
-import { handleProxyRequest, invalidateProfileCache } from './proxy';
+import { invalidateProfileCache } from './proxy';
 import { loadPersistedProfiles, persistProfiles, mergeProfiles, validateProfileInput,
          loadPersistedTargets, persistTargets, mergeTargets, validateTargetInput } from './store';
-import { initTelemetry, shutdownTelemetry, startTargetSpan, endTargetSpan, getTelemetryConfig, getMetricsSnapshot } from './telemetry';
-import { initRequestLog, shutdownRequestLog, logRequest, captureRequestBody, captureResponseBody, headersToRecord, queryRequestLogs, getRequestLogDetail, getRequestLogStats } from './request-log';
+import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry';
+import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats } from './request-log';
 import { startTarget, stopTarget, stopAllTargets, restartTarget, getTargetStatus } from './target-server';
+import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort } from './proxy-server';
+import { loadPortAssignments, assignAllPorts, assignProxyPort, assignTargetPort, releaseProxyPort, releaseTargetPort } from './port-manager';
 import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie } from './auth';
 import { readFileSync, writeFileSync } from 'fs';
+import QRCode from 'qrcode';
 import { resolve } from 'path';
 
 // Track server start time for health checks
@@ -35,6 +38,9 @@ initRequestLog(config.requestLog);
 // Initialize auth
 initAuth(config.requestLog.dataDir, config.auth.sessionMaxAge);
 
+// Load port assignments from disk
+loadPortAssignments();
+
 // Load templates & assets
 const errorTemplate = readFileSync(resolve(import.meta.dir, 'error.html'), 'utf-8');
 const landingPage = readFileSync(resolve(import.meta.dir, 'landing.html'), 'utf-8');
@@ -58,21 +64,12 @@ function renderErrorPage(statusCode: number, title: string, message: string): Re
     });
 }
 
-// Determine if we're in multi-target mode or legacy single-target mode
-const hasNamedTargets = config.proxyTargets.length > 0;
-const hasLegacyTarget = !!config.targetUrl;
-
-console.log(`🚀 Bun-Forwarder starting...`);
-if (hasLegacyTarget) {
-    console.log(`📌 Target URL: ${config.targetUrl}`);
-    console.log(`🔀 Forward Path: ${config.forwardPath ? 'Enabled' : 'DISABLED (Fixed URL mode)'}`);
-}
-console.log(`🔐 Authentication: ${config.authToken ? 'Enabled' : 'DISABLED ⚠️'}`);
+console.log(`🚀 Midleman starting...`);
 if (config.proxyProfiles.length > 0) {
     console.log(`🔓 Proxy Profiles: ${config.proxyProfiles.map(p => p.name).join(', ')}`);
 }
-if (hasNamedTargets) {
-    console.log(`🎯 Named Targets: ${config.proxyTargets.map(t => `${t.name}(:${t.port})`).join(', ')}`);
+if (config.proxyTargets.length > 0) {
+    console.log(`🎯 Named Targets: ${config.proxyTargets.map(t => t.name).join(', ')}`);
 }
 
 /** Shorthand for JSON responses */
@@ -110,11 +107,28 @@ function checkAdminAuth(req: Request, url: URL): Response | null {
     });
 }
 
-// ─── Start named target servers ─────────────────────────────────────────────
+// ─── Async startup: assign ports, then start per-profile and per-target servers ─
+
+const portAssignments = await assignAllPorts(
+    config.proxyProfiles.map(p => p.name),
+    config.proxyTargets.map(t => ({ name: t.name, configuredPort: t.port })),
+    config.port,
+);
+
+for (const profile of config.proxyProfiles) {
+    const port = portAssignments.proxies[profile.name];
+    try {
+        startProxyServer(profile, port);
+    } catch (err) {
+        console.error(`❌ Failed to start proxy "${profile.name}":`, err instanceof Error ? err.message : err);
+    }
+}
 
 for (const target of config.proxyTargets) {
+    const assignedPort = portAssignments.targets[target.name];
+    const t = { ...target, port: assignedPort };
     try {
-        startTarget(target);
+        startTarget(t);
     } catch (err) {
         console.error(`❌ Failed to start target "${target.name}":`, err instanceof Error ? err.message : err);
     }
@@ -151,7 +165,7 @@ const server = Bun.serve({
             // Landing page
             if (url.pathname === '/' && !req.headers.get('X-Forward-Token') && !url.searchParams.get('token')) {
                 const accept = req.headers.get('Accept') || '';
-                if (accept.includes('text/html')) {
+                if (accept.includes('text/html') || accept === '*/*' || accept === '') {
                     return new Response(landingPage, {
                         status: 200,
                         headers: { 'Content-Type': 'text/html; charset=utf-8' },
@@ -174,7 +188,8 @@ const server = Bun.serve({
                 const username = (body.username || '').trim();
                 if (!username || username.length < 2) return jsonRes(400, { error: 'Username must be at least 2 characters' });
                 const totp = generateTotpSecret(username);
-                return jsonRes(200, { secret: totp.secret, otpauthUrl: totp.otpauthUrl });
+                const qrDataUrl = await QRCode.toDataURL(totp.otpauthUrl, { width: 200, margin: 1 });
+                return jsonRes(200, { secret: totp.secret, otpauthUrl: totp.otpauthUrl, qrDataUrl });
             }
 
             if (url.pathname === '/auth/register' && req.method === 'POST') {
@@ -320,10 +335,28 @@ const server = Bun.serve({
                     const persistedTgts = loadPersistedTargets();
                     config.proxyTargets = mergeTargets(envTargets, persistedTgts);
 
+                    // Reassign all ports
+                    const newPorts = await assignAllPorts(
+                        config.proxyProfiles.map(p => p.name),
+                        config.proxyTargets.map(t => ({ name: t.name, configuredPort: t.port })),
+                        config.port,
+                    );
+
+                    // Restart all proxy servers
+                    await stopAllProxyServers();
+                    for (const profile of config.proxyProfiles) {
+                        const port = newPorts.proxies[profile.name];
+                        try { startProxyServer(profile, port); } catch (err) {
+                            console.error(`❌ Failed to restart proxy "${profile.name}":`, err instanceof Error ? err.message : err);
+                        }
+                    }
+
                     // Restart all target servers
                     await stopAllTargets();
                     for (const target of config.proxyTargets) {
-                        try { startTarget(target); } catch (err) {
+                        const assignedPort = newPorts.targets[target.name];
+                        const t = { ...target, port: assignedPort };
+                        try { startTarget(t); } catch (err) {
                             console.error(`❌ Failed to restart target "${target.name}":`, err instanceof Error ? err.message : err);
                         }
                     }
@@ -377,7 +410,7 @@ const server = Bun.serve({
                         return {
                             name: t.name,
                             targetUrl: t.targetUrl,
-                            port: t.port,
+                            port: s?.port ?? t.port,
                             forwardPath: t.forwardPath,
                             hasAuth: !!t.authToken,
                             running: s?.running ?? false,
@@ -426,24 +459,21 @@ const server = Bun.serve({
                     if (error) return jsonRes(400, { error });
 
                     const input = body as Record<string, unknown>;
+                    const configuredPort = input.port ? parseInt(String(input.port), 10) : 0;
                     const target: ProxyTarget = {
                         name: (input.name as string).toLowerCase(),
                         targetUrl: (input.targetUrl as string).replace(/\/$/, ''),
-                        port: input.port as number,
+                        port: configuredPort,
                         forwardPath: input.forwardPath !== false,
                     };
                     if (input.authToken) target.authToken = input.authToken as string;
 
-                    // Check port conflicts
-                    if (target.port === config.port) {
-                        return jsonRes(400, { error: `Port ${target.port} is used by the main admin server` });
-                    }
-                    const portConflict = config.proxyTargets.find(t => t.port === target.port && t.name !== target.name);
-                    if (portConflict) {
-                        return jsonRes(400, { error: `Port ${target.port} is already used by target "${portConflict.name}"` });
-                    }
+                    // Assign a port (auto or explicit)
+                    const excludePorts = getTargetStatus().map(s => s.port).filter(Boolean);
+                    const assignedPort = await assignTargetPort(target.name, configuredPort, config.port, excludePorts);
+                    const targetWithPort = { ...target, port: assignedPort };
 
-                    // Update or add
+                    // Update or add config entry (store configured port, not assigned)
                     const idx = config.proxyTargets.findIndex(t => t.name === target.name);
                     if (idx >= 0) {
                         config.proxyTargets[idx] = target;
@@ -454,16 +484,16 @@ const server = Bun.serve({
                     // Persist
                     persistTargets(config.proxyTargets);
 
-                    // Start/restart the server
+                    // Start/restart the server with the assigned port
                     try {
-                        await restartTarget(target);
+                        await restartTarget(targetWithPort);
                     } catch (err) {
                         console.error(`⚠️  Target "${target.name}" saved but failed to start:`, err);
                     }
 
                     const action = idx >= 0 ? 'updated' : 'created';
-                    console.log(`✅ Target "${target.name}" ${action} (port ${target.port})`);
-                    return jsonRes(200, { status: action, target: target.name });
+                    console.log(`✅ Target "${target.name}" ${action} (port ${assignedPort})`);
+                    return jsonRes(200, { status: action, target: target.name, port: assignedPort });
                 }
 
                 if (url.pathname.startsWith('/admin/targets/') && req.method === 'DELETE') {
@@ -476,6 +506,7 @@ const server = Bun.serve({
                     config.proxyTargets.splice(idx, 1);
                     persistTargets(config.proxyTargets);
                     await stopTarget(name);
+                    releaseTargetPort(name);
 
                     console.log(`🗑️  Target "${name}" deleted`);
                     return jsonRes(200, { status: 'deleted', target: name });
@@ -566,6 +597,7 @@ const server = Bun.serve({
                         authPrefix: p.authPrefix,
                         hasAccessKey: !!p.accessKey,
                         blockedExtensions: p.blockedExtensions ? Array.from(p.blockedExtensions) : [],
+                        port: getProxyServerPort(p.name),
                     }));
                     return jsonRes(200, { profiles });
                 }
@@ -599,9 +631,18 @@ const server = Bun.serve({
                     persistProfiles(config.proxyProfiles);
                     invalidateProfileCache();
 
+                    // Assign port and start/restart the proxy server
+                    const excludePorts = getProxyServerStatus().map(s => s.port).filter(Boolean);
+                    const proxyPort = await assignProxyPort(profile.name, config.port, excludePorts);
+                    if (idx >= 0) {
+                        await restartProxyServer(profile.name, profile);
+                    } else {
+                        startProxyServer(profile, proxyPort);
+                    }
+
                     const action = idx >= 0 ? 'updated' : 'created';
-                    console.log(`✅ Profile "${profile.name}" ${action}`);
-                    return jsonRes(200, { status: action, profile: profile.name });
+                    console.log(`✅ Profile "${profile.name}" ${action} (port ${proxyPort})`);
+                    return jsonRes(200, { status: action, profile: profile.name, port: proxyPort });
                 }
 
                 if (url.pathname.startsWith('/admin/profiles/') && req.method === 'DELETE') {
@@ -612,146 +653,28 @@ const server = Bun.serve({
                     config.proxyProfiles.splice(idx, 1);
                     persistProfiles(config.proxyProfiles);
                     invalidateProfileCache();
+                    await stopProxyServer(name);
+                    releaseProxyPort(name);
                     console.log(`🗑️  Profile "${name}" deleted`);
                     return jsonRes(200, { status: 'deleted', profile: name });
                 }
 
                 const accept = req.headers.get('Accept') || '';
                 if (accept.includes('text/html')) {
-                    return renderErrorPage(404, 'Not Found', 'Check the <a href="/dashboard" style="color:#6c5ce7">Dashboard</a>.');
+                    return renderErrorPage(404, 'Not Found', 'Check the <a href="/dashboard" style="color:#0078d4">Dashboard</a>.');
                 }
                 return jsonRes(404, { error: 'Admin endpoint not found' });
             }
 
-            // Handle proxy bypass requests
-            if (url.pathname.startsWith('/proxy/')) {
-                if (config.proxyProfiles.length === 0) {
-                    const accept = req.headers.get('Accept') || '';
-                    if (accept.includes('text/html')) {
-                        return renderErrorPage(404, 'Not Found', 'No proxy profiles configured. Visit the <a href="/dashboard" style="color:#6c5ce7">Dashboard</a>.');
-                    }
-                    return jsonRes(404, { error: 'Not Found', message: 'No proxy profiles configured' });
-                }
-                return handleProxyRequest(req, url, config.proxyProfiles, startTime);
+            // Catch unmatched /auth/* paths (e.g. wrong method)
+            if (url.pathname.startsWith('/auth/')) {
+                return jsonRes(404, { error: 'Not Found' });
             }
 
-            // ─── Legacy single-target forwarding ────────────────────────────
-            // Only active if TARGET_URL is set AND no named targets are defined
-            if (hasLegacyTarget) {
-                // Auth check
-                if (config.authToken) {
-                    const authHeader = req.headers.get('X-Forward-Token');
-                    const authQuery = url.searchParams.get('token');
-                    const providedToken = authHeader || authQuery;
-
-                    if (providedToken !== config.authToken) {
-                        console.warn(`❌ Unauthorized ${req.method} ${url.pathname}`);
-                        const accept = req.headers.get('Accept') || '';
-                        if (accept.includes('text/html')) {
-                            return renderErrorPage(401, 'Unauthorized', 'Provide a valid token via <strong>X-Forward-Token</strong> header or <strong>?token=</strong>.');
-                        }
-                        return jsonRes(401, { error: 'Unauthorized', message: 'Valid token required' });
-                    }
-                    url.searchParams.delete('token');
-                }
-
-                const pathWithQuery = url.pathname + url.search;
-                let targetUrl: string;
-
-                if (config.forwardPath) {
-                    targetUrl = config.targetUrl + pathWithQuery;
-                } else {
-                    targetUrl = config.targetUrl;
-                    if (!url.searchParams.has('original_url')) {
-                        const separator = config.targetUrl.includes('?') ? '&' : '?';
-                        targetUrl += `${separator}original_url=${encodeURIComponent(pathWithQuery)}`;
-                    }
-                }
-
-                const forwardHeaders = new Headers();
-                req.headers.forEach((value, key) => {
-                    if (key.toLowerCase() !== 'host') forwardHeaders.set(key, value);
-                });
-                forwardHeaders.delete('X-Forward-Token');
-                forwardHeaders.set('X-Request-ID', requestId);
-                if (!config.forwardPath) forwardHeaders.set('X-Original-URL', pathWithQuery);
-
-                const reqCapture = await captureRequestBody(req);
-
-                const otelSpan = startTargetSpan({
-                    method: req.method,
-                    path: pathWithQuery,
-                    targetUrl,
-                    requestId,
-                });
-
-                const forwardBody = reqCapture.body && req.method !== 'GET' && req.method !== 'HEAD'
-                    ? reqCapture.body : req.body;
-
-                let targetResponse: Response;
-
-                try {
-                    targetResponse = await fetch(targetUrl, {
-                        method: req.method,
-                        headers: forwardHeaders,
-                        body: forwardBody,
-                    });
-                } catch (fetchError) {
-                    const durationMs = performance.now() - startTime;
-                    console.error(`❌ Failed to connect to target (${durationMs.toFixed(2)}ms):`, fetchError);
-                    endTargetSpan(otelSpan, 502, durationMs,
-                        fetchError instanceof Error ? fetchError : new Error(String(fetchError)));
-
-                    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown';
-                    logRequest({
-                        requestId, type: 'target', targetName: 'default', method: req.method, path: pathWithQuery, targetUrl, clientIp,
-                        reqHeaders: headersToRecord(forwardHeaders), reqBody: reqCapture.body, reqBodySize: reqCapture.size,
-                        resStatus: 502, resStatusText: 'Bad Gateway', durationMs,
-                        error: fetchError instanceof Error ? fetchError.message : String(fetchError),
-                    });
-
-                    return jsonRes(502, {
-                        error: 'Failed to connect to target server',
-                        message: fetchError instanceof Error ? fetchError.message : 'Unknown error',
-                        target: targetUrl,
-                    });
-                }
-
-                const resCapture = await captureResponseBody(targetResponse);
-                const responseHeaders = new Headers(targetResponse.headers);
-                responseHeaders.delete('content-encoding');
-                responseHeaders.delete('Content-Encoding');
-                responseHeaders.delete('content-length');
-                responseHeaders.delete('Content-Length');
-                responseHeaders.set('Connection', 'close');
-                responseHeaders.set('X-Request-ID', requestId);
-
-                const durationMs = performance.now() - startTime;
-                const statusEmoji = targetResponse.status < 400 ? '✅' : '⚠️';
-                console.log(`${statusEmoji} ${req.method} ${pathWithQuery} → ${targetResponse.status} ${targetResponse.statusText} (${durationMs.toFixed(2)}ms)`);
-
-                endTargetSpan(otelSpan, targetResponse.status, durationMs);
-
-                const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown';
-                logRequest({
-                    requestId, type: 'target', targetName: 'default', method: req.method, path: pathWithQuery, targetUrl, clientIp,
-                    reqHeaders: headersToRecord(forwardHeaders), reqBody: reqCapture.body, reqBodySize: reqCapture.size,
-                    resStatus: targetResponse.status, resStatusText: targetResponse.statusText,
-                    resHeaders: headersToRecord(responseHeaders), resBody: resCapture.body, resBodySize: resCapture.size,
-                    durationMs,
-                });
-
-                return new Response(resCapture.body, {
-                    status: targetResponse.status,
-                    statusText: targetResponse.statusText,
-                    headers: responseHeaders,
-                });
-            }
-
-            // No target to forward to — return helpful message
+            // Admin-only port — no forwarding
             const accept = req.headers.get('Accept') || '';
             if (accept.includes('text/html')) {
-                return renderErrorPage(404, 'Not Found', 'This is the Midleman admin server. Visit the <a href="/dashboard" style="color:#6c5ce7">Dashboard</a> to manage targets and profiles.');
+                return renderErrorPage(404, 'Not Found', 'This is the Midleman admin server. Visit the <a href="/dashboard" style="color:#0078d4">Dashboard</a> to manage targets and profiles.');
             }
             return jsonRes(404, { error: 'Not Found', message: 'No target configured on this port. Use named targets or set TARGET_URL.' });
 
@@ -780,9 +703,6 @@ const server = Bun.serve({
 });
 
 console.log(`\n✨ Admin server on http://localhost:${server.port}`);
-if (hasLegacyTarget) {
-    console.log(`📡 Forwarding to: ${config.targetUrl}`);
-}
 console.log(`💚 Health check: http://localhost:${server.port}/health`);
 console.log(`🖥️  Dashboard: http://localhost:${server.port}/dashboard`);
 console.log(`\n⚡ Ready!\n`);
@@ -792,7 +712,8 @@ const shutdown = async (signal: string) => {
     console.log(`\n🛑 ${signal} received — shutting down...`);
     isShuttingDown = true;
 
-    // Stop all named target servers
+    // Stop all proxy and target servers
+    await stopAllProxyServers();
     await stopAllTargets();
 
     // Wait for main server requests

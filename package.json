@@ -19,7 +19,8 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/qrcode": "^1.5.6"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
@@ -28,6 +29,7 @@
     "@opentelemetry/resources": "^2.6.0",
     "@opentelemetry/sdk-metrics": "^2.6.0",
     "@opentelemetry/sdk-trace-base": "^2.6.0",
-    "@opentelemetry/semantic-conventions": "^1.40.0"
+    "@opentelemetry/semantic-conventions": "^1.40.0",
+    "qrcode": "^1.5.4"
   }
 }

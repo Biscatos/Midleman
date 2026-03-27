@@ -186,13 +186,6 @@ function jsonResponse(status: number, body: Record<string, unknown>): Response {
  * Start a Bun.serve() instance for a named target.
  */
 export function startTarget(target: ProxyTarget): TargetServer {
-    // Check for port conflict with already-running targets
-    for (const [name, existing] of servers) {
-        if (existing.target.port === target.port) {
-            throw new Error(`Port ${target.port} is already used by target "${name}"`);
-        }
-    }
-
     const ts: TargetServer = {
         target,
         server: null!,
@@ -201,7 +194,7 @@ export function startTarget(target: ProxyTarget): TargetServer {
     };
 
     const server = Bun.serve({
-        port: target.port,
+        port: target.port, // 0 = OS auto-assigns a free port
         idleTimeout: 255,
 
         async fetch(req: Request): Promise<Response> {
@@ -232,7 +225,7 @@ export function startTarget(target: ProxyTarget): TargetServer {
     ts.server = server;
     servers.set(target.name, ts);
 
-    console.log(`🎯 Target "${target.name}" listening on :${target.port} → ${target.targetUrl}`);
+    console.log(`🎯 Target "${target.name}" on :${server.port} → ${target.targetUrl}`);
 
     return ts;
 }
@@ -284,12 +277,14 @@ export function getTargetServers(): Map<string, TargetServer> {
 /**
  * Get status info for all targets.
  */
-export function getTargetStatus(): { name: string; port: number; targetUrl: string; active: number; running: boolean }[] {
+export function getTargetStatus(): { name: string; port: number; targetUrl: string; active: number; running: boolean; hasAuth: boolean; forwardPath: boolean }[] {
     return Array.from(servers.values()).map(ts => ({
         name: ts.target.name,
-        port: ts.target.port,
+        port: ts.server.port ?? ts.target.port,       // actual OS-assigned port
         targetUrl: ts.target.targetUrl,
         active: ts.activeRequests,
         running: !ts.isShuttingDown,
+        hasAuth: !!ts.target.authToken,
+        forwardPath: ts.target.forwardPath,
     }));
 }

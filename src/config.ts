@@ -161,10 +161,7 @@ export function loadProxyTargets(): ProxyTarget[] {
             console.warn(`⚠️  Target "${name}" is incomplete (needs URL). Skipping.`);
             continue;
         }
-        if (!target.port) {
-            console.warn(`⚠️  Target "${name}" is incomplete (needs PORT). Skipping.`);
-            continue;
-        }
+        if (!target.port) target.port = 0; // 0 = auto-assign at startup
 
         // Validate URL format
         try {
@@ -190,29 +187,9 @@ export function loadConfig(): Config {
     const authToken = process.env.AUTH_TOKEN;
     const forwardPath = process.env.FORWARD_PATH !== 'false'; // Default: true
 
-    // AUTH_TOKEN is optional - if not provided, authentication is disabled
-    if (!authToken) {
-        console.warn('⚠️  AUTH_TOKEN not set - authentication is DISABLED');
-        console.warn('⚠️  All incoming requests will be forwarded without authentication checks');
-    }
-
-    // Validate TARGET_URL format if provided
-    if (targetUrl) {
-        try {
-            new URL(targetUrl);
-        } catch {
-            throw new ConfigError('TARGET_URL must be a valid URL');
-        }
-    }
-
     // Load proxy profiles and targets
     const proxyProfiles = loadProxyProfiles();
     const proxyTargets = loadProxyTargets();
-
-    // Warn if no target and no targets defined
-    if (!targetUrl && proxyTargets.length === 0) {
-        console.warn('⚠️  No TARGET_URL or named targets configured — main forwarding is disabled');
-    }
 
     // OpenTelemetry configuration
     const otel = {
