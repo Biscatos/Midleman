@@ -194,9 +194,9 @@ export async function handleProxyRequest(
                     resolvedProfileName = cookieProfile;
                 }
             }
-            // Also check for access key cookie
+            // Also check for profile-scoped access key cookie
             if (resolvedProfileName && !resolvedKey) {
-                const keyMatch = cookies.match(/(?:^|;\s*)__proxy_key=([^;]+)/);
+                const keyMatch = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${resolvedProfileName}=([^;]+)`));
                 if (keyMatch) resolvedKey = decodeURIComponent(keyMatch[1]);
             }
         }
@@ -252,16 +252,16 @@ export async function handleProxyRequest(
             grantSession(profileName, clientIP, providedKey);
         }
 
-        // B. Cookie
+        // B. Profile-scoped cookie (cookie name includes profileName to prevent cross-proxy auth)
         if (!validatedAccessKey) {
             const cookies = req.headers.get('cookie') || '';
-            const m = cookies.match(/(?:^|;\s*)__proxy_key=([^;]+)/);
+            const m = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${profileName}=([^;]+)`));
             if (m && decodeURIComponent(m[1]) === profile.accessKey) {
                 validatedAccessKey = profile.accessKey;
             }
         }
 
-        // C. In-memory session cache
+        // C. In-memory session cache (scoped to profileName:clientIP — no cross-proxy leakage)
         if (!validatedAccessKey) {
             const sessionKey = getSessionKey(profileName, clientIP);
             if (sessionKey === profile.accessKey) {
@@ -269,23 +269,19 @@ export async function handleProxyRequest(
             }
         }
 
-        // D. Sub-resource with Referer from same profile → always allow
-        //    The parent page was authenticated; browser is just loading assets.
-        if (!validatedAccessKey && refererIsFromProfile) {
-            validatedAccessKey = profile.accessKey;
-            grantSession(profileName, clientIP, profile.accessKey);
-            console.log(`🔑 Proxy "${profileName}": sub-resource ${remainingPath} allowed via referer`);
-        }
-
-        // E. Known asset type with active session OR referer present
-        //    Catches edge cases where referer path doesn't match exactly
-        if (!validatedAccessKey && isSubResource && referer) {
-            validatedAccessKey = profile.accessKey;
-            console.log(`🔑 Proxy "${profileName}": asset ${remainingPath} allowed (asset+referer)`);
+        // D. Sub-resource from an authenticated session
+        //    Allows CSS/JS/fonts loaded by the browser after the user authenticated at least once.
+        //    Requires an active session — prevents cold requests from bypassing auth.
+        if (!validatedAccessKey && isSubResource) {
+            const sessionKey = getSessionKey(profileName, clientIP);
+            if (sessionKey === profile.accessKey) {
+                validatedAccessKey = sessionKey;
+                console.log(`🔑 Proxy "${profileName}": sub-resource ${remainingPath} allowed via session`);
+            }
         }
 
         if (!validatedAccessKey) {
-            console.warn(`❌ Proxy "${profileName}": REJECTED ${remainingPath} | key=${!!providedKey} cookie=${!!(req.headers.get('cookie')?.includes('__proxy_key'))} session=${!!getSessionKey(profileName, clientIP)} referer=${referer.substring(0, 80)} isAsset=${isSubResource}`);
+            console.warn(`❌ Proxy "${profileName}": REJECTED ${remainingPath} | key=${!!providedKey} cookie=${!!(req.headers.get('cookie')?.includes(`__pk_${profileName}`))} session=${!!getSessionKey(profileName, clientIP)} referer=${referer.substring(0, 80)} isAsset=${isSubResource}`);
             return jsonResponse(401, {
                 error: 'Unauthorized',
                 message: 'Valid ?key= parameter is required to access this resource',
@@ -346,9 +342,8 @@ export async function handleProxyRequest(
         targetUrl,
     });
 
-    // Build request body for forwarding
-    const forwardBody = reqCapture.body && req.method !== 'GET' && req.method !== 'HEAD'
-        ? reqCapture.body : undefined;
+    // Build request body for forwarding — use original stream, not the captured string
+    const forwardBody = req.method !== 'GET' && req.method !== 'HEAD' ? req.body : undefined;
 
     try {
         for (let i = 0; i <= maxRedirects; i++) {
@@ -421,15 +416,21 @@ export async function handleProxyRequest(
     }
 
     // Stream the response directly — no buffering in memory
-    const responseHeaders = new Headers(targetResponse.headers);
-
-    // Clean up compression headers (fetch auto-decompresses)
-    responseHeaders.delete('content-encoding');
-    responseHeaders.delete('Content-Encoding');
-    responseHeaders.delete('content-length');
-    responseHeaders.delete('Content-Length');
-
-    // Use Transfer-Encoding chunked for streaming
+    const responseHeaders = new Headers();
+    // Copy all headers except ones we'll rewrite, handling multiple Set-Cookie correctly
+    for (const [key, value] of (targetResponse.headers as any)) {
+        const lower = key.toLowerCase();
+        if (lower === 'content-encoding' || lower === 'content-length') continue;
+        if (lower === 'set-cookie') {
+            // Strip Domain= so upstream cookies work on our proxy host (e.g. localhost)
+            const rewritten = value
+                .replace(/;\s*domain=[^;]*/gi, '')
+                .replace(/;\s*samesite=none/gi, '; SameSite=Lax');
+            responseHeaders.append('set-cookie', rewritten);
+            continue;
+        }
+        responseHeaders.set(key, value);
+    }
     responseHeaders.set('Connection', 'close');
 
     // Block by Content-Type if URL had no extension (fallback check)
@@ -576,9 +577,9 @@ if(location.pathname===P.slice(0,-1)){_r.call(history,null,"",P+location.search+
         html = html.replace(/(<head[^>]*>(?:<base[^>]*>)?)/i, `$1${patchScript}`);
 
         // 5. Set cookies for deep sub-resource resolution (CSS → fonts)
-        responseHeaders.append('Set-Cookie', `__proxy_profile=${profileName}; Path=/proxy/; SameSite=Lax`);
+        responseHeaders.append('Set-Cookie', `__proxy_profile=${profileName}; Path=/proxy/${profileName}/; SameSite=Lax`);
         if (validatedAccessKey) {
-            responseHeaders.append('Set-Cookie', `__proxy_key=${encodeURIComponent(validatedAccessKey)}; Path=/proxy/; SameSite=Lax`);
+            responseHeaders.append('Set-Cookie', `__pk_${profileName}=${encodeURIComponent(validatedAccessKey)}; Path=/proxy/${profileName}/; SameSite=Lax`);
         }
 
         responseHeaders.delete('content-length');
@@ -593,13 +594,15 @@ if(location.pathname===P.slice(0,-1)){_r.call(history,null,"",P+location.search+
 
     // Set profile cookie on ALL proxy responses (not just HTML)
     // This ensures the cookie is available for deep sub-resources on subsequent requests
-    responseHeaders.append('Set-Cookie', `__proxy_profile=${profileName}; Path=/proxy/; SameSite=Lax`);
+    responseHeaders.append('Set-Cookie', `__proxy_profile=${profileName}; Path=/proxy/${profileName}/; SameSite=Lax`);
     if (validatedAccessKey) {
-        responseHeaders.append('Set-Cookie', `__proxy_key=${encodeURIComponent(validatedAccessKey)}; Path=/proxy/; SameSite=Lax`);
+        responseHeaders.append('Set-Cookie', `__pk_${profileName}=${encodeURIComponent(validatedAccessKey)}; Path=/proxy/${profileName}/; SameSite=Lax`);
     }
 
-    // Return captured body for non-HTML responses
-    return new Response(resCapture.body, {
+    // Stream the original response body directly — never convert binary to string.
+    // resCapture was only used for logging; targetResponse.body is still intact
+    // because captureResponseBody clones text responses and skips binary ones.
+    return new Response(targetResponse.body, {
         status: targetResponse.status,
         statusText: targetResponse.statusText,
         headers: responseHeaders,
@@ -637,16 +640,16 @@ export async function handleDirectProxy(
             grantSession(profileName, clientIP, providedKey);
         }
 
-        // B. Cookie
+        // B. Profile-scoped cookie (cookie name includes profileName to prevent cross-proxy auth)
         if (!validatedAccessKey) {
             const cookies = req.headers.get('cookie') || '';
-            const m = cookies.match(/(?:^|;\s*)__proxy_key=([^;]+)/);
+            const m = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${profileName}=([^;]+)`));
             if (m && decodeURIComponent(m[1]) === profile.accessKey) {
                 validatedAccessKey = profile.accessKey;
             }
         }
 
-        // C. In-memory session cache
+        // C. In-memory session cache (scoped to profileName:clientIP — no cross-proxy leakage)
         if (!validatedAccessKey) {
             const sessionKey = getSessionKey(profileName, clientIP);
             if (sessionKey === profile.accessKey) {
@@ -654,14 +657,16 @@ export async function handleDirectProxy(
             }
         }
 
-        // D. Sub-resource: any request with referer from same host is allowed
-        //    (on a dedicated port, all referers from this host are ours)
+        // D. Sub-resource from an authenticated session
+        //    Allows CSS/JS/fonts loaded by the browser after the user authenticated at least once.
+        //    Requires an active session — prevents cold requests from bypassing auth.
         if (!validatedAccessKey) {
-            const referer = req.headers.get('referer') || '';
             const isSubResource = isAssetRequest(url.pathname, req.headers.get('accept'));
-            if (referer || isSubResource) {
-                validatedAccessKey = profile.accessKey;
-                grantSession(profileName, clientIP, profile.accessKey);
+            if (isSubResource) {
+                const sessionKey = getSessionKey(profileName, clientIP);
+                if (sessionKey === profile.accessKey) {
+                    validatedAccessKey = sessionKey;
+                }
             }
         }
 
@@ -709,8 +714,7 @@ export async function handleDirectProxy(
     const requestId = req.headers.get('X-Request-ID') || crypto.randomUUID();
     const clientIp = getClientIP(req);
 
-    const forwardBody = reqCapture.body && req.method !== 'GET' && req.method !== 'HEAD'
-        ? reqCapture.body : undefined;
+    const forwardBody = req.method !== 'GET' && req.method !== 'HEAD' ? req.body : undefined;
 
     // ── Telemetry ──
     const otelSpan = startProxySpan({
@@ -785,11 +789,23 @@ export async function handleDirectProxy(
     }
 
     // ── Process response ──
-    const responseHeaders = new Headers(targetResponse.headers);
-    responseHeaders.delete('content-encoding');
-    responseHeaders.delete('Content-Encoding');
-    responseHeaders.delete('content-length');
-    responseHeaders.delete('Content-Length');
+    const responseHeaders = new Headers();
+    // Copy all headers except ones we'll rewrite, handling multiple Set-Cookie correctly
+    for (const [key, value] of (targetResponse.headers as any)) {
+        const lower = key.toLowerCase();
+        if (lower === 'content-encoding' || lower === 'content-length') continue;
+        if (lower === 'set-cookie') {
+            // Strip Domain= so the browser sends this cookie back to our proxy host.
+            // Without this, cookies set by the upstream (e.g. Domain=payment.ucall.co.ao)
+            // are never sent by the browser to localhost:XXXX, causing 401 on sub-resources.
+            const rewritten = value
+                .replace(/;\s*domain=[^;]*/gi, '')
+                .replace(/;\s*samesite=none/gi, '; SameSite=Lax');
+            responseHeaders.append('set-cookie', rewritten);
+            continue;
+        }
+        responseHeaders.set(key, value);
+    }
     responseHeaders.set('Connection', 'close');
 
     // Block by Content-Type (fallback check)
@@ -844,12 +860,13 @@ export async function handleDirectProxy(
         durationMs,
     });
 
-    // Set access key cookie for session persistence
+    // Set profile-scoped access key cookie for session persistence
+    // Cookie name includes profileName to prevent cross-proxy authentication leakage
     if (validatedAccessKey) {
-        responseHeaders.append('Set-Cookie', `__proxy_key=${encodeURIComponent(validatedAccessKey)}; Path=/; SameSite=Lax`);
+        responseHeaders.append('Set-Cookie', `__pk_${profileName}=${encodeURIComponent(validatedAccessKey)}; Path=/; SameSite=Lax`);
     }
 
-    return new Response(resCapture.body, {
+    return new Response(targetResponse.body, {
         status: targetResponse.status,
         statusText: targetResponse.statusText,
         headers: responseHeaders,

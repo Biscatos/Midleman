@@ -1,251 +1,421 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" type="image/svg+xml" href="/logo.svg">
-<title>Midleman — High-Performance Proxy Server</title>
-<style>
-  :root {
-    --bg: #0f1117;
-    --bg2: #161822;
-    --surface: #1c1e2b;
-    --border: #2e3148;
-    --text: #e4e6f0;
-    --text2: #8b8fa7;
-    --text3: #5d6180;
-    --accent: #0078d4;
-    --accent2: #2899f5;
-    --green: #00b894;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    min-height: 100vh;
-    -webkit-font-smoothing: antialiased;
-  }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/png" href="/logo.png">
+  <title>Midleman — Proxy Server</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
-  .hero {
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    padding: 40px 24px;
-    position: relative;
-    overflow: hidden;
-  }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
-  /* Subtle grid background */
-  .hero::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background-image:
-      linear-gradient(rgba(0,120,212,0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(0,120,212,0.03) 1px, transparent 1px);
-    background-size: 60px 60px;
-    pointer-events: none;
-  }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0a0a0c;
+      color: #d4d4d8;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
 
-  /* Glow */
-  .hero::after {
-    content: '';
-    position: absolute;
-    top: 20%;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 600px;
-    height: 400px;
-    background: radial-gradient(ellipse, rgba(0,120,212,0.12) 0%, transparent 70%);
-    pointer-events: none;
-  }
+    /* top bar */
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 32px;
+      border-bottom: 1px solid #1a1a1f;
+    }
 
-  .hero-content { position: relative; z-index: 1; max-width: 640px; }
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
 
-  .logo {
-    width: 72px;
-    height: 72px;
-    border-radius: 18px;
-    margin-bottom: 28px;
-    box-shadow: 0 4px 24px rgba(0,120,212,0.3);
-  }
+    .topbar-left img {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+    }
 
-  h1 {
-    font-size: 48px;
-    font-weight: 900;
-    letter-spacing: -1.5px;
-    line-height: 1.1;
-    margin-bottom: 16px;
-  }
-  h1 span {
-    background: linear-gradient(135deg, var(--accent), var(--accent2), var(--green));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
+    .topbar-left span {
+      font-weight: 600;
+      font-size: 15px;
+      color: #e4e4e7;
+      letter-spacing: -0.3px;
+    }
 
-  .subtitle {
-    font-size: 18px;
-    color: var(--text2);
-    line-height: 1.6;
-    margin-bottom: 36px;
-    max-width: 480px;
-    margin-left: auto;
-    margin-right: auto;
-  }
+    .topbar-right {
+      display: flex;
+      gap: 8px;
+    }
 
-  .hero-actions {
-    display: flex;
-    gap: 12px;
-    justify-content: center;
-    margin-bottom: 48px;
-  }
+    .topbar-right a {
+      font-size: 13px;
+      color: #71717a;
+      text-decoration: none;
+      padding: 6px 12px;
+      border-radius: 6px;
+      transition: color 0.15s, background 0.15s;
+    }
 
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 28px;
-    border-radius: 12px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--text);
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-    text-decoration: none;
-    transition: all 0.2s;
-  }
-  .btn:hover { background: var(--bg2); border-color: #3a3d55; }
-  .btn-primary {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
-    box-shadow: 0 4px 16px rgba(0,120,212,0.3);
-  }
-  .btn-primary:hover { background: var(--accent2); border-color: var(--accent2); }
+    .topbar-right a:hover {
+      color: #d4d4d8;
+      background: #18181b;
+    }
 
-  .features {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 16px;
-    max-width: 640px;
-    width: 100%;
-  }
+    .topbar-right a.primary {
+      color: #e4e4e7;
+      background: #0078d4;
+    }
 
-  .feature {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 20px 16px;
-    text-align: left;
-    transition: border-color 0.2s;
-  }
-  .feature:hover { border-color: #3a3d55; }
-  .feature-icon {
-    font-size: 20px;
-    margin-bottom: 10px;
-    width: 36px;
-    height: 36px;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0,120,212,0.1);
-  }
-  .feature h3 {
-    font-size: 13px;
-    font-weight: 600;
-    margin-bottom: 4px;
-  }
-  .feature p {
-    font-size: 12px;
-    color: var(--text3);
-    line-height: 1.5;
-  }
+    .topbar-right a.primary:hover {
+      background: #005ea6;
+    }
 
-  .status-bar {
-    margin-top: 48px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    color: var(--text3);
-  }
-  .status-bar .dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: var(--text3);
-  }
-  .status-bar .dot.online { background: var(--green); box-shadow: 0 0 8px var(--green); }
-  .status-bar .dot.offline { background: #e17055; }
+    /* main content */
+    .main {
+      max-width: 580px;
+      margin: 0 auto;
+      padding: 80px 24px 60px;
+    }
 
-  @media (max-width: 640px) {
-    h1 { font-size: 32px; }
-    .subtitle { font-size: 16px; }
-    .features { grid-template-columns: 1fr; }
-    .hero-actions { flex-direction: column; align-items: center; }
-  }
-</style>
+    /* status pill */
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 12px;
+      border-radius: 6px;
+      background: #111114;
+      border: 1px solid #1f1f24;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: #52525b;
+      margin-bottom: 32px;
+    }
+
+    .status-pill .indicator {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #3f3f46;
+    }
+
+    .status-pill .indicator.up {
+      background: #16a34a;
+    }
+
+    .status-pill .indicator.down {
+      background: #dc2626;
+    }
+
+    h1 {
+      font-size: 36px;
+      font-weight: 700;
+      color: #fafafa;
+      letter-spacing: -1px;
+      line-height: 1.2;
+      margin-bottom: 14px;
+    }
+
+    .desc {
+      font-size: 15px;
+      color: #71717a;
+      line-height: 1.7;
+      margin-bottom: 36px;
+    }
+
+    /* actions */
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 56px;
+    }
+
+    .actions a {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 8px;
+      text-decoration: none;
+      transition: all 0.15s;
+    }
+
+    .actions .go {
+      background: #0078d4;
+      color: #ffffff;
+    }
+
+    .actions .go:hover {
+      background: #005ea6;
+      transform: translateY(-1px);
+    }
+
+    .actions .sec {
+      background: transparent;
+      color: #a1a1aa;
+      border: 1px solid #27272a;
+    }
+
+    .actions .sec:hover {
+      border-color: #3f3f46;
+      color: #d4d4d8;
+    }
+
+    /* info grid */
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 0;
+      border: 1px solid #1a1a1f;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 48px;
+    }
+
+    .grid-item {
+      padding: 22px 18px;
+      border-right: 1px solid #1a1a1f;
+      background: #0e0e11;
+    }
+
+    .grid-item:last-child {
+      border-right: none;
+    }
+
+    .grid-item .label {
+      font-size: 11px;
+      font-weight: 500;
+      color: #52525b;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .grid-item .val {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: #a1a1aa;
+    }
+
+    .grid-item .val.ok {
+      color: #16a34a;
+    }
+
+    .grid-item .val.err {
+      color: #dc2626;
+    }
+
+    /* what it does */
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: #3f3f46;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 16px;
+    }
+
+    .cards {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      background: #1a1a1f;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid #1a1a1f;
+    }
+
+    .card {
+      padding: 18px 20px;
+      background: #0e0e11;
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+    }
+
+    .card-num {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: #3f3f46;
+      min-width: 20px;
+      padding-top: 1px;
+    }
+
+    .card-body h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #d4d4d8;
+      margin-bottom: 4px;
+    }
+
+    .card-body p {
+      font-size: 13px;
+      color: #52525b;
+      line-height: 1.5;
+    }
+
+    /* footer */
+    footer {
+      max-width: 580px;
+      margin: 40px auto;
+      padding: 0 24px;
+      font-size: 12px;
+      color: #27272a;
+    }
+
+    @media (max-width: 600px) {
+      .main {
+        padding: 48px 20px 40px;
+      }
+
+      h1 {
+        font-size: 28px;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .grid-item {
+        border-right: none;
+        border-bottom: 1px solid #1a1a1f;
+      }
+
+      .grid-item:last-child {
+        border-bottom: none;
+      }
+
+      .actions {
+        flex-direction: column;
+      }
+
+      .actions a {
+        justify-content: center;
+      }
+    }
+  </style>
 </head>
+
 <body>
 
-<section class="hero">
-  <div class="hero-content">
-    <img src="/logo.svg" alt="Midleman" class="logo">
-    <h1><span>Midleman</span></h1>
-    <p class="subtitle">
-      High-performance HTTP proxy server with authentication bypass,
-      per-profile routing, and built-in observability.
-    </p>
-    <div class="hero-actions">
-      <a href="/dashboard" class="btn btn-primary">Open Dashboard</a>
-      <a href="/health" class="btn">Health Check</a>
+  <div class="topbar">
+    <div class="topbar-left">
+      <img src="/logo.png" alt="Midleman">
+      <span>Midleman</span>
     </div>
-
-    <div class="features">
-      <div class="feature">
-        <div class="feature-icon"></div>
-        <h3>Fast Proxy</h3>
-        <p>Stream-based forwarding with zero buffering on Bun runtime.</p>
-      </div>
-      <div class="feature">
-        <div class="feature-icon"></div>
-        <h3>Auth Bypass</h3>
-        <p>Per-profile API key injection for public access to protected APIs.</p>
-      </div>
-      <div class="feature">
-        <div class="feature-icon"></div>
-        <h3>Telemetry</h3>
-        <p>Built-in metrics with OpenTelemetry export and live dashboard.</p>
-      </div>
-    </div>
-
-    <div class="status-bar" id="statusBar">
-      <span class="dot" id="landingDot"></span>
-      <span id="landingStatus">Checking status...</span>
+    <div class="topbar-right">
+      <a href="/health">Status</a>
+      <a href="/dashboard" class="primary">Dashboard</a>
     </div>
   </div>
-</section>
 
-<script>
-(async function() {
-  try {
-    const res = await fetch('/health');
-    const data = await res.json();
-    document.getElementById('landingDot').className = 'dot online';
-    const s = data.uptime;
-    const uptime = s < 60 ? s+'s' : s < 3600 ? Math.floor(s/60)+'m' : Math.floor(s/3600)+'h '+Math.floor(s%3600/60)+'m';
-    document.getElementById('landingStatus').textContent = 'Online — ' + uptime + ' uptime — ' + data.proxyProfiles + ' profiles active';
-  } catch {
-    document.getElementById('landingDot').className = 'dot offline';
-    document.getElementById('landingStatus').textContent = 'Server unreachable';
-  }
-})();
-</script>
+  <main class="main">
+
+    <div class="status-pill" id="statusPill">
+      <span class="indicator" id="ind"></span>
+      <span id="statusText">checking...</span>
+    </div>
+
+    <h1>HTTP proxy server with built-in auth</h1>
+    <p class="desc">
+      Route requests through profile-based proxy configurations.
+      Inject API keys, bypass authentication, and monitor everything in real time.
+    </p>
+
+    <div class="actions">
+      <a href="/dashboard" class="go">Open dashboard &rarr;</a>
+      <a href="/health" class="sec">View health</a>
+    </div>
+
+    <div class="grid" id="statsGrid">
+      <div class="grid-item">
+        <div class="label">Status</div>
+        <div class="val" id="gStatus">--</div>
+      </div>
+      <div class="grid-item">
+        <div class="label">Uptime</div>
+        <div class="val" id="gUptime">--</div>
+      </div>
+      <div class="grid-item">
+        <div class="label">Profiles</div>
+        <div class="val" id="gProfiles">--</div>
+      </div>
+    </div>
+
+    <div class="section-title">How it works</div>
+    <div class="cards">
+      <div class="card">
+        <span class="card-num">01</span>
+        <div class="card-body">
+          <h3>Proxy forwarding</h3>
+          <p>Requests are streamed directly to target servers with zero buffering. Runs on Bun for minimal overhead.</p>
+        </div>
+      </div>
+      <div class="card">
+        <span class="card-num">02</span>
+        <div class="card-body">
+          <h3>Auth injection</h3>
+          <p>Each profile has its own API keys and headers. Clients hit the proxy without credentials — the proxy adds
+            them.</p>
+        </div>
+      </div>
+      <div class="card">
+        <span class="card-num">03</span>
+        <div class="card-body">
+          <h3>Live telemetry</h3>
+          <p>Request counts, latency, and errors tracked per profile. Exportable via OpenTelemetry or the built-in
+            dashboard.</p>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <footer>midleman</footer>
+
+  <script>
+    (async () => {
+      const ind = document.getElementById('ind');
+      const txt = document.getElementById('statusText');
+      const gStatus = document.getElementById('gStatus');
+      const gUptime = document.getElementById('gUptime');
+      const gProfiles = document.getElementById('gProfiles');
+
+      try {
+        const r = await fetch('/health');
+        const d = await r.json();
+
+        ind.classList.add('up');
+        txt.textContent = 'operational';
+
+        gStatus.textContent = 'online';
+        gStatus.classList.add('ok');
+
+        const s = d.uptime;
+        if (s < 60) gUptime.textContent = Math.floor(s) + 's';
+        else if (s < 3600) gUptime.textContent = Math.floor(s / 60) + 'm ' + Math.floor(s % 60) + 's';
+        else gUptime.textContent = Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+
+        gProfiles.textContent = d.proxyProfiles;
+      } catch {
+        ind.classList.add('down');
+        txt.textContent = 'unreachable';
+        gStatus.textContent = 'offline';
+        gStatus.classList.add('err');
+      }
+    })();
+  </script>
 </body>
+
 </html>

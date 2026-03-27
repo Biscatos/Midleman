@@ -130,12 +130,19 @@ async function handleTargetForward(
 
     // Capture response
     const resCapture = await captureResponseBody(targetResponse);
-    const responseHeaders = new Headers(targetResponse.headers);
-
-    responseHeaders.delete('content-encoding');
-    responseHeaders.delete('Content-Encoding');
-    responseHeaders.delete('content-length');
-    responseHeaders.delete('Content-Length');
+    const responseHeaders = new Headers();
+    for (const [key, value] of (targetResponse.headers as any)) {
+        const lower = key.toLowerCase();
+        if (lower === 'content-encoding' || lower === 'content-length') continue;
+        if (lower === 'set-cookie') {
+            const rewritten = value
+                .replace(/;\s*domain=[^;]*/gi, '')
+                .replace(/;\s*samesite=none/gi, '; SameSite=Lax');
+            responseHeaders.append('set-cookie', rewritten);
+            continue;
+        }
+        responseHeaders.set(key, value);
+    }
     responseHeaders.set('Connection', 'close');
     responseHeaders.set('X-Request-ID', requestId);
 
@@ -166,7 +173,7 @@ async function handleTargetForward(
         durationMs,
     });
 
-    return new Response(resCapture.body, {
+    return new Response(targetResponse.body, {
         status: targetResponse.status,
         statusText: targetResponse.statusText,
         headers: responseHeaders,

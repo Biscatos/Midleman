@@ -1,399 +1,1452 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" type="image/svg+xml" href="/logo.svg">
-<title>Midleman Dashboard</title>
-<style>
-  /* ─── Theme Variables ─────────────────────────────────────────────────────── */
-  [data-theme="dark"] {
-    --bg: #0f1117; --bg2: #161822; --surface: #1c1e2b; --surface2: #242736; --surface3: #2c2f42;
-    --border: #2e3148; --border2: #3a3d55;
-    --text: #e4e6f0; --text2: #8b8fa7; --text3: #5d6180;
-    --accent: #0078d4; --accent2: #2899f5; --accent-bg: rgba(0,120,212,0.12);
-    --green: #00b894; --green-bg: rgba(0,184,148,0.12);
-    --red: #e17055; --red-bg: rgba(225,112,85,0.12);
-    --orange: #fdcb6e; --orange-bg: rgba(253,203,110,0.12);
-    --blue: #74b9ff; --blue-bg: rgba(116,185,255,0.12);
-    --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.2);
-    --topbar-bg: rgba(15,17,23,0.85);
-    --code-bg: var(--surface2);
-  }
-  [data-theme="light"] {
-    --bg: #f0f2f5; --bg2: #ffffff; --surface: #ffffff; --surface2: #f5f6fa; --surface3: #eceef4;
-    --border: #dde1eb; --border2: #c8cdd9;
-    --text: #1a1d27; --text2: #6b7185; --text3: #9096a9;
-    --accent: #0078d4; --accent2: #005ea6; --accent-bg: rgba(0,120,212,0.08);
-    --green: #00a17d; --green-bg: rgba(0,161,125,0.08);
-    --red: #d35400; --red-bg: rgba(211,84,0,0.08);
-    --orange: #c8980a; --orange-bg: rgba(200,152,10,0.08);
-    --blue: #2e86de; --blue-bg: rgba(46,134,222,0.08);
-    --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04);
-    --topbar-bg: rgba(255,255,255,0.85);
-    --code-bg: #eceef4;
-  }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/png" href="/logo.png">
+  <title>Midleman Dashboard</title>
+  <style>
+    /* ─── Theme Variables ─────────────────────────────────────────────────────── */
+    [data-theme="dark"] {
+      --bg: #0f1117;
+      --bg2: #161822;
+      --surface: #1c1e2b;
+      --surface2: #242736;
+      --surface3: #2c2f42;
+      --border: #2e3148;
+      --border2: #3a3d55;
+      --text: #e4e6f0;
+      --text2: #8b8fa7;
+      --text3: #5d6180;
+      --accent: #0078d4;
+      --accent2: #2899f5;
+      --accent-bg: rgba(0, 120, 212, 0.12);
+      --green: #00b894;
+      --green-bg: rgba(0, 184, 148, 0.12);
+      --red: #e17055;
+      --red-bg: rgba(225, 112, 85, 0.12);
+      --orange: #fdcb6e;
+      --orange-bg: rgba(253, 203, 110, 0.12);
+      --blue: #74b9ff;
+      --blue-bg: rgba(116, 185, 255, 0.12);
+      --shadow: none;
+      --topbar-bg: rgba(15, 17, 23, 0.85);
+      --code-bg: var(--surface2);
+    }
 
-  :root { --radius: 12px; --radius-sm: 8px; --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: var(--bg); color: var(--text);
-    min-height: 100vh; -webkit-font-smoothing: antialiased;
-    transition: background var(--transition), color var(--transition);
-  }
+    [data-theme="light"] {
+      --bg: #f0f2f5;
+      --bg2: #ffffff;
+      --surface: #ffffff;
+      --surface2: #f5f6fa;
+      --surface3: #eceef4;
+      --border: #dde1eb;
+      --border2: #c8cdd9;
+      --text: #1a1d27;
+      --text2: #6b7185;
+      --text3: #9096a9;
+      --accent: #0078d4;
+      --accent2: #005ea6;
+      --accent-bg: rgba(0, 120, 212, 0.08);
+      --green: #00a17d;
+      --green-bg: rgba(0, 161, 125, 0.08);
+      --red: #d35400;
+      --red-bg: rgba(211, 84, 0, 0.08);
+      --orange: #c8980a;
+      --orange-bg: rgba(200, 152, 10, 0.08);
+      --blue: #2e86de;
+      --blue-bg: rgba(46, 134, 222, 0.08);
+      --shadow: none;
+      --topbar-bg: rgba(255, 255, 255, 0.85);
+      --code-bg: #eceef4;
+    }
 
-  /* ─── Layout ──────────────────────────────────────────────────────────────── */
-  .app { display: flex; flex-direction: column; min-height: 100vh; }
+    :root {
+      --radius: 12px;
+      --radius-sm: 8px;
+      --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
 
-  /* ─── Navbar ──────────────────────────────────────────────────────────────── */
-  .navbar {
-    position: sticky; top: 0; z-index: 50;
-    background: var(--topbar-bg); backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--border);
-    transition: background var(--transition);
-  }
-  .navbar-inner {
-    max-width: 1280px; margin: 0 auto; padding: 0 24px;
-    height: 60px; display: flex; align-items: center; gap: 0;
-  }
-  .navbar-brand {
-    display: flex; align-items: center; gap: 10px; margin-right: 32px; flex-shrink: 0;
-    text-decoration: none; color: inherit;
-  }
-  .navbar-brand img { width: 32px; height: 32px; border-radius: 8px; }
-  .navbar-brand-name { font-size: 16px; font-weight: 700; letter-spacing: -0.3px; color: var(--text); }
-  .navbar-brand-name span { color: var(--accent2); }
-  .navbar-nav { display: flex; align-items: stretch; flex: 1; height: 60px; gap: 0; }
-  .nav-link {
-    display: flex; align-items: center; gap: 7px; padding: 0 16px;
-    font-size: 13.5px; font-weight: 500; color: var(--text2);
-    border: none; background: none; cursor: pointer;
-    border-bottom: 2px solid transparent; margin-bottom: -1px;
-    transition: color var(--transition), border-color var(--transition);
-    white-space: nowrap;
-  }
-  .nav-link:hover { color: var(--text); }
-  .nav-link.active { color: var(--accent2); border-bottom-color: var(--accent2); }
-  .nav-link svg { width: 15px; height: 15px; flex-shrink: 0; }
-  .nav-badge {
-    font-size: 10px; padding: 1px 6px; border-radius: 10px;
-    background: var(--surface3); color: var(--text3); font-weight: 600;
-  }
-  .nav-link.active .nav-badge { background: var(--accent-bg); color: var(--accent2); }
-  .navbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
-  .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-  .status-dot.online { background: var(--green); box-shadow: 0 0 6px var(--green); }
-  .status-dot.offline { background: var(--red); }
-  .navbar-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); padding: 4px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; }
-  .navbar-user { font-size: 12px; font-weight: 600; color: var(--accent2); padding: 4px 10px; background: var(--accent-bg); border-radius: 6px; }
-  .theme-toggle {
-    background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm);
-    padding: 6px 8px; cursor: pointer; color: var(--text2); display: flex; align-items: center;
-    transition: all var(--transition); font-size: 15px; line-height: 1;
-  }
-  .theme-toggle:hover { background: var(--surface3); color: var(--text); }
-  .logout-btn {
-    background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
-    color: var(--text3); cursor: pointer; padding: 6px 8px; display: flex; align-items: center;
-    transition: all var(--transition); font-size: 13px;
-  }
-  .logout-btn:hover { border-color: var(--red); color: var(--red); background: var(--red-bg); }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
-  /* ─── Content ─────────────────────────────────────────────────────────────── */
-  .content { padding: 28px 24px; max-width: 1280px; margin: 0 auto; width: 100%; }
-  .page { display: none; } .page.active { display: block; }
-  .page-header { margin-bottom: 24px; }
-  .page-header h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin-bottom: 6px; }
-  .page-header p { font-size: 14px; color: var(--text2); }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      transition: background var(--transition), color var(--transition);
+    }
 
-  /* ─── Cards ───────────────────────────────────────────────────────────────── */
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 20px; box-shadow: var(--shadow); transition: background var(--transition), border var(--transition); }
-  .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
-  .card-header h3 { font-size: 14px; font-weight: 600; }
-  .card-body { padding: 20px; }
+    /* ─── Layout ──────────────────────────────────────────────────────────────── */
+    .app {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
 
-  /* ─── Stats Grid ──────────────────────────────────────────────────────────── */
-  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
-  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); transition: all var(--transition); }
-  .stat-card:hover { border-color: var(--border2); }
-  .stat-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 14px; font-size: 18px; }
-  .stat-icon.purple { background: var(--accent-bg); } .stat-icon.green { background: var(--green-bg); }
-  .stat-icon.red { background: var(--red-bg); } .stat-icon.blue { background: var(--blue-bg); } .stat-icon.orange { background: var(--orange-bg); }
-  .stat-label { font-size: 12px; color: var(--text2); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-  .stat-value { font-size: 28px; font-weight: 800; letter-spacing: -0.5px; line-height: 1; }
-  .stat-sub { font-size: 12px; color: var(--text3); margin-top: 6px; }
+    /* ─── Navbar ──────────────────────────────────────────────────────────────── */
+    .navbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: var(--topbar-bg);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      transition: background var(--transition);
+    }
 
-  /* ─── Buttons ─────────────────────────────────────────────────────────────── */
-  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-size: 13px; font-weight: 500; cursor: pointer; transition: all var(--transition); white-space: nowrap; }
-  .btn:hover { background: var(--surface3); border-color: var(--border2); }
-  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .btn-primary:hover { background: var(--accent2); border-color: var(--accent2); }
-  .btn-danger { background: transparent; border-color: var(--red); color: var(--red); } .btn-danger:hover { background: var(--red-bg); }
-  .btn-ghost { background: transparent; border-color: transparent; } .btn-ghost:hover { background: var(--surface2); }
-  .btn-sm { padding: 5px 10px; font-size: 12px; }
-  .btn svg { width: 15px; height: 15px; }
+    .navbar-inner {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 0 24px;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      gap: 0;
+    }
 
-  /* ─── Forms ───────────────────────────────────────────────────────────────── */
-  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .form-group { display: flex; flex-direction: column; gap: 6px; }
-  .form-group.span-2 { grid-column: span 2; }
-  .form-group label { font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.3px; }
-  .form-group input, .form-group select { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 14px; color: var(--text); font-size: 14px; outline: none; transition: border-color var(--transition); font-family: inherit; }
-  .form-group input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
-  .form-group input::placeholder { color: var(--text3); }
-  .form-group input:disabled { opacity: 0.5; cursor: not-allowed; }
-  .checkbox-group { display: flex; align-items: center; gap: 10px; padding: 10px 0; }
-  .checkbox-group input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
-  .checkbox-group label { font-size: 14px !important; text-transform: none !important; color: var(--text) !important; }
-  .form-section { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.8px; padding: 16px 0 10px; border-top: 1px solid var(--border); margin-top: 8px; }
+    .navbar-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-right: 32px;
+      flex-shrink: 0;
+      text-decoration: none;
+      color: inherit;
+    }
 
-  /* ─── Profiles / Targets Grid ──────────────────────────────────────────────── */
-  .profiles-grid { display: flex; flex-direction: column; gap: 12px; }
-  .profile-row {
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 0; transition: border-color var(--transition), box-shadow var(--transition);
-    overflow: hidden;
-  }
-  .profile-row:hover { border-color: var(--border2); box-shadow: var(--shadow); }
-  .profile-row-top {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 20px; border-bottom: 1px solid var(--border);
-  }
-  .profile-row-name { display: flex; align-items: center; gap: 12px; min-width: 0; }
-  .profile-avatar {
-    width: 38px; height: 38px; border-radius: 10px; background: var(--accent-bg);
-    color: var(--accent2); display: flex; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 14px; text-transform: uppercase; flex-shrink: 0;
-  }
-  .profile-avatar.green-avatar { background: var(--green-bg); color: var(--green); }
-  .profile-name-wrap { min-width: 0; }
-  .profile-name { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
-  .profile-url { font-size: 12px; color: var(--text2); margin-top: 3px; font-family: 'SF Mono', Monaco, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 420px; }
-  .profile-status-badge {
-    display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600;
-    padding: 2px 8px; border-radius: 20px;
-  }
-  .profile-status-badge.running { background: var(--green-bg); color: var(--green); }
-  .profile-status-badge.stopped { background: var(--red-bg); color: var(--red); }
-  .profile-row-actions { display: flex; gap: 6px; flex-shrink: 0; margin-left: 12px; }
-  .profile-details {
-    display: flex; flex-wrap: wrap; gap: 0;
-    padding: 0; background: var(--surface2);
-  }
-  .profile-detail {
-    display: flex; flex-direction: column; gap: 3px;
-    padding: 12px 20px; border-right: 1px solid var(--border); flex: 1; min-width: 120px;
-  }
-  .profile-detail:last-child { border-right: none; }
-  .profile-detail-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
-  .profile-detail-value { font-size: 13px; font-weight: 500; word-break: break-all; }
-  .empty-state { text-align: center; padding: 48px 20px; color: var(--text3); }
-  .empty-state svg { margin-bottom: 12px; opacity: 0.3; }
-  .empty-state p { margin-top: 8px; font-size: 14px; }
+    .navbar-brand img {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+    }
 
-  /* ─── Modal ───────────────────────────────────────────────────────────────── */
-  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 100; align-items: center; justify-content: center; }
-  .modal-overlay.active { display: flex; }
-  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
-  .modal-header { padding: 20px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
-  .modal-header h3 { font-size: 16px; font-weight: 700; }
-  .modal-body { padding: 24px; }
-  .modal-footer { padding: 16px 24px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
-  .close-btn { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 20px; line-height: 1; padding: 4px; border-radius: 6px; transition: all var(--transition); }
-  .close-btn:hover { color: var(--text); background: var(--surface2); }
+    .navbar-brand-name {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: var(--text);
+    }
 
-  /* ─── Toast ───────────────────────────────────────────────────────────────── */
-  .toast { position: fixed; bottom: 24px; right: 24px; z-index: 200; padding: 12px 20px; border-radius: var(--radius-sm); font-size: 14px; font-weight: 500; transform: translateY(80px); opacity: 0; transition: all 0.3s ease; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
-  .toast.show { transform: translateY(0); opacity: 1; }
-  .toast.success { background: var(--green); color: #fff; }
-  .toast.error { background: var(--red); color: #fff; }
+    .navbar-brand-name span {
+      color: var(--accent2);
+    }
 
-  /* ─── Auth Pages ─────────────────────────────────────────────────────────── */
-  .auth-page {
-    display: none; position: fixed; inset: 0; z-index: 300; background: var(--bg);
-    align-items: center; justify-content: center;
-  }
-  .auth-page.active { display: flex; }
-  .auth-card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
-    padding: 40px; width: 100%; max-width: 440px; box-shadow: 0 8px 40px rgba(0,0,0,0.3);
-  }
-  .auth-card h2 { font-size: 24px; font-weight: 800; margin-bottom: 4px; text-align: center; }
-  .auth-card .subtitle { color: var(--text2); font-size: 14px; text-align: center; margin-bottom: 28px; }
-  .auth-card .form-group { margin-bottom: 16px; }
-  .auth-card .form-group input { width: 100%; }
-  .auth-card .btn-primary { width: 100%; justify-content: center; padding: 12px; font-size: 15px; margin-top: 8px; }
-  .auth-card .auth-error { background: var(--red-bg); color: var(--red); padding: 10px 14px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 16px; display: none; }
-  .auth-brand { text-align: center; margin-bottom: 28px; }
-  .auth-brand img { width: 48px; height: 48px; border-radius: 12px; margin-bottom: 8px; }
-  .auth-step { display: none; } .auth-step.active { display: block; }
-  .totp-secret-box {
-    background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm);
-    padding: 12px; text-align: center; font-family: 'SF Mono', Monaco, monospace;
-    font-size: 14px; letter-spacing: 2px; word-break: break-all; margin: 12px 0;
-  }
-  .qr-container { text-align: center; padding: 16px 0; }
-  .qr-container canvas, .qr-container img { border-radius: 8px; background: #fff; padding: 8px; }
+    .navbar-nav {
+      display: flex;
+      align-items: stretch;
+      flex: 1;
+      height: 60px;
+      gap: 0;
+    }
 
-  /* ─── Live indicator ──────────────────────────────────────────────────────── */
-  .live-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--green); margin-right: 6px; animation: livePulse 2s ease-in-out infinite; }
-  @keyframes livePulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .nav-link {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 16px;
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--text2);
+      border: none;
+      background: none;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: color var(--transition), border-color var(--transition);
+      white-space: nowrap;
+    }
 
-  /* ─── Metrics row ─────────────────────────────────────────────────────────── */
-  .metrics-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; margin-bottom: 14px; }
-  .metric-box { text-align: center; padding: 10px 6px; background: var(--surface); border-radius: var(--radius-sm); border: 1px solid var(--border); }
-  .metric-val { font-size: 18px; font-weight: 700; }
-  .metric-lbl { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.3px; font-weight: 600; margin-top: 2px; }
+    .nav-link:hover {
+      color: var(--text);
+    }
 
-  /* ─── Responsive ──────────────────────────────────────────────────────────── */
-  @media (max-width: 768px) {
-    .navbar-inner { padding: 0 16px; gap: 0; }
-    .navbar-brand { margin-right: 12px; }
-    .navbar-brand-name { display: none; }
-    .nav-link { padding: 0 10px; font-size: 12px; gap: 4px; }
-    .nav-link svg { display: none; }
-    .navbar-status { display: none; }
-    .navbar-user { display: none; }
-    .content { padding: 16px; }
-    .form-grid { grid-template-columns: 1fr; } .form-group.span-2 { grid-column: span 1; }
-    .stats-grid { grid-template-columns: 1fr 1fr; }
-    .profile-row-top { flex-direction: column; gap: 12px; align-items: flex-start; }
-    .profile-row-actions { margin-left: 0; flex-wrap: wrap; }
-    .profile-url { max-width: 100%; }
-    .profile-detail { min-width: 100px; }
-  }
-</style>
+    .nav-link.active {
+      color: var(--accent2);
+      border-bottom-color: var(--accent2);
+    }
+
+    .nav-link svg {
+      width: 15px;
+      height: 15px;
+      flex-shrink: 0;
+    }
+
+    .nav-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 10px;
+      background: var(--surface3);
+      color: var(--text3);
+      font-weight: 600;
+    }
+
+    .nav-link.active .nav-badge {
+      background: var(--accent-bg);
+      color: var(--accent2);
+    }
+
+    .navbar-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .status-dot.online {
+      background: var(--green);
+    }
+
+    .status-dot.offline {
+      background: var(--red);
+    }
+
+    .navbar-status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text2);
+      padding: 4px 10px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+
+    .navbar-user {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent2);
+      padding: 4px 10px;
+      background: var(--accent-bg);
+      border-radius: 6px;
+    }
+
+    .theme-toggle {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 6px 8px;
+      cursor: pointer;
+      color: var(--text2);
+      display: flex;
+      align-items: center;
+      transition: all var(--transition);
+      font-size: 15px;
+      line-height: 1;
+    }
+
+    .theme-toggle:hover {
+      background: var(--surface3);
+      color: var(--text);
+    }
+
+    .logout-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text3);
+      cursor: pointer;
+      padding: 6px 8px;
+      display: flex;
+      align-items: center;
+      transition: all var(--transition);
+      font-size: 13px;
+    }
+
+    .logout-btn:hover {
+      border-color: var(--red);
+      color: var(--red);
+      background: var(--red-bg);
+    }
+
+    /* ─── Content ─────────────────────────────────────────────────────────────── */
+    .content {
+      padding: 28px 24px;
+      max-width: 1280px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .page {
+      display: none;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    .page-header {
+      margin-bottom: 24px;
+    }
+
+    .page-header h2 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      margin-bottom: 6px;
+    }
+
+    .page-header p {
+      font-size: 14px;
+      color: var(--text2);
+    }
+
+    /* ─── Cards ───────────────────────────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 20px;
+      box-shadow: var(--shadow);
+      transition: background var(--transition), border var(--transition);
+    }
+
+    .card-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .card-header h3 {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .card-body {
+      padding: 20px;
+    }
+
+    /* ─── Stats Grid ──────────────────────────────────────────────────────────── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
+      gap: 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+
+    .stat-card {
+      padding: 20px 18px;
+      border-right: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .stat-card:last-child {
+      border-right: none;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: var(--text3);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+    }
+
+    .stat-value {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      line-height: 1;
+      color: var(--text);
+    }
+
+    .stat-sub {
+      font-size: 12px;
+      color: var(--text3);
+      margin-top: 6px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Charts row */
+    .charts-row {
+      display: grid;
+      grid-template-columns: 1fr 300px;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .chart-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .chart-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text2);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .chart-header span {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text3);
+      font-weight: 400;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .chart-body {
+      padding: 16px;
+    }
+
+    .chart-body canvas {
+      width: 100%;
+      display: block;
+    }
+
+    /* Mini bar list for methods/status */
+    .bar-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .bar-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .bar-item-label {
+      font-size: 12px;
+      font-weight: 600;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text2);
+      min-width: 36px;
+    }
+
+    .bar-item-track {
+      flex: 1;
+      height: 6px;
+      background: var(--surface2);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .bar-item-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.4s ease;
+    }
+
+    .bar-item-count {
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text3);
+      min-width: 32px;
+      text-align: right;
+    }
+
+    @media (max-width: 900px) {
+      .charts-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 600px) {
+      .stats-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .stat-card:nth-child(2) {
+        border-right: none;
+      }
+
+      .stat-card:nth-child(1),
+      .stat-card:nth-child(2) {
+        border-bottom: 1px solid var(--border);
+      }
+    }
+
+    /* ─── Buttons ─────────────────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all var(--transition);
+      white-space: nowrap;
+    }
+
+    .btn:hover {
+      background: var(--surface3);
+      border-color: var(--border2);
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent2);
+      border-color: var(--accent2);
+    }
+
+    .btn-danger {
+      background: transparent;
+      border-color: var(--red);
+      color: var(--red);
+    }
+
+    .btn-danger:hover {
+      background: var(--red-bg);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      border-color: transparent;
+    }
+
+    .btn-ghost:hover {
+      background: var(--surface2);
+    }
+
+    .btn-sm {
+      padding: 5px 10px;
+      font-size: 12px;
+    }
+
+    .btn svg {
+      width: 15px;
+      height: 15px;
+    }
+
+    /* ─── Forms ───────────────────────────────────────────────────────────────── */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .form-group.span-2 {
+      grid-column: span 2;
+    }
+
+    .form-group label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text2);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .form-group input,
+    .form-group select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      color: var(--text);
+      font-size: 14px;
+      outline: none;
+      transition: border-color var(--transition);
+      font-family: inherit;
+    }
+
+    .form-group input:focus {
+      border-color: var(--accent);
+    }
+
+    .form-group input::placeholder {
+      color: var(--text3);
+    }
+
+    .form-group input:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 0;
+    }
+
+    .checkbox-group input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent);
+    }
+
+    .checkbox-group label {
+      font-size: 14px !important;
+      text-transform: none !important;
+      color: var(--text) !important;
+    }
+
+    .form-section {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      padding: 16px 0 10px;
+      border-top: 1px solid var(--border);
+      margin-top: 8px;
+    }
+
+    /* ─── Profiles / Targets Grid ──────────────────────────────────────────────── */
+    .profiles-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .profile-row {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0;
+      transition: border-color var(--transition);
+      overflow: hidden;
+    }
+
+    .profile-row:hover {
+      border-color: var(--border2);
+    }
+
+    .profile-row-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .profile-row-name {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .profile-avatar {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: var(--accent-bg);
+      color: var(--accent2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 14px;
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+
+    .profile-avatar.green-avatar {
+      background: var(--green-bg);
+      color: var(--green);
+    }
+
+    .profile-name-wrap {
+      min-width: 0;
+    }
+
+    .profile-name {
+      font-weight: 600;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .profile-url {
+      font-size: 12px;
+      color: var(--text2);
+      margin-top: 3px;
+      font-family: 'SF Mono', Monaco, monospace;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 420px;
+    }
+
+    .profile-status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 20px;
+    }
+
+    .profile-status-badge.running {
+      background: var(--green-bg);
+      color: var(--green);
+    }
+
+    .profile-status-badge.stopped {
+      background: var(--red-bg);
+      color: var(--red);
+    }
+
+    .profile-row-actions {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0;
+      margin-left: 12px;
+    }
+
+    .profile-details {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0;
+      padding: 0;
+      background: var(--surface2);
+    }
+
+    .profile-detail {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      padding: 12px 20px;
+      border-right: 1px solid var(--border);
+      flex: 1;
+      min-width: 120px;
+    }
+
+    .profile-detail:last-child {
+      border-right: none;
+    }
+
+    .profile-detail-label {
+      font-size: 10px;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+    }
+
+    .profile-detail-value {
+      font-size: 13px;
+      font-weight: 500;
+      word-break: break-all;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 48px 20px;
+      color: var(--text3);
+    }
+
+    .empty-state svg {
+      margin-bottom: 12px;
+      opacity: 0.3;
+    }
+
+    .empty-state p {
+      margin-top: 8px;
+      font-size: 14px;
+    }
+
+    /* ─── Modal ───────────────────────────────────────────────────────────────── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+    }
+
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      width: 100%;
+      max-width: 560px;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+
+    .modal-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .modal-header h3 {
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .modal-body {
+      padding: 24px;
+    }
+
+    .modal-footer {
+      padding: 16px 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .close-btn {
+      background: none;
+      border: none;
+      color: var(--text3);
+      cursor: pointer;
+      font-size: 20px;
+      line-height: 1;
+      padding: 4px;
+      border-radius: 6px;
+      transition: all var(--transition);
+    }
+
+    .close-btn:hover {
+      color: var(--text);
+      background: var(--surface2);
+    }
+
+    /* ─── Toast ───────────────────────────────────────────────────────────────── */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 200;
+      padding: 12px 20px;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 500;
+      transform: translateY(80px);
+      opacity: 0;
+      transition: all 0.3s ease;
+    }
+
+    .toast.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    .toast.success {
+      background: var(--green);
+      color: #fff;
+    }
+
+    .toast.error {
+      background: var(--red);
+      color: #fff;
+    }
+
+    /* ─── Auth Pages (Professional Redesign) ─────────────────────────────────── */
+    .auth-page {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 300;
+      background: #0a0a0c;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    .auth-page.active {
+      display: flex;
+    }
+
+    /* Auth topbar — matches landing page */
+    .auth-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 32px;
+      border-bottom: 1px solid #1a1a1f;
+      flex-shrink: 0;
+    }
+
+    .auth-topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .auth-topbar-left img {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+    }
+
+    .auth-topbar-left span {
+      font-weight: 600;
+      font-size: 15px;
+      color: #e4e4e7;
+      letter-spacing: -0.3px;
+    }
+
+    .auth-topbar-right {
+      display: flex;
+      gap: 8px;
+    }
+
+    .auth-topbar-right a {
+      font-size: 13px;
+      color: #71717a;
+      text-decoration: none;
+      padding: 6px 12px;
+      border-radius: 6px;
+      transition: color 0.15s, background 0.15s;
+    }
+
+    .auth-topbar-right a:hover {
+      color: #d4d4d8;
+      background: #18181b;
+    }
+
+    .auth-main {
+      max-width: 420px;
+      margin: 0 auto;
+      padding: 80px 24px 60px;
+      width: 100%;
+    }
+
+    .auth-card {
+      width: 100%;
+    }
+
+    .auth-card h2 {
+      font-size: 36px;
+      font-weight: 700;
+      color: #fafafa;
+      letter-spacing: -1px;
+      line-height: 1.2;
+      margin-bottom: 14px;
+    }
+
+    .auth-card .subtitle {
+      font-size: 15px;
+      color: #71717a;
+      line-height: 1.7;
+      margin-bottom: 36px;
+    }
+
+    .auth-card .form-group {
+      margin-bottom: 20px;
+    }
+
+    .auth-card .form-group label {
+      display: block;
+      font-size: 11px;
+      font-weight: 500;
+      color: #52525b;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .auth-card .form-group input {
+      width: 100%;
+      height: 44px;
+      padding: 12px;
+      font-size: 14px;
+      border-radius: 8px;
+      border: 1px solid #1a1a1f;
+      background: #0e0e11;
+      color: #d4d4d8;
+      transition: border-color 0.15s;
+    }
+
+    .auth-card .form-group input:focus {
+      border-color: #0078d4;
+      outline: none;
+    }
+
+    .auth-card .form-group input::placeholder {
+      color: #3f3f46;
+    }
+
+    .auth-card .btn-primary {
+      width: 100%;
+      height: 48px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      justify-content: center;
+      margin-top: 12px;
+      cursor: pointer;
+      border: none;
+      background: #0078d4;
+      color: #ffffff;
+      transition: background 0.15s;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .auth-card .btn-primary:hover {
+      background: #005ea6;
+    }
+
+    .auth-card .btn-primary:active {
+      background: #004c8a;
+    }
+
+    .auth-error {
+      background: rgba(220, 38, 38, 0.08);
+      color: #dc2626;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 20px;
+      border: 1px solid rgba(220, 38, 38, 0.15);
+      display: none;
+      font-weight: 500;
+    }
+
+    .auth-brand {
+      margin-bottom: 32px;
+      position: relative;
+    }
+
+    .auth-brand img {
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+    }
+
+    .auth-step {
+      display: none;
+    }
+
+    .auth-step.active {
+      display: block;
+    }
+
+    .auth-footer {
+      max-width: 420px;
+      margin: 40px auto;
+      padding: 0 24px;
+      font-size: 12px;
+      color: #27272a;
+    }
+
+    @media (max-width: 600px) {
+      .auth-main {
+        padding: 48px 20px 40px;
+      }
+
+      .auth-card h2 {
+        font-size: 28px;
+      }
+    }
+
+    .totp-secret-box {
+      background: #0e0e11;
+      border: 1px solid #1a1a1f;
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: #a1a1aa;
+      font-weight: 600;
+      letter-spacing: 1px;
+      word-break: break-all;
+      margin: 16px 0;
+    }
+
+    .qr-container {
+      text-align: center;
+      padding: 20px 0;
+    }
+
+    .qr-container canvas,
+    .qr-container img {
+      border-radius: 10px;
+      background: #fff;
+      padding: 12px;
+      border: 1px solid #1a1a1f;
+    }
+
+
+    /* ─── Live indicator ──────────────────────────────────────────────────────── */
+    .live-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      margin-right: 6px;
+      animation: livePulse 2s ease-in-out infinite;
+    }
+
+    @keyframes livePulse {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.3;
+      }
+    }
+
+    /* ─── Metrics row ─────────────────────────────────────────────────────────── */
+    .metrics-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .metric-box {
+      text-align: center;
+      padding: 10px 6px;
+      background: var(--surface);
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+    }
+
+    .metric-val {
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .metric-lbl {
+      font-size: 10px;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      font-weight: 600;
+      margin-top: 2px;
+    }
+
+    /* ─── Responsive ──────────────────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .navbar-inner {
+        padding: 0 16px;
+        gap: 0;
+      }
+
+      .navbar-brand {
+        margin-right: 12px;
+      }
+
+      .navbar-brand-name {
+        display: none;
+      }
+
+      .nav-link {
+        padding: 0 10px;
+        font-size: 12px;
+        gap: 4px;
+      }
+
+      .nav-link svg {
+        display: none;
+      }
+
+      .navbar-status {
+        display: none;
+      }
+
+      .navbar-user {
+        display: none;
+      }
+
+      .content {
+        padding: 16px;
+      }
+
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .form-group.span-2 {
+        grid-column: span 1;
+      }
+
+      .stats-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .profile-row-top {
+        flex-direction: column;
+        gap: 12px;
+        align-items: flex-start;
+      }
+
+      .profile-row-actions {
+        margin-left: 0;
+        flex-wrap: wrap;
+      }
+
+      .profile-url {
+        max-width: 100%;
+      }
+
+      .profile-detail {
+        min-width: 100px;
+      }
+    }
+  </style>
 </head>
+
 <body>
 
-<!-- ═══ SETUP PAGE ═══ -->
-<div class="auth-page" id="authSetup">
-  <div class="auth-card">
-    <div class="auth-brand"><img src="/logo.svg" alt="Midleman"></div>
-    <h2>Welcome to Midleman</h2>
-    <div class="subtitle">Create your admin account to get started.</div>
-    <div class="auth-error" id="setupError"></div>
-
-    <div class="auth-step active" id="setupStep1">
-      <div class="form-group"><label>Username</label><input type="text" id="setupUser" placeholder="admin" autocomplete="username"></div>
-      <div class="form-group"><label>Password</label><input type="password" id="setupPass" placeholder="Min. 6 characters" autocomplete="new-password"></div>
-      <div class="form-group"><label>Confirm Password</label><input type="password" id="setupPass2" placeholder="Repeat password" autocomplete="new-password"></div>
-      <button class="btn btn-primary" onclick="setupStep2()">Continue to 2FA Setup</button>
-    </div>
-
-    <div class="auth-step" id="setupStep2">
-      <p style="font-size:14px;color:var(--text2);margin-bottom:16px;text-align:center">Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.)</p>
-      <div class="qr-container" id="setupQrContainer"></div>
-      <p style="font-size:12px;color:var(--text3);text-align:center;margin-bottom:4px">Or enter this key manually:</p>
-      <div class="totp-secret-box" id="setupSecretDisplay"></div>
-      <div class="form-group"><label>Enter 6-digit code to verify</label><input type="text" id="setupTotpCode" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code" style="text-align:center;font-size:24px;letter-spacing:8px;font-weight:700"></div>
-      <button class="btn btn-primary" onclick="completeSetup()">Create Account</button>
-      <button class="btn" style="width:100%;justify-content:center;margin-top:8px" onclick="backToStep1()">Back</button>
-    </div>
-  </div>
-</div>
-
-<!-- ═══ LOGIN PAGE ═══ -->
-<div class="auth-page" id="authLogin">
-  <div class="auth-card">
-    <div class="auth-brand"><img src="/logo.svg" alt="Midleman"></div>
-    <h2>Sign In</h2>
-    <div class="subtitle">Enter your credentials and 2FA code.</div>
-    <div class="auth-error" id="loginError"></div>
-    <div class="form-group"><label>Username</label><input type="text" id="loginUser" placeholder="Username" autocomplete="username"></div>
-    <div class="form-group"><label>Password</label><input type="password" id="loginPass" placeholder="Password" autocomplete="current-password"></div>
-    <div class="form-group"><label>Authenticator Code</label><input type="text" id="loginTotp" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code" style="text-align:center;font-size:24px;letter-spacing:8px;font-weight:700" onkeydown="if(event.key==='Enter')doLogin()"></div>
-    <button class="btn btn-primary" onclick="doLogin()" id="loginBtn">Sign In</button>
-  </div>
-</div>
-
-<div class="app" style="display:none">
-  <nav class="navbar">
-    <div class="navbar-inner">
-      <a class="navbar-brand" href="/dashboard">
-        <img src="/logo.svg" alt="Midleman">
-        <span class="navbar-brand-name"><span>Mid</span>leman</span>
-      </a>
-
-      <div class="navbar-nav">
-        <button class="nav-link active" onclick="navigate('overview')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
-          Overview
-        </button>
-        <button class="nav-link" onclick="navigate('requests')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-          Requests
-          <span class="nav-badge" id="navReqBadge">0</span>
-        </button>
-        <button class="nav-link" onclick="navigate('targets')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-          Targets
-          <span class="nav-badge" id="navTargetBadge">0</span>
-        </button>
-        <button class="nav-link" onclick="navigate('profiles')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/></svg>
-          Profiles
-          <span class="nav-badge" id="navProfileBadge">0</span>
-        </button>
-        <button class="nav-link" onclick="navigate('settings')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-          Settings
-        </button>
+  <!-- ═══ SETUP PAGE ═══ -->
+  <div class="auth-page" id="authSetup">
+    <div class="auth-topbar">
+      <div class="auth-topbar-left">
+        <img src="/logo.png" alt="Midleman">
+        <span>Midleman</span>
       </div>
+      <div class="auth-topbar-right">
+        <a href="/health">Status</a>
+      </div>
+    </div>
+    <main class="auth-main">
+      <div class="auth-card">
+        <div class="auth-brand"><img src="/logo.png" alt="Midleman"></div>
+        <h2>Setup</h2>
+        <div class="subtitle">Configure your administrative credentials and secure access.</div>
+        <div class="auth-error" id="setupError"></div>
 
-      <div class="navbar-right">
-        <div class="navbar-status">
-          <span class="status-dot offline" id="navDot"></span>
-          <span id="navStatus">Connecting...</span>
-          <span id="navUptime" style="color:var(--text3)"></span>
+        <div class="auth-step active" id="setupStep1">
+          <div class="form-group"><label>Username</label><input type="text" id="setupUser" placeholder="admin"
+              autocomplete="username"></div>
+          <div class="form-group"><label>Password</label><input type="password" id="setupPass"
+              placeholder="Min. 6 characters" autocomplete="new-password"></div>
+          <div class="form-group"><label>Confirm Password</label><input type="password" id="setupPass2"
+              placeholder="Repeat password" autocomplete="new-password"></div>
+          <button class="btn btn-primary" onclick="setupStep2()">Continue to 2FA Setup</button>
         </div>
-        <span class="navbar-user" id="navUser"></span>
-        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeBtn">&#9790;</button>
-        <button class="logout-btn" onclick="doLogout()" title="Logout">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        </button>
+
+        <div class="auth-step" id="setupStep2">
+          <p style="font-size:14px;color:#71717a;margin-bottom:16px;text-align:center">Scan this QR code with your
+            authenticator app (Google Authenticator, Authy, etc.)</p>
+          <div class="qr-container" id="setupQrContainer"></div>
+          <p style="font-size:12px;color:#52525b;text-align:center;margin-bottom:4px">Or enter this key manually:</p>
+          <div class="totp-secret-box" id="setupSecretDisplay"></div>
+          <div class="form-group"><label>Enter 6-digit code to verify</label><input type="text" id="setupTotpCode"
+              placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code"
+              style="text-align:center;font-size:24px;letter-spacing:8px;font-weight:700"></div>
+          <button class="btn btn-primary" onclick="completeSetup()">Create Account</button>
+          <button class="btn" style="width:100%;justify-content:center;margin-top:8px"
+            onclick="backToStep1()">Back</button>
+        </div>
+      </div>
+    </main>
+    <footer class="auth-footer">midleman</footer>
+  </div>
+
+  <!-- ═══ LOGIN PAGE ═══ -->
+  <div class="auth-page" id="authLogin">
+    <div class="auth-topbar">
+      <div class="auth-topbar-left">
+        <img src="/logo.png" alt="Midleman">
+        <span>Midleman</span>
+      </div>
+      <div class="auth-topbar-right">
+        <a href="/health">Status</a>
       </div>
     </div>
-  </nav>
+    <main class="auth-main">
+      <div class="auth-card">
+        <div class="auth-brand"><img src="/logo.png" alt="Midleman"></div>
+        <!-- Step 1: Credentials -->
+        <div id="loginStep1" class="auth-step active">
+          <h2>Sign In</h2>
+          <div class="subtitle">Enter your credentials to access the dashboard.</div>
+          <div class="auth-error" id="loginError"></div>
+          <div class="form-group"><label>Username</label><input type="text" id="loginUser" placeholder="Username"
+              autocomplete="username"></div>
+          <div class="form-group"><label>Password</label><input type="password" id="loginPass" placeholder="Password"
+              autocomplete="current-password" onkeydown="if(event.key==='Enter')doLoginStep1()"></div>
+          <button class="btn btn-primary" onclick="doLoginStep1()" id="loginBtn1">Continue</button>
+        </div>
+        <!-- Step 2: TOTP -->
+        <div id="loginStep2" class="auth-step">
+          <h2>Verification</h2>
+          <div class="subtitle">Enter the 6-digit code from your authenticator app.</div>
+          <div class="auth-error" id="loginTotpError"></div>
+          <div class="form-group"><label>Authenticator Code</label><input type="text" id="loginTotp" placeholder="000000"
+              maxlength="6" inputmode="numeric" autocomplete="one-time-code"
+              style="text-align:center;font-size:24px;letter-spacing:8px;font-weight:700"
+              onkeydown="if(event.key==='Enter')doLoginStep2()"></div>
+          <button class="btn btn-primary" onclick="doLoginStep2()" id="loginBtn2">Sign In</button>
+          <button class="btn" onclick="loginBackToStep1()"
+            style="width:100%;justify-content:center;margin-top:8px;font-size:13px;color:#71717a;border:1px solid #27272a;background:transparent;cursor:pointer;border-radius:8px;height:40px;display:inline-flex;align-items:center">Back</button>
+        </div>
+      </div>
+    </main>
+    <footer class="auth-footer">midleman</footer>
+  </div>
+
+  <div class="app" style="display:none">
+    <nav class="navbar">
+      <div class="navbar-inner">
+        <a class="navbar-brand" href="/dashboard">
+          <img src="/logo.png" alt="Midleman">
+          <span class="navbar-brand-name"><span>Mid</span>leman</span>
+        </a>
+
+        <div class="navbar-nav">
+          <button class="nav-link active" onclick="navigate('overview')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="9" rx="1" />
+              <rect x="14" y="3" width="7" height="5" rx="1" />
+              <rect x="14" y="12" width="7" height="9" rx="1" />
+              <rect x="3" y="16" width="7" height="5" rx="1" />
+            </svg>
+            Overview
+          </button>
+          <button class="nav-link" onclick="navigate('requests')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+            Requests
+            <span class="nav-badge" id="navReqBadge">0</span>
+          </button>
+          <button class="nav-link" onclick="navigate('targets')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+            </svg>
+            Targets
+            <span class="nav-badge" id="navTargetBadge">0</span>
+          </button>
+          <button class="nav-link" onclick="navigate('profiles')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <rect x="2" y="7" width="20" height="14" rx="2" />
+              <path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16" />
+            </svg>
+            Profiles
+            <span class="nav-badge" id="navProfileBadge">0</span>
+          </button>
+        </div>
+
+        <div class="navbar-right">
+          <div class="navbar-status">
+            <span class="status-dot offline" id="navDot"></span>
+            <span id="navStatus">Connecting...</span>
+            <span id="navUptime" style="color:var(--text3)"></span>
+          </div>
+          <span class="navbar-user" id="navUser"></span>
+          <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeBtn">&#9790;</button>
+          <button class="logout-btn" onclick="doLogout()" title="Logout">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </nav>
 
     <div class="content">
       <!-- ═══ OVERVIEW ═══ -->
       <div class="page active" id="pageOverview">
         <div class="page-header">
           <h2>Dashboard</h2>
-          <p><span class="live-dot"></span>Real-time overview of your Midleman proxy server.</p>
+          <p><span class="live-dot"></span>Real-time overview</p>
         </div>
+
         <div class="stats-grid">
           <div class="stat-card">
-            <div class="stat-icon green"></div>
             <div class="stat-label">Status</div>
             <div class="stat-value" id="ovStatus" style="color:var(--text3)">--</div>
             <div class="stat-sub" id="ovUptime"></div>
           </div>
           <div class="stat-card">
-            <div class="stat-icon purple">&#9679;</div>
-            <div class="stat-label">Active Requests</div>
+            <div class="stat-label">Requests</div>
             <div class="stat-value" id="ovActive">--</div>
-            <div class="stat-sub">currently in-flight</div>
+            <div class="stat-sub">in-flight</div>
           </div>
           <div class="stat-card">
-            <div class="stat-icon blue"></div>
-            <div class="stat-label">Profiles + Targets</div>
+            <div class="stat-label">Profiles</div>
             <div class="stat-value" id="ovProfiles">--</div>
             <div class="stat-sub" id="ovProfileNames"></div>
           </div>
           <div class="stat-card">
-            <div class="stat-icon orange"></div>
             <div class="stat-label">Auth</div>
-            <div class="stat-value" id="ovAuth" style="font-size:20px">--</div>
+            <div class="stat-value" id="ovAuth" style="font-size:18px">--</div>
             <div class="stat-sub" id="ovPort"></div>
           </div>
         </div>
 
-        <div class="card">
+        <!-- Charts -->
+        <div class="charts-row">
+          <div class="chart-card">
+            <div class="chart-header">Traffic <span id="chartTrafficLabel">last 24h</span></div>
+            <div class="chart-body" style="position:relative">
+              <canvas id="chartTimeline" height="160" style="cursor:crosshair"></canvas>
+              <div id="chartTooltip" style="display:none;position:fixed;z-index:999;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;box-shadow:var(--shadow);pointer-events:none;white-space:nowrap"></div>
+            </div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">Breakdown</div>
+            <div class="chart-body" id="chartBreakdown">
+              <div style="color:var(--text3);font-size:13px;text-align:center;padding:20px">Loading...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick metrics -->
+        <div class="card" id="ovQuickMetricsCard">
           <div class="card-header">
-            <h3><span class="live-dot"></span>Request Activity</h3>
+            <h3>Activity</h3>
             <button class="btn btn-sm btn-ghost" onclick="navigate('requests')">View all &rarr;</button>
           </div>
           <div class="card-body" id="ovQuickMetrics">
@@ -404,23 +1457,25 @@
         <!-- Recent requests live feed -->
         <div class="card">
           <div class="card-header">
-            <h3><span class="live-dot"></span>Recent Requests</h3>
-            <span style="font-size:12px;color:var(--text3)" id="ovFeedCount"></span>
+            <h3>Recent Requests</h3>
+            <span style="font-size:12px;color:var(--text3);font-family:'JetBrains Mono',monospace" id="ovFeedCount"></span>
           </div>
           <div class="card-body" style="padding:0;overflow-x:auto">
             <table style="width:100%;border-collapse:collapse;font-size:13px">
               <thead>
                 <tr style="background:var(--surface2);text-align:left">
-                  <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Time</th>
-                  <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Type</th>
-                  <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Method</th>
-                  <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Path</th>
-                  <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Status</th>
-                  <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Duration</th>
+                  <th style="padding:8px 12px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Time</th>
+                  <th style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Type</th>
+                  <th style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Method</th>
+                  <th style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Path</th>
+                  <th style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Status</th>
+                  <th style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Duration</th>
                 </tr>
               </thead>
               <tbody id="ovRecentBody">
-                <tr><td colspan="6" style="padding:30px;text-align:center;color:var(--text3)">Waiting for requests...</td></tr>
+                <tr>
+                  <td colspan="6" style="padding:30px;text-align:center;color:var(--text3)">Waiting for requests...</td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -432,7 +1487,8 @@
         <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
           <div>
             <h2>Request Log</h2>
-            <p>Full request/response history with payload details. <span id="reqLogStats" style="color:var(--text3)"></span></p>
+            <p>Full request/response history with payload details. <span id="reqLogStats"
+                style="color:var(--text3)"></span></p>
           </div>
           <div style="display:flex;gap:8px;align-items:center">
             <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px">
@@ -444,15 +1500,40 @@
         <div class="card" style="margin-bottom:16px">
           <div class="card-body" style="padding:12px 16px">
             <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-              <input type="text" id="rlSearch" placeholder="Search path, URL, request ID..." style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px" onkeydown="if(event.key==='Enter')fetchRequestLogs()">
-              <select id="rlType" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px" onchange="fetchRequestLogs()">
-                <option value="">All types</option><option value="target">Target</option><option value="proxy">Proxy</option>
+              <input type="text" id="rlSearch" placeholder="Search path, URL, request ID..."
+                style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
+                onkeydown="if(event.key==='Enter')fetchRequestLogs()">
+              <select id="rlType"
+                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+                onchange="fetchRequestLogs()">
+                <option value="">All types</option>
+                <option value="target">Target</option>
+                <option value="proxy">Proxy</option>
               </select>
-              <select id="rlMethod" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px" onchange="fetchRequestLogs()">
-                <option value="">All methods</option><option value="GET">GET</option><option value="POST">POST</option><option value="PUT">PUT</option><option value="PATCH">PATCH</option><option value="DELETE">DELETE</option>
+              <select id="rlMethod"
+                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+                onchange="fetchRequestLogs()">
+                <option value="">All methods</option>
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="PATCH">PATCH</option>
+                <option value="DELETE">DELETE</option>
               </select>
-              <select id="rlStatus" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px" onchange="fetchRequestLogs()">
-                <option value="">All statuses</option><option value="200">200</option><option value="201">201</option><option value="301">301</option><option value="302">302</option><option value="400">400</option><option value="401">401</option><option value="403">403</option><option value="404">404</option><option value="500">500</option><option value="502">502</option>
+              <select id="rlStatus"
+                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+                onchange="fetchRequestLogs()">
+                <option value="">All statuses</option>
+                <option value="200">200</option>
+                <option value="201">201</option>
+                <option value="301">301</option>
+                <option value="302">302</option>
+                <option value="400">400</option>
+                <option value="401">401</option>
+                <option value="403">403</option>
+                <option value="404">404</option>
+                <option value="500">500</option>
+                <option value="502">502</option>
               </select>
               <button class="btn btn-sm btn-primary" onclick="fetchRequestLogs()">Filter</button>
             </div>
@@ -463,21 +1544,40 @@
             <table id="reqLogTable" style="width:100%;border-collapse:collapse;font-size:13px">
               <thead>
                 <tr style="background:var(--surface2);text-align:left">
-                  <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Time</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Type</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Method</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Path</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Status</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Duration</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Size</th>
+                  <th
+                    style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                    Time</th>
+                  <th
+                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                    Type</th>
+                  <th
+                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                    Method</th>
+                  <th
+                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                    Path</th>
+                  <th
+                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                    Status</th>
+                  <th
+                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                    Duration</th>
+                  <th
+                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                    Size</th>
                   <th style="padding:10px 12px"></th>
                 </tr>
               </thead>
-              <tbody id="reqLogBody"><tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr></tbody>
+              <tbody id="reqLogBody">
+                <tr>
+                  <td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td>
+                </tr>
+              </tbody>
             </table>
           </div>
         </div>
-        <div id="reqLogPagination" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--text2)">
+        <div id="reqLogPagination"
+          style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--text2)">
           <span id="reqLogInfo"></span>
           <div style="display:flex;gap:6px">
             <button class="btn btn-sm" id="rlPrev" onclick="reqLogPrevPage()" disabled>Prev</button>
@@ -487,7 +1587,8 @@
       </div>
 
       <!-- Request Detail Modal -->
-      <div id="reqDetailModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);overflow-y:auto">
+      <div id="reqDetailModal"
+        style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);overflow-y:auto">
         <div class="rdm-panel">
           <div class="rdm-header">
             <div class="rdm-header-left">
@@ -502,27 +1603,81 @@
       <!-- ═══ TARGETS ═══ -->
       <div class="page" id="pageTargets">
         <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
-          <div><h2>Targets</h2><p>Named forwarding targets, each on its own port.</p></div>
+          <div>
+            <h2>Targets</h2>
+            <p>Named forwarding targets, each on its own port.</p>
+          </div>
           <button class="btn btn-primary btn-sm" onclick="openTargetModal()">+ New Target</button>
         </div>
-        <div id="targetList" class="profiles-grid"><div class="empty-state"><p>Loading targets...</p></div></div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-body" style="padding:12px 16px">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+              <input type="text" id="targetSearch" placeholder="Search name, URL..."
+                style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
+                oninput="filterTargets()">
+              <select id="targetStatusFilter"
+                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+                onchange="filterTargets()">
+                <option value="">All statuses</option>
+                <option value="running">Running</option>
+                <option value="stopped">Stopped</option>
+              </select>
+              <select id="targetAuthFilter"
+                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+                onchange="filterTargets()">
+                <option value="">All auth</option>
+                <option value="enabled">Auth enabled</option>
+                <option value="disabled">Auth disabled</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body" style="padding:0;overflow-x:auto">
+            <table id="targetTable" style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead>
+                <tr style="background:var(--surface2);text-align:left">
+                  <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Status</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Port</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Target URL</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Forward Path</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Auth</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">In-Flight</th>
+                  <th style="padding:10px 12px"></th>
+                </tr>
+              </thead>
+              <tbody id="targetListBody">
+                <tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       <!-- Target Modal -->
-      <div id="targetModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px)">
-        <div style="max-width:560px;margin:60px auto;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)">
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border)">
+      <div id="targetModal"
+        style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px)">
+        <div
+          style="max-width:560px;margin:60px auto;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)">
+          <div
+            style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border)">
             <h3 id="targetModalTitle" style="font-size:16px;font-weight:600">New Target</h3>
-            <button onclick="closeTargetModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
+            <button onclick="closeTargetModal()"
+              style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
           </div>
           <div style="padding:20px">
             <div class="form-grid" style="gap:12px">
               <div class="form-group"><label>Name</label><input type="text" id="tName" placeholder="api"></div>
-              <div class="form-group"><label>Target URL</label><input type="text" id="tTargetUrl" placeholder="https://api.example.com"></div>
-              <div class="form-group"><label>Port (optional, 0 = auto-assign)</label><input type="number" id="tPort" placeholder="Auto-assign" min="0" max="65535"></div>
-              <div class="form-group"><label>Auth Token (optional)</label><input type="text" id="tAuthToken" placeholder="Leave empty for no auth"></div>
+              <div class="form-group"><label>Target URL</label><input type="text" id="tTargetUrl"
+                  placeholder="https://api.example.com"></div>
+              <div class="form-group"><label>Port (optional, 0 = auto-assign)</label><input type="number" id="tPort"
+                  placeholder="Auto-assign" min="0" max="65535"></div>
+              <div class="form-group"><label>Auth Token (optional)</label><input type="text" id="tAuthToken"
+                  placeholder="Leave empty for no auth"></div>
               <div class="form-group" style="display:flex;align-items:center;gap:8px">
-                <input type="checkbox" id="tForwardPath" checked> <label for="tForwardPath" style="margin:0">Forward Path</label>
+                <input type="checkbox" id="tForwardPath" checked> <label for="tForwardPath" style="margin:0">Forward
+                  Path</label>
               </div>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
@@ -536,311 +1691,668 @@
       <!-- ═══ PROFILES ═══ -->
       <div class="page" id="pageProfiles">
         <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
-          <div><h2>Proxy Profiles</h2><p>Manage public proxy bypass endpoints for upstream APIs.</p></div>
+          <div>
+            <h2>Proxy Profiles</h2>
+            <p>Manage public proxy bypass endpoints for upstream APIs.</p>
+          </div>
           <div style="display:flex;gap:8px">
             <button class="btn btn-sm" onclick="reloadProfiles()">Reload</button>
             <button class="btn btn-primary btn-sm" onclick="openProfileModal()">+ New Profile</button>
           </div>
         </div>
-        <div id="profileList" class="profiles-grid"><div class="empty-state"><p>Loading profiles...</p></div></div>
-      </div>
-
-      <!-- ═══ SETTINGS ═══ -->
-      <div class="page" id="pageSettings">
-        <div class="page-header"><h2>Settings</h2><p>Core server configuration. Changes require a restart.</p></div>
-        <div class="card">
-          <div class="card-header"><h3>Server Configuration</h3><button class="btn btn-primary btn-sm" onclick="saveConfig()">Save Changes</button></div>
-          <div class="card-body">
-            <div class="form-grid">
-              <div class="form-group"><label>Admin Port</label><input type="number" id="cfgPort" value="3000" disabled title="Port 3000 is reserved for administration"><div style="font-size:11px;color:var(--text3);margin-top:4px">Port 3000 is reserved exclusively for administration. Proxies and targets use auto-assigned ports.</div></div>
-              <div class="form-group"><label>Auth Token</label><input type="text" id="cfgAuthToken" placeholder="Leave empty to disable"></div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-body" style="padding:12px 16px">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+              <input type="text" id="profileSearch" placeholder="Search name, URL..."
+                style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
+                oninput="filterProfiles()">
+              <select id="profileAuthFilter"
+                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+                onchange="filterProfiles()">
+                <option value="">All auth</option>
+                <option value="enabled">Auth enabled</option>
+                <option value="passthrough">Passthrough</option>
+              </select>
+              <select id="profileAccessFilter"
+                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+                onchange="filterProfiles()">
+                <option value="">All access</option>
+                <option value="protected">Protected</option>
+                <option value="public">Public</option>
+              </select>
             </div>
           </div>
         </div>
+        <div class="card">
+          <div class="card-body" style="padding:0;overflow-x:auto">
+            <table id="profileTable" style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead>
+                <tr style="background:var(--surface2);text-align:left">
+                  <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Port</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Target URL</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Auth Header</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Access</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Blocked Ext.</th>
+                  <th style="padding:10px 12px"></th>
+                </tr>
+              </thead>
+              <tbody id="profileListBody">
+                <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
-    </div>
-</div>
 
-<!-- Profile Modal -->
-<div class="modal-overlay" id="profileModal">
-  <div class="modal">
-    <div class="modal-header"><h3 id="modalTitle">New Profile</h3><button class="close-btn" onclick="closeProfileModal()">&times;</button></div>
-    <div class="modal-body">
-      <div class="form-grid">
-        <div class="form-group"><label>Profile Name *</label><input type="text" id="pName" placeholder="e.g. infobip"></div>
-        <div class="form-group span-2"><label>Target URL *</label><input type="url" id="pTargetUrl" placeholder="https://api.example.com"></div>
-      </div>
-      <div class="form-section">Authentication (optional)</div>
-      <div class="form-grid">
-        <div class="form-group"><label>Auth Header</label><input type="text" id="pAuthHeader" placeholder="e.g. Authorization"></div>
-        <div class="form-group"><label>Auth Prefix</label><input type="text" id="pAuthPrefix" placeholder="e.g. Bearer, App"></div>
-        <div class="form-group span-2"><label>API Key</label><input type="text" id="pApiKey" placeholder="Your API key"></div>
-      </div>
-      <div class="form-section">Access Control</div>
-      <div class="form-grid">
-        <div class="form-group"><label>Access Key</label><input type="text" id="pAccessKey" placeholder="Optional"></div>
-        <div class="form-group"><label>Blocked Extensions</label><input type="text" id="pBlocked" placeholder=".exe, .bat, .sh"></div>
-      </div>
+      <!-- ═══ SETTINGS ═══ -->
     </div>
-    <div class="modal-footer"><button class="btn" onclick="closeProfileModal()">Cancel</button><button class="btn btn-primary" onclick="saveProfile()">Save Profile</button></div>
   </div>
-</div>
 
-<div class="toast" id="toast"></div>
+  <!-- Profile Modal -->
+  <div class="modal-overlay" id="profileModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modalTitle">New Profile</h3><button class="close-btn" onclick="closeProfileModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="form-group"><label>Profile Name *</label><input type="text" id="pName" placeholder="e.g. infobip">
+          </div>
+          <div class="form-group span-2"><label>Target URL *</label><input type="url" id="pTargetUrl"
+              placeholder="https://api.example.com"></div>
+        </div>
+        <div class="form-section">Authentication (optional)</div>
+        <div class="form-grid">
+          <div class="form-group"><label>Auth Header</label><input type="text" id="pAuthHeader"
+              placeholder="e.g. Authorization"></div>
+          <div class="form-group"><label>Auth Prefix</label><input type="text" id="pAuthPrefix"
+              placeholder="e.g. Bearer, App"></div>
+          <div class="form-group span-2"><label>API Key</label><input type="text" id="pApiKey"
+              placeholder="Your API key"></div>
+        </div>
+        <div class="form-section">Access Control</div>
+        <div class="form-grid">
+          <div class="form-group"><label>Access Key</label><input type="text" id="pAccessKey" placeholder="Optional">
+          </div>
+          <div class="form-group"><label>Blocked Extensions</label><input type="text" id="pBlocked"
+              placeholder=".exe, .bat, .sh"></div>
+        </div>
+      </div>
+      <div class="modal-footer"><button class="btn" onclick="closeProfileModal()">Cancel</button><button
+          class="btn btn-primary" onclick="saveProfile()">Save Profile</button></div>
+    </div>
+  </div>
 
-<script>
-// ─── State ───────────────────────────────────────────────────────────────────
-const THEME_KEY = 'midleman_theme';
-let editingProfile = null;
-let editingTarget = null;
-let currentPage = 'overview';
-let lastReqLogId = 0;
-let setupTotpSecret = '';
-let loggedInUser = null;
+  <div class="toast" id="toast"></div>
 
-// ─── Theme ───────────────────────────────────────────────────────────────────
-function initTheme() {
-  const saved = localStorage.getItem(THEME_KEY) || 'dark';
-  document.documentElement.setAttribute('data-theme', saved);
-  updateThemeIcon(saved);
-}
-function toggleTheme() {
-  const current = document.documentElement.getAttribute('data-theme');
-  const next = current === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', next);
-  localStorage.setItem(THEME_KEY, next);
-  updateThemeIcon(next);
-}
-function updateThemeIcon(theme) {
-  document.getElementById('themeBtn').innerHTML = theme === 'dark' ? '&#9728;' : '&#9790;';
-}
-initTheme();
+  <script>
+    // ─── State ───────────────────────────────────────────────────────────────────
+    const THEME_KEY = 'midleman_theme';
+    let editingProfile = null;
+    let editingTarget = null;
+    let currentPage = 'overview';
+    let lastReqLogId = 0;
+    let setupTotpSecret = '';
+    let loggedInUser = null;
+    let _allTargets = [];
+    let _allProfiles = [];
 
-// ─── Init ────────────────────────────────────────────────────────────────────
-(async function init() {
-  try {
-    const res = await fetch('/auth/status');
-    const status = await res.json();
+    // ─── Theme ───────────────────────────────────────────────────────────────────
+    function initTheme() {
+      const saved = localStorage.getItem(THEME_KEY) || 'dark';
+      document.documentElement.setAttribute('data-theme', saved);
+      updateThemeIcon(saved);
+    }
+    function toggleTheme() {
+      const current = document.documentElement.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem(THEME_KEY, next);
+      updateThemeIcon(next);
+    }
+    function updateThemeIcon(theme) {
+      document.getElementById('themeBtn').innerHTML = theme === 'dark' ? '&#9728;' : '&#9790;';
+    }
+    initTheme();
 
-    if (status.needsSetup) {
-      document.getElementById('authSetup').classList.add('active');
-      document.querySelector('.app').style.display = 'none';
-      return;
+    // ─── Init ────────────────────────────────────────────────────────────────────
+    (async function init() {
+      try {
+        const res = await fetch('/auth/status');
+        const status = await res.json();
+
+        if (status.needsSetup) {
+          document.getElementById('authSetup').classList.add('active');
+          document.querySelector('.app').style.display = 'none';
+          return;
+        }
+
+        if (!status.loggedIn) {
+          document.getElementById('authLogin').classList.add('active');
+          document.querySelector('.app').style.display = 'none';
+          return;
+        }
+
+        // Authenticated
+        loggedInUser = status.username;
+        document.getElementById('navUser').textContent = loggedInUser;
+        document.querySelector('.app').style.display = 'flex';
+        await refreshAll();
+        setInterval(fetchHealth, 5000);
+        setInterval(fetchRecentRequests, 3000);
+        setInterval(fetchChartData, 15000);
+        setInterval(() => {
+          if (currentPage === 'requests' && document.getElementById('rlAutoRefresh').checked) fetchRequestLogs();
+        }, 5000);
+      } catch (e) {
+        console.error('Init error:', e);
+      }
+    })();
+
+    // ─── Auth Functions ──────────────────────────────────────────────────────────
+    function showAuthError(id, msg) {
+      const el = document.getElementById(id);
+      el.textContent = msg; el.style.display = 'block';
+    }
+    function hideAuthError(id) { document.getElementById(id).style.display = 'none'; }
+
+    async function setupStep2() {
+      hideAuthError('setupError');
+      const user = document.getElementById('setupUser').value.trim();
+      const pass = document.getElementById('setupPass').value;
+      const pass2 = document.getElementById('setupPass2').value;
+      if (!user || user.length < 2) return showAuthError('setupError', 'Username must be at least 2 characters.');
+      if (!pass || pass.length < 6) return showAuthError('setupError', 'Password must be at least 6 characters.');
+      if (pass !== pass2) return showAuthError('setupError', 'Passwords do not match.');
+      try {
+        const res = await fetch('/auth/setup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: user }) });
+        const data = await res.json();
+        if (!res.ok) return showAuthError('setupError', data.error || 'Failed');
+        setupTotpSecret = data.secret;
+        const qrContainer = document.getElementById('setupQrContainer');
+        qrContainer.innerHTML = '';
+        if (data.qrDataUrl) {
+          const img = document.createElement('img');
+          img.src = data.qrDataUrl;
+          img.width = 200;
+          img.height = 200;
+          img.alt = 'QR Code 2FA';
+          qrContainer.appendChild(img);
+        } else {
+          qrContainer.textContent = 'Failed to generate QR code';
+        }
+        document.getElementById('setupSecretDisplay').textContent = data.secret;
+        document.getElementById('setupStep1').classList.remove('active');
+        document.getElementById('setupStep2').classList.add('active');
+      } catch (e) { showAuthError('setupError', 'Error: ' + e.message); }
     }
 
-    if (!status.loggedIn) {
-      document.getElementById('authLogin').classList.add('active');
-      document.querySelector('.app').style.display = 'none';
-      return;
+    function backToStep1() {
+      document.getElementById('setupStep2').classList.remove('active');
+      document.getElementById('setupStep1').classList.add('active');
     }
 
-    // Authenticated
-    loggedInUser = status.username;
-    document.getElementById('navUser').textContent = loggedInUser;
-    document.querySelector('.app').style.display = 'flex';
-    await refreshAll();
-    setInterval(fetchHealth, 5000);
-    setInterval(fetchRecentRequests, 3000);
-    setInterval(() => {
-      if (currentPage === 'requests' && document.getElementById('rlAutoRefresh').checked) fetchRequestLogs();
-    }, 5000);
-  } catch(e) {
-    console.error('Init error:', e);
-  }
-})();
-
-// ─── Auth Functions ──────────────────────────────────────────────────────────
-function showAuthError(id, msg) {
-  const el = document.getElementById(id);
-  el.textContent = msg; el.style.display = 'block';
-}
-function hideAuthError(id) { document.getElementById(id).style.display = 'none'; }
-
-async function setupStep2() {
-  hideAuthError('setupError');
-  const user = document.getElementById('setupUser').value.trim();
-  const pass = document.getElementById('setupPass').value;
-  const pass2 = document.getElementById('setupPass2').value;
-  if (!user || user.length < 2) return showAuthError('setupError', 'Username must be at least 2 characters.');
-  if (!pass || pass.length < 6) return showAuthError('setupError', 'Password must be at least 6 characters.');
-  if (pass !== pass2) return showAuthError('setupError', 'Passwords do not match.');
-  try {
-    const res = await fetch('/auth/setup', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ username: user }) });
-    const data = await res.json();
-    if (!res.ok) return showAuthError('setupError', data.error || 'Failed');
-    setupTotpSecret = data.secret;
-    const qrContainer = document.getElementById('setupQrContainer');
-    qrContainer.innerHTML = '';
-    if (data.qrDataUrl) {
-      const img = document.createElement('img');
-      img.src = data.qrDataUrl;
-      img.width = 200;
-      img.height = 200;
-      img.alt = 'QR Code 2FA';
-      qrContainer.appendChild(img);
-    } else {
-      qrContainer.textContent = 'Failed to generate QR code';
+    async function completeSetup() {
+      hideAuthError('setupError');
+      const user = document.getElementById('setupUser').value.trim();
+      const pass = document.getElementById('setupPass').value;
+      const code = document.getElementById('setupTotpCode').value.trim();
+      if (!code || code.length !== 6) return showAuthError('setupError', 'Enter the 6-digit code from your authenticator app.');
+      try {
+        const res = await fetch('/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: user, password: pass, totpSecret: setupTotpSecret, totpCode: code }) });
+        const data = await res.json();
+        if (!res.ok) return showAuthError('setupError', data.error || 'Failed');
+        window.location.reload();
+      } catch (e) { showAuthError('setupError', 'Error: ' + e.message); }
     }
-    document.getElementById('setupSecretDisplay').textContent = data.secret;
-    document.getElementById('setupStep1').classList.remove('active');
-    document.getElementById('setupStep2').classList.add('active');
-  } catch(e) { showAuthError('setupError', 'Error: ' + e.message); }
-}
 
-function backToStep1() {
-  document.getElementById('setupStep2').classList.remove('active');
-  document.getElementById('setupStep1').classList.add('active');
-}
+    let loginChallengeToken = null;
 
-async function completeSetup() {
-  hideAuthError('setupError');
-  const user = document.getElementById('setupUser').value.trim();
-  const pass = document.getElementById('setupPass').value;
-  const code = document.getElementById('setupTotpCode').value.trim();
-  if (!code || code.length !== 6) return showAuthError('setupError', 'Enter the 6-digit code from your authenticator app.');
-  try {
-    const res = await fetch('/auth/register', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ username: user, password: pass, totpSecret: setupTotpSecret, totpCode: code }) });
-    const data = await res.json();
-    if (!res.ok) return showAuthError('setupError', data.error || 'Failed');
-    window.location.reload();
-  } catch(e) { showAuthError('setupError', 'Error: ' + e.message); }
-}
+    async function doLoginStep1() {
+      hideAuthError('loginError');
+      const user = document.getElementById('loginUser').value.trim();
+      const pass = document.getElementById('loginPass').value;
+      if (!user || !pass) return showAuthError('loginError', 'Username and password are required.');
+      document.getElementById('loginBtn1').disabled = true;
+      document.getElementById('loginBtn1').textContent = 'Verifying...';
+      try {
+        const res = await fetch('/auth/login/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: user, password: pass }) });
+        const data = await res.json();
+        if (!res.ok) { showAuthError('loginError', data.error || 'Login failed'); document.getElementById('loginBtn1').disabled = false; document.getElementById('loginBtn1').textContent = 'Continue'; return; }
+        loginChallengeToken = data.challengeToken;
+        document.getElementById('loginStep1').classList.remove('active');
+        document.getElementById('loginStep2').classList.add('active');
+        document.getElementById('loginTotp').value = '';
+        document.getElementById('loginTotp').focus();
+      } catch (e) { showAuthError('loginError', 'Error: ' + e.message); }
+      document.getElementById('loginBtn1').disabled = false;
+      document.getElementById('loginBtn1').textContent = 'Continue';
+    }
 
-async function doLogin() {
-  hideAuthError('loginError');
-  const user = document.getElementById('loginUser').value.trim();
-  const pass = document.getElementById('loginPass').value;
-  const code = document.getElementById('loginTotp').value.trim();
-  if (!user || !pass || !code) return showAuthError('loginError', 'All fields are required.');
-  document.getElementById('loginBtn').disabled = true;
-  document.getElementById('loginBtn').textContent = 'Signing in...';
-  try {
-    const res = await fetch('/auth/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ username: user, password: pass, totpCode: code }) });
-    const data = await res.json();
-    if (!res.ok) { showAuthError('loginError', data.error || 'Login failed'); document.getElementById('loginBtn').disabled = false; document.getElementById('loginBtn').textContent = 'Sign In'; return; }
-    window.location.reload();
-  } catch(e) { showAuthError('loginError', 'Error: ' + e.message); document.getElementById('loginBtn').disabled = false; document.getElementById('loginBtn').textContent = 'Sign In'; }
-}
+    async function doLoginStep2() {
+      hideAuthError('loginTotpError');
+      const code = document.getElementById('loginTotp').value.trim();
+      if (!code || code.length !== 6) return showAuthError('loginTotpError', 'Enter the 6-digit code.');
+      if (!loginChallengeToken) return showAuthError('loginTotpError', 'Session expired. Go back and try again.');
+      document.getElementById('loginBtn2').disabled = true;
+      document.getElementById('loginBtn2').textContent = 'Signing in...';
+      try {
+        const res = await fetch('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ challengeToken: loginChallengeToken, totpCode: code }) });
+        const data = await res.json();
+        if (!res.ok) { showAuthError('loginTotpError', data.error || 'Invalid code'); document.getElementById('loginBtn2').disabled = false; document.getElementById('loginBtn2').textContent = 'Sign In'; return; }
+        window.location.reload();
+      } catch (e) { showAuthError('loginTotpError', 'Error: ' + e.message); document.getElementById('loginBtn2').disabled = false; document.getElementById('loginBtn2').textContent = 'Sign In'; }
+    }
 
-async function doLogout() {
-  await fetch('/auth/logout', { method: 'POST' });
-  window.location.reload();
-}
+    function loginBackToStep1() {
+      loginChallengeToken = null;
+      hideAuthError('loginTotpError');
+      document.getElementById('loginStep2').classList.remove('active');
+      document.getElementById('loginStep1').classList.add('active');
+      document.getElementById('loginUser').focus();
+    }
 
-// ─── Navigation ──────────────────────────────────────────────────────────────
-function navigate(page) {
-  currentPage = page;
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
-  const pageEl = document.getElementById('page' + page.charAt(0).toUpperCase() + page.slice(1));
-  if (pageEl) pageEl.classList.add('active');
-  document.querySelectorAll('.nav-link').forEach(n => {
-    if (n.textContent.trim().toLowerCase().startsWith(page === 'requests' ? 'req' : page)) n.classList.add('active');
-  });
-  if (page === 'requests') { rlPage = 1; fetchRequestLogs(); }
-  if (page === 'targets') fetchTargets();
-}
+    async function doLogout() {
+      await fetch('/auth/logout', { method: 'POST' });
+      window.location.reload();
+    }
 
-// ─── API ─────────────────────────────────────────────────────────────────────
-function hdrs() { return { 'Content-Type': 'application/json' }; }
-async function api(path, opts = {}) {
-  const res = await fetch(path, { ...opts, headers: { ...hdrs(), ...(opts.headers || {}) } });
-  if (res.status === 401) { window.location.reload(); throw new Error('Session expired'); }
-  return res;
-}
-function toast(msg, type = 'success') {
-  const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast ' + type;
-  requestAnimationFrame(() => t.classList.add('show'));
-  setTimeout(() => t.classList.remove('show'), 3000);
-}
-function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-function fmtNum(n) { if (n >= 1e6) return (n/1e6).toFixed(1)+'M'; if (n >= 1e3) return (n/1e3).toFixed(1)+'K'; return String(n); }
-function fmtMs(ms) { if (!ms) return '0ms'; if (ms < 1) return ms.toFixed(2)+'ms'; if (ms < 1000) return Math.round(ms)+'ms'; return (ms/1000).toFixed(2)+'s'; }
-function fmtUptime(s) { if(s<60)return s+'s'; if(s<3600)return Math.floor(s/60)+'m '+s%60+'s'; const h=Math.floor(s/3600),m=Math.floor(s%3600/60); return h+'h '+m+'m'; }
-function fmtBytes(b) { if (b < 1024) return b + ' B'; if (b < 1048576) return (b/1024).toFixed(1) + ' KB'; return (b/1048576).toFixed(1) + ' MB'; }
+    // ─── Navigation ──────────────────────────────────────────────────────────────
+    function navigate(page) {
+      currentPage = page;
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
+      const pageEl = document.getElementById('page' + page.charAt(0).toUpperCase() + page.slice(1));
+      if (pageEl) pageEl.classList.add('active');
+      document.querySelectorAll('.nav-link').forEach(n => {
+        if (n.textContent.trim().toLowerCase().startsWith(page === 'requests' ? 'req' : page)) n.classList.add('active');
+      });
+      if (page === 'requests') { rlPage = 1; fetchRequestLogs(); }
+      if (page === 'targets') fetchTargets();
+    }
 
-// ─── Data Fetch ──────────────────────────────────────────────────────────────
-async function refreshAll() {
-  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchTargets(), fetchRequestLogStats(), fetchRecentRequests()]);
-}
+    // ─── API ─────────────────────────────────────────────────────────────────────
+    function hdrs() { return { 'Content-Type': 'application/json' }; }
+    async function api(path, opts = {}) {
+      const res = await fetch(path, { ...opts, headers: { ...hdrs(), ...(opts.headers || {}) } });
+      if (res.status === 401) { window.location.reload(); throw new Error('Session expired'); }
+      return res;
+    }
+    function toast(msg, type = 'success') {
+      const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast ' + type;
+      requestAnimationFrame(() => t.classList.add('show'));
+      setTimeout(() => t.classList.remove('show'), 3000);
+    }
+    function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    function fmtNum(n) { if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'; if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K'; return String(n); }
+    function fmtMs(ms) { if (!ms) return '0ms'; if (ms < 1) return ms.toFixed(2) + 'ms'; if (ms < 1000) return Math.round(ms) + 'ms'; return (ms / 1000).toFixed(2) + 's'; }
+    function fmtUptime(s) { if (s < 60) return s + 's'; if (s < 3600) return Math.floor(s / 60) + 'm ' + s % 60 + 's'; const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h + 'h ' + m + 'm'; }
+    function fmtBytes(b) { if (b < 1024) return b + ' B'; if (b < 1048576) return (b / 1024).toFixed(1) + ' KB'; return (b / 1048576).toFixed(1) + ' MB'; }
 
-async function fetchHealth() {
-  try {
-    const res = await fetch('/health'); const d = await res.json();
-    document.getElementById('navDot').className = 'status-dot online';
-    document.getElementById('navStatus').textContent = 'Online';
-    document.getElementById('navUptime').textContent = fmtUptime(d.uptime);
-    document.getElementById('ovStatus').textContent = 'Online';
-    document.getElementById('ovStatus').style.color = 'var(--green)';
-    document.getElementById('ovUptime').textContent = 'Uptime: ' + fmtUptime(d.uptime);
-    document.getElementById('ovActive').textContent = d.activeRequests;
-    document.getElementById('ovProfiles').textContent = (d.proxyProfiles || 0) + (d.proxyTargets || 0);
-  } catch {
-    document.getElementById('navDot').className = 'status-dot offline';
-    document.getElementById('navStatus').textContent = 'Offline';
-    document.getElementById('navUptime').textContent = '';
-    document.getElementById('ovStatus').textContent = 'Offline';
-    document.getElementById('ovStatus').style.color = 'var(--red)';
-  }
-}
+    // ─── Data Fetch ──────────────────────────────────────────────────────────────
+    async function refreshAll() {
+      await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchTargets(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData()]);
+    }
 
-async function fetchRequestLogStats() {
-  try {
-    const res = await api('/admin/requests/stats'); if (!res.ok) return;
-    const s = await res.json();
-    document.getElementById('navReqBadge').textContent = fmtNum(s.total);
+    // ─── Chart Rendering ──────────────────────────────────────────────────────────
+    const CHART_COLORS = {
+      accent: '#0078d4',
+      accentFade: 'rgba(0, 120, 212, 0.08)',
+      red: '#e17055',
+      redFade: 'rgba(225, 112, 85, 0.15)',
+      green: '#00b894',
+      blue: '#74b9ff',
+      orange: '#fdcb6e',
+      grid: 'rgba(255,255,255,0.04)',
+      label: '#5d6180',
+    };
 
-    // Overview quick metrics
-    const el = document.getElementById('ovQuickMetrics');
-    if (s.total === 0) {
-      el.innerHTML = '<div style="color:var(--text3);font-size:14px;text-align:center;padding:20px">No requests recorded yet.</div>';
-    } else {
-      el.innerHTML = `
+    function getThemeColors() {
+      const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+      return {
+        accent: '#0078d4',
+        accentFade: isDark ? 'rgba(0, 120, 212, 0.10)' : 'rgba(0, 120, 212, 0.06)',
+        red: isDark ? '#e17055' : '#d35400',
+        green: isDark ? '#00b894' : '#00a17d',
+        blue: isDark ? '#74b9ff' : '#2e86de',
+        orange: isDark ? '#fdcb6e' : '#c8980a',
+        grid: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
+        label: isDark ? '#5d6180' : '#9096a9',
+        text: isDark ? '#8b8fa7' : '#6b7185',
+      };
+    }
+
+    function drawTimelineChart(canvas, data) {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.parentElement.getBoundingClientRect();
+      const w = rect.width - 32; // account for chart-body padding
+      const h = 160;
+
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      canvas.style.width = w + 'px';
+      canvas.style.height = h + 'px';
+
+      const ctx = canvas.getContext('2d');
+      ctx.scale(dpr, dpr);
+
+      const colors = getThemeColors();
+      const padLeft = 36;
+      const padRight = 8;
+      const padTop = 8;
+      const padBot = 24;
+      const plotW = w - padLeft - padRight;
+      const plotH = h - padTop - padBot;
+
+      if (!data || data.length === 0) {
+        ctx.fillStyle = colors.label;
+        ctx.font = '13px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('No traffic data yet', w / 2, h / 2);
+        canvas._chartMeta = null;
+        return;
+      }
+
+      const maxVal = Math.max(...data.map(d => d.count), 1);
+      const barW = Math.max(2, (plotW / data.length) - 2);
+
+      // Y-axis grid lines
+      const ySteps = 4;
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.font = '10px JetBrains Mono, monospace';
+      for (let i = 0; i <= ySteps; i++) {
+        const y = padTop + (plotH / ySteps) * i;
+        const val = Math.round(maxVal - (maxVal / ySteps) * i);
+        ctx.strokeStyle = colors.grid;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(padLeft, y);
+        ctx.lineTo(w - padRight, y);
+        ctx.stroke();
+        ctx.fillStyle = colors.label;
+        ctx.fillText(val.toString(), padLeft - 6, y);
+      }
+
+      // Bars
+      data.forEach((d, i) => {
+        const x = padLeft + (plotW / data.length) * i + 1;
+        const barH = (d.count / maxVal) * plotH;
+        const y = padTop + plotH - barH;
+
+        ctx.fillStyle = colors.accent;
+        ctx.beginPath();
+        ctx.roundRect(x, y, barW, barH, [2, 2, 0, 0]);
+        ctx.fill();
+
+        if (d.errors > 0) {
+          const errH = (d.errors / maxVal) * plotH;
+          ctx.fillStyle = colors.red;
+          ctx.beginPath();
+          ctx.roundRect(x, padTop + plotH - errH, barW, errH, [2, 2, 0, 0]);
+          ctx.fill();
+        }
+      });
+
+      // X-axis labels (show ~6 labels)
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.font = '10px JetBrains Mono, monospace';
+      ctx.fillStyle = colors.label;
+      const labelStep = Math.max(1, Math.floor(data.length / 6));
+      data.forEach((d, i) => {
+        if (i % labelStep === 0 || i === data.length - 1) {
+          const x = padLeft + (plotW / data.length) * i + barW / 2;
+          const hour = d.bucket.substring(11, 16);
+          ctx.fillText(hour, x, padTop + plotH + 6);
+        }
+      });
+
+      // Store layout metadata for tooltip hit-testing
+      canvas._chartMeta = { data, padLeft, padRight, padTop, padBot, plotW, plotH, barW, maxVal, w, h };
+      setupTimelineTooltip(canvas);
+    }
+
+    function setupTimelineTooltip(canvas) {
+      if (canvas._tooltipBound) return;
+      canvas._tooltipBound = true;
+      const tip = document.getElementById('chartTooltip');
+
+      canvas.addEventListener('mousemove', (e) => {
+        const meta = canvas._chartMeta;
+        if (!meta) { tip.style.display = 'none'; return; }
+        const { data, padLeft, padRight, plotW, padTop, plotH, barW, maxVal, w } = meta;
+        const cr = canvas.getBoundingClientRect();
+        const mx = e.clientX - cr.left;
+        const my = e.clientY - cr.top;
+
+        let found = null;
+        data.forEach((d, i) => {
+          const x = padLeft + (plotW / data.length) * i + 1;
+          const barH = (d.count / maxVal) * plotH;
+          const by = padTop + plotH - barH;
+          // Expand hit area horizontally to full slot width for easier hover
+          const slotW = plotW / data.length;
+          const slotX = padLeft + slotW * i;
+          if (mx >= slotX && mx < slotX + slotW && my >= padTop && my <= padTop + plotH) {
+            found = d;
+          }
+        });
+
+        if (!found) { tip.style.display = 'none'; return; }
+
+        const label = found.bucket.length >= 16 ? found.bucket.substring(11, 16) : found.bucket;
+        const errPct = found.count > 0 ? ((found.errors / found.count) * 100).toFixed(1) : '0.0';
+        tip.innerHTML =
+          `<div style="font-weight:600;margin-bottom:4px;color:var(--text)">${label}</div>` +
+          `<div style="color:var(--text2)">Requests: <span style="color:var(--accent2);font-weight:600">${found.count}</span></div>` +
+          (found.errors > 0
+            ? `<div style="color:var(--text2)">Errors: <span style="color:var(--red);font-weight:600">${found.errors}</span> <span style="color:var(--text3)">(${errPct}%)</span></div>`
+            : `<div style="color:var(--text3)">No errors</div>`);
+        tip.style.display = 'block';
+        // Position tooltip near cursor, keep inside viewport
+        const tipW = 160;
+        let tx = e.clientX + 14;
+        if (tx + tipW > window.innerWidth - 8) tx = e.clientX - tipW - 14;
+        tip.style.left = tx + 'px';
+        tip.style.top = (e.clientY - 10) + 'px';
+      });
+
+      canvas.addEventListener('mouseleave', () => {
+        tip.style.display = 'none';
+      });
+    }
+
+    function renderBreakdown(container, chartData) {
+      const colors = getThemeColors();
+      const methods = chartData.methods || [];
+      const statuses = chartData.statuses || [];
+      const avgDur = chartData.avgDuration || 0;
+      const errRate = chartData.errorRate || 0;
+
+      if (methods.length === 0 && statuses.length === 0) {
+        container.innerHTML = '<div style="color:var(--text3);font-size:13px;text-align:center;padding:20px">No data yet</div>';
+        return;
+      }
+
+      const methodColors = { GET: colors.green, POST: colors.blue, PUT: colors.orange, PATCH: colors.orange, DELETE: colors.red };
+
+      function statusLabel(code) {
+        const labels = {
+          200:'OK', 201:'Created', 202:'Accepted', 204:'No Content',
+          301:'Moved', 302:'Found', 304:'Not Modified',
+          400:'Bad Request', 401:'Unauthorized', 403:'Forbidden',
+          404:'Not Found', 405:'Method Not Allowed', 409:'Conflict',
+          422:'Unprocessable', 429:'Too Many Requests',
+          500:'Internal Error', 502:'Bad Gateway', 503:'Unavailable', 504:'Timeout'
+        };
+        return labels[code] ? code + ' ' + labels[code] : String(code);
+      }
+      function statusColor(code) {
+        if (code < 300) return colors.green;
+        if (code < 400) return colors.blue;
+        if (code < 500) return colors.orange;
+        return colors.red;
+      }
+
+      const maxMethod = Math.max(...methods.map(m => m.count), 1);
+      const maxStatus = Math.max(...statuses.map(s => s.count), 1);
+
+      let html = '';
+
+      // Key metrics
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">';
+      html += '<div style="text-align:center;padding:8px;background:var(--surface2);border-radius:8px">';
+      html += '<div style="font-size:16px;font-weight:700;color:var(--text);font-family:JetBrains Mono,monospace">' + (avgDur < 1000 ? avgDur + 'ms' : (avgDur / 1000).toFixed(1) + 's') + '</div>';
+      html += '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-top:2px">Avg latency</div></div>';
+      html += '<div style="text-align:center;padding:8px;background:var(--surface2);border-radius:8px">';
+      html += '<div style="font-size:16px;font-weight:700;font-family:JetBrains Mono,monospace;color:' + (errRate > 5 ? colors.red : colors.green) + '">' + errRate + '%</div>';
+      html += '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-top:2px">Error rate</div></div>';
+      html += '</div>';
+
+      // Methods
+      if (methods.length > 0) {
+        html += '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;font-weight:500">Methods</div>';
+        html += '<div class="bar-list">';
+        methods.slice(0, 5).forEach(m => {
+          const pct = (m.count / maxMethod) * 100;
+          const c = methodColors[m.method] || colors.accent;
+          html += '<div class="bar-item">';
+          html += '<div class="bar-item-label">' + m.method + '</div>';
+          html += '<div class="bar-item-track"><div class="bar-item-fill" style="width:' + pct + '%;background:' + c + '"></div></div>';
+          html += '<div class="bar-item-count">' + m.count + '</div>';
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+
+      // Status codes
+      if (statuses.length > 0) {
+        html += '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin:14px 0 8px;font-weight:500">Status</div>';
+        html += '<div class="bar-list">';
+        statuses.forEach(s => {
+          const pct = (s.count / maxStatus) * 100;
+          const c = statusColor(s.status);
+          html += '<div class="bar-item">';
+          html += '<div class="bar-item-label" style="font-family:JetBrains Mono,monospace;font-size:12px;color:' + c + '">' + statusLabel(s.status) + '</div>';
+          html += '<div class="bar-item-track"><div class="bar-item-fill" style="width:' + pct + '%;background:' + c + '"></div></div>';
+          html += '<div class="bar-item-count">' + s.count + '</div>';
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+
+      container.innerHTML = html;
+    }
+
+    let lastChartData = null;
+
+    async function fetchChartData() {
+      try {
+        const res = await api('/admin/requests/chart');
+        if (!res.ok) return;
+        const data = await res.json();
+        lastChartData = data;
+
+        const canvas = document.getElementById('chartTimeline');
+        if (canvas) drawTimelineChart(canvas, data.timeline);
+
+        const breakdown = document.getElementById('chartBreakdown');
+        if (breakdown) renderBreakdown(breakdown, data);
+
+        const label = document.getElementById('chartTrafficLabel');
+        if (label) {
+          const total = (data.timeline || []).reduce((s, d) => s + d.count, 0);
+          label.textContent = total + ' requests \u00b7 last 24h';
+        }
+      } catch { }
+    }
+
+    window.addEventListener('resize', () => {
+      if (lastChartData) {
+        const canvas = document.getElementById('chartTimeline');
+        if (canvas) drawTimelineChart(canvas, lastChartData.timeline);
+      }
+    });
+
+    async function fetchHealth() {
+      try {
+        const res = await fetch('/health'); const d = await res.json();
+        document.getElementById('navDot').className = 'status-dot online';
+        document.getElementById('navStatus').textContent = 'Online';
+        document.getElementById('navUptime').textContent = fmtUptime(d.uptime);
+        document.getElementById('ovStatus').textContent = 'Online';
+        document.getElementById('ovStatus').style.color = 'var(--green)';
+        document.getElementById('ovUptime').textContent = 'Uptime: ' + fmtUptime(d.uptime);
+        document.getElementById('ovActive').textContent = d.activeRequests;
+        document.getElementById('ovProfiles').textContent = (d.proxyProfiles || 0) + (d.proxyTargets || 0);
+      } catch {
+        document.getElementById('navDot').className = 'status-dot offline';
+        document.getElementById('navStatus').textContent = 'Offline';
+        document.getElementById('navUptime').textContent = '';
+        document.getElementById('ovStatus').textContent = 'Offline';
+        document.getElementById('ovStatus').style.color = 'var(--red)';
+      }
+    }
+
+    async function fetchRequestLogStats() {
+      try {
+        const res = await api('/admin/requests/stats'); if (!res.ok) return;
+        const s = await res.json();
+        document.getElementById('navReqBadge').textContent = fmtNum(s.total);
+
+        // Overview quick metrics
+        const el = document.getElementById('ovQuickMetrics');
+        if (s.total === 0) {
+          el.innerHTML = '<div style="color:var(--text3);font-size:14px;text-align:center;padding:20px">No requests recorded yet.</div>';
+        } else {
+          el.innerHTML = `
         <div class="metrics-row">
           <div class="metric-box"><div class="metric-val">${fmtNum(s.total)}</div><div class="metric-lbl">Total Requests</div></div>
           <div class="metric-box"><div class="metric-val">${s.dbSizeMB || 0} MB</div><div class="metric-lbl">Log Size</div></div>
-          <div class="metric-box"><div class="metric-val">${s.oldest ? new Date(s.oldest+'Z').toLocaleDateString() : '-'}</div><div class="metric-lbl">Since</div></div>
-          <div class="metric-box"><div class="metric-val">${s.newest ? new Date(s.newest+'Z').toLocaleTimeString() : '-'}</div><div class="metric-lbl">Last Request</div></div>
+          <div class="metric-box"><div class="metric-val">${s.oldest ? new Date(s.oldest + 'Z').toLocaleDateString() : '-'}</div><div class="metric-lbl">Since</div></div>
+          <div class="metric-box"><div class="metric-val">${s.newest ? new Date(s.newest + 'Z').toLocaleTimeString() : '-'}</div><div class="metric-lbl">Last Request</div></div>
         </div>`;
-    }
-  } catch {}
-}
-
-// Real-time recent requests for overview
-async function fetchRecentRequests() {
-  try {
-    const res = await api('/admin/requests?limit=10');
-    if (!res.ok) return;
-    const data = await res.json();
-    const reqs = data.requests || [];
-
-    // Update stats too
-    fetchRequestLogStats();
-
-    const tbody = document.getElementById('ovRecentBody');
-    const count = document.getElementById('ovFeedCount');
-    count.textContent = data.total + ' total';
-
-    if (reqs.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="padding:30px;text-align:center;color:var(--text3)">No requests yet.</td></tr>';
-      return;
+        }
+      } catch { }
     }
 
-    // Check for new entries
-    const newestId = reqs[0]?.id || 0;
-    const isNew = newestId > lastReqLogId;
-    lastReqLogId = newestId;
+    // Real-time recent requests for overview
+    async function fetchRecentRequests() {
+      try {
+        const res = await api('/admin/requests?limit=10');
+        if (!res.ok) return;
+        const data = await res.json();
+        const reqs = data.requests || [];
 
-    tbody.innerHTML = reqs.map((r, i) => {
-      const ts = new Date(r.timestamp + 'Z');
-      const sc = r.resStatus;
-      const statusCls = !sc ? 'color:var(--text3)' : sc < 300 ? 'color:var(--green)' : sc < 400 ? 'color:var(--blue)' : sc < 500 ? 'color:var(--orange)' : 'color:var(--red)';
-      const typeBadge = r.type === 'proxy'
-        ? '<span style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:4px;font-size:11px">proxy' + (r.profileName ? ' / ' + esc(r.profileName) : '') + '</span>'
-        : '<span style="background:var(--blue-bg);color:var(--blue);padding:2px 8px;border-radius:4px;font-size:11px">target' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>';
-      const methodCls = r.method === 'GET' ? 'color:var(--green)' : r.method === 'POST' ? 'color:var(--blue)' : r.method === 'DELETE' ? 'color:var(--red)' : 'color:var(--orange)';
-      const flash = isNew && i === 0 ? 'animation:flash 1s ease' : '';
-      return `<tr style="border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;${flash}" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''" onclick="navigate('requests');setTimeout(()=>openReqDetail(${r.id}),300)">
+        // Update stats too
+        fetchRequestLogStats();
+
+        const tbody = document.getElementById('ovRecentBody');
+        const count = document.getElementById('ovFeedCount');
+        count.textContent = data.total + ' total';
+
+        if (reqs.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6" style="padding:30px;text-align:center;color:var(--text3)">No requests yet.</td></tr>';
+          return;
+        }
+
+        // Check for new entries
+        const newestId = reqs[0]?.id || 0;
+        const isNew = newestId > lastReqLogId;
+        lastReqLogId = newestId;
+
+        tbody.innerHTML = reqs.map((r, i) => {
+          const ts = new Date(r.timestamp + 'Z');
+          const sc = r.resStatus;
+          const statusCls = !sc ? 'color:var(--text3)' : sc < 300 ? 'color:var(--green)' : sc < 400 ? 'color:var(--blue)' : sc < 500 ? 'color:var(--orange)' : 'color:var(--red)';
+          const typeBadge = r.type === 'proxy'
+            ? '<span style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:4px;font-size:11px">proxy' + (r.profileName ? ' / ' + esc(r.profileName) : '') + '</span>'
+            : '<span style="background:var(--blue-bg);color:var(--blue);padding:2px 8px;border-radius:4px;font-size:11px">target' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>';
+          const methodCls = r.method === 'GET' ? 'color:var(--green)' : r.method === 'POST' ? 'color:var(--blue)' : r.method === 'DELETE' ? 'color:var(--red)' : 'color:var(--orange)';
+          const flash = isNew && i === 0 ? 'animation:flash 1s ease' : '';
+          return `<tr style="border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;${flash}" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''" onclick="navigate('requests');setTimeout(()=>openReqDetail(${r.id}),300)">
         <td style="padding:6px 12px;white-space:nowrap;color:var(--text2);font-size:12px">${ts.toLocaleTimeString()}</td>
         <td style="padding:6px 8px">${typeBadge}</td>
         <td style="padding:6px 8px;font-weight:600;${methodCls}">${esc(r.method)}</td>
@@ -848,283 +2360,320 @@ async function fetchRecentRequests() {
         <td style="padding:6px 8px;font-weight:600;${statusCls}">${sc || '-'}</td>
         <td style="padding:6px 8px;color:var(--text2)">${r.durationMs ? fmtMs(r.durationMs) : '-'}</td>
       </tr>`;
-    }).join('');
-  } catch {}
-}
+        }).join('');
+      } catch { }
+    }
 
-async function fetchConfig() {
-  try {
-    const res = await api('/admin/config'); if (!res.ok) return; const d = await res.json();
-    document.getElementById('cfgPort').value = d.port || '';
-    document.getElementById('cfgAuthToken').value = d.authToken || '';
-    document.getElementById('ovAuth').textContent = d.authToken ? 'Enabled' : 'Disabled';
-    document.getElementById('ovAuth').style.color = d.authToken ? 'var(--green)' : 'var(--orange)';
-    document.getElementById('ovPort').textContent = 'Port ' + (d.port || 3000);
-  } catch {}
-}
+    async function fetchConfig() {
+      try {
+        const res = await api('/admin/config'); if (!res.ok) return; const d = await res.json();
+        document.getElementById('ovAuth').textContent = d.authToken ? 'Enabled' : 'Disabled';
+        document.getElementById('ovAuth').style.color = d.authToken ? 'var(--green)' : 'var(--orange)';
+        document.getElementById('ovPort').textContent = 'Port ' + (d.port || 3000);
+      } catch { }
+    }
 
-async function fetchProfiles() {
-  try {
-    const res = await api('/admin/profiles'); if (!res.ok) return;
-    const d = await res.json(); const profiles = d.profiles || [];
-    renderProfiles(profiles);
-    document.getElementById('navProfileBadge').textContent = profiles.length;
-    document.getElementById('ovProfileNames').textContent = profiles.map(p => p.name).join(', ') || 'none';
-  } catch {}
-}
+    async function fetchProfiles() {
+      try {
+        const res = await api('/admin/profiles'); if (!res.ok) return;
+        const d = await res.json(); _allProfiles = d.profiles || [];
+        filterProfiles();
+        document.getElementById('navProfileBadge').textContent = _allProfiles.length;
+        document.getElementById('ovProfileNames').textContent = _allProfiles.map(p => p.name).join(', ') || 'none';
+      } catch { }
+    }
 
-function renderProfiles(profiles) {
-  const c = document.getElementById('profileList');
-  if (profiles.length === 0) { c.innerHTML = '<div class="empty-state"><p>No profiles yet. Click "+ New Profile".</p></div>'; return; }
-  c.innerHTML = profiles.map(p => {
-    const hasAuth = p.authHeader;
-    const authVal = hasAuth
-      ? esc(p.authHeader) + (p.authPrefix ? ` <span style="color:var(--text3);font-weight:400">(${esc(p.authPrefix)})</span>` : '')
-      : '<span style="color:var(--text3)">Passthrough</span>';
-    const portDisplay = p.port ? `:${p.port}` : '';
-    return `<div class="profile-row">
-      <div class="profile-row-top">
-        <div class="profile-row-name">
-          <div class="profile-avatar">${esc(p.name.substring(0,2))}</div>
-          <div class="profile-name-wrap">
-            <div class="profile-name">${esc(p.name)} ${p.port ? `<span style="color:var(--text3);font-weight:400;font-size:13px">${portDisplay}</span>` : ''}</div>
-            <div class="profile-url">${esc(p.targetUrl)}</div>
-          </div>
-        </div>
-        <div class="profile-row-actions">
-          ${p.port ? `<a class="btn btn-sm" href="${location.protocol}//${location.hostname}:${p.port}/" target="_blank" style="text-decoration:none">Open :${p.port}</a>` : '<span class="btn btn-sm" style="opacity:0.5">No port</span>'}
+    function filterProfiles() {
+      const search = (document.getElementById('profileSearch')?.value || '').toLowerCase();
+      const authF = document.getElementById('profileAuthFilter')?.value || '';
+      const accessF = document.getElementById('profileAccessFilter')?.value || '';
+      const filtered = _allProfiles.filter(p => {
+        if (search && !p.name.toLowerCase().includes(search) && !p.targetUrl.toLowerCase().includes(search)) return false;
+        if (authF === 'enabled' && !p.authHeader) return false;
+        if (authF === 'passthrough' && p.authHeader) return false;
+        if (accessF === 'protected' && !p.hasAccessKey) return false;
+        if (accessF === 'public' && p.hasAccessKey) return false;
+        return true;
+      });
+      renderProfiles(filtered);
+    }
+
+    function renderProfiles(profiles) {
+      const c = document.getElementById('profileListBody');
+      if (profiles.length === 0) { c.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No profiles yet. Click "+ New Profile".</td></tr>'; return; }
+      c.innerHTML = profiles.map(p => {
+        const hasAuth = p.authHeader;
+        const authVal = hasAuth
+          ? esc(p.authHeader) + (p.authPrefix ? ` <span style="color:var(--text3)">(${esc(p.authPrefix)})</span>` : '')
+          : '<span style="color:var(--text3)">Passthrough</span>';
+        const accessBadge = p.hasAccessKey
+          ? '<span style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:4px;font-size:11px">Protected</span>'
+          : '<span style="color:var(--text3)">Public</span>';
+        const blockedVal = p.blockedExtensions?.length
+          ? `<span style="color:var(--red)">${esc(p.blockedExtensions.join(', '))}</span>`
+          : '<span style="color:var(--text3)">None</span>';
+        return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
+      <td style="padding:8px 12px;font-weight:600">${esc(p.name)}</td>
+      <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${p.port || '<span style="color:var(--text3)">N/A</span>'}</td>
+      <td style="padding:8px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'SF Mono',Monaco,monospace;color:var(--text2)" title="${esc(p.targetUrl)}">${esc(p.targetUrl)}</td>
+      <td style="padding:8px">${authVal}</td>
+      <td style="padding:8px">${accessBadge}</td>
+      <td style="padding:8px">${blockedVal}</td>
+      <td style="padding:8px 12px">
+        <div style="display:flex;gap:6px;justify-content:flex-end">
+          ${p.port ? `<a class="btn btn-sm" href="${location.protocol}//${location.hostname}:${p.port}/" target="_blank" style="text-decoration:none">Open :${p.port}</a>` : ''}
           <button class="btn btn-sm" onclick="copyProxyUrl('${esc(p.name)}', ${p.port || 0})">Copy URL</button>
+          ${p.hasAccessKey ? `<button class="btn btn-sm" onclick="copyProfileCredential('${esc(p.name)}')">Copy Key</button>` : ''}
           <button class="btn btn-sm" onclick="editProfile('${esc(p.name)}')">Edit</button>
           <button class="btn btn-danger btn-sm" onclick="deleteProfile('${esc(p.name)}')">Delete</button>
         </div>
-      </div>
-      <div class="profile-details">
-        <div class="profile-detail"><span class="profile-detail-label">Port</span><span class="profile-detail-value">${p.port || '<span style="color:var(--text3)">N/A</span>'}</span></div>
-        <div class="profile-detail"><span class="profile-detail-label">Auth Header</span><span class="profile-detail-value">${authVal}</span></div>
-        <div class="profile-detail"><span class="profile-detail-label">Access</span><span class="profile-detail-value">${p.hasAccessKey ? '<span style="color:var(--orange)">Protected</span>' : '<span style="color:var(--text3)">Public</span>'}</span></div>
-        ${p.blockedExtensions?.length
-          ? `<div class="profile-detail"><span class="profile-detail-label">Blocked Ext.</span><span class="profile-detail-value" style="color:var(--red)">${esc(p.blockedExtensions.join(', '))}</span></div>`
-          : ''}
-      </div>
-    </div>`;
-  }).join('');
-}
+      </td>
+    </tr>`;
+      }).join('');
+    }
 
-// ─── Config ──────────────────────────────────────────────────────────────────
-async function saveConfig() {
-  try {
-    const res = await api('/admin/config', { method: 'PUT', body: JSON.stringify({
-      port: parseInt(document.getElementById('cfgPort').value) || 3000,
-      authToken: document.getElementById('cfgAuthToken').value,
-    })}); const d = await res.json();
-    if (res.ok) { toast(d.message || 'Config saved!'); const nt = document.getElementById('cfgAuthToken').value; if (nt && nt !== authToken) { authToken = nt; localStorage.setItem(TOKEN_KEY, authToken); } }
-    else toast(d.error || 'Failed', 'error');
-  } catch(e) { toast('Error: '+e.message, 'error'); }
-}
+    // ─── Profile CRUD ────────────────────────────────────────────────────────────
+    function openProfileModal(profile = null) {
+      editingProfile = profile;
+      document.getElementById('modalTitle').textContent = profile ? 'Edit Profile' : 'New Profile';
+      document.getElementById('pName').value = profile ? profile.name : ''; document.getElementById('pName').disabled = !!profile;
+      document.getElementById('pTargetUrl').value = profile ? profile.targetUrl : '';
+      document.getElementById('pApiKey').value = profile ? (profile.apiKey || '') : '';
+      document.getElementById('pAuthHeader').value = profile ? (profile.authHeader || '') : '';
+      document.getElementById('pAuthPrefix').value = profile ? (profile.authPrefix || '') : '';
+      document.getElementById('pAccessKey').value = profile ? (profile.accessKey || '') : '';
+      document.getElementById('pBlocked').value = profile?.blockedExtensions ? profile.blockedExtensions.join(', ') : '';
+      document.getElementById('profileModal').classList.add('active');
+    }
+    function closeProfileModal() { document.getElementById('profileModal').classList.remove('active'); editingProfile = null; }
+    async function saveProfile() {
+      const body = { name: document.getElementById('pName').value.trim(), targetUrl: document.getElementById('pTargetUrl').value.trim() };
+      const v = (id) => document.getElementById(id).value.trim();
+      if (v('pApiKey')) body.apiKey = v('pApiKey');
+      if (v('pAuthHeader')) body.authHeader = v('pAuthHeader');
+      if (v('pAuthPrefix')) body.authPrefix = v('pAuthPrefix');
+      if (v('pAccessKey')) body.accessKey = v('pAccessKey');
+      const blocked = v('pBlocked'); if (blocked) body.blockedExtensions = blocked.split(',').map(s => s.trim()).filter(Boolean);
+      try {
+        const res = await api('/admin/profiles', { method: 'POST', body: JSON.stringify(body) }); const d = await res.json();
+        if (res.ok) { toast('Profile ' + (d.status || 'saved')); closeProfileModal(); await fetchProfiles(); }
+        else toast(d.error || 'Failed', 'error');
+      } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+    async function editProfile(name) {
+      try { const res = await api('/admin/profiles/' + encodeURIComponent(name)); if (!res.ok) return toast('Not found', 'error'); openProfileModal((await res.json()).profile); } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+    async function deleteProfile(name) {
+      if (!confirm('Delete "' + name + '"?')) return;
+      try { const res = await api('/admin/profiles/' + encodeURIComponent(name), { method: 'DELETE' }); if (res.ok) { toast('Deleted'); await fetchProfiles(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+    function copyProxyUrl(name, port) {
+      if (!port || port <= 0) { toast('No port assigned for "' + name + '"', 'error'); return; }
+      const url = location.protocol + '//' + location.hostname + ':' + port + '/';
+      navigator.clipboard.writeText(url).then(() => toast('Copied: ' + url)).catch(() => prompt('Copy:', url));
+    }
+    async function copyProfileCredential(name) {
+      try {
+        const res = await api('/admin/profiles/' + encodeURIComponent(name));
+        if (!res.ok) return toast('Not found', 'error');
+        const { profile } = await res.json();
+        const key = profile.accessKey;
+        if (!key) return toast('No access key set', 'error');
+        navigator.clipboard.writeText(key).then(() => toast('Access key copied')).catch(() => prompt('Copy:', key));
+      } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+    async function copyTargetCredential(name) {
+      try {
+        const res = await api('/admin/targets/' + encodeURIComponent(name));
+        if (!res.ok) return toast('Not found', 'error');
+        const { target } = await res.json();
+        const token = target.authToken;
+        if (!token) return toast('No auth token set', 'error');
+        navigator.clipboard.writeText(token).then(() => toast('Auth token copied')).catch(() => prompt('Copy:', token));
+      } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+    async function reloadProfiles() {
+      try {
+        const res = await api('/admin/reload', { method: 'POST' }); const d = await res.json();
+        if (res.ok) { toast('Reloaded: ' + (d.profiles || []).join(', ')); await fetchProfiles(); } else toast(d.error || 'Failed', 'error');
+      } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
 
-// ─── Profile CRUD ────────────────────────────────────────────────────────────
-function openProfileModal(profile = null) {
-  editingProfile = profile;
-  document.getElementById('modalTitle').textContent = profile ? 'Edit Profile' : 'New Profile';
-  document.getElementById('pName').value = profile ? profile.name : ''; document.getElementById('pName').disabled = !!profile;
-  document.getElementById('pTargetUrl').value = profile ? profile.targetUrl : '';
-  document.getElementById('pApiKey').value = profile ? (profile.apiKey || '') : '';
-  document.getElementById('pAuthHeader').value = profile ? (profile.authHeader || '') : '';
-  document.getElementById('pAuthPrefix').value = profile ? (profile.authPrefix || '') : '';
-  document.getElementById('pAccessKey').value = profile ? (profile.accessKey || '') : '';
-  document.getElementById('pBlocked').value = profile?.blockedExtensions ? profile.blockedExtensions.join(', ') : '';
-  document.getElementById('profileModal').classList.add('active');
-}
-function closeProfileModal() { document.getElementById('profileModal').classList.remove('active'); editingProfile = null; }
-async function saveProfile() {
-  const body = { name: document.getElementById('pName').value.trim(), targetUrl: document.getElementById('pTargetUrl').value.trim() };
-  const v = (id) => document.getElementById(id).value.trim();
-  if (v('pApiKey')) body.apiKey = v('pApiKey');
-  if (v('pAuthHeader')) body.authHeader = v('pAuthHeader');
-  if (v('pAuthPrefix')) body.authPrefix = v('pAuthPrefix');
-  if (v('pAccessKey')) body.accessKey = v('pAccessKey');
-  const blocked = v('pBlocked'); if (blocked) body.blockedExtensions = blocked.split(',').map(s=>s.trim()).filter(Boolean);
-  try {
-    const res = await api('/admin/profiles', { method: 'POST', body: JSON.stringify(body) }); const d = await res.json();
-    if (res.ok) { toast('Profile ' + (d.status || 'saved')); closeProfileModal(); await fetchProfiles(); }
-    else toast(d.error || 'Failed', 'error');
-  } catch(e) { toast('Error: '+e.message, 'error'); }
-}
-async function editProfile(name) {
-  try { const res = await api('/admin/profiles/' + encodeURIComponent(name)); if (!res.ok) return toast('Not found','error'); openProfileModal((await res.json()).profile); } catch(e) { toast('Error: '+e.message,'error'); }
-}
-async function deleteProfile(name) {
-  if (!confirm('Delete "' + name + '"?')) return;
-  try { const res = await api('/admin/profiles/' + encodeURIComponent(name), { method: 'DELETE' }); if (res.ok) { toast('Deleted'); await fetchProfiles(); } } catch(e) { toast('Error: '+e.message,'error'); }
-}
-function copyProxyUrl(name, port) {
-  if (!port || port <= 0) { toast('No port assigned for "' + name + '"', 'error'); return; }
-  const url = location.protocol + '//' + location.hostname + ':' + port + '/';
-  navigator.clipboard.writeText(url).then(() => toast('Copied: ' + url)).catch(() => prompt('Copy:', url));
-}
-async function reloadProfiles() {
-  try { const res = await api('/admin/reload', { method: 'POST' }); const d = await res.json();
-    if (res.ok) { toast('Reloaded: ' + (d.profiles||[]).join(', ')); await fetchProfiles(); } else toast(d.error||'Failed','error');
-  } catch(e) { toast('Error: '+e.message,'error'); }
-}
+    // ─── Target CRUD ─────────────────────────────────────────────────────────────
+    async function fetchTargets() {
+      try { const res = await api('/admin/targets'); if (!res.ok) return; const d = await res.json(); _allTargets = d.targets || []; filterTargets(); document.getElementById('navTargetBadge').textContent = _allTargets.length; } catch { }
+    }
 
-// ─── Target CRUD ─────────────────────────────────────────────────────────────
-async function fetchTargets() {
-  try { const res = await api('/admin/targets'); if (!res.ok) return; const d = await res.json(); renderTargets(d.targets||[]); document.getElementById('navTargetBadge').textContent = (d.targets||[]).length; } catch {}
-}
-function renderTargets(targets) {
-  const c = document.getElementById('targetList');
-  if (targets.length === 0) { c.innerHTML = '<div class="empty-state"><p>No targets yet. Click "+ New Target".</p></div>'; return; }
-  c.innerHTML = targets.map(t => {
-    const statusBadge = t.running
-      ? '<span class="profile-status-badge running">&#9679; Running</span>'
-      : '<span class="profile-status-badge stopped">&#9679; Stopped</span>';
-    return `<div class="profile-row">
-      <div class="profile-row-top">
-        <div class="profile-row-name">
-          <div class="profile-avatar${t.running ? ' green-avatar' : ''}">${esc(t.name.substring(0,2))}</div>
-          <div class="profile-name-wrap">
-            <div class="profile-name">${esc(t.name)} <span style="color:var(--text3);font-weight:400;font-size:13px">:${t.port}</span> ${statusBadge}</div>
-            <div class="profile-url">${esc(t.targetUrl)}</div>
-          </div>
-        </div>
-        <div class="profile-row-actions">
+    function filterTargets() {
+      const search = (document.getElementById('targetSearch')?.value || '').toLowerCase();
+      const statusF = document.getElementById('targetStatusFilter')?.value || '';
+      const authF = document.getElementById('targetAuthFilter')?.value || '';
+      const filtered = _allTargets.filter(t => {
+        if (search && !t.name.toLowerCase().includes(search) && !t.targetUrl.toLowerCase().includes(search)) return false;
+        if (statusF === 'running' && !t.running) return false;
+        if (statusF === 'stopped' && t.running) return false;
+        if (authF === 'enabled' && !t.hasAuth) return false;
+        if (authF === 'disabled' && t.hasAuth) return false;
+        return true;
+      });
+      renderTargets(filtered);
+    }
+    function renderTargets(targets) {
+      const c = document.getElementById('targetListBody');
+      if (targets.length === 0) { c.innerHTML = '<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">No targets yet. Click "+ New Target".</td></tr>'; return; }
+      c.innerHTML = targets.map(t => {
+        const statusBadge = t.running
+          ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px">Running</span>'
+          : '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>';
+        const authBadge = t.hasAuth
+          ? '<span style="color:var(--green)">Enabled</span>'
+          : '<span style="color:var(--text3)">Disabled</span>';
+        return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
+      <td style="padding:8px 12px;font-weight:600">${esc(t.name)}</td>
+      <td style="padding:8px">${statusBadge}</td>
+      <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${t.port}</td>
+      <td style="padding:8px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'SF Mono',Monaco,monospace;color:var(--text2)" title="${esc(t.targetUrl)}">${esc(t.targetUrl)}</td>
+      <td style="padding:8px">${t.forwardPath ? '<span style="color:var(--green)">Yes</span>' : '<span style="color:var(--text3)">No</span>'}</td>
+      <td style="padding:8px">${authBadge}</td>
+      <td style="padding:8px;color:var(--accent2)">${t.active > 0 ? t.active : '<span style="color:var(--text3)">0</span>'}</td>
+      <td style="padding:8px 12px">
+        <div style="display:flex;gap:6px;justify-content:flex-end">
           <button class="btn btn-sm" onclick="restartTargetAction('${esc(t.name)}')">Restart</button>
+          ${t.hasAuth ? `<button class="btn btn-sm" onclick="copyTargetCredential('${esc(t.name)}')">Copy Token</button>` : ''}
           <button class="btn btn-sm" onclick="editTarget('${esc(t.name)}')">Edit</button>
           <button class="btn btn-danger btn-sm" onclick="deleteTarget('${esc(t.name)}')">Delete</button>
         </div>
-      </div>
-      <div class="profile-details">
-        <div class="profile-detail"><span class="profile-detail-label">Port</span><span class="profile-detail-value">${t.port} <span style="color:var(--text3);font-size:11px">${t.port ? '' : '(auto)'}</span></span></div>
-        <div class="profile-detail"><span class="profile-detail-label">Forward Path</span><span class="profile-detail-value">${t.forwardPath ? 'Yes' : 'No'}</span></div>
-        <div class="profile-detail"><span class="profile-detail-label">Auth Token</span><span class="profile-detail-value">${t.hasAuth ? '<span style="color:var(--green)">Enabled</span>' : '<span style="color:var(--text3)">Disabled</span>'}</span></div>
-        ${t.active > 0 ? `<div class="profile-detail"><span class="profile-detail-label">In-Flight</span><span class="profile-detail-value" style="color:var(--accent2)">${t.active} requests</span></div>` : ''}
-      </div>
-    </div>`;
-  }).join('');
-}
-function openTargetModal(target = null) {
-  editingTarget = target;
-  document.getElementById('targetModalTitle').textContent = target ? 'Edit Target' : 'New Target';
-  document.getElementById('tName').value = target ? target.name : ''; document.getElementById('tName').disabled = !!target;
-  document.getElementById('tTargetUrl').value = target ? target.targetUrl : '';
-  document.getElementById('tPort').value = target ? target.port : '';
-  document.getElementById('tAuthToken').value = target ? (target.authToken || '') : '';
-  document.getElementById('tForwardPath').checked = target ? target.forwardPath !== false : true;
-  document.getElementById('targetModal').style.display = 'block';
-}
-function closeTargetModal() { document.getElementById('targetModal').style.display = 'none'; editingTarget = null; }
-async function saveTarget() {
-  const body = { name: document.getElementById('tName').value.trim(), targetUrl: document.getElementById('tTargetUrl').value.trim(), port: parseInt(document.getElementById('tPort').value)||0, forwardPath: document.getElementById('tForwardPath').checked };
-  const at = document.getElementById('tAuthToken').value.trim(); if (at) body.authToken = at;
-  try { const res = await api('/admin/targets', { method: 'POST', body: JSON.stringify(body) }); const d = await res.json();
-    if (res.ok) { toast('Target ' + (d.status||'saved')); closeTargetModal(); await fetchTargets(); } else toast(d.error||'Failed','error');
-  } catch(e) { toast('Error: '+e.message,'error'); }
-}
-async function editTarget(name) {
-  try { const res = await api('/admin/targets/'+encodeURIComponent(name)); if (!res.ok) return toast('Not found','error'); openTargetModal((await res.json()).target); } catch(e) { toast('Error: '+e.message,'error'); }
-}
-async function deleteTarget(name) {
-  if (!confirm('Delete target "'+name+'"?')) return;
-  try { const res = await api('/admin/targets/'+encodeURIComponent(name), { method: 'DELETE' }); if (res.ok) { toast('Deleted'); await fetchTargets(); } } catch(e) { toast('Error: '+e.message,'error'); }
-}
-async function restartTargetAction(name) {
-  try { const res = await api('/admin/targets/'+encodeURIComponent(name)+'/restart', { method: 'POST' }); if ((await res.json()).status) { toast('Restarted "'+name+'"'); await fetchTargets(); } } catch(e) { toast('Error: '+e.message,'error'); }
-}
-
-// ─── Request Log ─────────────────────────────────────────────────────────────
-let rlPage = 1; const rlLimit = 50; let rlData = null;
-async function fetchRequestLogs() {
-  try {
-    const params = new URLSearchParams({ page: rlPage, limit: rlLimit });
-    const type = document.getElementById('rlType').value;
-    const method = document.getElementById('rlMethod').value;
-    const status = document.getElementById('rlStatus').value;
-    const search = document.getElementById('rlSearch').value.trim();
-    if (type) params.set('type', type); if (method) params.set('method', method);
-    if (status) params.set('status', status); if (search) params.set('search', search);
-    const res = await api('/admin/requests?' + params.toString()); if (!res.ok) return;
-    rlData = await res.json(); renderRequestLogs();
-    const sres = await api('/admin/requests/stats'); if (sres.ok) { const s = await sres.json();
-      document.getElementById('reqLogStats').textContent = s.total + ' total | ' + (s.dbSizeMB||0) + ' MB';
-      document.getElementById('navReqBadge').textContent = fmtNum(s.total);
+      </td>
+    </tr>`;
+      }).join('');
     }
-  } catch {}
-}
-function renderRequestLogs() {
-  if (!rlData) return;
-  const { requests, total, page, totalPages } = rlData;
-  const tbody = document.getElementById('reqLogBody');
-  if (requests.length === 0) { tbody.innerHTML = '<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">No requests found.</td></tr>'; }
-  else { tbody.innerHTML = requests.map(r => {
-    const ts = new Date(r.timestamp + 'Z'); const sc = r.resStatus;
-    const statusCls = !sc ? 'color:var(--text3)' : sc < 300 ? 'color:var(--green)' : sc < 400 ? 'color:var(--blue)' : sc < 500 ? 'color:var(--orange)' : 'color:var(--red)';
-    const typeBadge = r.type === 'proxy'
-      ? '<span style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:4px;font-size:11px">proxy' + (r.profileName ? ' / ' + esc(r.profileName) : '') + '</span>'
-      : '<span style="background:var(--blue-bg);color:var(--blue);padding:2px 8px;border-radius:4px;font-size:11px">target' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>';
-    const methodCls = r.method === 'GET' ? 'color:var(--green)' : r.method === 'POST' ? 'color:var(--blue)' : r.method === 'DELETE' ? 'color:var(--red)' : 'color:var(--orange)';
-    const sz = (r.reqBodySize||0)+(r.resBodySize||0);
-    return `<tr style="border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''" onclick="openReqDetail(${r.id})">
+    function openTargetModal(target = null) {
+      editingTarget = target;
+      document.getElementById('targetModalTitle').textContent = target ? 'Edit Target' : 'New Target';
+      document.getElementById('tName').value = target ? target.name : ''; document.getElementById('tName').disabled = !!target;
+      document.getElementById('tTargetUrl').value = target ? target.targetUrl : '';
+      document.getElementById('tPort').value = target ? target.port : '';
+      document.getElementById('tAuthToken').value = target ? (target.authToken || '') : '';
+      document.getElementById('tForwardPath').checked = target ? target.forwardPath !== false : true;
+      document.getElementById('targetModal').style.display = 'block';
+    }
+    function closeTargetModal() { document.getElementById('targetModal').style.display = 'none'; editingTarget = null; }
+    async function saveTarget() {
+      const body = { name: document.getElementById('tName').value.trim(), targetUrl: document.getElementById('tTargetUrl').value.trim(), port: parseInt(document.getElementById('tPort').value) || 0, forwardPath: document.getElementById('tForwardPath').checked };
+      const at = document.getElementById('tAuthToken').value.trim(); if (at) body.authToken = at;
+      try {
+        const res = await api('/admin/targets', { method: 'POST', body: JSON.stringify(body) }); const d = await res.json();
+        if (res.ok) { toast('Target ' + (d.status || 'saved')); closeTargetModal(); await fetchTargets(); } else toast(d.error || 'Failed', 'error');
+      } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+    async function editTarget(name) {
+      try { const res = await api('/admin/targets/' + encodeURIComponent(name)); if (!res.ok) return toast('Not found', 'error'); openTargetModal((await res.json()).target); } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+    async function deleteTarget(name) {
+      if (!confirm('Delete target "' + name + '"?')) return;
+      try { const res = await api('/admin/targets/' + encodeURIComponent(name), { method: 'DELETE' }); if (res.ok) { toast('Deleted'); await fetchTargets(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+    async function restartTargetAction(name) {
+      try { const res = await api('/admin/targets/' + encodeURIComponent(name) + '/restart', { method: 'POST' }); if ((await res.json()).status) { toast('Restarted "' + name + '"'); await fetchTargets(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+
+    // ─── Request Log ─────────────────────────────────────────────────────────────
+    let rlPage = 1; const rlLimit = 50; let rlData = null;
+    async function fetchRequestLogs() {
+      try {
+        const params = new URLSearchParams({ page: rlPage, limit: rlLimit });
+        const type = document.getElementById('rlType').value;
+        const method = document.getElementById('rlMethod').value;
+        const status = document.getElementById('rlStatus').value;
+        const search = document.getElementById('rlSearch').value.trim();
+        if (type) params.set('type', type); if (method) params.set('method', method);
+        if (status) params.set('status', status); if (search) params.set('search', search);
+        const res = await api('/admin/requests?' + params.toString()); if (!res.ok) return;
+        rlData = await res.json(); renderRequestLogs();
+        const sres = await api('/admin/requests/stats'); if (sres.ok) {
+          const s = await sres.json();
+          document.getElementById('reqLogStats').textContent = s.total + ' total | ' + (s.dbSizeMB || 0) + ' MB';
+          document.getElementById('navReqBadge').textContent = fmtNum(s.total);
+        }
+      } catch { }
+    }
+    function renderRequestLogs() {
+      if (!rlData) return;
+      const { requests, total, page, totalPages } = rlData;
+      const tbody = document.getElementById('reqLogBody');
+      if (requests.length === 0) { tbody.innerHTML = '<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">No requests found.</td></tr>'; }
+      else {
+        tbody.innerHTML = requests.map(r => {
+          const ts = new Date(r.timestamp + 'Z'); const sc = r.resStatus;
+          const statusCls = !sc ? 'color:var(--text3)' : sc < 300 ? 'color:var(--green)' : sc < 400 ? 'color:var(--blue)' : sc < 500 ? 'color:var(--orange)' : 'color:var(--red)';
+          const typeBadge = r.type === 'proxy'
+            ? '<span style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:4px;font-size:11px">proxy' + (r.profileName ? ' / ' + esc(r.profileName) : '') + '</span>'
+            : '<span style="background:var(--blue-bg);color:var(--blue);padding:2px 8px;border-radius:4px;font-size:11px">target' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>';
+          const methodCls = r.method === 'GET' ? 'color:var(--green)' : r.method === 'POST' ? 'color:var(--blue)' : r.method === 'DELETE' ? 'color:var(--red)' : 'color:var(--orange)';
+          const sz = (r.reqBodySize || 0) + (r.resBodySize || 0);
+          return `<tr style="border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''" onclick="openReqDetail(${r.id})">
       <td style="padding:8px 12px;white-space:nowrap;color:var(--text2);font-size:12px">${esc(ts.toLocaleString())}</td>
       <td style="padding:8px">${typeBadge}</td>
       <td style="padding:8px;font-weight:600;${methodCls}">${esc(r.method)}</td>
       <td style="padding:8px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.path)}">${esc(r.path)}</td>
-      <td style="padding:8px;font-weight:600;${statusCls}">${sc||(r.error?'ERR':'-')}</td>
-      <td style="padding:8px;color:var(--text2)">${r.durationMs?fmtMs(r.durationMs):'-'}</td>
-      <td style="padding:8px;color:var(--text3);font-size:12px">${sz>0?fmtBytes(sz):'-'}</td>
+      <td style="padding:8px;font-weight:600;${statusCls}">${sc || (r.error ? 'ERR' : '-')}</td>
+      <td style="padding:8px;color:var(--text2)">${r.durationMs ? fmtMs(r.durationMs) : '-'}</td>
+      <td style="padding:8px;color:var(--text3);font-size:12px">${sz > 0 ? fmtBytes(sz) : '-'}</td>
       <td style="padding:8px 12px"><span style="color:var(--accent2);font-size:12px">View</span></td>
-    </tr>`; }).join(''); }
-  document.getElementById('reqLogInfo').textContent = total === 0 ? 'No results' : `Showing ${(page-1)*rlLimit+1}-${Math.min(page*rlLimit,total)} of ${total}`;
-  document.getElementById('rlPrev').disabled = page <= 1;
-  document.getElementById('rlNext').disabled = page >= totalPages;
-}
-function reqLogPrevPage() { if (rlPage > 1) { rlPage--; fetchRequestLogs(); } }
-function reqLogNextPage() { if (rlData && rlPage < rlData.totalPages) { rlPage++; fetchRequestLogs(); } }
+    </tr>`;
+        }).join('');
+      }
+      document.getElementById('reqLogInfo').textContent = total === 0 ? 'No results' : `Showing ${(page - 1) * rlLimit + 1}-${Math.min(page * rlLimit, total)} of ${total}`;
+      document.getElementById('rlPrev').disabled = page <= 1;
+      document.getElementById('rlNext').disabled = page >= totalPages;
+    }
+    function reqLogPrevPage() { if (rlPage > 1) { rlPage--; fetchRequestLogs(); } }
+    function reqLogNextPage() { if (rlData && rlPage < rlData.totalPages) { rlPage++; fetchRequestLogs(); } }
 
-async function openReqDetail(id) {
-  const modal = document.getElementById('reqDetailModal');
-  modal.style.display = 'block';
-  document.getElementById('reqDetailContent').innerHTML = '<div class="rdm-loading"><div class="rdm-spinner"></div><span>Loading request details…</span></div>';
-  try {
-    const res = await api('/admin/requests/' + id);
-    if (!res.ok) { document.getElementById('reqDetailContent').innerHTML = '<div class="rdm-error">Failed to load request details.</div>'; return; }
-    renderReqDetail(await res.json());
-  } catch(e) { document.getElementById('reqDetailContent').innerHTML = '<div class="rdm-error">Error: '+esc(e.message)+'</div>'; }
-}
-function closeReqDetail() { document.getElementById('reqDetailModal').style.display = 'none'; }
+    async function openReqDetail(id) {
+      const modal = document.getElementById('reqDetailModal');
+      modal.style.display = 'block';
+      document.getElementById('reqDetailContent').innerHTML = '<div class="rdm-loading"><div class="rdm-spinner"></div><span>Loading request details…</span></div>';
+      try {
+        const res = await api('/admin/requests/' + id);
+        if (!res.ok) { document.getElementById('reqDetailContent').innerHTML = '<div class="rdm-error">Failed to load request details.</div>'; return; }
+        renderReqDetail(await res.json());
+      } catch (e) { document.getElementById('reqDetailContent').innerHTML = '<div class="rdm-error">Error: ' + esc(e.message) + '</div>'; }
+    }
+    function closeReqDetail() { document.getElementById('reqDetailModal').style.display = 'none'; }
 
-function renderReqDetail(d) {
-  const sc = d.resStatus;
-  const statusCls = !sc ? 'rdm-st-unknown' : sc < 300 ? 'rdm-st-ok' : sc < 400 ? 'rdm-st-redirect' : sc < 500 ? 'rdm-st-client' : 'rdm-st-server';
-  const ts = new Date(d.timestamp + 'Z');
-  let reqH = ''; try { reqH = JSON.stringify(JSON.parse(d.reqHeaders||'{}'),null,2); } catch { reqH = d.reqHeaders||''; }
-  let resH = ''; try { resH = JSON.stringify(JSON.parse(d.resHeaders||'{}'),null,2); } catch { resH = d.resHeaders||''; }
+    function renderReqDetail(d) {
+      const sc = d.resStatus;
+      const statusCls = !sc ? 'rdm-st-unknown' : sc < 300 ? 'rdm-st-ok' : sc < 400 ? 'rdm-st-redirect' : sc < 500 ? 'rdm-st-client' : 'rdm-st-server';
+      const ts = new Date(d.timestamp + 'Z');
+      let reqH = ''; try { reqH = JSON.stringify(JSON.parse(d.reqHeaders || '{}'), null, 2); } catch { reqH = d.reqHeaders || ''; }
+      let resH = ''; try { resH = JSON.stringify(JSON.parse(d.resHeaders || '{}'), null, 2); } catch { resH = d.resHeaders || ''; }
 
-  const methodColors = { GET:'var(--green)', POST:'var(--blue)', PUT:'var(--orange)', PATCH:'var(--orange)', DELETE:'var(--red)', HEAD:'var(--text3)', OPTIONS:'var(--text3)' };
-  const mColor = methodColors[d.method] || 'var(--text2)';
+      const methodColors = { GET: 'var(--green)', POST: 'var(--blue)', PUT: 'var(--orange)', PATCH: 'var(--orange)', DELETE: 'var(--red)', HEAD: 'var(--text3)', OPTIONS: 'var(--text3)' };
+      const mColor = methodColors[d.method] || 'var(--text2)';
 
-  // Duration performance bar (relative to 5000ms)
-  const durPct = d.durationMs ? Math.min((d.durationMs / 5000) * 100, 100) : 0;
-  const durColor = d.durationMs < 200 ? 'var(--green)' : d.durationMs < 1000 ? 'var(--orange)' : 'var(--red)';
+      // Duration performance bar (relative to 5000ms)
+      const durPct = d.durationMs ? Math.min((d.durationMs / 5000) * 100, 100) : 0;
+      const durColor = d.durationMs < 200 ? 'var(--green)' : d.durationMs < 1000 ? 'var(--orange)' : 'var(--red)';
 
-  // Type badge
-  const typeBadge = d.type === 'proxy'
-    ? `<span class="rdm-badge rdm-badge-proxy">Proxy${d.profileName ? ' &middot; '+esc(d.profileName) : ''}</span>`
-    : `<span class="rdm-badge rdm-badge-target">Target${d.targetName ? ' &middot; '+esc(d.targetName) : ''}</span>`;
+      // Type badge
+      const typeBadge = d.type === 'proxy'
+        ? `<span class="rdm-badge rdm-badge-proxy">Proxy${d.profileName ? ' &middot; ' + esc(d.profileName) : ''}</span>`
+        : `<span class="rdm-badge rdm-badge-target">Target${d.targetName ? ' &middot; ' + esc(d.targetName) : ''}</span>`;
 
-  // Request header count
-  let reqHCount = 0; try { reqHCount = Object.keys(JSON.parse(d.reqHeaders||'{}')).length; } catch {}
-  let resHCount = 0; try { resHCount = Object.keys(JSON.parse(d.resHeaders||'{}')).length; } catch {}
+      // Request header count
+      let reqHCount = 0; try { reqHCount = Object.keys(JSON.parse(d.reqHeaders || '{}')).length; } catch { }
+      let resHCount = 0; try { resHCount = Object.keys(JSON.parse(d.resHeaders || '{}')).length; } catch { }
 
-  document.getElementById('reqDetailTitle').innerHTML = `<span style="color:${mColor};font-weight:700">${esc(d.method)}</span> <span style="font-weight:400;color:var(--text2)">${esc(d.path)}</span>`;
+      document.getElementById('reqDetailTitle').innerHTML = `<span style="color:${mColor};font-weight:700">${esc(d.method)}</span> <span style="font-weight:400;color:var(--text2)">${esc(d.path)}</span>`;
 
-  document.getElementById('reqDetailContent').innerHTML = `
+      document.getElementById('reqDetailContent').innerHTML = `
     <!-- Hero Status Bar -->
     <div class="rdm-hero ${statusCls}">
       <div class="rdm-hero-main">
-        <div class="rdm-status-code">${sc||'—'}</div>
+        <div class="rdm-status-code">${sc || '—'}</div>
         <div class="rdm-status-info">
-          <div class="rdm-status-text">${esc(d.resStatusText||'No Response')}</div>
+          <div class="rdm-status-text">${esc(d.resStatusText || 'No Response')}</div>
           <div class="rdm-status-meta">${typeBadge}</div>
         </div>
       </div>
@@ -1135,7 +2684,7 @@ function renderReqDetail(d) {
           ${d.durationMs ? `<div class="rdm-perf-bar"><div class="rdm-perf-fill" style="width:${durPct}%;background:${durColor}"></div></div>` : ''}
         </div>
         <div class="rdm-metric">
-          <div class="rdm-metric-val">${fmtBytes((d.reqBodySize||0)+(d.resBodySize||0))}</div>
+          <div class="rdm-metric-val">${fmtBytes((d.reqBodySize || 0) + (d.resBodySize || 0))}</div>
           <div class="rdm-metric-lbl">Total Size</div>
         </div>
       </div>
@@ -1147,7 +2696,7 @@ function renderReqDetail(d) {
         <div><div class="rdm-meta-lbl">Timestamp</div><div class="rdm-meta-val">${esc(ts.toLocaleString())}</div></div>
       </div>
       <div class="rdm-meta-item">
-        <div><div class="rdm-meta-lbl">Client IP</div><div class="rdm-meta-val" style="font-family:'SF Mono',ui-monospace,monospace">${esc(d.clientIp||'unknown')}</div></div>
+        <div><div class="rdm-meta-lbl">Client IP</div><div class="rdm-meta-val" style="font-family:'SF Mono',ui-monospace,monospace">${esc(d.clientIp || 'unknown')}</div></div>
       </div>
       <div class="rdm-meta-item rdm-meta-wide">
         <div style="min-width:0;flex:1">
@@ -1165,17 +2714,17 @@ function renderReqDetail(d) {
       </div>
     </div>
 
-    ${d.error?`<div class="rdm-error-banner"><div><div style="font-weight:600;margin-bottom:2px">Error</div><div>${esc(d.error)}</div></div></div>`:''}
+    ${d.error ? `<div class="rdm-error-banner"><div><div style="font-weight:600;margin-bottom:2px">Error</div><div>${esc(d.error)}</div></div></div>` : ''}
 
     <!-- Request / Response Tabs -->
     <div class="rdm-tabs">
       <button class="rdm-tab active" onclick="rdmSwitchTab(this,'rdmReqPanel')">
         <span style="color:${mColor};font-weight:600">${esc(d.method)}</span> Request
-        <span class="rdm-tab-badge">${fmtBytes(d.reqBodySize||0)}</span>
+        <span class="rdm-tab-badge">${fmtBytes(d.reqBodySize || 0)}</span>
       </button>
       <button class="rdm-tab" onclick="rdmSwitchTab(this,'rdmResPanel')">
-        <span style="color:${statusCls === 'rdm-st-ok' ? 'var(--green)' : statusCls === 'rdm-st-redirect' ? 'var(--blue)' : statusCls === 'rdm-st-client' ? 'var(--orange)' : statusCls === 'rdm-st-server' ? 'var(--red)' : 'var(--text3)'};font-weight:600">${sc||'—'}</span> Response
-        <span class="rdm-tab-badge">${fmtBytes(d.resBodySize||0)}</span>
+        <span style="color:${statusCls === 'rdm-st-ok' ? 'var(--green)' : statusCls === 'rdm-st-redirect' ? 'var(--blue)' : statusCls === 'rdm-st-client' ? 'var(--orange)' : statusCls === 'rdm-st-server' ? 'var(--red)' : 'var(--text3)'};font-weight:600">${sc || '—'}</span> Response
+        <span class="rdm-tab-badge">${fmtBytes(d.resBodySize || 0)}</span>
       </button>
     </div>
 
@@ -1198,7 +2747,7 @@ function renderReqDetail(d) {
         <div class="rdm-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
           <span class="rdm-section-chevron">&#9660;</span>
           <span class="rdm-section-title">Body</span>
-          <span class="rdm-section-count">${fmtBytes(d.reqBodySize||0)}</span>
+          <span class="rdm-section-count">${fmtBytes(d.reqBodySize || 0)}</span>
         </div>
         <div class="rdm-section-body">
           <div class="rdm-code-block">
@@ -1228,7 +2777,7 @@ function renderReqDetail(d) {
         <div class="rdm-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
           <span class="rdm-section-chevron">&#9660;</span>
           <span class="rdm-section-title">Body</span>
-          <span class="rdm-section-count">${fmtBytes(d.resBodySize||0)}</span>
+          <span class="rdm-section-count">${fmtBytes(d.resBodySize || 0)}</span>
         </div>
         <div class="rdm-section-body">
           <div class="rdm-code-block">
@@ -1239,211 +2788,525 @@ function renderReqDetail(d) {
       </div>
     </div>
   `;
-}
+    }
 
-// Tab switching
-function rdmSwitchTab(btn, panelId) {
-  btn.closest('.rdm-tabs').querySelectorAll('.rdm-tab').forEach(t => t.classList.remove('active'));
-  btn.classList.add('active');
-  const panels = btn.closest('.rdm-body').querySelectorAll('.rdm-tab-panel');
-  panels.forEach(p => p.classList.remove('active'));
-  document.getElementById(panelId).classList.add('active');
-}
+    // Tab switching
+    function rdmSwitchTab(btn, panelId) {
+      btn.closest('.rdm-tabs').querySelectorAll('.rdm-tab').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+      const panels = btn.closest('.rdm-body').querySelectorAll('.rdm-tab-panel');
+      panels.forEach(p => p.classList.remove('active'));
+      document.getElementById(panelId).classList.add('active');
+    }
 
-// Copy code block
-function rdmCopyCode(btn) {
-  const pre = btn.parentElement.querySelector('pre');
-  navigator.clipboard.writeText(pre.textContent).then(() => toast('Copied to clipboard'));
-}
+    // Copy code block
+    function rdmCopyCode(btn) {
+      const pre = btn.parentElement.querySelector('pre');
+      navigator.clipboard.writeText(pre.textContent).then(() => toast('Copied to clipboard'));
+    }
 
-// Minimal JSON syntax highlighting
-function rdmSyntaxHL(str) {
-  if (!str || str === '(empty)') return '<span style="color:var(--text3);font-style:italic">(empty)</span>';
-  return esc(str)
-    .replace(/("[^"]*")\s*:/g, '<span style="color:var(--blue)">$1</span>:')
-    .replace(/:\s*("[^"]*")/g, ': <span style="color:var(--green)">$1</span>')
-    .replace(/:\s*(\d+\.?\d*)/g, ': <span style="color:var(--orange)">$1</span>')
-    .replace(/:\s*(true|false)/g, ': <span style="color:var(--accent2)">$1</span>')
-    .replace(/:\s*(null)/g, ': <span style="color:var(--text3)">$1</span>');
-}
+    // Minimal JSON syntax highlighting
+    function rdmSyntaxHL(str) {
+      if (!str || str === '(empty)') return '<span style="color:var(--text3);font-style:italic">(empty)</span>';
+      return esc(str)
+        .replace(/("[^"]*")\s*:/g, '<span style="color:var(--blue)">$1</span>:')
+        .replace(/:\s*("[^"]*")/g, ': <span style="color:var(--green)">$1</span>')
+        .replace(/:\s*(\d+\.?\d*)/g, ': <span style="color:var(--orange)">$1</span>')
+        .replace(/:\s*(true|false)/g, ': <span style="color:var(--accent2)">$1</span>')
+        .replace(/:\s*(null)/g, ': <span style="color:var(--text3)">$1</span>');
+    }
 
-function fmtBody(body) { if (!body) return '(empty)'; try { return JSON.stringify(JSON.parse(body),null,2); } catch { return body; } }
-</script>
+    function fmtBody(body) { if (!body) return '(empty)'; try { return JSON.stringify(JSON.parse(body), null, 2); } catch { return body; } }
+  </script>
 
-<!-- Request Detail Modal Styles -->
-<style>
-/* Modal panel */
-.rdm-panel {
-  max-width:960px; margin:30px auto; background:var(--surface);
-  border-radius:16px; border:1px solid var(--border);
-  box-shadow: 0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.03);
-  animation: rdmSlideIn 0.25s ease-out;
-  overflow:hidden;
-}
-@keyframes rdmSlideIn { from { transform:translateY(20px);opacity:0; } to { transform:translateY(0);opacity:1; } }
+  <!-- Request Detail Modal Styles -->
+  <style>
+    /* Modal panel */
+    .rdm-panel {
+      max-width: 960px;
+      margin: 30px auto;
+      background: var(--surface);
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      animation: rdmSlideIn 0.25s ease-out;
+      overflow: hidden;
+    }
 
-.rdm-header {
-  display:flex; justify-content:space-between; align-items:center;
-  padding:16px 24px; border-bottom:1px solid var(--border);
-  background:var(--surface2);
-}
-.rdm-header-left { display:flex; align-items:center; gap:10px; min-width:0; }
-.rdm-title { font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.rdm-close {
-  background:none; border:1px solid var(--border); color:var(--text2);
-  cursor:pointer; font-size:18px; width:32px; height:32px;
-  border-radius:8px; display:flex; align-items:center; justify-content:center;
-  transition:all 0.15s;
-}
-.rdm-close:hover { background:var(--red-bg); color:var(--red); border-color:var(--red); }
+    @keyframes rdmSlideIn {
+      from {
+        transform: translateY(20px);
+        opacity: 0;
+      }
 
-.rdm-body { padding:20px 24px 24px; }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
 
-/* Loading & Error */
-.rdm-loading { display:flex; align-items:center; justify-content:center; gap:12px; padding:60px 0; color:var(--text3); font-size:14px; }
-.rdm-spinner {
-  width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent2);
-  border-radius:50%;animation:rdmSpin 0.8s linear infinite;
-}
-@keyframes rdmSpin { to { transform:rotate(360deg); } }
-.rdm-error { text-align:center; padding:40px; color:var(--red); font-size:14px; }
+    .rdm-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface2);
+    }
 
-/* Hero bar */
-.rdm-hero {
-  display:flex; justify-content:space-between; align-items:center;
-  padding:16px 20px; border-radius:12px; margin-bottom:16px;
-  border:1px solid var(--border);
-}
-.rdm-hero.rdm-st-ok      { background:rgba(0,184,148,0.06); border-color:rgba(0,184,148,0.2); }
-.rdm-hero.rdm-st-redirect { background:rgba(116,185,255,0.06); border-color:rgba(116,185,255,0.2); }
-.rdm-hero.rdm-st-client   { background:rgba(253,203,110,0.06); border-color:rgba(253,203,110,0.2); }
-.rdm-hero.rdm-st-server   { background:rgba(225,112,85,0.06); border-color:rgba(225,112,85,0.2); }
-.rdm-hero.rdm-st-unknown  { background:var(--surface2); }
+    .rdm-header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
 
-.rdm-hero-main { display:flex; align-items:center; gap:14px; }
-.rdm-status-code {
-  font-size:28px; font-weight:800; line-height:1;
-  font-family:'SF Mono',ui-monospace,monospace;
-}
-.rdm-st-ok .rdm-status-code      { color:var(--green); }
-.rdm-st-redirect .rdm-status-code { color:var(--blue); }
-.rdm-st-client .rdm-status-code   { color:var(--orange); }
-.rdm-st-server .rdm-status-code   { color:var(--red); }
-.rdm-st-unknown .rdm-status-code  { color:var(--text3); }
+    .rdm-title {
+      font-size: 15px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
 
-.rdm-status-text { font-size:14px; font-weight:500; margin-bottom:2px; }
-.rdm-status-meta { font-size:12px; color:var(--text3); }
+    .rdm-close {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text2);
+      cursor: pointer;
+      font-size: 18px;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
 
-.rdm-badge {
-  display:inline-flex; align-items:center; padding:2px 10px;
-  border-radius:6px; font-size:11px; font-weight:600; letter-spacing:0.3px;
-}
-.rdm-badge-proxy  { background:var(--accent-bg); color:var(--accent2); }
-.rdm-badge-target { background:var(--blue-bg); color:var(--blue); }
+    .rdm-close:hover {
+      background: var(--red-bg);
+      color: var(--red);
+      border-color: var(--red);
+    }
 
-.rdm-hero-metrics { display:flex; gap:24px; }
-.rdm-metric { text-align:right; min-width:80px; }
-.rdm-metric-val { font-size:16px; font-weight:700; margin-bottom:2px; }
-.rdm-metric-lbl { font-size:10px; color:var(--text3); text-transform:uppercase; letter-spacing:0.5px; }
+    .rdm-body {
+      padding: 20px 24px 24px;
+    }
 
-.rdm-perf-bar {
-  height:3px; width:80px; background:var(--surface3); border-radius:2px;
-  margin-top:6px; overflow:hidden; margin-left:auto;
-}
-.rdm-perf-fill { height:100%; border-radius:2px; transition:width 0.6s ease; }
+    /* Loading & Error */
+    .rdm-loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 60px 0;
+      color: var(--text3);
+      font-size: 14px;
+    }
 
-/* Metadata grid */
-.rdm-meta-grid {
-  display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:16px;
-}
-.rdm-meta-item {
-  display:flex; align-items:flex-start; gap:10px;
-  background:var(--surface2); padding:10px 14px; border-radius:8px;
-  border:1px solid transparent; transition:border-color 0.15s;
-}
-.rdm-meta-item:hover { border-color:var(--border2); }
-.rdm-meta-wide { grid-column:1 / -1; }
-.rdm-meta-lbl { font-size:10px; text-transform:uppercase; color:var(--text3); letter-spacing:0.5px; margin-bottom:2px; }
-.rdm-meta-val { font-size:13px; }
-.rdm-mono-val {
-  font-family:'SF Mono',ui-monospace,monospace; font-size:12px;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-}
-.rdm-copy-btn {
-  background:none; border:1px solid var(--border); color:var(--text3);
-  cursor:pointer; font-size:12px; padding:3px 7px; border-radius:6px;
-  flex-shrink:0; transition:all 0.15s; line-height:1;
-}
-.rdm-copy-btn:hover { background:var(--accent-bg); color:var(--accent2); border-color:var(--accent); }
+    .rdm-spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent2);
+      border-radius: 50%;
+      animation: rdmSpin 0.8s linear infinite;
+    }
 
-/* Error banner */
-.rdm-error-banner {
-  display:flex; align-items:flex-start; gap:10px;
-  background:var(--red-bg); border:1px solid rgba(225,112,85,0.25);
-  border-radius:10px; padding:12px 16px; margin-bottom:16px;
-  color:var(--red); font-size:13px;
-}
+    @keyframes rdmSpin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
 
-/* Tabs */
-.rdm-tabs {
-  display:flex; gap:4px; margin-bottom:0;
-  background:var(--surface2); padding:4px; border-radius:10px;
-}
-.rdm-tab {
-  flex:1; padding:8px 16px; border:none; background:none;
-  color:var(--text2); font-size:13px; font-weight:500;
-  border-radius:8px; cursor:pointer; transition:all 0.15s;
-  display:flex; align-items:center; justify-content:center; gap:8px;
-}
-.rdm-tab:hover { color:var(--text); }
-.rdm-tab.active { background:var(--surface); color:var(--text); box-shadow:0 1px 4px rgba(0,0,0,0.12); }
-.rdm-tab-badge {
-  font-size:10px; padding:1px 6px; border-radius:4px;
-  background:var(--surface3); color:var(--text3);
-}
+    .rdm-error {
+      text-align: center;
+      padding: 40px;
+      color: var(--red);
+      font-size: 14px;
+    }
 
-/* Tab panels */
-.rdm-tab-panel { display:none; padding-top:12px; }
-.rdm-tab-panel.active { display:block; animation:rdmFadeIn 0.2s ease; }
-@keyframes rdmFadeIn { from { opacity:0; } to { opacity:1; } }
+    /* Hero bar */
+    .rdm-hero {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      border-radius: 12px;
+      margin-bottom: 16px;
+      border: 1px solid var(--border);
+    }
 
-/* Collapsible sections */
-.rdm-section { margin-bottom:8px; border:1px solid var(--border); border-radius:10px; overflow:hidden; }
-.rdm-section-header {
-  display:flex; align-items:center; gap:8px;
-  padding:10px 14px; cursor:pointer;
-  background:var(--surface2); user-select:none;
-  transition:background 0.15s;
-}
-.rdm-section-header:hover { background:var(--surface3); }
-.rdm-section-chevron { font-size:10px; color:var(--text3); transition:transform 0.2s; }
-.rdm-section.collapsed .rdm-section-chevron { transform:rotate(-90deg); }
-.rdm-section-title { font-size:13px; font-weight:600; flex:1; }
-.rdm-section-count {
-  font-size:11px; padding:1px 8px; border-radius:4px;
-  background:var(--surface3); color:var(--text3);
-}
-.rdm-section-body { transition:max-height 0.25s ease; }
-.rdm-section.collapsed .rdm-section-body { display:none; }
+    .rdm-hero.rdm-st-ok {
+      background: rgba(0, 184, 148, 0.06);
+      border-color: rgba(0, 184, 148, 0.2);
+    }
 
-/* Code block */
-.rdm-code-block {
-  position:relative; background:var(--bg); margin:0;
-  border-top:1px solid var(--border);
-}
-.rdm-code-block pre {
-  margin:0; padding:14px 16px; font-size:12px; line-height:1.6;
-  font-family:'SF Mono',ui-monospace,SFMono-Regular,'Cascadia Code',monospace;
-  max-height:380px; overflow:auto;
-  white-space:pre-wrap; word-break:break-all; color:var(--text);
-}
-.rdm-copy-code {
-  position:absolute; top:8px; right:8px;
-  opacity:0; transition:opacity 0.15s;
-}
-.rdm-code-block:hover .rdm-copy-code { opacity:1; }
+    .rdm-hero.rdm-st-redirect {
+      background: rgba(116, 185, 255, 0.06);
+      border-color: rgba(116, 185, 255, 0.2);
+    }
 
-@keyframes flash { 0% { background: var(--accent-bg); } 100% { background: transparent; } }
-</style>
+    .rdm-hero.rdm-st-client {
+      background: rgba(253, 203, 110, 0.06);
+      border-color: rgba(253, 203, 110, 0.2);
+    }
+
+    .rdm-hero.rdm-st-server {
+      background: rgba(225, 112, 85, 0.06);
+      border-color: rgba(225, 112, 85, 0.2);
+    }
+
+    .rdm-hero.rdm-st-unknown {
+      background: var(--surface2);
+    }
+
+    .rdm-hero-main {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .rdm-status-code {
+      font-size: 28px;
+      font-weight: 800;
+      line-height: 1;
+      font-family: 'SF Mono', ui-monospace, monospace;
+    }
+
+    .rdm-st-ok .rdm-status-code {
+      color: var(--green);
+    }
+
+    .rdm-st-redirect .rdm-status-code {
+      color: var(--blue);
+    }
+
+    .rdm-st-client .rdm-status-code {
+      color: var(--orange);
+    }
+
+    .rdm-st-server .rdm-status-code {
+      color: var(--red);
+    }
+
+    .rdm-st-unknown .rdm-status-code {
+      color: var(--text3);
+    }
+
+    .rdm-status-text {
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 2px;
+    }
+
+    .rdm-status-meta {
+      font-size: 12px;
+      color: var(--text3);
+    }
+
+    .rdm-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+
+    .rdm-badge-proxy {
+      background: var(--accent-bg);
+      color: var(--accent2);
+    }
+
+    .rdm-badge-target {
+      background: var(--blue-bg);
+      color: var(--blue);
+    }
+
+    .rdm-hero-metrics {
+      display: flex;
+      gap: 24px;
+    }
+
+    .rdm-metric {
+      text-align: right;
+      min-width: 80px;
+    }
+
+    .rdm-metric-val {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 2px;
+    }
+
+    .rdm-metric-lbl {
+      font-size: 10px;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .rdm-perf-bar {
+      height: 3px;
+      width: 80px;
+      background: var(--surface3);
+      border-radius: 2px;
+      margin-top: 6px;
+      overflow: hidden;
+      margin-left: auto;
+    }
+
+    .rdm-perf-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.6s ease;
+    }
+
+    /* Metadata grid */
+    .rdm-meta-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .rdm-meta-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      background: var(--surface2);
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      transition: border-color 0.15s;
+    }
+
+    .rdm-meta-item:hover {
+      border-color: var(--border2);
+    }
+
+    .rdm-meta-wide {
+      grid-column: 1 / -1;
+    }
+
+    .rdm-meta-lbl {
+      font-size: 10px;
+      text-transform: uppercase;
+      color: var(--text3);
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+
+    .rdm-meta-val {
+      font-size: 13px;
+    }
+
+    .rdm-mono-val {
+      font-family: 'SF Mono', ui-monospace, monospace;
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .rdm-copy-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text3);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 3px 7px;
+      border-radius: 6px;
+      flex-shrink: 0;
+      transition: all 0.15s;
+      line-height: 1;
+    }
+
+    .rdm-copy-btn:hover {
+      background: var(--accent-bg);
+      color: var(--accent2);
+      border-color: var(--accent);
+    }
+
+    /* Error banner */
+    .rdm-error-banner {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      background: var(--red-bg);
+      border: 1px solid rgba(225, 112, 85, 0.25);
+      border-radius: 10px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+      color: var(--red);
+      font-size: 13px;
+    }
+
+    /* Tabs */
+    .rdm-tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 0;
+      background: var(--surface2);
+      padding: 4px;
+      border-radius: 10px;
+    }
+
+    .rdm-tab {
+      flex: 1;
+      padding: 8px 16px;
+      border: none;
+      background: none;
+      color: var(--text2);
+      font-size: 13px;
+      font-weight: 500;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .rdm-tab:hover {
+      color: var(--text);
+    }
+
+    .rdm-tab.active {
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    .rdm-tab-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: var(--surface3);
+      color: var(--text3);
+    }
+
+    /* Tab panels */
+    .rdm-tab-panel {
+      display: none;
+      padding-top: 12px;
+    }
+
+    .rdm-tab-panel.active {
+      display: block;
+      animation: rdmFadeIn 0.2s ease;
+    }
+
+    @keyframes rdmFadeIn {
+      from {
+        opacity: 0;
+      }
+
+      to {
+        opacity: 1;
+      }
+    }
+
+    /* Collapsible sections */
+    .rdm-section {
+      margin-bottom: 8px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .rdm-section-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      cursor: pointer;
+      background: var(--surface2);
+      user-select: none;
+      transition: background 0.15s;
+    }
+
+    .rdm-section-header:hover {
+      background: var(--surface3);
+    }
+
+    .rdm-section-chevron {
+      font-size: 10px;
+      color: var(--text3);
+      transition: transform 0.2s;
+    }
+
+    .rdm-section.collapsed .rdm-section-chevron {
+      transform: rotate(-90deg);
+    }
+
+    .rdm-section-title {
+      font-size: 13px;
+      font-weight: 600;
+      flex: 1;
+    }
+
+    .rdm-section-count {
+      font-size: 11px;
+      padding: 1px 8px;
+      border-radius: 4px;
+      background: var(--surface3);
+      color: var(--text3);
+    }
+
+    .rdm-section-body {
+      transition: max-height 0.25s ease;
+    }
+
+    .rdm-section.collapsed .rdm-section-body {
+      display: none;
+    }
+
+    /* Code block */
+    .rdm-code-block {
+      position: relative;
+      background: var(--bg);
+      margin: 0;
+      border-top: 1px solid var(--border);
+    }
+
+    .rdm-code-block pre {
+      margin: 0;
+      padding: 14px 16px;
+      font-size: 12px;
+      line-height: 1.6;
+      font-family: 'SF Mono', ui-monospace, SFMono-Regular, 'Cascadia Code', monospace;
+      max-height: 380px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--text);
+    }
+
+    .rdm-copy-code {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+
+    .rdm-code-block:hover .rdm-copy-code {
+      opacity: 1;
+    }
+
+    @keyframes flash {
+      0% {
+        background: var(--accent-bg);
+      }
+
+      100% {
+        background: transparent;
+      }
+    }
+  </style>
 </body>
+
 </html>

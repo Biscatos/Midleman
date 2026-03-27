@@ -467,3 +467,66 @@ export function getRequestLogStats(): { total: number; oldest: string | null; ne
         return { total: 0, oldest: null, newest: null, dbSizeMB: 0 };
     }
 }
+
+export function getRequestLogChart(): {
+    timeline: { bucket: string; count: number; errors: number }[];
+    methods: { method: string; count: number }[];
+    statuses: { status: number; count: number }[];
+    avgDuration: number;
+    errorRate: number;
+} {
+    const empty = { timeline: [], methods: [], statuses: [], avgDuration: 0, errorRate: 0 };
+    if (!db) return empty;
+
+    try {
+        // Time-bucketed request counts (last 24h, 30-minute buckets)
+        const timeline = db.prepare(`
+            SELECT strftime('%Y-%m-%dT%H:', timestamp) ||
+                   CASE WHEN CAST(strftime('%M', timestamp) AS INTEGER) < 30 THEN '00' ELSE '30' END AS bucket,
+                   COUNT(*) as count,
+                   SUM(CASE WHEN res_status >= 500 OR error IS NOT NULL THEN 1 ELSE 0 END) as errors
+            FROM request_logs
+            WHERE timestamp >= datetime('now', '-24 hours')
+            GROUP BY bucket
+            ORDER BY bucket ASC
+        `).all() as { bucket: string; count: number; errors: number }[];
+
+        // Method breakdown
+        const methods = db.prepare(`
+            SELECT method, COUNT(*) as count
+            FROM request_logs
+            WHERE timestamp >= datetime('now', '-24 hours')
+            GROUP BY method
+            ORDER BY count DESC
+        `).all() as { method: string; count: number }[];
+
+        // Status code breakdown (individual codes)
+        const statuses = db.prepare(`
+            SELECT res_status as status, COUNT(*) as count
+            FROM request_logs
+            WHERE timestamp >= datetime('now', '-24 hours')
+              AND res_status IS NOT NULL
+            GROUP BY res_status
+            ORDER BY count DESC
+            LIMIT 10
+        `).all() as { status: number; count: number }[];
+
+        // Average duration & error rate
+        const agg = db.prepare(`
+            SELECT AVG(duration_ms) as avg_dur,
+                   SUM(CASE WHEN res_status >= 500 OR error IS NOT NULL THEN 1 ELSE 0 END) * 100.0 / MAX(COUNT(*), 1) as err_rate
+            FROM request_logs
+            WHERE timestamp >= datetime('now', '-24 hours')
+        `).get() as any;
+
+        return {
+            timeline,
+            methods,
+            statuses,
+            avgDuration: Math.round((agg?.avg_dur || 0) * 100) / 100,
+            errorRate: Math.round((agg?.err_rate || 0) * 10) / 10,
+        };
+    } catch {
+        return empty;
+    }
+}

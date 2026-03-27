@@ -185,6 +185,33 @@ function cleanExpiredSessions(): void {
     } catch {}
 }
 
+// ─── Login Challenge Tokens ──────────────────────────────────────────────────
+
+const loginChallenges = new Map<string, { userId: number; username: string; totpSecret: string; expiresAt: number }>();
+const CHALLENGE_TTL = 5 * 60 * 1000; // 5 minutes
+
+export function createLoginChallenge(userId: number, username: string, totpSecret: string): string {
+    const token = crypto.randomUUID();
+    loginChallenges.set(token, { userId, username, totpSecret, expiresAt: Date.now() + CHALLENGE_TTL });
+    return token;
+}
+
+export function consumeLoginChallenge(token: string): { userId: number; username: string; totpSecret: string } | null {
+    const entry = loginChallenges.get(token);
+    if (!entry) return null;
+    loginChallenges.delete(token);
+    if (entry.expiresAt < Date.now()) return null;
+    return { userId: entry.userId, username: entry.username, totpSecret: entry.totpSecret };
+}
+
+// Cleanup expired challenges
+setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of loginChallenges) {
+        if (v.expiresAt < now) loginChallenges.delete(k);
+    }
+}, 60 * 1000);
+
 // ─── Rate Limiter ────────────────────────────────────────────────────────────
 
 const attempts = new Map<string, { count: number; resetAt: number }>();

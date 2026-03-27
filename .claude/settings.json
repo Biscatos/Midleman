@@ -45,7 +45,8 @@
       "Bash(curl -s -w \"\\\\nHTTP: %{http_code}\" -X POST -H \"Content-Type: application/json\" -d '{\"\"hello\"\":\"\"target test\"\"}' \"http://localhost:3002/\")",
       "Bash(docker cp:*)",
       "Bash(docker restart:*)",
-      "Bash(curl -s -H \"X-Forward-Token: 123456\" \"http://localhost:3000/admin/requests?limit=5\")"
+      "Bash(curl -s -H \"X-Forward-Token: 123456\" \"http://localhost:3000/admin/requests?limit=5\")",
+      "Bash(find /c/Users/Julio.rei/Documents/GitHub/Midleman -type f \\\\\\(-name *.html -o -name *.ts -o -name *.js \\\\\\))"
     ]
   }
 }

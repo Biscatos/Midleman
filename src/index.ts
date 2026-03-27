@@ -1,15 +1,17 @@
 import { loadConfig, reloadEnvFile, loadProxyProfiles, loadProxyTargets } from './config';
 import { UnauthorizedError, type ProxyProfile, type ProxyTarget } from './types';
 import { invalidateProfileCache } from './proxy';
-import { loadPersistedProfiles, persistProfiles, mergeProfiles, validateProfileInput,
-         loadPersistedTargets, persistTargets, mergeTargets, validateTargetInput } from './store';
+import {
+    loadPersistedProfiles, persistProfiles, mergeProfiles, validateProfileInput,
+    loadPersistedTargets, persistTargets, mergeTargets, validateTargetInput
+} from './store';
 import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry';
-import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats } from './request-log';
+import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart } from './request-log';
 import { startTarget, stopTarget, stopAllTargets, restartTarget, getTargetStatus } from './target-server';
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort } from './proxy-server';
 import { loadPortAssignments, assignAllPorts, assignProxyPort, assignTargetPort, releaseProxyPort, releaseTargetPort } from './port-manager';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie } from './auth';
-import { readFileSync, writeFileSync } from 'fs';
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge } from './auth';
+import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
 import { resolve } from 'path';
 
@@ -46,9 +48,9 @@ const errorTemplate = readFileSync(resolve(import.meta.dir, 'error.html'), 'utf-
 const landingPage = readFileSync(resolve(import.meta.dir, 'landing.html'), 'utf-8');
 let logoSvg: Uint8Array | null = null;
 try {
-    logoSvg = new Uint8Array(readFileSync(resolve(import.meta.dir, 'logo.svg')));
+    logoSvg = new Uint8Array(readFileSync(resolve(import.meta.dir, 'logo.png')));
 } catch (err) {
-    console.warn('⚠️  Logo not found in src/logo.svg');
+    console.warn('⚠️  Logo not found in src/logo.png');
 }
 
 function renderErrorPage(statusCode: number, title: string, message: string): Response {
@@ -153,10 +155,10 @@ const server = Bun.serve({
             const url = new URL(req.url);
 
             // Serve logo/favicon requests
-            if (url.pathname === '/logo.svg' || url.pathname === '/favicon.ico' || url.pathname === '/favicon.png') {
+            if (url.pathname === '/logo.png' || url.pathname === '/favicon.ico' || url.pathname === '/favicon.png') {
                 if (logoSvg) {
                     return new Response(logoSvg, {
-                        headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=31536000' }
+                        headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000' }
                     });
                 }
                 return new Response(null, { status: 204 });
@@ -221,20 +223,34 @@ const server = Bun.serve({
                 }
             }
 
-            if (url.pathname === '/auth/login' && req.method === 'POST') {
+            // Step 1: verify username + password, return challenge token
+            if (url.pathname === '/auth/login/verify' && req.method === 'POST') {
                 const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
                 if (!checkRateLimit(clientIp)) return jsonRes(429, { error: 'Too many attempts. Try again in 15 minutes.' });
                 let body: any;
                 try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
                 const username = (body.username || '').trim();
                 const password = body.password || '';
-                const totpCode = (body.totpCode || '').trim();
-                if (!username || !password || !totpCode) return jsonRes(400, { error: 'Username, password, and TOTP code required' });
+                if (!username || !password) return jsonRes(400, { error: 'Username and password required' });
                 const cred = await verifyCredentials(username, password);
                 if (!cred) return jsonRes(401, { error: 'Invalid username or password' });
-                if (!verifyTotp(cred.totpSecret, totpCode)) return jsonRes(401, { error: 'Invalid TOTP code' });
-                const sid = createSession(cred.user.id, clientIp, req.headers.get('user-agent') || '');
-                return new Response(JSON.stringify({ status: 'ok', username: cred.user.username }), {
+                const challengeToken = createLoginChallenge(cred.user.id, cred.user.username, cred.totpSecret);
+                return jsonRes(200, { status: 'ok', challengeToken });
+            }
+
+            // Step 2: verify TOTP with challenge token, create session
+            if (url.pathname === '/auth/login' && req.method === 'POST') {
+                const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+                let body: any;
+                try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                const challengeToken = (body.challengeToken || '').trim();
+                const totpCode = (body.totpCode || '').trim();
+                if (!challengeToken || !totpCode) return jsonRes(400, { error: 'Challenge token and TOTP code required' });
+                const challenge = consumeLoginChallenge(challengeToken);
+                if (!challenge) return jsonRes(401, { error: 'Session expired. Please start login again.' });
+                if (!verifyTotp(challenge.totpSecret, totpCode)) return jsonRes(401, { error: 'Invalid authenticator code' });
+                const sid = createSession(challenge.userId, clientIp, req.headers.get('user-agent') || '');
+                return new Response(JSON.stringify({ status: 'ok', username: challenge.username }), {
                     status: 200,
                     headers: {
                         'Content-Type': 'application/json',
@@ -294,7 +310,6 @@ const server = Bun.serve({
                         endpoints: {
                             'GET /dashboard': 'Web dashboard',
                             'GET /admin/config': 'Get current configuration',
-                            'PUT /admin/config': 'Update .env configuration',
                             'GET /admin/targets': 'List all named targets',
                             'GET /admin/targets/:name': 'Get target details',
                             'POST /admin/targets': 'Create or update a target',
@@ -393,6 +408,10 @@ const server = Bun.serve({
 
                 if (url.pathname === '/admin/requests/stats' && req.method === 'GET') {
                     return jsonRes(200, getRequestLogStats() as unknown as Record<string, unknown>);
+                }
+
+                if (url.pathname === '/admin/requests/chart' && req.method === 'GET') {
+                    return jsonRes(200, getRequestLogChart() as unknown as Record<string, unknown>);
                 }
 
                 if (url.pathname.match(/^\/admin\/requests\/\d+$/) && req.method === 'GET') {
@@ -522,53 +541,7 @@ const server = Bun.serve({
                     });
                 }
 
-                if (url.pathname === '/admin/config' && req.method === 'PUT') {
-                    let body: unknown;
-                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
 
-                    const input = body as Record<string, unknown>;
-                    const envPath = resolve(process.cwd(), '.env');
-
-                    try {
-                        let envContent = '';
-                        try { envContent = readFileSync(envPath, 'utf-8'); } catch {}
-
-                        const lines = envContent.split('\n');
-                        const coreKeys = new Map<string, string>();
-                        if (input.port !== undefined) coreKeys.set('PORT', String(input.port));
-                        if (input.targetUrl !== undefined) coreKeys.set('TARGET_URL', String(input.targetUrl));
-                        if (input.authToken !== undefined) coreKeys.set('AUTH_TOKEN', String(input.authToken));
-                        if (input.forwardPath !== undefined) coreKeys.set('FORWARD_PATH', String(input.forwardPath));
-
-                        const updatedKeys = new Set<string>();
-                        const newLines = lines.map(line => {
-                            const trimmed = line.trim();
-                            if (!trimmed || trimmed.startsWith('#')) return line;
-                            const eqIdx = trimmed.indexOf('=');
-                            if (eqIdx === -1) return line;
-                            const key = trimmed.substring(0, eqIdx).trim();
-                            if (coreKeys.has(key)) {
-                                updatedKeys.add(key);
-                                return `${key}=${coreKeys.get(key)}`;
-                            }
-                            return line;
-                        });
-
-                        for (const [key, value] of coreKeys) {
-                            if (!updatedKeys.has(key)) newLines.unshift(`${key}=${value}`);
-                        }
-
-                        writeFileSync(envPath, newLines.join('\n'), 'utf-8');
-                        console.log('✅ .env file updated via dashboard');
-
-                        return jsonRes(200, {
-                            status: 'saved',
-                            message: 'Configuration saved. Restart to apply core changes.',
-                        });
-                    } catch (err) {
-                        return jsonRes(500, { error: 'Failed to write .env: ' + (err instanceof Error ? err.message : String(err)) });
-                    }
-                }
 
                 // ── Profile CRUD ──
                 if (url.pathname.startsWith('/admin/profiles/') && req.method === 'GET') {
