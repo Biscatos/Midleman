@@ -295,6 +295,7 @@ export interface RequestLogSummary {
     targetUrl: string;
     clientIp: string | null;
     resStatus: number | null;
+    resStatusText: string | null;
     durationMs: number | null;
     reqBodySize: number;
     resBodySize: number;
@@ -304,7 +305,6 @@ export interface RequestLogSummary {
 export interface RequestLogDetail extends RequestLogSummary {
     reqHeaders: string | null;
     reqBody: string | null;
-    resStatusText: string | null;
     resHeaders: string | null;
     resBody: string | null;
 }
@@ -342,7 +342,7 @@ export function queryRequestLogs(query: RequestLogQuery): RequestLogListResult {
         params.$status = query.status;
     }
     if (query.search) {
-        conditions.push('(path LIKE $search OR target_url LIKE $search OR request_id LIKE $search)');
+        conditions.push('(path LIKE $search OR target_url LIKE $search OR request_id LIKE $search OR profile_name LIKE $search OR target_name LIKE $search)');
         params.$search = `%${query.search}%`;
     }
     if (query.from) {
@@ -361,7 +361,7 @@ export function queryRequestLogs(query: RequestLogQuery): RequestLogListResult {
 
     const rows = db.prepare(`
         SELECT id, request_id, timestamp, type, profile_name, target_name, method, path, target_url,
-               client_ip, res_status, duration_ms, req_body_size, res_body_size, error
+               client_ip, res_status, res_status_text, duration_ms, req_body_size, res_body_size, error
         FROM request_logs ${where}
         ORDER BY id DESC
         LIMIT $limit OFFSET $offset
@@ -380,6 +380,7 @@ export function queryRequestLogs(query: RequestLogQuery): RequestLogListResult {
             targetUrl: r.target_url,
             clientIp: r.client_ip,
             resStatus: r.res_status,
+            resStatusText: r.res_status_text,
             durationMs: r.duration_ms,
             reqBodySize: r.req_body_size,
             resBodySize: r.res_body_size,

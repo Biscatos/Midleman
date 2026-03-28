@@ -25,9 +25,21 @@ async function handleWebhookFanout(
     const requestId = req.headers.get('X-Request-ID') || crypto.randomUUID();
     const url = new URL(req.url);
 
+    // Meta (Facebook) Webhook Verification Handshake
+    if (req.method === 'GET' && url.searchParams.get('hub.mode') === 'subscribe') {
+        const verifyToken = url.searchParams.get('hub.verify_token');
+        if (webhook.authToken && verifyToken !== webhook.authToken) {
+             console.warn(`❌ [webhook:${webhook.name}] Meta Verification failed: Invalid hub.verify_token`);
+             return new Response('Invalid verify_token', { status: 403 });
+        }
+        const challenge = url.searchParams.get('hub.challenge');
+        console.log(`✅ [webhook:${webhook.name}] Answered Meta Webhook Verification challenge`);
+        return new Response(challenge || '', { status: 200 });
+    }
+
     // Auth check (per-webhook token)
     if (webhook.authToken) {
-        const providedToken = req.headers.get('X-Forward-Token') || url.searchParams.get('token');
+        const providedToken = req.headers.get('X-Forward-Token') || url.searchParams.get('token') || url.searchParams.get('hub.verify_token');
         if (providedToken !== webhook.authToken) {
             console.warn(`❌ [webhook:${webhook.name}] Unauthorized ${req.method} from ${req.headers.get('X-Forwarded-For') || 'unknown'}`);
             return jsonResponse(401, {

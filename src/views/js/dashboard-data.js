@@ -87,9 +87,6 @@ async function fetchRecentRequests() {
 async function fetchConfig() {
   try {
     const res = await api('/admin/config'); if (!res.ok) return; const d = await res.json();
-    document.getElementById('ovAuth').textContent = d.authToken ? 'Enabled' : 'Disabled';
-    document.getElementById('ovAuth').style.color = d.authToken ? 'var(--green)' : 'var(--orange)';
-    document.getElementById('ovPort').textContent = 'Port ' + (d.port || 3000);
   } catch { }
 }
 
@@ -595,7 +592,8 @@ async function loadFanoutDeliveries(reqId) {
     c.innerHTML = data.requests.map(f => {
       const ts = new Date(f.timestamp + 'Z').toLocaleTimeString();
       const st = f.resStatus;
-      const statusHtml = !st ? '<span style="color:var(--text3)">Err</span>' : st < 300 ? `<span style="color:var(--green);font-weight:600">${st}</span>` : `<span style="color:var(--red);font-weight:600">${st}</span>`;
+      const stText = f.resStatusText ? ' ' + esc(f.resStatusText) : '';
+      const statusHtml = !st ? '<span style="color:var(--text3)">Err</span>' : st < 300 ? `<span style="color:var(--green);font-weight:600">${st}${stText}</span>` : `<span style="color:var(--red);font-weight:600">${st}${stText}</span>`;
       return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
         <td style="padding:10px 16px;color:var(--text2)">${ts}</td>
         <td style="padding:10px 16px">${statusHtml}</td>

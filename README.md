@@ -55,10 +55,23 @@ docker-compose up -d
 
 ## Endpoint Management
 
-Midleman allows the definition of two primary endpoint types:
+Midleman allows the definition of three primary endpoint types:
 
 1. **Proxy Profiles**: Designed for credential abstraction. Profiles automatically inject authorization headers (e.g., Bearer tokens, API keys) into outgoing requests, allowing internal API access to be securely shared via public or key-protected links.
 2. **Named Targets**: Configurable network endpoints running on dedicated ports. Used primarily for standard reverse-proxying, application routing, and environment obfuscation.
+3. **Webhook Distributors**: Native fan-out engine for receiving external webhooks and asynchronously dispatching the payload to multiple internal destinations simultaneously ("Fire-and-Forget").
+
+### Webhook Authentication
+Webhooks can be secured by specifying an **Auth Token** in the Midleman Dashboard. When an Auth Token is defined, Midleman will only accept payload dispatches that include the token via one of the following methods:
+- **Header**: `X-Forward-Token: seu_token_aqui`
+- **Query Parameter**: `?token=seu_token_aqui`
+
+#### Meta (Facebook/WhatsApp/Instagram) Integration
+Midleman features native support for **Meta Webhooks**. Meta requires endpoints to automatically respond to a `hub.challenge` verification request.
+To integrate Midleman with Meta:
+1. In the Meta App Dashboard, set the **Callback URL** to your Midleman server (e.g., `https://midleman.exemplo.com/webhook?token=seu_token`).
+2. Set the **Verify Token** in Meta to exactly match the **Auth Token** configured in Midleman.
+3. Midleman handles the `GET` handshake automatically and validates the payloads securely, fanning them out to all your internal services.
 
 All configurations can be managed visually via the dashboard or programmatically via the underlying REST API located at `/admin`.
 
