@@ -220,6 +220,7 @@ export function loadConfig(): Config {
         forwardPath,
         proxyProfiles,
         proxyTargets,
+        webhooks: [], // Populated in index.ts from store
         otel,
         requestLog,
         auth,

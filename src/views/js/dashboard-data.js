@@ -1,6 +1,6 @@
 // ─── Data Fetch ──────────────────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchTargets(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData()]);
+  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchTargets(), fetchWebhooks(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData()]);
 }
 
 async function fetchHealth() {
@@ -14,6 +14,7 @@ async function fetchHealth() {
     document.getElementById('ovUptime').textContent = 'Uptime: ' + fmtUptime(d.uptime);
     document.getElementById('ovActive').textContent = d.activeRequests;
     document.getElementById('ovProfiles').textContent = (d.proxyProfiles || 0) + (d.proxyTargets || 0);
+    document.getElementById('ovWebhooks').textContent = d.webhooks || 0;
   } catch {
     document.getElementById('navDot').className = 'status-dot offline';
     document.getElementById('navStatus').textContent = 'Offline';
@@ -66,6 +67,8 @@ async function fetchRecentRequests() {
       const statusCls = !sc ? 'color:var(--text3)' : sc < 300 ? 'color:var(--green)' : sc < 400 ? 'color:var(--blue)' : sc < 500 ? 'color:var(--orange)' : 'color:var(--red)';
       const typeBadge = r.type === 'proxy'
         ? '<span style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:4px;font-size:11px">proxy' + (r.profileName ? ' / ' + esc(r.profileName) : '') + '</span>'
+        : r.type === 'webhook'
+        ? '<span style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:4px;font-size:11px">webhook' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>'
         : '<span style="background:var(--blue-bg);color:var(--blue);padding:2px 8px;border-radius:4px;font-size:11px">target' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>';
       const methodCls = r.method === 'GET' ? 'color:var(--green)' : r.method === 'POST' ? 'color:var(--blue)' : r.method === 'DELETE' ? 'color:var(--red)' : 'color:var(--orange)';
       const flash = isNew && i === 0 ? 'animation:flash 1s ease' : '';
@@ -295,6 +298,107 @@ async function restartTargetAction(name) {
   try { const res = await api('/admin/targets/' + encodeURIComponent(name) + '/restart', { method: 'POST' }); if ((await res.json()).status) { toast('Restarted "' + name + '"'); await fetchTargets(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
+// ─── Webhooks CRUD ───────────────────────────────────────────────────────────
+let _allWebhooks = [];
+let editingWebhook = null;
+
+async function fetchWebhooks() {
+  try {
+    const res = await api('/admin/webhooks'); if (!res.ok) return;
+    const d = await res.json();
+    _allWebhooks = d.webhooks || [];
+    filterWebhooks();
+    document.getElementById('navWebhookBadge').textContent = _allWebhooks.length;
+  } catch { }
+}
+
+function filterWebhooks() {
+  const search = (document.getElementById('webhookSearch')?.value || '').toLowerCase();
+  const filtered = _allWebhooks.filter(w => {
+    if (search && !w.name.toLowerCase().includes(search)) return false;
+    return true;
+  });
+  renderWebhooks(filtered);
+}
+
+function renderWebhooks(webhooks) {
+  const c = document.getElementById('webhookListBody');
+  if (webhooks.length === 0) { c.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No webhooks yet. Click "+ New Webhook".</td></tr>'; return; }
+  c.innerHTML = webhooks.map(w => {
+    const statusBadge = w.running
+      ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px">Running</span>'
+      : '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>';
+    const authBadge = w.hasAuth
+      ? '<span style="color:var(--green)">Enabled</span>'
+      : '<span style="color:var(--text3)">Public</span>';
+    const numTargets = w.targets.length;
+    return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
+  <td style="padding:8px 12px;font-weight:600">${esc(w.name)}</td>
+  <td style="padding:8px">${statusBadge}</td>
+  <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${w.port}</td>
+  <td style="padding:8px;color:var(--text2)">${numTargets} destinations</td>
+  <td style="padding:8px">${authBadge}</td>
+  <td style="padding:8px;color:var(--accent2)">${w.active > 0 ? w.active : '<span style="color:var(--text3)">0</span>'}</td>
+  <td style="padding:8px 12px">
+    <div style="display:flex;gap:6px;justify-content:flex-end">
+      <button class="btn btn-sm" onclick="viewWebhookLogs('${esc(w.name)}')">Logs</button>
+      <button class="btn btn-sm" onclick="restartWebhookAction('${esc(w.name)}')">Restart</button>
+      <button class="btn btn-sm" onclick="editWebhook('${esc(w.name)}')">Edit</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteWebhook('${esc(w.name)}')">Delete</button>
+    </div>
+  </td>
+</tr>`;
+  }).join('');
+}
+
+function viewWebhookLogs(name) {
+  document.getElementById('rlType').value = 'webhook';
+  document.getElementById('rlSearch').value = name;
+  rlPage = 1;
+  navigate('requests');
+  fetchRequestLogs();
+}
+
+function openWebhookModal(webhook = null) {
+  editingWebhook = webhook;
+  document.getElementById('webhookModalTitle').textContent = webhook ? 'Edit Webhook Distributor' : 'New Webhook Distributor';
+  document.getElementById('wName').value = webhook ? webhook.name : ''; document.getElementById('wName').disabled = !!webhook;
+  document.getElementById('wPort').value = webhook ? webhook.port : '';
+  document.getElementById('wTargets').value = webhook ? webhook.targets.join('\n') : '';
+  document.getElementById('wAuthToken').value = webhook ? (webhook.authToken || '') : '';
+  document.getElementById('webhookModal').style.display = 'block';
+}
+
+function closeWebhookModal() { document.getElementById('webhookModal').style.display = 'none'; editingWebhook = null; }
+
+async function saveWebhook() {
+  const targetsRaw = document.getElementById('wTargets').value.split('\n').map(l => l.trim()).filter(Boolean);
+  const body = { 
+    name: document.getElementById('wName').value.trim(), 
+    port: parseInt(document.getElementById('wPort').value) || 0, 
+    targets: targetsRaw 
+  };
+  if (targetsRaw.length === 0) return toast('At least one target URL is required', 'error');
+  const at = document.getElementById('wAuthToken').value.trim(); if (at) body.authToken = at;
+  try {
+    const res = await api('/admin/webhooks', { method: 'POST', body: JSON.stringify(body) }); const d = await res.json();
+    if (res.ok) { toast('Webhook ' + (d.status || 'saved')); closeWebhookModal(); await fetchWebhooks(); } else toast(d.error || 'Failed', 'error');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function editWebhook(name) {
+  try { const res = await api('/admin/webhooks/' + encodeURIComponent(name)); if (!res.ok) return toast('Not found', 'error'); openWebhookModal((await res.json()).webhook); } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteWebhook(name) {
+  if (!confirm('Delete webhook "' + name + '"?')) return;
+  try { const res = await api('/admin/webhooks/' + encodeURIComponent(name), { method: 'DELETE' }); if (res.ok) { toast('Deleted'); await fetchWebhooks(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function restartWebhookAction(name) {
+  try { const res = await api('/admin/webhooks/' + encodeURIComponent(name) + '/restart', { method: 'POST' }); if ((await res.json()).status) { toast('Restarted "' + name + '"'); await fetchWebhooks(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
 // ─── Request Log ─────────────────────────────────────────────────────────────
 let rlPage = 1; const rlLimit = 50; let rlData = null;
 async function fetchRequestLogs() {
@@ -325,8 +429,10 @@ function renderRequestLogs() {
       const ts = new Date(r.timestamp + 'Z'); const sc = r.resStatus;
       const statusCls = !sc ? 'color:var(--text3)' : sc < 300 ? 'color:var(--green)' : sc < 400 ? 'color:var(--blue)' : sc < 500 ? 'color:var(--orange)' : 'color:var(--red)';
       const typeBadge = r.type === 'proxy'
-        ? '<span style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:4px;font-size:11px">proxy' + (r.profileName ? ' / ' + esc(r.profileName) : '') + '</span>'
-        : '<span style="background:var(--blue-bg);color:var(--blue);padding:2px 8px;border-radius:4px;font-size:11px">target' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>';
+        ? '<span class="rdm-badge" style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:4px;font-size:11px">proxy' + (r.profileName ? ' / ' + esc(r.profileName) : '') + '</span>'
+        : r.type === 'webhook'
+        ? '<span class="rdm-badge" style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:4px;font-size:11px">webhook' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>'
+        : '<span class="rdm-badge" style="background:var(--blue-bg);color:var(--blue);padding:2px 8px;border-radius:4px;font-size:11px">target' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>';
       const methodCls = r.method === 'GET' ? 'color:var(--green)' : r.method === 'POST' ? 'color:var(--blue)' : r.method === 'DELETE' ? 'color:var(--red)' : 'color:var(--orange)';
       const sz = (r.reqBodySize || 0) + (r.resBodySize || 0);
       return `<tr style="border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''" onclick="openReqDetail(${r.id})">
@@ -373,8 +479,10 @@ function renderReqDetail(d) {
   const durPct = d.durationMs ? Math.min((d.durationMs / 5000) * 100, 100) : 0;
   const durColor = d.durationMs < 200 ? 'var(--green)' : d.durationMs < 1000 ? 'var(--orange)' : 'var(--red)';
   const typeBadge = d.type === 'proxy'
-    ? `<span class="rdm-badge rdm-badge-proxy">Proxy${d.profileName ? ' &middot; ' + esc(d.profileName) : ''}</span>`
-    : `<span class="rdm-badge rdm-badge-target">Target${d.targetName ? ' &middot; ' + esc(d.targetName) : ''}</span>`;
+    ? `<span class="rdm-badge rdm-badge-proxy" style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:4px;font-size:11px">Proxy${d.profileName ? ' &middot; ' + esc(d.profileName) : ''}</span>`
+    : d.type === 'webhook'
+    ? `<span class="rdm-badge" style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:4px;font-size:11px">Webhook${d.targetName ? ' &middot; ' + esc(d.targetName) : ''}</span>`
+    : `<span class="rdm-badge rdm-badge-target" style="background:var(--blue-bg);color:var(--blue);padding:2px 8px;border-radius:4px;font-size:11px">Target${d.targetName ? ' &middot; ' + esc(d.targetName) : ''}</span>`;
   let reqHCount = 0; try { reqHCount = Object.keys(JSON.parse(d.reqHeaders || '{}')).length; } catch { }
   let resHCount = 0; try { resHCount = Object.keys(JSON.parse(d.resHeaders || '{}')).length; } catch { }
 
@@ -423,6 +531,7 @@ ${d.error ? `<div class="rdm-error-banner"><div><div style="font-weight:600;marg
     <span style="color:${statusCls === 'rdm-st-ok' ? 'var(--green)' : statusCls === 'rdm-st-redirect' ? 'var(--blue)' : statusCls === 'rdm-st-client' ? 'var(--orange)' : statusCls === 'rdm-st-server' ? 'var(--red)' : 'var(--text3)'};font-weight:600">${sc || '\u2014'}</span> Response
     <span class="rdm-tab-badge">${fmtBytes(d.resBodySize || 0)}</span>
   </button>
+  ${d.type === 'webhook' ? `<button class="rdm-tab" onclick="rdmSwitchTab(this,'rdmFanoutPanel');loadFanoutDeliveries('${esc(d.requestId)}')"><span style="color:var(--orange);font-weight:600">Fanouts</span></button>` : ''}
 </div>
 <div id="rdmReqPanel" class="rdm-tab-panel active">
   <div class="rdm-section">
@@ -451,7 +560,53 @@ ${d.error ? `<div class="rdm-error-banner"><div><div style="font-weight:600;marg
     </div>
     <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="rdmCopyCode(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(fmtBody(d.resBody))}</pre></div></div>
   </div>
-</div>`;
+</div>
+${d.type === 'webhook' ? `
+<div id="rdmFanoutPanel" class="rdm-tab-panel">
+  <div style="padding:0">
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin:12px 0">
+      <thead>
+        <tr style="text-align:left;border-bottom:1px solid var(--border)">
+          <th style="padding:8px 16px;color:var(--text2);font-weight:600">Timestamp</th>
+          <th style="padding:8px 16px;color:var(--text2);font-weight:600">Status</th>
+          <th style="padding:8px 16px;color:var(--text2);font-weight:600">Destination</th>
+          <th style="padding:8px 16px;color:var(--text2);font-weight:600">Time</th>
+          <th style="padding:8px 16px;color:var(--text2);font-weight:600"></th>
+        </tr>
+      </thead>
+      <tbody id="fanoutDeliveriesList">
+        <tr><td colspan="5" style="padding:30px;text-align:center;color:var(--text3)"><div class="rdm-spinner" style="display:inline-block;vertical-align:middle;margin-right:8px"></div>Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>` : ''}`;
+}
+
+async function loadFanoutDeliveries(reqId) {
+  try {
+    const res = await api('/admin/requests?limit=100&type=webhook-fanout&search=' + reqId);
+    if (!res.ok) throw new Error('Failed to load fanouts');
+    const data = await res.json();
+    const c = document.getElementById('fanoutDeliveriesList');
+    if (!data.requests || data.requests.length === 0) {
+      c.innerHTML = '<tr><td colspan="5" style="padding:30px;text-align:center;color:var(--text3)">No fanout deliveries found for this payload.</td></tr>';
+      return;
+    }
+    c.innerHTML = data.requests.map(f => {
+      const ts = new Date(f.timestamp + 'Z').toLocaleTimeString();
+      const st = f.resStatus;
+      const statusHtml = !st ? '<span style="color:var(--text3)">Err</span>' : st < 300 ? `<span style="color:var(--green);font-weight:600">${st}</span>` : `<span style="color:var(--red);font-weight:600">${st}</span>`;
+      return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
+        <td style="padding:10px 16px;color:var(--text2)">${ts}</td>
+        <td style="padding:10px 16px">${statusHtml}</td>
+        <td style="padding:10px 16px;font-family:monospace;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(f.targetUrl)}">${esc(f.targetUrl)}</td>
+        <td style="padding:10px 16px;color:var(--text2)">${f.durationMs ? fmtMs(f.durationMs) : '-'}</td>
+        <td style="padding:10px 16px"><button class="btn btn-sm" onclick="openReqDetail(${f.id})" style="font-size:11px;padding:3px 8px">Details</button></td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    document.getElementById('fanoutDeliveriesList').innerHTML = `<tr><td colspan="5" style="padding:20px;color:var(--red);text-align:center">Error: ${esc(e.message)}</td></tr>`;
+  }
 }
 
 function rdmSwitchTab(btn, panelId) {

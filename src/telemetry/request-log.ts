@@ -117,7 +117,7 @@ export function shutdownRequestLog(): void {
 
 export interface RequestLogEntry {
     requestId: string;
-    type: 'target' | 'proxy';
+    type: 'target' | 'proxy' | 'webhook' | 'webhook-fanout';
     profileName?: string;
     targetName?: string;
     method: string;
@@ -265,7 +265,7 @@ export function headersToRecord(headers: Headers): Record<string, string> {
 export interface RequestLogQuery {
     page?: number;
     limit?: number;
-    type?: 'target' | 'proxy';
+    type?: 'target' | 'proxy' | 'webhook';
     profileName?: string;
     targetName?: string;
     method?: string;
@@ -322,6 +322,8 @@ export function queryRequestLogs(query: RequestLogQuery): RequestLogListResult {
     if (query.type) {
         conditions.push('type = $type');
         params.$type = query.type;
+    } else {
+        conditions.push("type != 'webhook-fanout'");
     }
     if (query.profileName) {
         conditions.push('profile_name = $profileName');
@@ -451,6 +453,7 @@ export function getRequestLogStats(): { total: number; oldest: string | null; ne
                    MIN(timestamp) as oldest,
                    MAX(timestamp) as newest
             FROM request_logs
+            WHERE type != 'webhook-fanout'
         `).get() as any;
 
         const pageCount = (db.prepare('PRAGMA page_count').get() as any)?.page_count || 0;

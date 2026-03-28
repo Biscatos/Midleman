@@ -23,6 +23,17 @@ export interface ProxyTarget {
 }
 
 /**
+ * Webhook Fan-out distributor: listens on a dedicated port
+ * and duplicates the incoming request to multiple target URLs.
+ */
+export interface WebhookDistributor {
+  name: string;           // Unique identifier
+  port: number;           // Dedicated listening port (0 = auto-assign)
+  targets: string[];      // Array of upstream URLs to fan-out to
+  authToken?: string;     // Optional auth token to restrict inbound requests
+}
+
+/**
  * Application configuration interface
  */
 export interface Config {
@@ -32,6 +43,7 @@ export interface Config {
   forwardPath: boolean; // If false, don't append path to target URL
   proxyProfiles: ProxyProfile[]; // Configured proxy bypass profiles
   proxyTargets: ProxyTarget[];   // Named targets with dedicated ports
+  webhooks: WebhookDistributor[]; // Configured webhook distributors
   otel: {
     enabled: boolean;
     endpoint: string;

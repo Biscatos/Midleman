@@ -1,4 +1,4 @@
-import type { ProxyProfile, ProxyTarget } from './types';
+import type { ProxyProfile, ProxyTarget, WebhookDistributor } from './types';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname, resolve } from 'path';
 
@@ -20,6 +20,7 @@ interface StoredProfile {
 const DATA_DIR = process.env.DATA_DIR || resolve(process.cwd(), 'data');
 const PROFILES_FILE = resolve(DATA_DIR, 'profiles.json');
 const TARGETS_FILE = resolve(DATA_DIR, 'targets.json');
+const WEBHOOKS_FILE = resolve(DATA_DIR, 'webhooks.json');
 
 /**
  * Ensure the data directory exists.
@@ -240,6 +241,88 @@ export function validateTargetInput(input: unknown): string | null {
         new URL(t.targetUrl as string);
     } catch {
         return '"targetUrl" must be a valid URL';
+    }
+
+    return null;
+}
+
+// ─── Webhook Persistence ────────────────────────────────────────────────────
+
+interface StoredWebhook {
+    name: string;
+    port: number;
+    targets: string[];
+    authToken?: string;
+}
+
+/**
+ * Load webhooks from the persistent JSON file.
+ */
+export function loadPersistedWebhooks(): WebhookDistributor[] {
+    try {
+        if (!existsSync(WEBHOOKS_FILE)) return [];
+
+        const raw = readFileSync(WEBHOOKS_FILE, 'utf-8');
+        const stored: StoredWebhook[] = JSON.parse(raw);
+
+        return stored
+            .filter(w => w.name && Array.isArray(w.targets) && w.targets.length > 0)
+            .map(w => ({
+                name: w.name.toLowerCase(),
+                port: w.port,
+                targets: w.targets.map(t => t.endsWith('/') ? t.slice(0, -1) : t),
+                authToken: w.authToken,
+            }));
+    } catch (err) {
+        console.warn('⚠️  Could not load webhooks.json:', err instanceof Error ? err.message : err);
+        return [];
+    }
+}
+
+/**
+ * Save webhooks to the persistent JSON file.
+ */
+export function persistWebhooks(webhooks: WebhookDistributor[]): void {
+    try {
+        ensureDataDir();
+        const stored: StoredWebhook[] = webhooks.map(w => ({
+            name: w.name,
+            port: w.port,
+            targets: w.targets,
+            authToken: w.authToken,
+        }));
+        writeFileSync(WEBHOOKS_FILE, JSON.stringify(stored, null, 2), 'utf-8');
+    } catch (err) {
+        console.error('❌ Could not save webhooks.json:', err instanceof Error ? err.message : err);
+        throw err;
+    }
+}
+
+/**
+ * Validate a webhook object from API input.
+ */
+export function validateWebhookInput(input: unknown): string | null {
+    if (!input || typeof input !== 'object') return 'Request body must be a JSON object';
+
+    const w = input as Record<string, unknown>;
+
+    if (!w.name || typeof w.name !== 'string') return '"name" is required (string)';
+    
+    if (w.port !== undefined && w.port !== null && w.port !== 0) {
+        if (typeof w.port !== 'number' || w.port < 1 || w.port > 65535) return '"port" must be a number between 1 and 65535 (or 0/omitted for auto-assign)';
+    }
+
+    if (!Array.isArray(w.targets) || w.targets.length === 0) {
+        return '"targets" must be a non-empty array of strings';
+    }
+
+    for (const target of w.targets) {
+        if (typeof target !== 'string') return 'All targets must be string URLs';
+        try {
+            new URL(target);
+        } catch {
+            return `"${target}" is not a valid URL`;
+        }
     }
 
     return null;

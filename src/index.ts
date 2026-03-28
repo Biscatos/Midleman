@@ -3,13 +3,15 @@ import { UnauthorizedError, type ProxyProfile, type ProxyTarget } from './core/t
 import { invalidateProfileCache } from './proxy/proxy';
 import {
     loadPersistedProfiles, persistProfiles, mergeProfiles, validateProfileInput,
-    loadPersistedTargets, persistTargets, mergeTargets, validateTargetInput
+    loadPersistedTargets, persistTargets, mergeTargets, validateTargetInput,
+    loadPersistedWebhooks, persistWebhooks, validateWebhookInput
 } from './core/store';
 import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry/telemetry';
 import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart } from './telemetry/request-log';
 import { startTarget, stopTarget, stopAllTargets, restartTarget, getTargetStatus } from './servers/target-server';
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort } from './servers/proxy-server';
-import { loadPortAssignments, assignAllPorts, assignProxyPort, assignTargetPort, releaseProxyPort, releaseTargetPort, getTargetPort } from './servers/port-manager';
+import { loadPortAssignments, assignAllPorts, assignProxyPort, assignTargetPort, assignWebhookPort, releaseProxyPort, releaseTargetPort, releaseWebhookPort, getTargetPort, getWebhookPort } from './servers/port-manager';
+import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus } from './servers/webhook-server';
 import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge } from './auth/auth';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
@@ -30,6 +32,9 @@ config.proxyProfiles = mergeProfiles(config.proxyProfiles, persistedProfiles);
 // Merge env targets with persisted targets
 const persistedTargets = loadPersistedTargets();
 config.proxyTargets = mergeTargets(config.proxyTargets, persistedTargets);
+
+// Load persisted webhooks
+config.webhooks = loadPersistedWebhooks();
 
 // Initialize OpenTelemetry
 initTelemetry(config.otel);
@@ -73,6 +78,9 @@ if (config.proxyProfiles.length > 0) {
 if (config.proxyTargets.length > 0) {
     console.log(`🎯 Named Targets: ${config.proxyTargets.map(t => t.name).join(', ')}`);
 }
+if (config.webhooks.length > 0) {
+    console.log(`📡 Webhooks: ${config.webhooks.map(w => w.name).join(', ')}`);
+}
 
 /** Shorthand for JSON responses */
 function jsonRes(status: number, body: Record<string, unknown>): Response {
@@ -114,6 +122,7 @@ function checkAdminAuth(req: Request, url: URL): Response | null {
 const portAssignments = await assignAllPorts(
     config.proxyProfiles.map(p => p.name),
     config.proxyTargets.map(t => ({ name: t.name, configuredPort: t.port })),
+    config.webhooks.map(w => w.name),
     config.port,
 );
 
@@ -133,6 +142,16 @@ for (const target of config.proxyTargets) {
         startTarget(t);
     } catch (err) {
         console.error(`❌ Failed to start target "${target.name}":`, err instanceof Error ? err.message : err);
+    }
+}
+
+for (const webhook of config.webhooks) {
+    const assignedPort = portAssignments.webhooks[webhook.name];
+    const w = { ...webhook, port: assignedPort };
+    try {
+        startWebhookServer(w);
+    } catch (err) {
+        console.error(`❌ Failed to start webhook "${webhook.name}":`, err instanceof Error ? err.message : err);
     }
 }
 
@@ -287,7 +306,9 @@ const server = Bun.serve({
                     activeRequests,
                     proxyProfiles: config.proxyProfiles.length,
                     proxyTargets: config.proxyTargets.length,
+                    webhooks: config.webhooks.length,
                     targets: getTargetStatus(),
+                    webhookServers: getWebhookStatus(),
                     telemetry: { enabled: otelConfig.enabled, endpoint: otelConfig.endpoint },
                 });
             }
@@ -376,10 +397,14 @@ const server = Bun.serve({
                     const persistedTgts = loadPersistedTargets();
                     config.proxyTargets = mergeTargets(envTargets, persistedTgts);
 
+                    // Reload webhooks
+                    config.webhooks = loadPersistedWebhooks();
+
                     // Reassign all ports
                     const newPorts = await assignAllPorts(
                         config.proxyProfiles.map(p => p.name),
                         config.proxyTargets.map(t => ({ name: t.name, configuredPort: t.port })),
+                        config.webhooks.map(w => w.name),
                         config.port,
                     );
 
@@ -402,11 +427,22 @@ const server = Bun.serve({
                         }
                     }
 
-                    console.log(`🔄 Reloaded: profiles=[${config.proxyProfiles.map(p => p.name).join(', ')}] targets=[${config.proxyTargets.map(t => t.name).join(', ')}]`);
+                    // Restart all webhook servers
+                    await stopAllWebhooks();
+                    for (const webhook of config.webhooks) {
+                        const assignedPort = newPorts.webhooks[webhook.name];
+                        const w = { ...webhook, port: assignedPort };
+                        try { startWebhookServer(w); } catch (err) {
+                            console.error(`❌ Failed to restart webhook "${webhook.name}":`, err instanceof Error ? err.message : err);
+                        }
+                    }
+
+                    console.log(`🔄 Reloaded: profiles=[${config.proxyProfiles.map(p => p.name).join(', ')}] targets=[${config.proxyTargets.map(t => t.name).join(', ')}] webhooks=[${config.webhooks.map(w => w.name).join(', ')}]`);
                     return jsonRes(200, {
                         status: 'reloaded',
                         profiles: config.proxyProfiles.map(p => p.name),
                         targets: config.proxyTargets.map(t => t.name),
+                        webhooks: config.webhooks.map(w => w.name),
                     });
                 }
 
@@ -420,7 +456,7 @@ const server = Bun.serve({
                     const result = queryRequestLogs({
                         page: parseInt(url.searchParams.get('page') || '1', 10),
                         limit: parseInt(url.searchParams.get('limit') || '50', 10),
-                        type: (url.searchParams.get('type') as 'target' | 'proxy') || undefined,
+                        type: (url.searchParams.get('type') as 'target' | 'proxy' | 'webhook') || undefined,
                         profileName: url.searchParams.get('profile') || undefined,
                         targetName: url.searchParams.get('target') || undefined,
                         method: url.searchParams.get('method') || undefined,
@@ -556,6 +592,117 @@ const server = Bun.serve({
 
                     console.log(`🗑️  Target "${name}" deleted`);
                     return jsonRes(200, { status: 'deleted', target: name });
+                }
+
+                // ── Webhook CRUD ──
+                if (url.pathname === '/admin/webhooks' && req.method === 'GET') {
+                    const status = getWebhookStatus();
+                    const webhooks = config.webhooks.map(w => {
+                        const s = status.find(s => s.name === w.name);
+                        return {
+                            name: w.name,
+                            targets: w.targets,
+                            port: s?.port ?? w.port,
+                            hasAuth: !!w.authToken,
+                            running: s?.running ?? false,
+                            active: s?.active ?? 0,
+                        };
+                    });
+                    return jsonRes(200, { webhooks });
+                }
+
+                if (url.pathname.match(/^\/admin\/webhooks\/[^/]+\/restart$/) && req.method === 'POST') {
+                    const name = url.pathname.split('/')[3]?.toLowerCase();
+                    const webhook = config.webhooks.find(w => w.name === name);
+                    if (!webhook) return jsonRes(404, { error: `Webhook "${name}" not found` });
+                    try {
+                        const portToUse = getWebhookPort(name) || webhook.port;
+                        await restartWebhook({ ...webhook, port: portToUse });
+                        return jsonRes(200, { status: 'restarted', webhook: name });
+                    } catch (err) {
+                        return jsonRes(500, { error: `Failed to restart: ${err instanceof Error ? err.message : err}` });
+                    }
+                }
+
+                if (url.pathname.startsWith('/admin/webhooks/') && req.method === 'GET') {
+                    const name = url.pathname.split('/')[3]?.toLowerCase();
+                    if (!name) return jsonRes(400, { error: 'Webhook name required' });
+                    const webhook = config.webhooks.find(w => w.name === name);
+                    if (!webhook) return jsonRes(404, { error: `Webhook "${name}" not found` });
+                    const status = getWebhookStatus().find(s => s.name === name);
+                    return jsonRes(200, {
+                        webhook: {
+                            name: webhook.name,
+                            targets: webhook.targets,
+                            port: webhook.port,
+                            authToken: webhook.authToken || '',
+                            running: status?.running ?? false,
+                            active: status?.active ?? 0,
+                        },
+                    });
+                }
+
+                if (url.pathname === '/admin/webhooks' && req.method === 'POST') {
+                    let body: unknown;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
+
+                    const error = validateWebhookInput(body);
+                    if (error) return jsonRes(400, { error });
+
+                    const input = body as Record<string, unknown>;
+                    const configuredPort = input.port ? parseInt(String(input.port), 10) : 0;
+                    const webhook: import('./core/types').WebhookDistributor = {
+                        name: (input.name as string).toLowerCase(),
+                        targets: input.targets as string[],
+                        port: configuredPort,
+                    };
+                    if (input.authToken) webhook.authToken = input.authToken as string;
+
+                    // Assign a port (auto or explicit)
+                    const excludePorts = getWebhookStatus().filter(s => s.name !== webhook.name).map(s => s.port).filter(Boolean);
+                    const assignedPort = await assignWebhookPort(webhook.name, configuredPort, config.port, excludePorts);
+                    const webhookWithPort = { ...webhook, port: assignedPort };
+
+                    // Update or add config entry
+                    const idx = config.webhooks.findIndex(w => w.name === webhook.name);
+                    if (idx >= 0) {
+                        config.webhooks[idx] = webhook;
+                    } else {
+                        config.webhooks.push(webhook);
+                    }
+
+                    persistWebhooks(config.webhooks);
+
+                    // Start/restart the server
+                    try {
+                        if (idx >= 0) {
+                            await restartWebhook(webhookWithPort);
+                        } else {
+                            startWebhookServer(webhookWithPort);
+                        }
+                    } catch (err) {
+                        console.error(`⚠️  Webhook "${webhook.name}" saved but failed to start:`, err);
+                    }
+
+                    const action = idx >= 0 ? 'updated' : 'created';
+                    console.log(`✅ Webhook "${webhook.name}" ${action} (port ${assignedPort})`);
+                    return jsonRes(200, { status: action, webhook: webhook.name, port: assignedPort });
+                }
+
+                if (url.pathname.startsWith('/admin/webhooks/') && req.method === 'DELETE') {
+                    const name = url.pathname.split('/')[3]?.toLowerCase();
+                    if (!name) return jsonRes(400, { error: 'Webhook name required' });
+
+                    const idx = config.webhooks.findIndex(w => w.name === name);
+                    if (idx === -1) return jsonRes(404, { error: `Webhook "${name}" not found` });
+
+                    config.webhooks.splice(idx, 1);
+                    persistWebhooks(config.webhooks);
+                    await stopWebhookServer(name);
+                    releaseWebhookPort(name);
+
+                    console.log(`🗑️  Webhook "${name}" deleted`);
+                    return jsonRes(200, { status: 'deleted', webhook: name });
                 }
 
                 // ── Config ──
@@ -715,6 +862,7 @@ const shutdown = async (signal: string) => {
     // Stop all proxy and target servers
     await stopAllProxyServers();
     await stopAllTargets();
+    await stopAllWebhooks();
 
     // Wait for main server requests
     const maxWait = 10_000;
