@@ -9,7 +9,7 @@ import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapsho
 import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart } from './telemetry/request-log';
 import { startTarget, stopTarget, stopAllTargets, restartTarget, getTargetStatus } from './servers/target-server';
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort } from './servers/proxy-server';
-import { loadPortAssignments, assignAllPorts, assignProxyPort, assignTargetPort, releaseProxyPort, releaseTargetPort } from './servers/port-manager';
+import { loadPortAssignments, assignAllPorts, assignProxyPort, assignTargetPort, releaseProxyPort, releaseTargetPort, getTargetPort } from './servers/port-manager';
 import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge } from './auth/auth';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
@@ -470,7 +470,8 @@ const server = Bun.serve({
                     const target = config.proxyTargets.find(t => t.name === name);
                     if (!target) return jsonRes(404, { error: `Target "${name}" not found` });
                     try {
-                        await restartTarget(target);
+                        const portToUse = getTargetPort(name) || target.port;
+                        await restartTarget({ ...target, port: portToUse });
                         return jsonRes(200, { status: 'restarted', target: name });
                     } catch (err) {
                         return jsonRes(500, { error: `Failed to restart: ${err instanceof Error ? err.message : err}` });
@@ -514,7 +515,7 @@ const server = Bun.serve({
                     if (input.authToken) target.authToken = input.authToken as string;
 
                     // Assign a port (auto or explicit)
-                    const excludePorts = getTargetStatus().map(s => s.port).filter(Boolean);
+                    const excludePorts = getTargetStatus().filter(s => s.name !== target.name).map(s => s.port).filter(Boolean);
                     const assignedPort = await assignTargetPort(target.name, configuredPort, config.port, excludePorts);
                     const targetWithPort = { ...target, port: assignedPort };
 
@@ -631,10 +632,10 @@ const server = Bun.serve({
                     invalidateProfileCache();
 
                     // Assign port and start/restart the proxy server
-                    const excludePorts = getProxyServerStatus().map(s => s.port).filter(Boolean);
+                    const excludePorts = getProxyServerStatus().filter(s => s.name !== profile.name).map(s => s.port).filter(Boolean);
                     const proxyPort = await assignProxyPort(profile.name, config.port, excludePorts);
                     if (idx >= 0) {
-                        await restartProxyServer(profile.name, profile);
+                        await restartProxyServer(profile.name, profile, proxyPort);
                     } else {
                         startProxyServer(profile, proxyPort);
                     }

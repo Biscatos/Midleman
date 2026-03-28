@@ -52,10 +52,10 @@ export async function stopAllProxyServers(): Promise<void> {
     }
 }
 
-export async function restartProxyServer(name: string, newProfile?: ProxyProfile): Promise<ProxyServerInstance | null> {
+export async function restartProxyServer(name: string, newProfile?: ProxyProfile, newPort?: number): Promise<ProxyServerInstance | null> {
     const existing = servers.get(name);
     if (!existing) return null;
-    const port = existing.port;
+    const port = newPort ?? existing.port;
     const profile = newProfile || existing.profile;
     await stopProxyServer(name);
     return startProxyServer(profile, port);
