@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/png" href="/logo.png">
+  <title>Midleman Dashboard</title>
+  <link rel="stylesheet" href="/dashboard/css/dashboard.css">
+  <link rel="stylesheet" href="/dashboard/css/request-detail.css">
+</head>
+<body>
+
+  <!-- ═══ SETUP PAGE ═══ -->
+  <div class="auth-page" id="authSetup">
+    <div class="auth-topbar">
+      <div class="auth-topbar-left">
+        <img src="/logo.png" alt="Midleman">
+        <span>Midleman</span>
+      </div>
+      <div class="auth-topbar-right">
+        <a href="/health">Status</a>
+      </div>
+    </div>
+    <main class="auth-main">
+      <div class="auth-card">
+        <div class="auth-brand"><img src="/logo.png" alt="Midleman"></div>
+        <h2>Setup</h2>
+        <div class="subtitle">Configure your administrative credentials and secure access.</div>
+        <div class="auth-error" id="setupError"></div>
+
+        <div class="auth-step active" id="setupStep1">
+          <div class="form-group"><label>Username</label><input type="text" id="setupUser" placeholder="admin"
+              autocomplete="username"></div>
+          <div class="form-group"><label>Password</label><input type="password" id="setupPass"
+              placeholder="Min. 6 characters" autocomplete="new-password"></div>
+          <div class="form-group"><label>Confirm Password</label><input type="password" id="setupPass2"
+              placeholder="Repeat password" autocomplete="new-password"></div>
+          <button class="btn btn-primary" onclick="setupStep2()">Continue to 2FA Setup</button>
+        </div>
+
+        <div class="auth-step" id="setupStep2">
+          <p style="font-size:14px;color:#71717a;margin-bottom:16px;text-align:center">Scan this QR code with your
+            authenticator app (Google Authenticator, Authy, etc.)</p>
+          <div class="qr-container" id="setupQrContainer"></div>
+          <p style="font-size:12px;color:#52525b;text-align:center;margin-bottom:4px">Or enter this key manually:</p>
+          <div class="totp-secret-box" id="setupSecretDisplay"></div>
+          <div class="form-group"><label>Enter 6-digit code to verify</label><input type="text" id="setupTotpCode"
+              placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code"
+              style="text-align:center;font-size:24px;letter-spacing:8px;font-weight:700"></div>
+          <button class="btn btn-primary" onclick="completeSetup()">Create Account</button>
+          <button class="btn" style="width:100%;justify-content:center;margin-top:8px"
+            onclick="backToStep1()">Back</button>
+        </div>
+      </div>
+    </main>
+    <footer class="auth-footer">midleman</footer>
+  </div>
+
+  <!-- ═══ LOGIN PAGE ═══ -->
+  <div class="auth-page" id="authLogin">
+    <div class="auth-topbar">
+      <div class="auth-topbar-left">
+        <img src="/logo.png" alt="Midleman">
+        <span>Midleman</span>
+      </div>
+      <div class="auth-topbar-right">
+        <a href="/health">Status</a>
+      </div>
+    </div>
+    <main class="auth-main">
+      <div class="auth-card">
+        <div class="auth-brand"><img src="/logo.png" alt="Midleman"></div>
+        <!-- Step 1: Credentials -->
+        <div id="loginStep1" class="auth-step active">
+          <h2>Sign In</h2>
+          <div class="subtitle">Enter your credentials to access the dashboard.</div>
+          <div class="auth-error" id="loginError"></div>
+          <div class="form-group"><label>Username</label><input type="text" id="loginUser" placeholder="Username"
+              autocomplete="username"></div>
+          <div class="form-group"><label>Password</label><input type="password" id="loginPass" placeholder="Password"
+              autocomplete="current-password" onkeydown="if(event.key==='Enter')doLoginStep1()"></div>
+          <button class="btn btn-primary" onclick="doLoginStep1()" id="loginBtn1">Continue</button>
+        </div>
+        <!-- Step 2: TOTP -->
+        <div id="loginStep2" class="auth-step">
+          <h2>Verification</h2>
+          <div class="subtitle">Enter the 6-digit code from your authenticator app.</div>
+          <div class="auth-error" id="loginTotpError"></div>
+          <div class="form-group"><label>Authenticator Code</label><input type="text" id="loginTotp" placeholder="000000"
+              maxlength="6" inputmode="numeric" autocomplete="one-time-code"
+              style="text-align:center;font-size:24px;letter-spacing:8px;font-weight:700"
+              onkeydown="if(event.key==='Enter')doLoginStep2()"></div>
+          <button class="btn btn-primary" onclick="doLoginStep2()" id="loginBtn2">Sign In</button>
+          <button class="btn" onclick="loginBackToStep1()"
+            style="width:100%;justify-content:center;margin-top:8px;font-size:13px;color:#71717a;border:1px solid #27272a;background:transparent;cursor:pointer;border-radius:8px;height:40px;display:inline-flex;align-items:center">Back</button>
+        </div>
+      </div>
+    </main>
+    <footer class="auth-footer">midleman</footer>
+  </div>
+
+  <div class="app" style="display:none">
+    <nav class="navbar">
+      <div class="navbar-inner">
+        <a class="navbar-brand" href="/dashboard">
+          <img src="/logo.png" alt="Midleman">
+          <span class="navbar-brand-name"><span>Mid</span>leman</span>
+        </a>
+
+        <div class="navbar-nav">
+          <button class="nav-link active" onclick="navigate('overview')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="9" rx="1" />
+              <rect x="14" y="3" width="7" height="5" rx="1" />
+              <rect x="14" y="12" width="7" height="9" rx="1" />
+              <rect x="3" y="16" width="7" height="5" rx="1" />
+            </svg>
+            Overview
+          </button>
+          <button class="nav-link" onclick="navigate('requests')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+            Requests
+            <span class="nav-badge" id="navReqBadge">0</span>
+          </button>
+          <button class="nav-link" onclick="navigate('targets')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+            </svg>
+            Targets
+            <span class="nav-badge" id="navTargetBadge">0</span>
+          </button>
+          <button class="nav-link" onclick="navigate('profiles')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <rect x="2" y="7" width="20" height="14" rx="2" />
+              <path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16" />
+            </svg>
+            Profiles
+            <span class="nav-badge" id="navProfileBadge">0</span>
+          </button>
+        </div>
+
+        <div class="navbar-right">
+          <div class="navbar-status">
+            <span class="status-dot offline" id="navDot"></span>
+            <span id="navStatus">Connecting...</span>
+            <span id="navUptime" style="color:var(--text3)"></span>
+          </div>
+          <span class="navbar-user" id="navUser"></span>
+          <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeBtn">&#9790;</button>
+          <button class="logout-btn" onclick="doLogout()" title="Logout">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <div class="content">
+      <!-- ═══ OVERVIEW ═══ -->
+      <div class="page active" id="pageOverview">
+        <div class="page-header">
+          <h2>Dashboard</h2>
+          <p><span class="live-dot"></span>Real-time overview</p>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">Status</div>
+            <div class="stat-value" id="ovStatus" style="color:var(--text3)">--</div>
+            <div class="stat-sub" id="ovUptime"></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Requests</div>
+            <div class="stat-value" id="ovActive">--</div>
+            <div class="stat-sub">in-flight</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Profiles</div>
+            <div class="stat-value" id="ovProfiles">--</div>
+            <div class="stat-sub" id="ovProfileNames"></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Auth</div>
+            <div class="stat-value" id="ovAuth" style="font-size:18px">--</div>
+            <div class="stat-sub" id="ovPort"></div>
+          </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="charts-row">
+          <div class="chart-card">
+            <div class="chart-header">Traffic <span id="chartTrafficLabel">last 24h</span></div>
+            <div class="chart-body" style="position:relative">
+              <canvas id="chartTimeline" height="160" style="cursor:crosshair"></canvas>
+              <div id="chartTooltip" style="display:none;position:fixed;z-index:999;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;box-shadow:var(--shadow);pointer-events:none;white-space:nowrap"></div>
+            </div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">Breakdown</div>
+            <div class="chart-body" id="chartBreakdown">
+              <div style="color:var(--text3);font-size:13px;text-align:center;padding:20px">Loading...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick metrics -->
+        <div class="card" id="ovQuickMetricsCard">
+          <div class="card-header">
+            <h3>Activity</h3>
+            <button class="btn btn-sm btn-ghost" onclick="navigate('requests')">View all &rarr;</button>
+          </div>
+          <div class="card-body" id="ovQuickMetrics">
+            <div style="color:var(--text3);font-size:14px;text-align:center;padding:20px">Loading...</div>
+          </div>
+        </div>
+
+        <!-- Recent requests live feed -->
+        <div class="card">
+          <div class="card-header">
+            <h3>Recent Requests</h3>
+            <span style="font-size:12px;color:var(--text3);font-family:'JetBrains Mono',monospace" id="ovFeedCount"></span>
+          </div>
+          <div class="card-body" style="padding:0;overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead>
+                <tr style="background:var(--surface2);text-align:left">
+                  <th style="padding:8px 12px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Time</th>
+                  <th style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Type</th>
+                  <th style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Method</th>
+                  <th style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Path</th>
+                  <th style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Status</th>
+                  <th style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Duration</th>
+                </tr>
+              </thead>
+              <tbody id="ovRecentBody">
+                <tr>
+                  <td colspan="6" style="padding:30px;text-align:center;color:var(--text3)">Waiting for requests...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ REQUEST LOG ═══ -->
+      <div class="page" id="pageRequests">
+        <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <h2>Request Log</h2>
+            <p>Full request/response history with payload details. <span id="reqLogStats"
+                style="color:var(--text3)"></span></p>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px">
+              <input type="checkbox" id="rlAutoRefresh" checked style="accent-color:var(--accent)"> Auto-refresh
+            </label>
+            <button class="btn btn-sm" onclick="fetchRequestLogs()">Refresh</button>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-body" style="padding:12px 16px">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+              <input type="text" id="rlSearch" placeholder="Search path, URL, request ID..."
+                style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
+                onkeydown="if(event.key==='Enter')fetchRequestLogs()">
+              <select id="rlType"
+                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+                onchange="fetchRequestLogs()">
+                <option value="">All types</option>
+                <option value="target">Target</option>
+                <option value="proxy">Proxy</option>
+              </select>
+              <select id="rlMethod"
+                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+                onchange="fetchRequestLogs()">
+                <option value="">All methods</option>
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="PATCH">PATCH</option>
+                <option value="DELETE">DELETE</option>
+              </select>
+              <select id="rlStatus"
+                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+                onchange="fetchRequestLogs()">
+                <option value="">All statuses</option>
+                <option value="200">200</option>
+                <option value="201">201</option>
+                <option value="301">301</option>
+                <option value="302">302</option>
+                <option value="400">400</option>
+                <option value="401">401</option>
+                <option value="403">403</option>
+                <option value="404">404</option>
+                <option value="500">500</option>
+                <option value="502">502</option>
+              </select>
+              <button class="btn btn-sm btn-primary" onclick="fetchRequestLogs()">Filter</button>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body" style="padding:0;overflow-x:auto">
+            <table id="reqLogTable" style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead>
+                <tr style="background:var(--surface2);text-align:left">
+                  <th
+                    style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                    Time</th>
+                  <th
+                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                    Type</th>
+                  <th
+                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                    Method</th>
+                  <th
+                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                    Path</th>
+                  <th
+                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                    Status</th>
+                  <th
+                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                    Duration</th>
+                  <th
+                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                    Size</th>
+                  <th style="padding:10px 12px"></th>
+                </tr>
+              </thead>
+              <tbody id="reqLogBody">
+                <tr>
+                  <td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div id="reqLogPagination"
+          style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--text2)">
+          <span id="reqLogInfo"></span>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-sm" id="rlPrev" onclick="reqLogPrevPage()" disabled>Prev</button>
+            <button class="btn btn-sm" id="rlNext" onclick="reqLogNextPage()" disabled>Next</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Request Detail Modal -->
+      <div id="reqDetailModal"
+        style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);overflow-y:auto">
+        <div class="rdm-panel">
+          <div class="rdm-header">
+            <div class="rdm-header-left">
+              <h3 id="reqDetailTitle" class="rdm-title">Request Detail</h3>
+            </div>
+            <button onclick="closeReqDetail()" class="rdm-close">&times;</button>
+          </div>
+          <div id="reqDetailContent" class="rdm-body"></div>
+        </div>
+      </div>
+
+      <!-- ═══ TARGETS ═══ -->
+      <div class="page" id="pageTargets">
+        <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <h2>Targets</h2>
+            <p>Named forwarding targets, each on its own port.</p>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="openTargetModal()">+ New Target</button>
+        </div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-body" style="padding:12px 16px">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+              <input type="text" id="targetSearch" placeholder="Search name, URL..."
+                style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
+                oninput="filterTargets()">
+              <select id="targetStatusFilter"
+                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+                onchange="filterTargets()">
+                <option value="">All statuses</option>
+                <option value="running">Running</option>
+                <option value="stopped">Stopped</option>
+              </select>
+              <select id="targetAuthFilter"
+                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+                onchange="filterTargets()">
+                <option value="">All auth</option>
+                <option value="enabled">Auth enabled</option>
+                <option value="disabled">Auth disabled</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body" style="padding:0;overflow-x:auto">
+            <table id="targetTable" style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead>
+                <tr style="background:var(--surface2);text-align:left">
+                  <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Status</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Port</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Target URL</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Forward Path</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Auth</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">In-Flight</th>
+                  <th style="padding:10px 12px"></th>
+                </tr>
+              </thead>
+              <tbody id="targetListBody">
+                <tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Target Modal -->
+      <div id="targetModal"
+        style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px)">
+        <div
+          style="max-width:560px;margin:60px auto;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)">
+          <div
+            style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border)">
+            <h3 id="targetModalTitle" style="font-size:16px;font-weight:600">New Target</h3>
+            <button onclick="closeTargetModal()"
+              style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
+          </div>
+          <div style="padding:20px">
+            <div class="form-grid" style="gap:12px">
+              <div class="form-group"><label>Name</label><input type="text" id="tName" placeholder="api"></div>
+              <div class="form-group"><label>Target URL</label><input type="text" id="tTargetUrl"
+                  placeholder="https://api.example.com"></div>
+              <div class="form-group"><label>Port (optional, 0 = auto-assign)</label><input type="number" id="tPort"
+                  placeholder="Auto-assign" min="0" max="65535"></div>
+              <div class="form-group"><label>Auth Token (optional)</label><input type="text" id="tAuthToken"
+                  placeholder="Leave empty for no auth"></div>
+              <div class="form-group" style="display:flex;align-items:center;gap:8px">
+                <input type="checkbox" id="tForwardPath" checked> <label for="tForwardPath" style="margin:0">Forward
+                  Path</label>
+              </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+              <button class="btn btn-sm" onclick="closeTargetModal()">Cancel</button>
+              <button class="btn btn-primary btn-sm" onclick="saveTarget()">Save Target</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ PROFILES ═══ -->
+      <div class="page" id="pageProfiles">
+        <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <h2>Proxy Profiles</h2>
+            <p>Manage public proxy bypass endpoints for upstream APIs.</p>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm" onclick="reloadProfiles()">Reload</button>
+            <button class="btn btn-primary btn-sm" onclick="openProfileModal()">+ New Profile</button>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-body" style="padding:12px 16px">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+              <input type="text" id="profileSearch" placeholder="Search name, URL..."
+                style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
+                oninput="filterProfiles()">
+              <select id="profileAuthFilter"
+                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+                onchange="filterProfiles()">
+                <option value="">All auth</option>
+                <option value="enabled">Auth enabled</option>
+                <option value="passthrough">Passthrough</option>
+              </select>
+              <select id="profileAccessFilter"
+                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+                onchange="filterProfiles()">
+                <option value="">All access</option>
+                <option value="protected">Protected</option>
+                <option value="public">Public</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body" style="padding:0;overflow-x:auto">
+            <table id="profileTable" style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead>
+                <tr style="background:var(--surface2);text-align:left">
+                  <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Port</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Target URL</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Auth Header</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Access</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Blocked Ext.</th>
+                  <th style="padding:10px 12px"></th>
+                </tr>
+              </thead>
+              <tbody id="profileListBody">
+                <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ SETTINGS ═══ -->
+    </div>
+  </div>
+
+  <!-- Profile Modal -->
+  <div class="modal-overlay" id="profileModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modalTitle">New Profile</h3><button class="close-btn" onclick="closeProfileModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="form-group"><label>Profile Name *</label><input type="text" id="pName" placeholder="e.g. infobip">
+          </div>
+          <div class="form-group span-2"><label>Target URL *</label><input type="url" id="pTargetUrl"
+              placeholder="https://api.example.com"></div>
+        </div>
+        <div class="form-section">Authentication (optional)</div>
+        <div class="form-grid">
+          <div class="form-group"><label>Auth Header</label><input type="text" id="pAuthHeader"
+              placeholder="e.g. Authorization"></div>
+          <div class="form-group"><label>Auth Prefix</label><input type="text" id="pAuthPrefix"
+              placeholder="e.g. Bearer, App"></div>
+          <div class="form-group span-2"><label>API Key</label><input type="text" id="pApiKey"
+              placeholder="Your API key"></div>
+        </div>
+        <div class="form-section">Access Control</div>
+        <div class="form-grid">
+          <div class="form-group"><label>Access Key</label><input type="text" id="pAccessKey" placeholder="Optional">
+          </div>
+          <div class="form-group"><label>Blocked Extensions</label><input type="text" id="pBlocked"
+              placeholder=".exe, .bat, .sh"></div>
+        </div>
+      </div>
+      <div class="modal-footer"><button class="btn" onclick="closeProfileModal()">Cancel</button><button
+          class="btn btn-primary" onclick="saveProfile()">Save Profile</button></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="/dashboard/js/dashboard-app.js"></script>
+  <script src="/dashboard/js/dashboard-charts.js"></script>
+  <script src="/dashboard/js/dashboard-data.js"></script>
+</body>
+</html>

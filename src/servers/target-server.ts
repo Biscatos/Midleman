@@ -1,6 +1,6 @@
-import type { ProxyTarget } from './types';
-import { startTargetSpan, endTargetSpan } from './telemetry';
-import { logRequest, captureRequestBody, captureResponseBody, headersToRecord } from './request-log';
+import type { ProxyTarget } from '../core/types';
+import { startTargetSpan, endTargetSpan } from '../telemetry/telemetry';
+import { logRequest, captureRequestBody, captureResponseBody, headersToRecord } from '../telemetry/request-log';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 

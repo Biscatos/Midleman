@@ -1,0 +1,477 @@
+/* ─── Request Detail Modal ─────────────────────────────────────────────────── */
+
+/* Modal panel */
+.rdm-panel {
+  max-width: 960px;
+  margin: 30px auto;
+  background: var(--surface);
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  animation: rdmSlideIn 0.25s ease-out;
+  overflow: hidden;
+}
+
+@keyframes rdmSlideIn {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.rdm-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface2);
+}
+
+.rdm-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.rdm-title {
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rdm-close {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text2);
+  cursor: pointer;
+  font-size: 18px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.rdm-close:hover {
+  background: var(--red-bg);
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.rdm-body {
+  padding: 20px 24px 24px;
+}
+
+/* Loading & Error */
+.rdm-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 0;
+  color: var(--text3);
+  font-size: 14px;
+}
+
+.rdm-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent2);
+  border-radius: 50%;
+  animation: rdmSpin 0.8s linear infinite;
+}
+
+@keyframes rdmSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.rdm-error {
+  text-align: center;
+  padding: 40px;
+  color: var(--red);
+  font-size: 14px;
+}
+
+/* Hero bar */
+.rdm-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+}
+
+.rdm-hero.rdm-st-ok {
+  background: rgba(0, 184, 148, 0.06);
+  border-color: rgba(0, 184, 148, 0.2);
+}
+
+.rdm-hero.rdm-st-redirect {
+  background: rgba(116, 185, 255, 0.06);
+  border-color: rgba(116, 185, 255, 0.2);
+}
+
+.rdm-hero.rdm-st-client {
+  background: rgba(253, 203, 110, 0.06);
+  border-color: rgba(253, 203, 110, 0.2);
+}
+
+.rdm-hero.rdm-st-server {
+  background: rgba(225, 112, 85, 0.06);
+  border-color: rgba(225, 112, 85, 0.2);
+}
+
+.rdm-hero.rdm-st-unknown {
+  background: var(--surface2);
+}
+
+.rdm-hero-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.rdm-status-code {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1;
+  font-family: 'SF Mono', ui-monospace, monospace;
+}
+
+.rdm-st-ok .rdm-status-code {
+  color: var(--green);
+}
+
+.rdm-st-redirect .rdm-status-code {
+  color: var(--blue);
+}
+
+.rdm-st-client .rdm-status-code {
+  color: var(--orange);
+}
+
+.rdm-st-server .rdm-status-code {
+  color: var(--red);
+}
+
+.rdm-st-unknown .rdm-status-code {
+  color: var(--text3);
+}
+
+.rdm-status-text {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.rdm-status-meta {
+  font-size: 12px;
+  color: var(--text3);
+}
+
+.rdm-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.rdm-badge-proxy {
+  background: var(--accent-bg);
+  color: var(--accent2);
+}
+
+.rdm-badge-target {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+
+.rdm-hero-metrics {
+  display: flex;
+  gap: 24px;
+}
+
+.rdm-metric {
+  text-align: right;
+  min-width: 80px;
+}
+
+.rdm-metric-val {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.rdm-metric-lbl {
+  font-size: 10px;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.rdm-perf-bar {
+  height: 3px;
+  width: 80px;
+  background: var(--surface3);
+  border-radius: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+  margin-left: auto;
+}
+
+.rdm-perf-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.6s ease;
+}
+
+/* Metadata grid */
+.rdm-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.rdm-meta-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--surface2);
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.rdm-meta-item:hover {
+  border-color: var(--border2);
+}
+
+.rdm-meta-wide {
+  grid-column: 1 / -1;
+}
+
+.rdm-meta-lbl {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text3);
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+.rdm-meta-val {
+  font-size: 13px;
+}
+
+.rdm-mono-val {
+  font-family: 'SF Mono', ui-monospace, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rdm-copy-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text3);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: all 0.15s;
+  line-height: 1;
+}
+
+.rdm-copy-btn:hover {
+  background: var(--accent-bg);
+  color: var(--accent2);
+  border-color: var(--accent);
+}
+
+/* Error banner */
+.rdm-error-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--red-bg);
+  border: 1px solid rgba(225, 112, 85, 0.25);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  color: var(--red);
+  font-size: 13px;
+}
+
+/* Tabs */
+.rdm-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 0;
+  background: var(--surface2);
+  padding: 4px;
+  border-radius: 10px;
+}
+
+.rdm-tab {
+  flex: 1;
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  color: var(--text2);
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.rdm-tab:hover {
+  color: var(--text);
+}
+
+.rdm-tab.active {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.rdm-tab-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--surface3);
+  color: var(--text3);
+}
+
+/* Tab panels */
+.rdm-tab-panel {
+  display: none;
+  padding-top: 12px;
+}
+
+.rdm-tab-panel.active {
+  display: block;
+  animation: rdmFadeIn 0.2s ease;
+}
+
+@keyframes rdmFadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* Collapsible sections */
+.rdm-section {
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.rdm-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  background: var(--surface2);
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.rdm-section-header:hover {
+  background: var(--surface3);
+}
+
+.rdm-section-chevron {
+  font-size: 10px;
+  color: var(--text3);
+  transition: transform 0.2s;
+}
+
+.rdm-section.collapsed .rdm-section-chevron {
+  transform: rotate(-90deg);
+}
+
+.rdm-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.rdm-section-count {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 4px;
+  background: var(--surface3);
+  color: var(--text3);
+}
+
+.rdm-section-body {
+  transition: max-height 0.25s ease;
+}
+
+.rdm-section.collapsed .rdm-section-body {
+  display: none;
+}
+
+/* Code block */
+.rdm-code-block {
+  position: relative;
+  background: var(--bg);
+  margin: 0;
+  border-top: 1px solid var(--border);
+}
+
+.rdm-code-block pre {
+  margin: 0;
+  padding: 14px 16px;
+  font-size: 12px;
+  line-height: 1.6;
+  font-family: 'SF Mono', ui-monospace, SFMono-Regular, 'Cascadia Code', monospace;
+  max-height: 380px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text);
+}
+
+.rdm-copy-code {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.rdm-code-block:hover .rdm-copy-code {
+  opacity: 1;
+}

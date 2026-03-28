@@ -1,16 +1,16 @@
-import { loadConfig, reloadEnvFile, loadProxyProfiles, loadProxyTargets } from './config';
-import { UnauthorizedError, type ProxyProfile, type ProxyTarget } from './types';
-import { invalidateProfileCache } from './proxy';
+import { loadConfig, reloadEnvFile, loadProxyProfiles, loadProxyTargets } from './core/config';
+import { UnauthorizedError, type ProxyProfile, type ProxyTarget } from './core/types';
+import { invalidateProfileCache } from './proxy/proxy';
 import {
     loadPersistedProfiles, persistProfiles, mergeProfiles, validateProfileInput,
     loadPersistedTargets, persistTargets, mergeTargets, validateTargetInput
-} from './store';
-import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry';
-import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart } from './request-log';
-import { startTarget, stopTarget, stopAllTargets, restartTarget, getTargetStatus } from './target-server';
-import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort } from './proxy-server';
-import { loadPortAssignments, assignAllPorts, assignProxyPort, assignTargetPort, releaseProxyPort, releaseTargetPort } from './port-manager';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge } from './auth';
+} from './core/store';
+import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry/telemetry';
+import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart } from './telemetry/request-log';
+import { startTarget, stopTarget, stopAllTargets, restartTarget, getTargetStatus } from './servers/target-server';
+import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort } from './servers/proxy-server';
+import { loadPortAssignments, assignAllPorts, assignProxyPort, assignTargetPort, releaseProxyPort, releaseTargetPort } from './servers/port-manager';
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge } from './auth/auth';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
 import { resolve } from 'path';
@@ -44,13 +44,13 @@ initAuth(config.requestLog.dataDir, config.auth.sessionMaxAge);
 loadPortAssignments();
 
 // Load templates & assets
-const errorTemplate = readFileSync(resolve(import.meta.dir, 'error.html'), 'utf-8');
-const landingPage = readFileSync(resolve(import.meta.dir, 'landing.html'), 'utf-8');
+const errorTemplate = readFileSync(resolve(import.meta.dir, 'views/error.html'), 'utf-8');
+const landingPage = readFileSync(resolve(import.meta.dir, 'views/landing.html'), 'utf-8');
 let logoSvg: Uint8Array | null = null;
 try {
-    logoSvg = new Uint8Array(readFileSync(resolve(import.meta.dir, 'logo.png')));
+    logoSvg = new Uint8Array(readFileSync(resolve(import.meta.dir, 'views/logo.png')));
 } catch (err) {
-    console.warn('⚠️  Logo not found in src/logo.png');
+    console.warn('⚠️  Logo not found in src/views/logo.png');
 }
 
 function renderErrorPage(statusCode: number, title: string, message: string): Response {
@@ -180,7 +180,13 @@ const server = Bun.serve({
                 const cookies = parseCookies(req);
                 const sessionId = cookies[config.auth.cookieName];
                 const session = sessionId ? validateSession(sessionId) : null;
-                return jsonRes(200, { needsSetup: !hasUsers(), loggedIn: !!session, username: session?.user?.username || null });
+                const body = JSON.stringify({ needsSetup: !hasUsers(), loggedIn: !!session, username: session?.user?.username || null });
+                const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+                // Stale cookie: exists but session is gone — clear it so login works cleanly
+                if (sessionId && !session) {
+                    headers['Set-Cookie'] = clearSessionCookie(config.auth.cookieName);
+                }
+                return new Response(body, { status: 200, headers });
             }
 
             if (url.pathname === '/auth/setup' && req.method === 'POST') {
@@ -286,9 +292,29 @@ const server = Bun.serve({
                 });
             }
 
-            // Dashboard
+            // Dashboard & Static Assets
+            if (url.pathname.startsWith('/dashboard/css/')) {
+                const file = url.pathname.replace('/dashboard/css/', '');
+                try {
+                    const css = readFileSync(resolve(import.meta.dir, `views/css/${file}`), 'utf-8');
+                    return new Response(css, { status: 200, headers: { 'Content-Type': 'text/css; charset=utf-8' } });
+                } catch {
+                    return new Response('Not found', { status: 404 });
+                }
+            }
+
+            if (url.pathname.startsWith('/dashboard/js/')) {
+                const file = url.pathname.replace('/dashboard/js/', '');
+                try {
+                    const js = readFileSync(resolve(import.meta.dir, `views/js/${file}`), 'utf-8');
+                    return new Response(js, { status: 200, headers: { 'Content-Type': 'application/javascript; charset=utf-8' } });
+                } catch {
+                    return new Response('Not found', { status: 404 });
+                }
+            }
+
             if (url.pathname === '/dashboard' || url.pathname === '/dashboard/') {
-                const htmlPath = resolve(import.meta.dir, 'dashboard.html');
+                const htmlPath = resolve(import.meta.dir, 'views/dashboard.html');
                 const html = readFileSync(htmlPath, 'utf-8');
                 return new Response(html, {
                     status: 200,

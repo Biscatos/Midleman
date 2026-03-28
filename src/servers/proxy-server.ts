@@ -1,5 +1,5 @@
-import type { ProxyProfile } from './types';
-import { handleDirectProxy } from './proxy';
+import type { ProxyProfile } from '../core/types';
+import { handleDirectProxy } from '../proxy/proxy';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

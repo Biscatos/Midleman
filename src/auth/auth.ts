@@ -2,7 +2,7 @@ import { Database } from 'bun:sqlite';
 import { createHmac } from 'crypto';
 import { resolve } from 'path';
 import { mkdirSync } from 'fs';
-import type { AuthUser } from './types';
+import type { AuthUser } from '../core/types';
 
 // ─── Database ────────────────────────────────────────────────────────────────
 

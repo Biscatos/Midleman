@@ -1,6 +1,6 @@
-import type { ProxyProfile } from './types';
-import { startProxySpan, endProxySpan, recordProxyBlocked, recordProxyRedirect } from './telemetry';
-import { logRequest, captureRequestBody, captureResponseBody, headersToRecord } from './request-log';
+import type { ProxyProfile } from '../core/types';
+import { startProxySpan, endProxySpan, recordProxyBlocked, recordProxyRedirect } from '../telemetry/telemetry';
+import { logRequest, captureRequestBody, captureResponseBody, headersToRecord } from '../telemetry/request-log';
 
 // ─── Access Key Session Cache ───────────────────────────────────────────────
 // When a page is loaded with a valid ?key=, we cache the authorization so that
@@ -325,15 +325,15 @@ export async function handleProxyRequest(
                 });
             }
 
-            // Same-origin redirect — follow it internally
+            // Same-origin redirect → rewrite Location to proxy path and pass to browser
             recordProxyRedirect(profileName);
-            console.log(`↪️  PROXY [${profileName}] ${targetResponse.status} → ${redirectUrl.pathname}${redirectUrl.search}`);
-            currentUrl = redirectUrl.toString();
-
-            if (i === maxRedirects) {
-                endProxySpan(otelSpan, profileName, 502, performance.now() - startTime);
-                return jsonResponse(502, { error: 'Too many redirects from upstream', profile: profileName });
-            }
+            const proxyLocation = `/proxy/${profileName}${redirectUrl.pathname}${redirectUrl.search || ''}`;
+            console.log(`↪️  PROXY [${profileName}] ${targetResponse.status} → ${proxyLocation}`);
+            endProxySpan(otelSpan, profileName, targetResponse.status, performance.now() - startTime);
+            return new Response(null, {
+                status: targetResponse.status,
+                headers: { 'Location': proxyLocation },
+            });
         }
     } catch (fetchError) {
         const durationMs = performance.now() - startTime;
@@ -697,15 +697,15 @@ export async function handleDirectProxy(
                 });
             }
 
-            // Same-origin → follow internally
+            // Same-origin → rewrite Location to proxy path and pass to browser
             recordProxyRedirect(profileName);
-            console.log(`↪️  PROXY [${profileName}] ${targetResponse.status} → ${redirectUrl.pathname}${redirectUrl.search}`);
-            currentUrl = redirectUrl.toString();
-
-            if (i === maxRedirects) {
-                endProxySpan(otelSpan, profileName, 502, performance.now() - startTime);
-                return jsonResponse(502, { error: 'Too many redirects from upstream', profile: profileName });
-            }
+            const redirectPath = redirectUrl.pathname + (redirectUrl.search || '');
+            console.log(`↪️  PROXY [${profileName}] ${targetResponse.status} → ${redirectPath}`);
+            endProxySpan(otelSpan, profileName, targetResponse.status, performance.now() - startTime);
+            return new Response(null, {
+                status: targetResponse.status,
+                headers: { 'Location': redirectPath },
+            });
         }
     } catch (fetchError) {
         const durationMs = performance.now() - startTime;
