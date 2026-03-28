@@ -5,10 +5,10 @@ Midleman is a high-performance, programmable HTTP proxy and API gateway built on
 ## Features
 
 - **Multi-Target Routing**: Create and manage isolated proxy profiles and named targets with independent or auto-assigned port allocations.
+- **Webhook Fan-out Engine**: Receive external webhooks and asynchronously dispatch the payload to multiple internal destinations simultaneously ("Fire-and-Forget"), with native Meta/Facebook verification support.
 - **Web Dashboard**: An embedded administrative interface for managing edge configurations and viewing request flows in real-time.
 - **Traffic Inspection**: Persistent request logging powered by SQLite, offering detailed payload, throughput, and latency inspection.
-- **Telemetry & Metrics**: Built-in OpenTelemetry support and real-time dashboard analytics.
-- **Secure Access**: Native TOTP (Time-based One-Time Password) 2FA authentication for the administrative panel.
+- **Secure Access**: Native TOTP (Time-based One-Time Password) 2FA authentication for the administrative panel, alongside Token/Header-based protection for managed endpoints.
 - **Dynamic Configuration**: Modify port assignments, target URLs, and authentication methods at runtime without dropping active connections.
 - **Low Latency**: Sub-5ms processing overhead using Bun's native HTTP server. Fully binary-safe for large payload forwarding.
 
