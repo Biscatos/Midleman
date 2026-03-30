@@ -850,103 +850,98 @@ function unauthorizedResponse(req: Request, profileName: string): Response {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Access Required — ${profileName}</title>
+  <title>401 Unauthorized</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #0f1117;
-      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #111;
+      color: #ccc;
       min-height: 100vh;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 24px;
+      padding: 40px 24px;
     }
-    .card {
-      background: #1a1d27;
-      border: 1px solid #2d3148;
-      border-radius: 12px;
-      padding: 40px;
-      max-width: 520px;
-      width: 100%;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-    }
-    .icon { font-size: 36px; margin-bottom: 16px; }
-    h1 { font-size: 20px; font-weight: 700; margin-bottom: 6px; color: #f1f5f9; }
-    .subtitle { font-size: 13px; color: #94a3b8; margin-bottom: 28px; }
-    .badge {
-      display: inline-block;
-      background: #1e2235;
-      border: 1px solid #2d3148;
-      border-radius: 6px;
-      padding: 2px 8px;
-      font-size: 12px;
-      font-family: monospace;
-      color: #7c86f7;
-    }
-    .method {
-      margin-bottom: 20px;
-    }
-    .method-title {
-      font-size: 12px;
+    .wrap { max-width: 480px; width: 100%; }
+    .status {
+      font-size: 11px;
       font-weight: 600;
+      letter-spacing: .08em;
       text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: #64748b;
+      color: #555;
+      margin-bottom: 12px;
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 600;
+      color: #eee;
       margin-bottom: 8px;
+      letter-spacing: -.01em;
     }
-    .code-block {
-      background: #0f1117;
-      border: 1px solid #2d3148;
-      border-radius: 8px;
-      padding: 12px 16px;
-      font-family: 'SF Mono', 'Fira Code', monospace;
-      font-size: 12px;
-      color: #a5f3fc;
-      word-break: break-all;
-      position: relative;
-    }
-    .key-placeholder { color: #fbbf24; }
-    .dim { color: #475569; }
-    .divider {
-      border: none;
-      border-top: 1px solid #2d3148;
-      margin: 24px 0;
-    }
-    .note {
-      font-size: 12px;
-      color: #64748b;
+    .desc {
+      font-size: 13px;
+      color: #666;
       line-height: 1.6;
+      margin-bottom: 32px;
     }
-    .note a { color: #7c86f7; text-decoration: none; }
+    code {
+      font-family: 'SF Mono', ui-monospace, monospace;
+      font-size: 11.5px;
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 4px;
+      padding: 1px 5px;
+      color: #aaa;
+    }
+    .section { margin-bottom: 24px; }
+    .label {
+      font-size: 11px;
+      font-weight: 500;
+      color: #444;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    pre {
+      font-family: 'SF Mono', ui-monospace, monospace;
+      font-size: 12px;
+      background: #161616;
+      border: 1px solid #222;
+      border-radius: 6px;
+      padding: 14px 16px;
+      color: #888;
+      overflow-x: auto;
+      line-height: 1.7;
+    }
+    pre .hl { color: #ddd; }
+    pre .dim { color: #444; }
+    hr { border: none; border-top: 1px solid #1e1e1e; margin: 28px 0; }
+    .foot { font-size: 11px; color: #3a3a3a; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="icon">&#128274;</div>
-    <h1>Access Required</h1>
-    <p class="subtitle">This resource <span class="badge">${profileName}</span> requires an access key. Choose one of the methods below.</p>
-
-    <div class="method">
-      <div class="method-title">Option 1 — Query parameter (browser)</div>
-      <div class="code-block">${exampleUrl.replace('YOUR_KEY', '<span class="key-placeholder">YOUR_KEY</span>')}</div>
-    </div>
-
-    <div class="method">
-      <div class="method-title">Option 2 — Request header (API / curl)</div>
-      <div class="code-block">
-        curl <span class="dim">\\</span><br>
-        &nbsp;&nbsp;-H <span class="key-placeholder">"X-Access-Key: YOUR_KEY"</span> <span class="dim">\\</span><br>
-        &nbsp;&nbsp;${currentUrl.origin}${currentUrl.pathname}
-      </div>
-    </div>
-
-    <hr class="divider">
-    <p class="note">
-      The key is set by the administrator of this Midleman instance.<br>
-      After the first successful authentication the session is kept via a secure cookie — you won't need to include the key on every request.
+  <div class="wrap">
+    <p class="status">401 &mdash; Unauthorized</p>
+    <h1>Authentication required</h1>
+    <p class="desc">
+      Access to <code>${profileName}</code> is restricted.
+      Provide a valid key using one of the methods below.
     </p>
+
+    <div class="section">
+      <p class="label">Query parameter</p>
+      <pre><span class="hl">${currentUrl.origin}${currentUrl.pathname}</span>?key=<span class="hl">&lt;key&gt;</span></pre>
+    </div>
+
+    <div class="section">
+      <p class="label">Request header</p>
+      <pre>X-Access-Key<span class="dim">:</span> <span class="hl">&lt;key&gt;</span></pre>
+    </div>
+
+    <hr>
+    <p class="foot">Sessions are persisted via cookie after the first authenticated request.</p>
   </div>
 </body>
 </html>`;
