@@ -22,14 +22,22 @@ export interface ProxyTarget {
   forwardPath: boolean;   // Whether to append incoming path to target URL
 }
 
+export interface WebhookDestination {
+  url: string;
+  method?: string; // e.g. "POST", "GET"
+  customHeaders?: Record<string, string>;
+  forwardHeaders?: boolean; // If true, inherit all incoming request headers
+  bodyTemplate?: string; // uses {{field}} syntax
+}
+
 /**
  * Webhook Fan-out distributor: listens on a dedicated port
- * and duplicates the incoming request to multiple target URLs.
+ * and duplicates or transforms incoming requests to multiple upstream URLs.
  */
 export interface WebhookDistributor {
   name: string;           // Unique identifier
   port: number;           // Dedicated listening port (0 = auto-assign)
-  targets: string[];      // Array of upstream URLs to fan-out to
+  targets: (string | WebhookDestination)[];      // Array of upstream destinations
   authToken?: string;     // Optional auth token to restrict inbound requests
 }
 

@@ -251,7 +251,7 @@ export function validateTargetInput(input: unknown): string | null {
 interface StoredWebhook {
     name: string;
     port: number;
-    targets: string[];
+    targets: (string | import('./types').WebhookDestination)[];
     authToken?: string;
 }
 
@@ -270,7 +270,7 @@ export function loadPersistedWebhooks(): WebhookDistributor[] {
             .map(w => ({
                 name: w.name.toLowerCase(),
                 port: w.port,
-                targets: w.targets.map(t => t.endsWith('/') ? t.slice(0, -1) : t),
+                targets: w.targets.map(t => typeof t === 'string' ? (t.endsWith('/') ? t.slice(0, -1) : t) : t),
                 authToken: w.authToken,
             }));
     } catch (err) {
@@ -313,15 +313,22 @@ export function validateWebhookInput(input: unknown): string | null {
     }
 
     if (!Array.isArray(w.targets) || w.targets.length === 0) {
-        return '"targets" must be a non-empty array of strings';
+        return '"targets" must be a non-empty array of destinations';
     }
 
     for (const target of w.targets) {
-        if (typeof target !== 'string') return 'All targets must be string URLs';
-        try {
-            new URL(target);
-        } catch {
-            return `"${target}" is not a valid URL`;
+        if (typeof target === 'string') {
+            try { new URL(target); } catch { return `"${target}" is not a valid URL`; }
+        } else if (typeof target === 'object' && target !== null) {
+            const dest = target as Record<string, unknown>;
+            if (typeof dest.url !== 'string') return 'Custom action must have a valid string "url"';
+            try { new URL(dest.url); } catch { return `"${dest.url}" is not a valid URL`; }
+            if (dest.method && typeof dest.method !== 'string') return '"method" must be a string';
+            if (dest.bodyTemplate && typeof dest.bodyTemplate !== 'string') return '"bodyTemplate" must be a string';
+            if (dest.customHeaders && typeof dest.customHeaders !== 'object') return '"customHeaders" must be an object';
+            if (dest.forwardHeaders !== undefined && typeof dest.forwardHeaders !== 'boolean') return '"forwardHeaders" must be a boolean';
+        } else {
+            return 'Targets must be strings or valid WebhookDestination objects';
         }
     }
 

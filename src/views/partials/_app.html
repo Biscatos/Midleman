@@ -488,9 +488,24 @@
               placeholder="Auto-assign" min="0" max="65535"></div>
           
           <div class="form-group span-2">
-            <label>Target URLs (One per line)</label>
-            <textarea id="wTargets" rows="4" placeholder="https://api1.example.com/webhook&#10;https://api2.example.com/webhook" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;color:var(--text);font-family:monospace;font-size:13px;resize:vertical"></textarea>
-            <div style="font-size:11px;color:var(--text3);margin-top:4px">Enter the full destination URLs to which incoming payloads will be duplicated.</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <span style="font-weight:600;font-size:13px">Destinations</span>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-sm" onclick="toggleTestPayload()" style="padding:2px 8px;font-size:11px" tabindex="-1">Toggle Test Payload</button>
+                <button class="btn btn-sm" onclick="addWebhookTarget()" style="padding:2px 8px;font-size:11px">+ Add Action</button>
+              </div>
+            </div>
+            
+            <div id="wTestPayloadContainer" style="display:none;margin-bottom:12px;padding:10px;background:var(--surface2);border:1px dashed var(--border);border-radius:4px">
+              <label style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                <span style="font-size:12px">Test Payload (JSON)</span>
+                <button class="btn btn-sm" onclick="fetchRecentWebhookPayload()" style="padding:2px 8px;font-size:10px" tabindex="-1">Fetch recent request</button>
+              </label>
+              <textarea id="wTestPayload" rows="3" placeholder='{"event":"order.created", "data": {"id": 123}}' style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;color:var(--text);font-family:monospace;font-size:11px;resize:vertical" oninput="updateAllPreviews()"></textarea>
+              <div style="font-size:10px;color:var(--text3);margin-top:4px">Evaluated template variables will be shown inline inside your Custom Actions.</div>
+            </div>
+
+            <div id="wDestinationsContainer" style="display:flex;flex-direction:column;gap:8px;max-height:450px;overflow-y:auto;padding-right:4px"></div>
           </div>
           <div class="form-group span-2"><label>Incoming Auth Token (optional)</label><input type="text" id="wAuthToken" placeholder="Leave empty for public access"></div>
         </div>

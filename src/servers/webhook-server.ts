@@ -83,19 +83,65 @@ async function handleWebhookFanout(
     forwardHeaders.delete('X-Forward-Token');
     forwardHeaders.set('X-Request-ID', requestId);
 
+    // Attempt to parse incoming JSON for interpolations
+    let payloadObj: any = null;
+    if (bodyStringPreview && (req.headers.get('content-type')?.includes('application/json'))) {
+        try { payloadObj = JSON.parse(bodyStringPreview); } catch {}
+    }
+
+    function renderTemplate(template: string, data: any): string {
+        if (!data) return template;
+        return template.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_, path) => {
+            let val = data;
+            for (const k of path.split('.')) {
+                if (val === undefined || val === null) break;
+                val = val[k];
+            }
+            if (val === undefined || val === null) return '';
+            return typeof val === 'object' ? JSON.stringify(val) : String(val);
+        });
+    }
+
     // Fire-and-forget background execution
-    Promise.allSettled(webhook.targets.map(async (targetUrl) => {
+    Promise.allSettled(webhook.targets.map(async (target) => {
         const fetchStart = performance.now();
         
-        // Append incoming query params and path?
-        // Unlike "Targets", Webhooks typically hit a specific endpoint url directly without mirroring the path,
-        // but it's safe to just send to the exact targetUrl defined by the user.
+        let tUrl: string;
+        let tMethod = req.method;
+        let tHeaders = new Headers(forwardHeaders);
+        let tBody: ArrayBuffer | string | undefined = bodyBuffer;
+        let tBodySize = bodyBuffer?.byteLength || 0;
+        let tBodyStringPreview = bodyStringPreview;
+
+        if (typeof target === 'string') {
+            tUrl = target;
+        } else {
+            tUrl = renderTemplate(target.url, payloadObj);
+            
+            if (!target.forwardHeaders) {
+                tHeaders = new Headers();
+            }
+
+            if (target.method) tMethod = target.method;
+            if (target.customHeaders) {
+                for (const [k, v] of Object.entries(target.customHeaders)) {
+                    // Only render templates if it's dynamic
+                    tHeaders.set(k, renderTemplate(v, payloadObj));
+                }
+            }
+            if (target.bodyTemplate) {
+                tBody = renderTemplate(target.bodyTemplate, payloadObj);
+                tBodyStringPreview = tBody;
+                tBodySize = new TextEncoder().encode(tBody).byteLength;
+                tHeaders.set('content-type', 'application/json');
+            }
+        }
 
         try {
-            const res = await fetch(targetUrl, {
-                method: req.method,
-                headers: forwardHeaders,
-                body: bodyBuffer,
+            const res = await fetch(tUrl, {
+                method: tMethod,
+                headers: tHeaders,
+                body: tBody,
             });
 
             const fetchDuration = performance.now() - fetchStart;
@@ -105,13 +151,13 @@ async function handleWebhookFanout(
                 requestId,
                 type: 'webhook-fanout',
                 targetName: webhook.name,
-                method: req.method,
+                method: tMethod,
                 path: url.pathname + url.search,
-                targetUrl,
+                targetUrl: tUrl,
                 clientIp,
-                reqHeaders: headersToRecord(forwardHeaders),
-                reqBody: bodyStringPreview,
-                reqBodySize: bodyBuffer?.byteLength || 0,
+                reqHeaders: headersToRecord(tHeaders),
+                reqBody: tBodyStringPreview,
+                reqBodySize: tBodySize,
                 resStatus: res.status,
                 resStatusText: res.statusText,
                 resHeaders: headersToRecord(res.headers as unknown as Headers),
@@ -123,19 +169,19 @@ async function handleWebhookFanout(
         } catch (err) {
             const fetchDuration = performance.now() - fetchStart;
             const errorMsg = err instanceof Error ? err.message : String(err);
-            console.error(`❌ [webhook:${webhook.name}] Fan-out to ${targetUrl} failed:`, errorMsg);
+            console.error(`❌ [webhook:${webhook.name}] Action to ${tUrl} failed:`, errorMsg);
             
             logRequest({
                 requestId,
                 type: 'webhook-fanout',
                 targetName: webhook.name,
-                method: req.method,
+                method: tMethod,
                 path: url.pathname + url.search,
-                targetUrl,
+                targetUrl: tUrl,
                 clientIp,
-                reqHeaders: headersToRecord(forwardHeaders),
-                reqBody: bodyStringPreview,
-                reqBodySize: bodyBuffer?.byteLength || 0,
+                reqHeaders: headersToRecord(tHeaders),
+                reqBody: tBodyStringPreview,
+                reqBodySize: tBodySize,
                 resStatus: 502,
                 resStatusText: 'Bad Gateway',
                 durationMs: fetchDuration,
@@ -268,7 +314,7 @@ export function getWebhookServers(): Map<string, WebhookServer> {
     return servers;
 }
 
-export function getWebhookStatus(): { name: string; port: number; targets: string[]; active: number; running: boolean; hasAuth: boolean }[] {
+export function getWebhookStatus(): { name: string; port: number; targets: any[]; active: number; running: boolean; hasAuth: boolean }[] {
     return Array.from(servers.values()).map(ws => ({
         name: ws.webhook.name,
         port: ws.server.port ?? ws.webhook.port,

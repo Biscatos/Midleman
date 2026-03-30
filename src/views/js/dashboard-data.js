@@ -356,12 +356,268 @@ function viewWebhookLogs(name) {
   fetchRequestLogs();
 }
 
+let webhookTargetState = [];
+let showTestPayload = false;
+
+function toggleTestPayload() {
+    showTestPayload = !showTestPayload;
+    const container = document.getElementById('wTestPayloadContainer');
+    if (container) {
+        container.style.display = showTestPayload ? 'block' : 'none';
+    }
+    updateAllPreviews();
+}
+
+function renderTemplateJS(template, data) {
+    if (!data || !template) return template || '';
+    return template.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_, path) => {
+        let val = data;
+        for (const k of path.split('.')) {
+            if (val === undefined || val === null) break;
+            val = val[k];
+        }
+        if (val === undefined || val === null) return '';
+        return typeof val === 'object' ? JSON.stringify(val) : String(val);
+    });
+}
+
+function syntaxHighlightTemplate(code) {
+    if (!code) return '';
+    let html = esc(code);
+    
+    // Highlight Template Variables {{ ... }}
+    html = html.replace(/(\{\{[\s]*[a-zA-Z0-9_.-]+[\s]*\}\})/g, '<span style="color:var(--accent);font-weight:600;background:rgba(0,120,212,0.1);padding:0 2px;border-radius:2px">$1</span>');
+    // Highlight JSON Keys "key":
+    html = html.replace(/(&quot;[a-zA-Z0-9_.-]+&quot;)(?=\s*:)/g, '<span style="color:#4ec9b0">$1</span>');
+    // Highlight JSON Strings "value"
+    html = html.replace(/:\s*(&quot;.*?&quot;)(?![\w])/g, ': <span style="color:#ce9178">$1</span>');
+    // Highlight JSON Numbers/Booleans/Null
+    html = html.replace(/:\s*([0-9.]+|true|false|null)(?![\w])/g, ': <span style="color:#b5cea8">$1</span>');
+    // Re-highlight templates that might have been caught inside strings
+    html = html.replace(/(<span style="color:#ce9178">&quot;.*?)(\{\{[\s]*[a-zA-Z0-9_.-]+[\s]*\}\})(.*?&quot;<\/span>)/g, '$1</span><span style="color:var(--accent);font-weight:600;background:rgba(0,120,212,0.1);padding:0 2px;border-radius:2px">$2</span><span style="color:#ce9178">$3');
+    
+    return html;
+}
+
+function updateSyntaxEditor(index, value) {
+    const pre = document.getElementById(`preBody_${index}`);
+    if (pre) {
+        pre.innerHTML = syntaxHighlightTemplate(value);
+    }
+}
+
+function updateAllPreviews() {
+  const jsonStr = document.getElementById('wTestPayload').value.trim();
+  let payloadObj = null;
+  const tpEl = document.getElementById('wTestPayload');
+  
+  if (showTestPayload && jsonStr) {
+    try { payloadObj = JSON.parse(jsonStr); tpEl.style.borderColor = 'var(--accent)'; }
+    catch { tpEl.style.borderColor = 'var(--red)'; }
+  } else {
+    tpEl.style.borderColor = 'var(--border)';
+  }
+
+  webhookTargetState.forEach((t, i) => {
+    const pUrl = document.getElementById(`previewUrl_${i}`);
+    if (pUrl) {
+        if (showTestPayload && payloadObj) {
+            pUrl.textContent = 'Evaluates to: ' + renderTemplateJS(t.url, payloadObj);
+            pUrl.style.display = 'block';
+        } else {
+            pUrl.style.display = 'none';
+        }
+    }
+    
+    if (t.type === 'custom') {
+      (t.customHeaders || []).forEach((h, hIndex) => {
+          const ph = document.getElementById(`previewHeader_${i}_${hIndex}`);
+          if (ph) {
+              if (showTestPayload && payloadObj && h.value) {
+                  ph.textContent = '= ' + renderTemplateJS(h.value, payloadObj);
+                  ph.style.display = 'inline-block';
+              } else {
+                  ph.style.display = 'none';
+              }
+          }
+      });
+      
+      const pBody = document.getElementById(`previewBody_${i}`);
+      if (pBody) {
+          if (showTestPayload && payloadObj) {
+              let outBody = renderTemplateJS(t.bodyTemplate, payloadObj);
+              if (!outBody.trim()) {
+                  pBody.textContent = 'Evaluates to: (Original Payload Placeholder)';
+              } else {
+                  try { outBody = JSON.stringify(JSON.parse(outBody), null, 2); } catch {}
+                  pBody.textContent = 'Evaluates to:\n' + outBody;
+              }
+              pBody.style.display = 'block';
+          } else {
+              pBody.style.display = 'none';
+          }
+      }
+    }
+  });
+}
+
+async function fetchRecentWebhookPayload() {
+    try {
+        const res = await api('/admin/requests?type=webhook&limit=1');
+        if (!res.ok) return toast('Could not fetch recent payload', 'error');
+        const d = await res.json();
+        if (d.requests && d.requests.length > 0 && d.requests[0].reqBody) {
+            let bd = d.requests[0].reqBody;
+            try { bd = JSON.stringify(JSON.parse(bd), null, 2); } catch {}
+            document.getElementById('wTestPayload').value = bd;
+            if (!showTestPayload) toggleTestPayload();
+            else updateAllPreviews();
+            toast('Loaded payload from recent request');
+        } else {
+            toast('No recent webhook payload found', 'warning');
+        }
+    } catch { toast('Error fetching payload', 'error'); }
+}
+
+function addWebhookTarget(target = "") {
+  if (typeof target === 'string') {
+    webhookTargetState.push({ type: 'basic', url: target, method: 'POST', bodyTemplate: '', customHeaders: [], forwardHeaders: false });
+  } else {
+    const headersArr = [];
+    if (target.customHeaders) {
+        for (const [k, v] of Object.entries(target.customHeaders)) {
+            headersArr.push({ key: k, value: v });
+        }
+    }
+    webhookTargetState.push({ 
+      type: 'custom', 
+      url: target.url || '', 
+      method: target.method || 'POST', 
+      bodyTemplate: target.bodyTemplate || '',
+      customHeaders: headersArr,
+      forwardHeaders: target.forwardHeaders === true
+    });
+  }
+  renderWebhookTargets();
+}
+
+function removeWebhookTarget(index) {
+  webhookTargetState.splice(index, 1);
+  renderWebhookTargets();
+}
+
+function toggleWebhookTargetType(index) {
+  const t = webhookTargetState[index];
+  t.type = t.type === 'basic' ? 'custom' : 'basic';
+  renderWebhookTargets();
+}
+
+function updateWebhookTargetField(index, field, value) {
+  webhookTargetState[index][field] = value;
+  updateAllPreviews();
+}
+
+function addWebhookTargetHeader(index) {
+  webhookTargetState[index].customHeaders.push({ key: '', value: '' });
+  renderWebhookTargets();
+}
+
+function removeWebhookTargetHeader(index, hIndex) {
+  webhookTargetState[index].customHeaders.splice(hIndex, 1);
+  renderWebhookTargets();
+}
+
+function updateWebhookTargetHeader(index, hIndex, field, val) {
+  webhookTargetState[index].customHeaders[hIndex][field] = val;
+  updateAllPreviews();
+}
+
+function renderWebhookTargets() {
+  const container = document.getElementById('wDestinationsContainer');
+  if (webhookTargetState.length === 0) {
+    container.innerHTML = '<div style="color:var(--text3);font-size:12px;text-align:center;padding:12px">No actions added. Click "+ Add Action" above.</div>';
+    return;
+  }
+  
+  container.innerHTML = webhookTargetState.map((t, i) => {
+    const headersHtml = (t.customHeaders || []).map((h, hIndex) => `
+      <div style="display:flex;flex-direction:column;gap:2px;margin-top:4px">
+          <div style="display:flex;gap:4px">
+            <input type="text" placeholder="Key" value="${esc(h.key)}" oninput="updateWebhookTargetHeader(${i}, ${hIndex}, 'key', this.value)" style="flex:1;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
+            <input type="text" placeholder="Value (Template Allowed)" value="${esc(h.value)}" oninput="updateWebhookTargetHeader(${i}, ${hIndex}, 'value', this.value)" style="flex:2;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
+            <button onclick="removeWebhookTargetHeader(${i}, ${hIndex})" tabindex="-1" style="background:none;border:none;color:var(--red);cursor:pointer;padding:0 4px" title="Remove Header">&times;</button>
+          </div>
+          <div id="previewHeader_${i}_${hIndex}" style="display:none;font-size:10px;color:var(--accent);margin-left:5px"></div>
+      </div>
+    `).join('');
+
+    return `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;position:relative;padding:10px;">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <select onchange="toggleWebhookTargetType(${i})" style="padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);font-size:12px;color:var(--text);outline:none">
+          <option value="basic" ${t.type === 'basic' ? 'selected' : ''}>Basic Forward</option>
+          <option value="custom" ${t.type === 'custom' ? 'selected' : ''}>Custom Action</option>
+        </select>
+        <button onclick="removeWebhookTarget(${i})" style="margin-left:auto;background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;line-height:1" title="Remove Target">&times;</button>
+      </div>
+      
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div>
+           <input type="text" placeholder="Target URL (e.g. https://api.com/user/{{user.id}})" value="${esc(t.url)}" oninput="updateWebhookTargetField(${i}, 'url', this.value)" style="width:100%;padding:6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
+           <div id="previewUrl_${i}" style="display:none;font-size:10px;color:var(--accent);margin-top:2px;margin-left:4px"></div>
+        </div>
+        
+        ${t.type === 'custom' ? `
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <select onchange="updateWebhookTargetField(${i}, 'method', this.value)" style="padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
+                <option value="POST" ${t.method === 'POST' ? 'selected' : ''}>POST</option>
+                <option value="PUT" ${t.method === 'PUT' ? 'selected' : ''}>PUT</option>
+                <option value="GET" ${t.method === 'GET' ? 'selected' : ''}>GET</option>
+                <option value="DELETE" ${t.method === 'DELETE' ? 'selected' : ''}>DELETE</option>
+              </select>
+              <label style="font-size:11px;color:var(--text);display:flex;align-items:center;gap:4px;margin-left:auto;cursor:pointer">
+                <input type="checkbox" ${t.forwardHeaders ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'forwardHeaders', this.checked)"> Forward incoming headers
+              </label>
+            </div>
+            
+            <div style="border:1px solid var(--border);border-radius:4px;padding:6px;background:var(--surface)">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                <span style="font-size:11px;color:var(--text2)">Custom Headers</span>
+                <button onclick="addWebhookTargetHeader(${i})" class="btn" style="padding:2px 6px;font-size:10px">+ Add Header</button>
+              </div>
+              ${headersHtml}
+            </div>
+
+            <div>
+              <div style="display:grid; border-radius:4px; border:1px solid var(--border); background:#1e1e1e; font-size:12px; font-family:monospace; line-height:1.5;">
+                <pre id="preBody_${i}" style="grid-area: 1 / 1 / 2 / 2; margin:0; padding:8px; box-sizing:border-box; color:#d4d4d4; white-space:pre-wrap; word-wrap:break-word; overflow:hidden; pointer-events:none;">${syntaxHighlightTemplate(t.bodyTemplate)}</pre>
+                <textarea placeholder='Body Template (JSON)\\nExample: {"id": "{{data.id}}"}\\nDefaults to original payload if left empty' oninput="updateWebhookTargetField(${i}, 'bodyTemplate', this.value); updateSyntaxEditor(${i}, this.value)" onscroll="document.getElementById('preBody_'+${i}).scrollTop = this.scrollTop" style="grid-area: 1 / 1 / 2 / 2; margin:0; padding:8px; box-sizing:border-box; background:transparent; color:transparent; caret-color:#fff; border:none; outline:none; resize:vertical; min-height:80px;" spellcheck="false">${esc(t.bodyTemplate)}</textarea>
+              </div>
+              <div id="previewBody_${i}" style="display:none;font-size:10px;color:var(--accent);margin-top:2px;margin-left:4px;white-space:pre-wrap;font-family:monospace"></div>
+            </div>
+          </div>
+        ` : ''}
+      </div>
+    </div>
+  `}).join('');
+
+  updateAllPreviews();
+}
+
 function openWebhookModal(webhook = null) {
   editingWebhook = webhook;
   document.getElementById('webhookModalTitle').textContent = webhook ? 'Edit Webhook Distributor' : 'New Webhook Distributor';
   document.getElementById('wName').value = webhook ? webhook.name : ''; document.getElementById('wName').disabled = !!webhook;
   document.getElementById('wPort').value = webhook ? webhook.port : '';
-  document.getElementById('wTargets').value = webhook ? webhook.targets.join('\n') : '';
+  
+  webhookTargetState = [];
+  if (webhook && webhook.targets && webhook.targets.length > 0) {
+      webhook.targets.forEach(t => addWebhookTarget(t));
+  } else {
+      addWebhookTarget(''); // one empty default
+  }
+  
   document.getElementById('wAuthToken').value = webhook ? (webhook.authToken || '') : '';
   document.getElementById('webhookModal').style.display = 'block';
 }
@@ -369,13 +625,36 @@ function openWebhookModal(webhook = null) {
 function closeWebhookModal() { document.getElementById('webhookModal').style.display = 'none'; editingWebhook = null; }
 
 async function saveWebhook() {
-  const targetsRaw = document.getElementById('wTargets').value.split('\n').map(l => l.trim()).filter(Boolean);
+  const targetsRaw = [];
+  for (const t of webhookTargetState) {
+      if (!t.url.trim()) continue;
+      if (t.type === 'basic') {
+          targetsRaw.push(t.url.trim());
+      } else {
+          let headersObj = undefined;
+          if (t.customHeaders && t.customHeaders.length > 0) {
+              headersObj = {};
+              for (const h of t.customHeaders) {
+                  if (h.key.trim()) headersObj[h.key.trim()] = h.value.trim();
+              }
+              if (Object.keys(headersObj).length === 0) headersObj = undefined;
+          }
+          targetsRaw.push({
+              url: t.url.trim(),
+              method: t.method || 'POST',
+              customHeaders: headersObj,
+              forwardHeaders: t.forwardHeaders,
+              bodyTemplate: t.bodyTemplate.trim() || undefined
+          });
+      }
+  }
+
   const body = { 
     name: document.getElementById('wName').value.trim(), 
     port: parseInt(document.getElementById('wPort').value) || 0, 
     targets: targetsRaw 
   };
-  if (targetsRaw.length === 0) return toast('At least one target URL is required', 'error');
+  if (targetsRaw.length === 0) return toast('At least one valid destination is required', 'error');
   const at = document.getElementById('wAuthToken').value.trim(); if (at) body.authToken = at;
   try {
     const res = await api('/admin/webhooks', { method: 'POST', body: JSON.stringify(body) }); const d = await res.json();
