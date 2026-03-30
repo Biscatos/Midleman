@@ -381,29 +381,89 @@ function renderTemplateJS(template, data) {
     });
 }
 
-function syntaxHighlightTemplate(code) {
-    if (!code) return '';
-    let html = esc(code);
+let aceEditors = {};
+
+function initAceEditors() {
+    if (typeof ace === 'undefined') return;
+    Object.values(aceEditors).forEach(e => { try { e.destroy(); } catch {} });
+    aceEditors = {};
     
-    // Highlight Template Variables {{ ... }}
-    html = html.replace(/(\{\{[\s]*[a-zA-Z0-9_.-]+[\s]*\}\})/g, '<span style="color:var(--accent);font-weight:600;background:rgba(0,120,212,0.1);padding:0 2px;border-radius:2px">$1</span>');
-    // Highlight JSON Keys "key":
-    html = html.replace(/(&quot;[a-zA-Z0-9_.-]+&quot;)(?=\s*:)/g, '<span style="color:#4ec9b0">$1</span>');
-    // Highlight JSON Strings "value"
-    html = html.replace(/:\s*(&quot;.*?&quot;)(?![\w])/g, ': <span style="color:#ce9178">$1</span>');
-    // Highlight JSON Numbers/Booleans/Null
-    html = html.replace(/:\s*([0-9.]+|true|false|null)(?![\w])/g, ': <span style="color:#b5cea8">$1</span>');
-    // Re-highlight templates that might have been caught inside strings
-    html = html.replace(/(<span style="color:#ce9178">&quot;.*?)(\{\{[\s]*[a-zA-Z0-9_.-]+[\s]*\}\})(.*?&quot;<\/span>)/g, '$1</span><span style="color:var(--accent);font-weight:600;background:rgba(0,120,212,0.1);padding:0 2px;border-radius:2px">$2</span><span style="color:#ce9178">$3');
-    
-    return html;
+    webhookTargetState.forEach((t, i) => {
+        if (t.type !== 'custom') return;
+        const el = document.getElementById(`aceBody_${i}`);
+        if (!el) return;
+        
+        const editor = ace.edit(el, {
+            mode: 'ace/mode/json',
+            theme: 'ace/theme/twilight',
+            value: t.bodyTemplate || '',
+            fontSize: 12,
+            fontFamily: "'Consolas','Monaco','Courier New',monospace",
+            showPrintMargin: false,
+            maxLines: 20,
+            minLines: 3,
+            wrap: true,
+            tabSize: 2,
+            useWorker: false,
+            highlightActiveLine: true,
+            showGutter: true,
+            placeholder: '{"event": "{{event.type}}", "id": "{{data.id}}"}'
+        });
+        
+        editor.on('change', () => {
+            webhookTargetState[i].bodyTemplate = editor.getValue();
+            updateAllPreviews();
+        });
+        
+        aceEditors[i] = editor;
+    });
 }
 
-function updateSyntaxEditor(index, value) {
-    const pre = document.getElementById(`preBody_${index}`);
-    if (pre) {
-        pre.innerHTML = syntaxHighlightTemplate(value);
+let fullEditor = null;
+let currentFullEditorIndex = -1;
+
+function openBodyEditor(index) {
+    currentFullEditorIndex = index;
+    const content = webhookTargetState[index].bodyTemplate || '';
+    
+    document.getElementById('bodyEditorModal').style.display = 'block';
+    
+    if (!fullEditor) {
+        fullEditor = ace.edit('aceBodyFull', {
+            mode: 'ace/mode/json',
+            theme: 'ace/theme/twilight',
+            fontSize: 14,
+            fontFamily: "'Consolas','Monaco','Courier New',monospace",
+            showPrintMargin: false,
+            wrap: true,
+            tabSize: 2,
+            useWorker: false,
+            highlightActiveLine: true,
+            showGutter: true
+        });
     }
+    
+    fullEditor.setValue(content, -1);
+    fullEditor.focus();
+}
+
+function closeBodyEditor() {
+    document.getElementById('bodyEditorModal').style.display = 'none';
+    currentFullEditorIndex = -1;
+}
+
+function saveBodyEditor() {
+    if (currentFullEditorIndex === -1) return;
+    const content = fullEditor.getValue();
+    webhookTargetState[currentFullEditorIndex].bodyTemplate = content;
+    
+    // Sync back to small editor
+    if (aceEditors[currentFullEditorIndex]) {
+        aceEditors[currentFullEditorIndex].setValue(content, -1);
+    }
+    
+    updateAllPreviews();
+    closeBodyEditor();
 }
 
 function updateAllPreviews() {
@@ -589,11 +649,16 @@ function renderWebhookTargets() {
               ${headersHtml}
             </div>
 
-            <div>
-              <div style="display:grid; border-radius:4px; border:1px solid var(--border); background:#1e1e1e; font-size:12px; font-family:monospace; line-height:1.5;">
-                <pre id="preBody_${i}" style="grid-area: 1 / 1 / 2 / 2; margin:0; padding:8px; box-sizing:border-box; color:#d4d4d4; white-space:pre-wrap; word-wrap:break-word; overflow:hidden; pointer-events:none;">${syntaxHighlightTemplate(t.bodyTemplate)}</pre>
-                <textarea placeholder='Body Template (JSON)\\nExample: {"id": "{{data.id}}"}\\nDefaults to original payload if left empty' oninput="updateWebhookTargetField(${i}, 'bodyTemplate', this.value); updateSyntaxEditor(${i}, this.value)" onscroll="document.getElementById('preBody_'+${i}).scrollTop = this.scrollTop" style="grid-area: 1 / 1 / 2 / 2; margin:0; padding:8px; box-sizing:border-box; background:transparent; color:transparent; caret-color:#fff; border:none; outline:none; resize:vertical; min-height:80px;" spellcheck="false">${esc(t.bodyTemplate)}</textarea>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+                <span style="font-size:11px;color:var(--text2)">Body Template (JSON)</span>
+                <button onclick="openBodyEditor(${i})" class="btn" style="padding:2px 6px;font-size:10px;display:flex;align-items:center;gap:4px">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                  Expand
+                </button>
               </div>
+              <div id="aceBody_${i}" style="width:100%; min-height:100px; border-radius:4px; border:1px solid var(--border);"></div>
+              <div style="font-size:10px;color:var(--text3);margin-top:3px;margin-left:2px">Supports JSON + <code style="background:rgba(0,120,212,0.15);padding:1px 4px;border-radius:3px;color:var(--accent);font-size:10px">{{template.vars}}</code></div>
               <div id="previewBody_${i}" style="display:none;font-size:10px;color:var(--accent);margin-top:2px;margin-left:4px;white-space:pre-wrap;font-family:monospace"></div>
             </div>
           </div>
@@ -602,6 +667,7 @@ function renderWebhookTargets() {
     </div>
   `}).join('');
 
+  initAceEditors();
   updateAllPreviews();
 }
 
@@ -672,7 +738,32 @@ async function deleteWebhook(name) {
 }
 
 async function restartWebhookAction(name) {
-  try { const res = await api('/admin/webhooks/' + encodeURIComponent(name) + '/restart', { method: 'POST' }); if ((await res.json()).status) { toast('Restarted "' + name + '"'); await fetchWebhooks(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
+  const btn = event?.target;
+  const originalText = btn ? btn.textContent : 'Restart';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Restarting...';
+  }
+  
+  try { 
+    const res = await api('/admin/webhooks/' + encodeURIComponent(name) + '/restart', { method: 'POST' }); 
+    const data = await res.json();
+    if (data.status) { 
+      toast('Restarted "' + name + '"'); 
+      // Wait a bit for the server to actually be ready
+      await new Promise(r => setTimeout(r, 1000));
+      await fetchWebhooks(); 
+    } else {
+      toast(data.error || 'Failed to restart', 'error');
+    }
+  } catch (e) { 
+    toast('Error: ' + e.message, 'error'); 
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
 }
 
 // ─── Request Log ─────────────────────────────────────────────────────────────

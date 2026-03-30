@@ -637,9 +637,9 @@ const server = Bun.serve({
                 }
 
                 if (url.pathname.startsWith('/admin/webhooks/') && req.method === 'GET') {
-                    const name = url.pathname.split('/')[3]?.toLowerCase();
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '');
                     if (!name) return jsonRes(400, { error: 'Webhook name required' });
-                    const webhook = config.webhooks.find(w => w.name === name);
+                    const webhook = config.webhooks.find(w => w.name.toLowerCase() === name.toLowerCase());
                     if (!webhook) return jsonRes(404, { error: `Webhook "${name}" not found` });
                     const status = getWebhookStatus().find(s => s.name === name);
                     return jsonRes(200, {
@@ -671,23 +671,29 @@ const server = Bun.serve({
                     if (input.authToken) webhook.authToken = input.authToken as string;
 
                     // Assign a port (auto or explicit)
+                    const existingIdx = config.webhooks.findIndex(w => w.name === webhook.name);
+                    // When updating, preserve the existing port if none was explicitly set
+                    let portToUse = configuredPort;
+                    if (existingIdx >= 0 && configuredPort === 0) {
+                        const existingPort = getWebhookStatus().find(s => s.name === webhook.name)?.port || config.webhooks[existingIdx].port || 0;
+                        if (existingPort > 0) portToUse = existingPort;
+                    }
                     const excludePorts = getWebhookStatus().filter(s => s.name !== webhook.name).map(s => s.port).filter(Boolean);
-                    const assignedPort = await assignWebhookPort(webhook.name, configuredPort, config.port, excludePorts);
+                    const assignedPort = await assignWebhookPort(webhook.name, portToUse, config.port, excludePorts);
                     const webhookWithPort = { ...webhook, port: assignedPort };
 
-                    // Update or add config entry
-                    const idx = config.webhooks.findIndex(w => w.name === webhook.name);
-                    if (idx >= 0) {
-                        config.webhooks[idx] = webhook;
+                    // Update or add config entry (always save with assigned port)
+                    if (existingIdx >= 0) {
+                        config.webhooks[existingIdx] = webhookWithPort;
                     } else {
-                        config.webhooks.push(webhook);
+                        config.webhooks.push(webhookWithPort);
                     }
 
                     persistWebhooks(config.webhooks);
 
                     // Start/restart the server
                     try {
-                        if (idx >= 0) {
+                        if (existingIdx >= 0) {
                             await restartWebhook(webhookWithPort);
                         } else {
                             startWebhookServer(webhookWithPort);
@@ -696,16 +702,16 @@ const server = Bun.serve({
                         console.error(`⚠️  Webhook "${webhook.name}" saved but failed to start:`, err);
                     }
 
-                    const action = idx >= 0 ? 'updated' : 'created';
+                    const action = existingIdx >= 0 ? 'updated' : 'created';
                     console.log(`✅ Webhook "${webhook.name}" ${action} (port ${assignedPort})`);
                     return jsonRes(200, { status: action, webhook: webhook.name, port: assignedPort });
                 }
 
                 if (url.pathname.startsWith('/admin/webhooks/') && req.method === 'DELETE') {
-                    const name = url.pathname.split('/')[3]?.toLowerCase();
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '');
                     if (!name) return jsonRes(400, { error: 'Webhook name required' });
 
-                    const idx = config.webhooks.findIndex(w => w.name === name);
+                    const idx = config.webhooks.findIndex(w => w.name.toLowerCase() === name.toLowerCase());
                     if (idx === -1) return jsonRes(404, { error: `Webhook "${name}" not found` });
 
                     config.webhooks.splice(idx, 1);

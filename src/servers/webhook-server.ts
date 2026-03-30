@@ -282,22 +282,24 @@ export function startWebhookServer(webhook: WebhookDistributor): WebhookServer {
     return ws;
 }
 
-export async function stopWebhookServer(name: string): Promise<void> {
+export async function stopWebhookServer(name: string, graceful: boolean = true): Promise<void> {
     const ws = servers.get(name);
     if (!ws) return;
 
     ws.isShuttingDown = true;
 
-    // Wait for active bounds
-    const maxWait = 5000;
-    const start = Date.now();
-    while (ws.activeRequests > 0 && Date.now() - start < maxWait) {
-        await Bun.sleep(200);
+    if (graceful) {
+        // Wait for active bounds
+        const maxWait = 5000;
+        const start = Date.now();
+        while (ws.activeRequests > 0 && Date.now() - start < maxWait) {
+            await Bun.sleep(200);
+        }
     }
 
     ws.server.stop();
     servers.delete(name);
-    console.log(`🛑 Webhook "${name}" stopped`);
+    console.log(`🛑 Webhook "${name}" stopped${graceful ? ' gracefully' : ' immediately'}`);
 }
 
 export async function stopAllWebhooks(): Promise<void> {
@@ -306,7 +308,8 @@ export async function stopAllWebhooks(): Promise<void> {
 }
 
 export async function restartWebhook(webhook: WebhookDistributor): Promise<WebhookServer> {
-    await stopWebhookServer(webhook.name);
+    // For restart, we stop immediately to minimize downtime on the port
+    await stopWebhookServer(webhook.name, false);
     return startWebhookServer(webhook);
 }
 
