@@ -95,6 +95,8 @@ async function handleTargetForward(
             method: req.method,
             headers: forwardHeaders,
             body: forwardBody,
+            // @ts-ignore — Bun-specific: ignore self-signed / expired upstream certs
+            tls: { rejectUnauthorized: false },
         });
     } catch (fetchError) {
         const durationMs = performance.now() - startTime;

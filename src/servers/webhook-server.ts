@@ -134,7 +134,7 @@ async function fetchWithRetry(
         }
 
         try {
-            const res = await fetch(url, init);
+            const res = await fetch(url, { ...init, tls: { rejectUnauthorized: false } } as RequestInit);
             const resText = await res.text().catch(() => null);
 
             if (attempt < maxRetries && shouldRetry(res.status)) {
