@@ -211,10 +211,16 @@ export async function handleProxyRequest(
         const referer = req.headers.get('referer') || '';
         const refererIsFromProfile = referer.includes(`/proxy/${profileName}/`);
 
-        // A. Direct ?key= — redirect to strip key from URL and set cookie first.
+        // A. X-Access-Key header — for API clients / Postman (no redirect, no cookie)
+        const headerKey = req.headers.get('x-access-key');
+        if (headerKey === profile.accessKey) {
+            validatedAccessKey = profile.accessKey;
+        }
+
+        // B. Direct ?key= — redirect to strip key from URL and set cookie first.
         //    The browser receives the cookie BEFORE loading the page, so all
         //    sub-resources (CSS, JS, fonts) automatically include it. No race condition.
-        if (providedKey === profile.accessKey) {
+        if (!validatedAccessKey && providedKey === profile.accessKey) {
             const clean = new URL(url.toString());
             clean.searchParams.delete('key');
             return new Response(null, {
@@ -226,7 +232,7 @@ export async function handleProxyRequest(
             });
         }
 
-        // B. Profile-scoped cookie — the only valid credential after the initial redirect.
+        // C. Profile-scoped cookie — the only valid credential after the initial redirect.
         //    Cookie name includes profileName so different proxies never share auth state.
         if (!validatedAccessKey) {
             const cookies = req.headers.get('cookie') || '';
@@ -238,10 +244,7 @@ export async function handleProxyRequest(
 
         if (!validatedAccessKey) {
             console.warn(`❌ Proxy "${profileName}": REJECTED ${remainingPath} | cookie=${!!(req.headers.get('cookie')?.includes(`__pk_${profileName}`))} isAsset=${isSubResource}`);
-            return jsonResponse(401, {
-                error: 'Unauthorized',
-                message: 'Valid ?key= parameter is required to access this resource',
-            });
+            return unauthorizedResponse(req, profileName);
         }
     }
 
@@ -587,10 +590,16 @@ export async function handleDirectProxy(
         const providedKey = url.searchParams.get('key');
         const clientIP = getClientIP(req);
 
-        // A. Direct ?key= — redirect to strip key from URL and set cookie first.
+        // A. X-Access-Key header — for API clients / Postman (no redirect, no cookie)
+        const headerKey = req.headers.get('x-access-key');
+        if (headerKey === profile.accessKey) {
+            validatedAccessKey = profile.accessKey;
+        }
+
+        // B. Direct ?key= — redirect to strip key from URL and set cookie first.
         //    Cookie is received by the browser BEFORE the page loads, so all
         //    sub-resources (CSS, JS, fonts) automatically include it. No race condition.
-        if (providedKey === profile.accessKey) {
+        if (!validatedAccessKey && providedKey === profile.accessKey) {
             const clean = new URL(url.toString());
             clean.searchParams.delete('key');
             return new Response(null, {
@@ -602,7 +611,7 @@ export async function handleDirectProxy(
             });
         }
 
-        // B. Profile-scoped cookie — the only valid credential after the initial redirect.
+        // C. Profile-scoped cookie — the only valid credential after the initial redirect.
         //    Cookie name includes profileName so different proxies never share auth state.
         if (!validatedAccessKey) {
             const cookies = req.headers.get('cookie') || '';
@@ -613,10 +622,7 @@ export async function handleDirectProxy(
         }
 
         if (!validatedAccessKey) {
-            return jsonResponse(401, {
-                error: 'Unauthorized',
-                message: 'Valid ?key= parameter is required to access this resource',
-            });
+            return unauthorizedResponse(req, profileName);
         }
 
         url.searchParams.delete('key');
@@ -822,6 +828,132 @@ function jsonResponse(status: number, body: Record<string, unknown>): Response {
     return new Response(JSON.stringify(body), {
         status,
         headers: { 'Content-Type': 'application/json' },
+    });
+}
+
+function unauthorizedResponse(req: Request, profileName: string): Response {
+    const accept = req.headers.get('accept') || '';
+    const wantsBrowser = accept.includes('text/html');
+
+    if (!wantsBrowser) {
+        return jsonResponse(401, {
+            error: 'Unauthorized',
+            message: 'Valid ?key= parameter is required to access this resource',
+        });
+    }
+
+    const currentUrl = new URL(req.url);
+    const exampleUrl = `${currentUrl.origin}${currentUrl.pathname}?key=YOUR_KEY`;
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Access Required — ${profileName}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      background: #1a1d27;
+      border: 1px solid #2d3148;
+      border-radius: 12px;
+      padding: 40px;
+      max-width: 520px;
+      width: 100%;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    }
+    .icon { font-size: 36px; margin-bottom: 16px; }
+    h1 { font-size: 20px; font-weight: 700; margin-bottom: 6px; color: #f1f5f9; }
+    .subtitle { font-size: 13px; color: #94a3b8; margin-bottom: 28px; }
+    .badge {
+      display: inline-block;
+      background: #1e2235;
+      border: 1px solid #2d3148;
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-family: monospace;
+      color: #7c86f7;
+    }
+    .method {
+      margin-bottom: 20px;
+    }
+    .method-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #64748b;
+      margin-bottom: 8px;
+    }
+    .code-block {
+      background: #0f1117;
+      border: 1px solid #2d3148;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 12px;
+      color: #a5f3fc;
+      word-break: break-all;
+      position: relative;
+    }
+    .key-placeholder { color: #fbbf24; }
+    .dim { color: #475569; }
+    .divider {
+      border: none;
+      border-top: 1px solid #2d3148;
+      margin: 24px 0;
+    }
+    .note {
+      font-size: 12px;
+      color: #64748b;
+      line-height: 1.6;
+    }
+    .note a { color: #7c86f7; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">&#128274;</div>
+    <h1>Access Required</h1>
+    <p class="subtitle">This resource <span class="badge">${profileName}</span> requires an access key. Choose one of the methods below.</p>
+
+    <div class="method">
+      <div class="method-title">Option 1 — Query parameter (browser)</div>
+      <div class="code-block">${exampleUrl.replace('YOUR_KEY', '<span class="key-placeholder">YOUR_KEY</span>')}</div>
+    </div>
+
+    <div class="method">
+      <div class="method-title">Option 2 — Request header (API / curl)</div>
+      <div class="code-block">
+        curl <span class="dim">\\</span><br>
+        &nbsp;&nbsp;-H <span class="key-placeholder">"X-Access-Key: YOUR_KEY"</span> <span class="dim">\\</span><br>
+        &nbsp;&nbsp;${currentUrl.origin}${currentUrl.pathname}
+      </div>
+    </div>
+
+    <hr class="divider">
+    <p class="note">
+      The key is set by the administrator of this Midleman instance.<br>
+      After the first successful authentication the session is kept via a secure cookie — you won't need to include the key on every request.
+    </p>
+  </div>
+</body>
+</html>`;
+
+    return new Response(html, {
+        status: 401,
+        headers: { 'Content-Type': 'text/html; charset=utf-8', 'WWW-Authenticate': 'ApiKey realm="Proxy Access"' },
     });
 }
 
