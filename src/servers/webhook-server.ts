@@ -1,4 +1,4 @@
-import type { WebhookDistributor } from '../core/types';
+import type { WebhookDistributor, WebhookRetryConfig } from '../core/types';
 import { logRequest, headersToRecord } from '../telemetry/request-log';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -13,6 +13,150 @@ export interface WebhookServer {
 // ─── State ──────────────────────────────────────────────────────────────────
 
 const servers = new Map<string, WebhookServer>();
+
+// ─── Dead Letter Queue ──────────────────────────────────────────────────────
+
+const DLQ_MAX_SIZE = 500;
+
+export interface FailedFanout {
+    id: string;
+    webhookName: string;
+    requestId: string;
+    targetUrl: string;
+    method: string;
+    headers: Record<string, string>;
+    body: ArrayBuffer | string | null;
+    bodyPreview: string | null;
+    bodySize: number;
+    path: string;
+    clientIp: string;
+    retryConfig: import('../core/types').WebhookRetryConfig | undefined;
+    lastError: string;
+    totalAttempts: number;
+    failedAt: number; // Unix ms
+    retrying: boolean;
+}
+
+const deadLetterQueue: FailedFanout[] = [];
+
+export function getDeadLetterQueue(): FailedFanout[] {
+    return deadLetterQueue;
+}
+
+export function dismissFailedFanout(id: string): boolean {
+    const idx = deadLetterQueue.findIndex(e => e.id === id);
+    if (idx === -1) return false;
+    deadLetterQueue.splice(idx, 1);
+    return true;
+}
+
+export async function retryFailedFanout(id: string): Promise<{ ok: boolean; status?: number; error?: string }> {
+    const entry = deadLetterQueue.find(e => e.id === id);
+    if (!entry) return { ok: false, error: 'Not found' };
+    if (entry.retrying) return { ok: false, error: 'Already retrying' };
+
+    entry.retrying = true;
+    try {
+        const headers = new Headers(entry.headers);
+        const body = entry.body ?? undefined;
+        const { res } = await fetchWithRetry(
+            entry.targetUrl,
+            { method: entry.method, headers, body },
+            entry.retryConfig,
+            `DLQ:${entry.webhookName} → ${entry.targetUrl}`,
+        );
+
+        if (res.status >= 200 && res.status < 300) {
+            dismissFailedFanout(id);
+            console.log(`✅ [DLQ] Delivered ${entry.targetUrl} (${res.status}) — removed from queue`);
+            return { ok: true, status: res.status };
+        }
+
+        entry.lastError = `HTTP ${res.status}`;
+        entry.failedAt = Date.now();
+        entry.retrying = false;
+        return { ok: false, status: res.status, error: entry.lastError };
+    } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        entry.lastError = errorMsg;
+        entry.failedAt = Date.now();
+        entry.retrying = false;
+        return { ok: false, error: errorMsg };
+    }
+}
+
+export async function retryAllFailedFanouts(webhookName?: string): Promise<{ retried: number; succeeded: number; failed: number }> {
+    const targets = webhookName
+        ? deadLetterQueue.filter(e => e.webhookName === webhookName && !e.retrying)
+        : deadLetterQueue.filter(e => !e.retrying);
+
+    const results = await Promise.all(targets.map(e => retryFailedFanout(e.id)));
+    const succeeded = results.filter(r => r.ok).length;
+    return { retried: targets.length, succeeded, failed: targets.length - succeeded };
+}
+
+function enqueueFailedFanout(entry: Omit<FailedFanout, 'id' | 'failedAt' | 'retrying'>) {
+    if (deadLetterQueue.length >= DLQ_MAX_SIZE) {
+        deadLetterQueue.shift(); // drop oldest
+    }
+    deadLetterQueue.push({ ...entry, id: crypto.randomUUID(), failedAt: Date.now(), retrying: false });
+}
+
+// ─── Retry Helper ───────────────────────────────────────────────────────────
+
+const DEFAULT_RETRY_ON = [429, 502, 503, 504];
+
+async function fetchWithRetry(
+    url: string,
+    init: RequestInit,
+    retry: WebhookRetryConfig | undefined,
+    label: string,
+): Promise<{ res: Response; resText: string | null; attempts: number }> {
+    const maxRetries = retry?.maxRetries ?? 0;
+    const baseDelay = retry?.retryDelayMs ?? 1000;
+    const retryOn = retry?.retryOn ?? DEFAULT_RETRY_ON;
+    const backoff = retry?.backoff ?? 'exponential';
+    const retryUntilSuccess = retry?.retryUntilSuccess ?? false;
+
+    function shouldRetry(status: number): boolean {
+        if (retryUntilSuccess) return status < 200 || status >= 300;
+        return retryOn.includes(status);
+    }
+
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        if (attempt > 0) {
+            const delay = backoff === 'exponential'
+                ? baseDelay * Math.pow(2, attempt - 1)
+                : baseDelay;
+            console.warn(`🔁 [${label}] Retry ${attempt}/${maxRetries} in ${delay}ms…`);
+            await Bun.sleep(delay);
+        }
+
+        try {
+            const res = await fetch(url, init);
+            const resText = await res.text().catch(() => null);
+
+            if (attempt < maxRetries && shouldRetry(res.status)) {
+                console.warn(`🔁 [${label}] Got ${res.status}${retryUntilSuccess ? ' (retryUntilSuccess)' : ''}, will retry (${attempt + 1}/${maxRetries})`);
+                lastError = new Error(`HTTP ${res.status}`);
+                continue;
+            }
+
+            if (retryUntilSuccess && (res.status < 200 || res.status >= 300)) {
+                // Exhausted all retries without a 2xx — log as critical
+                console.error(`🚨 [${label}] All ${maxRetries + 1} attempt(s) failed — last status: ${res.status}`);
+            }
+
+            return { res, resText, attempts: attempt + 1 };
+        } catch (err) {
+            lastError = err;
+            if (attempt >= maxRetries) throw err;
+        }
+    }
+
+    throw lastError;
+}
 
 // ─── Request Fan-out Logic ──────────────────────────────────────────────────
 
@@ -137,15 +281,23 @@ async function handleWebhookFanout(
             }
         }
 
+        // Resolve effective retry config: per-destination overrides distributor-level default
+        const effectiveRetry = (typeof target !== 'string' && target.retry)
+            ? target.retry
+            : webhook.retry;
+
         try {
-            const res = await fetch(tUrl, {
-                method: tMethod,
-                headers: tHeaders,
-                body: tBody,
-            });
+            const { res, resText, attempts } = await fetchWithRetry(
+                tUrl,
+                { method: tMethod, headers: tHeaders, body: tBody },
+                effectiveRetry,
+                `webhook:${webhook.name} → ${tUrl}`,
+            );
 
             const fetchDuration = performance.now() - fetchStart;
-            const resText = await res.text().catch(() => null);
+            if (attempts > 1) {
+                console.log(`✅ [webhook:${webhook.name}] Delivered to ${tUrl} after ${attempts} attempt(s)`);
+            }
 
             logRequest({
                 requestId,
@@ -169,8 +321,24 @@ async function handleWebhookFanout(
         } catch (err) {
             const fetchDuration = performance.now() - fetchStart;
             const errorMsg = err instanceof Error ? err.message : String(err);
-            console.error(`❌ [webhook:${webhook.name}] Action to ${tUrl} failed:`, errorMsg);
-            
+            console.error(`❌ [webhook:${webhook.name}] Action to ${tUrl} failed (all attempts exhausted):`, errorMsg);
+
+            enqueueFailedFanout({
+                webhookName: webhook.name,
+                requestId,
+                targetUrl: tUrl,
+                method: tMethod,
+                headers: headersToRecord(tHeaders),
+                body: tBody ?? null,
+                bodyPreview: tBodyStringPreview,
+                bodySize: tBodySize,
+                path: url.pathname + url.search,
+                clientIp,
+                retryConfig: effectiveRetry,
+                lastError: errorMsg,
+                totalAttempts: (effectiveRetry?.maxRetries ?? 0) + 1,
+            });
+
             logRequest({
                 requestId,
                 type: 'webhook-fanout',

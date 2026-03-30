@@ -361,7 +361,7 @@ export function queryRequestLogs(query: RequestLogQuery): RequestLogListResult {
 
     const rows = db.prepare(`
         SELECT id, request_id, timestamp, type, profile_name, target_name, method, path, target_url,
-               client_ip, res_status, res_status_text, duration_ms, req_body_size, res_body_size, error
+               client_ip, req_body, res_status, res_status_text, duration_ms, req_body_size, res_body_size, error
         FROM request_logs ${where}
         ORDER BY id DESC
         LIMIT $limit OFFSET $offset
@@ -379,6 +379,7 @@ export function queryRequestLogs(query: RequestLogQuery): RequestLogListResult {
             path: r.path,
             targetUrl: r.target_url,
             clientIp: r.client_ip,
+            reqBody: r.req_body,
             resStatus: r.res_status,
             resStatusText: r.res_status_text,
             durationMs: r.duration_ms,

@@ -483,7 +483,14 @@
       </div>
       <div style="padding:20px">
         <div class="form-grid" style="gap:12px">
-          <div class="form-group"><label>Name</label><input type="text" id="wName" placeholder="payments-fanout"></div>
+          <div class="form-group">
+            <label>Name</label>
+            <input type="text" id="wName" placeholder="payments-fanout"
+              pattern="[a-z0-9_\-]+"
+              oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9_\-]/g,'')"
+              autocomplete="off" spellcheck="false">
+            <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">Lowercase letters, numbers, <code>-</code> and <code>_</code> only. No spaces.</span>
+          </div>
           <div class="form-group"><label>Port (optional, 0 = auto)</label><input type="number" id="wPort"
               placeholder="Auto-assign" min="0" max="65535"></div>
           
@@ -508,6 +515,45 @@
             <div id="wDestinationsContainer" style="display:flex;flex-direction:column;gap:8px;max-height:450px;overflow-y:auto;padding-right:4px"></div>
           </div>
           <div class="form-group span-2"><label>Incoming Auth Token (optional)</label><input type="text" id="wAuthToken" placeholder="Leave empty for public access"></div>
+
+          <!-- Default Retry Config -->
+          <div class="form-group span-2">
+            <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
+              <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface2);cursor:pointer;user-select:none" onclick="toggleRetrySection()">
+                <input type="checkbox" id="wRetryEnabled" onclick="event.stopPropagation();toggleRetrySection()" style="cursor:pointer">
+                <span style="font-size:13px;font-weight:600">Default Retry</span>
+                <span style="font-size:11px;color:var(--text3);font-weight:400">applies to all destinations unless overridden</span>
+              </label>
+              <div id="wRetrySection" style="display:none;padding:12px;display:none;flex-direction:column;gap:10px">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+                  <div>
+                    <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Max retries</label>
+                    <input type="number" id="wRetryMax" min="1" max="20" value="3" style="width:100%;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
+                  </div>
+                  <div>
+                    <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Initial delay (ms)</label>
+                    <input type="number" id="wRetryDelay" min="100" max="60000" step="100" value="1000" style="width:100%;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
+                  </div>
+                  <div>
+                    <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Backoff</label>
+                    <select id="wRetryBackoff" style="width:100%;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
+                      <option value="exponential">Exponential</option>
+                      <option value="fixed">Fixed</option>
+                    </select>
+                  </div>
+                </div>
+                <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer" title="Retry on ANY non-2xx response, not just the codes below">
+                  <input type="checkbox" id="wRetryUntilSuccess" onchange="document.getElementById('wRetryOnRow').style.display=this.checked?'none':'flex'">
+                  <strong>Retry until success (2xx)</strong>
+                  <span style="color:var(--text3);font-size:11px">— ignores the status code list below, retries on any non-2xx</span>
+                </label>
+                <div id="wRetryOnRow" style="display:flex;align-items:center;gap:8px">
+                  <label style="font-size:11px;color:var(--text2);white-space:nowrap">Retry on status codes</label>
+                  <input type="text" id="wRetryOn" value="429, 502, 503, 504" placeholder="429, 502, 503, 504" style="flex:1;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
           <button class="btn btn-sm" onclick="closeWebhookModal()">Cancel</button>
@@ -531,6 +577,20 @@
       <div style="padding:6px 16px;border-top:1px solid var(--border);background:var(--surface2);font-size:11px;color:var(--text3)">
         Use <code style="background:rgba(0,120,212,0.15);padding:1px 4px;border-radius:3px;color:var(--accent)">{{variable.path}}</code> syntax to interpolate incoming payload values. Standard JSON syntax is highlighted automatically.
       </div>
+    </div>
+  </div>
+
+  <!-- DLQ Modal -->
+  <div id="dlqModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px)" onclick="if(event.target===this)closeDlqModal()">
+    <div style="max-width:600px;margin:60px auto;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);display:flex;flex-direction:column;max-height:80vh">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0">
+        <h3 id="dlqModalTitle" style="font-size:16px;font-weight:600">Failed Deliveries</h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button id="dlqRetryAllBtn" class="btn" style="padding:4px 14px;font-size:12px;background:var(--accent);color:#fff;border:none" onclick="dlqRetryAll()">Retry All</button>
+          <button onclick="closeDlqModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
+        </div>
+      </div>
+      <div id="dlqList" style="padding:16px;overflow-y:auto;flex:1"></div>
     </div>
   </div>
 

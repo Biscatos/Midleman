@@ -22,12 +22,21 @@ export interface ProxyTarget {
   forwardPath: boolean;   // Whether to append incoming path to target URL
 }
 
+export interface WebhookRetryConfig {
+  maxRetries: number;           // Number of retry attempts after the first failure (0 = no retries)
+  retryDelayMs?: number;        // Base delay between retries in ms (default: 1000)
+  retryOn?: number[];           // HTTP status codes that trigger a retry (default: [429, 502, 503, 504])
+  backoff?: 'fixed' | 'exponential'; // Backoff strategy (default: 'exponential')
+  retryUntilSuccess?: boolean;  // If true, retry on ANY non-2xx response until maxRetries is exhausted
+}
+
 export interface WebhookDestination {
   url: string;
   method?: string; // e.g. "POST", "GET"
   customHeaders?: Record<string, string>;
   forwardHeaders?: boolean; // If true, inherit all incoming request headers
   bodyTemplate?: string; // uses {{field}} syntax
+  retry?: WebhookRetryConfig; // Per-destination retry config (overrides distributor-level)
 }
 
 /**
@@ -39,6 +48,7 @@ export interface WebhookDistributor {
   port: number;           // Dedicated listening port (0 = auto-assign)
   targets: (string | WebhookDestination)[];      // Array of upstream destinations
   authToken?: string;     // Optional auth token to restrict inbound requests
+  retry?: WebhookRetryConfig; // Default retry config for all targets (can be overridden per-destination)
 }
 
 /**

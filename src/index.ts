@@ -11,7 +11,7 @@ import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDeta
 import { startTarget, stopTarget, stopAllTargets, restartTarget, getTargetStatus } from './servers/target-server';
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort } from './servers/proxy-server';
 import { loadPortAssignments, assignAllPorts, assignProxyPort, assignTargetPort, assignWebhookPort, releaseProxyPort, releaseTargetPort, releaseWebhookPort, getTargetPort, getWebhookPort } from './servers/port-manager';
-import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus } from './servers/webhook-server';
+import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout } from './servers/webhook-server';
 import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge } from './auth/auth';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
@@ -636,6 +636,50 @@ const server = Bun.serve({
                     }
                 }
 
+                // ── Dead Letter Queue ──
+                if (url.pathname === '/admin/webhooks/dlq' && req.method === 'GET') {
+                    const nameFilter = url.searchParams.get('webhook') || undefined;
+                    const queue = getDeadLetterQueue();
+                    const filtered = nameFilter ? queue.filter(e => e.webhookName === nameFilter) : queue;
+                    const safeEntries = filtered.map(e => ({
+                        id: e.id,
+                        webhookName: e.webhookName,
+                        requestId: e.requestId,
+                        targetUrl: e.targetUrl,
+                        method: e.method,
+                        bodyPreview: e.bodyPreview,
+                        bodySize: e.bodySize,
+                        path: e.path,
+                        clientIp: e.clientIp,
+                        lastError: e.lastError,
+                        totalAttempts: e.totalAttempts,
+                        failedAt: e.failedAt,
+                        retrying: e.retrying,
+                    }));
+                    return jsonRes(200, { queue: safeEntries, total: safeEntries.length });
+                }
+
+                if (url.pathname === '/admin/webhooks/dlq/retry-all' && req.method === 'POST') {
+                    let webhookName: string | undefined;
+                    try { const b = await req.json() as any; webhookName = b?.webhook || undefined; } catch {}
+                    const result = await retryAllFailedFanouts(webhookName);
+                    return jsonRes(200, result);
+                }
+
+                if (url.pathname.match(/^\/admin\/webhooks\/dlq\/[^/]+\/retry$/) && req.method === 'POST') {
+                    const id = url.pathname.split('/')[4];
+                    const result = await retryFailedFanout(id);
+                    return result.ok
+                        ? jsonRes(200, { status: 'ok', ...result })
+                        : jsonRes(502, { error: result.error, ...result });
+                }
+
+                if (url.pathname.match(/^\/admin\/webhooks\/dlq\/[^/]+$/) && req.method === 'DELETE') {
+                    const id = url.pathname.split('/')[4];
+                    const removed = dismissFailedFanout(id);
+                    return removed ? jsonRes(200, { status: 'dismissed' }) : jsonRes(404, { error: 'Not found' });
+                }
+
                 if (url.pathname.startsWith('/admin/webhooks/') && req.method === 'GET') {
                     const name = decodeURIComponent(url.pathname.split('/')[3] || '');
                     if (!name) return jsonRes(400, { error: 'Webhook name required' });
@@ -648,6 +692,7 @@ const server = Bun.serve({
                             targets: webhook.targets,
                             port: webhook.port,
                             authToken: webhook.authToken || '',
+                            retry: webhook.retry,
                             running: status?.running ?? false,
                             active: status?.active ?? 0,
                         },
@@ -669,6 +714,7 @@ const server = Bun.serve({
                         port: configuredPort,
                     };
                     if (input.authToken) webhook.authToken = input.authToken as string;
+                    if (input.retry && typeof input.retry === 'object') webhook.retry = input.retry as import('./core/types').WebhookRetryConfig;
 
                     // Assign a port (auto or explicit)
                     const existingIdx = config.webhooks.findIndex(w => w.name === webhook.name);

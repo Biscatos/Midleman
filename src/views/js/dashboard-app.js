@@ -14,6 +14,7 @@ function initTheme() {
   const saved = localStorage.getItem(THEME_KEY) || 'dark';
   document.documentElement.setAttribute('data-theme', saved);
   updateThemeIcon(saved);
+  if (typeof updateAceThemes === 'function') updateAceThemes();
 }
 function toggleTheme() {
   const current = document.documentElement.getAttribute('data-theme');
@@ -21,6 +22,7 @@ function toggleTheme() {
   document.documentElement.setAttribute('data-theme', next);
   localStorage.setItem(THEME_KEY, next);
   updateThemeIcon(next);
+  if (typeof updateAceThemes === 'function') updateAceThemes();
 }
 function updateThemeIcon(theme) {
   document.getElementById('themeBtn').innerHTML = theme === 'dark' ? '&#9728;' : '&#9790;';

@@ -307,6 +307,8 @@ export function validateWebhookInput(input: unknown): string | null {
     const w = input as Record<string, unknown>;
 
     if (!w.name || typeof w.name !== 'string') return '"name" is required (string)';
+    if (!/^[a-z0-9_-]+$/.test(w.name)) return '"name" may only contain lowercase letters, numbers, hyphens and underscores (no spaces)';
+    if (w.name.length < 2 || w.name.length > 48) return '"name" must be between 2 and 48 characters';
     
     if (w.port !== undefined && w.port !== null && w.port !== 0) {
         if (typeof w.port !== 'number' || w.port < 1 || w.port > 65535) return '"port" must be a number between 1 and 65535 (or 0/omitted for auto-assign)';

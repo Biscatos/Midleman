@@ -1,3 +1,85 @@
+// ─── Action Dropdown Menu ────────────────────────────────────────────────────
+let _activeMenu = null;
+
+document.addEventListener('click', () => {
+  if (_activeMenu) { _activeMenu.remove(); _activeMenu = null; }
+});
+
+function showActionMenu(btn, items) {
+  if (_activeMenu) { _activeMenu.remove(); _activeMenu = null; }
+
+  const rect = btn.getBoundingClientRect();
+  const menu = document.createElement('div');
+  menu.style.cssText = 'position:fixed;z-index:9999;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.25);min-width:170px;padding:4px 0;';
+  menu.style.top  = (rect.bottom + 6) + 'px';
+  menu.style.right = (window.innerWidth - rect.right) + 'px';
+
+  for (const item of items) {
+    if (!item) continue;
+    if (item === '---') {
+      const sep = document.createElement('div');
+      sep.style.cssText = 'border-top:1px solid var(--border);margin:3px 0;';
+      menu.appendChild(sep);
+      continue;
+    }
+    const el = document.createElement('button');
+    el.textContent = item.label;
+    el.style.cssText = `display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:8px 14px;background:none;border:none;cursor:pointer;font-size:13px;color:${item.danger ? 'var(--red)' : 'var(--text)'};white-space:nowrap;`;
+    el.onmouseenter = () => el.style.background = 'var(--surface2)';
+    el.onmouseleave = () => el.style.background = '';
+    el.onclick = (e) => { e.stopPropagation(); _activeMenu?.remove(); _activeMenu = null; item.fn(); };
+    menu.appendChild(el);
+  }
+
+  // Flip upward if it would overflow the viewport
+  document.body.appendChild(menu);
+  if (rect.bottom + menu.offsetHeight + 6 > window.innerHeight) {
+    menu.style.top = (rect.top - menu.offsetHeight - 6) + 'px';
+  }
+  _activeMenu = menu;
+}
+
+function showContextMenu(e, btn) {
+  e.stopPropagation();
+  const type = btn.dataset.type;
+  const name = btn.dataset.name;
+
+  if (type === 'webhook') {
+    const w = _allWebhooks.find(x => x.name === name);
+    if (!w) return;
+    const dlqCount = _dlqByWebhook[name] || 0;
+    showActionMenu(btn, [
+      dlqCount > 0 ? { label: `Failed deliveries (${dlqCount})`, fn: () => openDlqModal(name), danger: true } : null,
+      { label: 'View Logs', fn: () => viewWebhookLogs(name) },
+      { label: 'Restart', fn: () => restartWebhookAction(name) },
+      { label: 'Edit', fn: () => editWebhook(name) },
+      '---',
+      { label: 'Delete', fn: () => deleteWebhook(name), danger: true },
+    ]);
+  } else if (type === 'target') {
+    const t = _allTargets.find(x => x.name === name);
+    if (!t) return;
+    showActionMenu(btn, [
+      { label: 'Restart', fn: () => restartTargetAction(name) },
+      t.hasAuth ? { label: 'Copy Token', fn: () => copyTargetCredential(name) } : null,
+      { label: 'Edit', fn: () => editTarget(name) },
+      '---',
+      { label: 'Delete', fn: () => deleteTarget(name), danger: true },
+    ]);
+  } else if (type === 'profile') {
+    const p = _allProfiles.find(x => x.name === name);
+    if (!p) return;
+    showActionMenu(btn, [
+      p.port ? { label: `Open :${p.port}`, fn: () => window.open(`${location.protocol}//${location.hostname}:${p.port}/`, '_blank') } : null,
+      { label: 'Copy URL', fn: () => copyProxyUrl(p.name, p.port || 0) },
+      p.hasAccessKey ? { label: 'Copy Key', fn: () => copyProfileCredential(p.name) } : null,
+      { label: 'Edit', fn: () => editProfile(p.name) },
+      '---',
+      { label: 'Delete', fn: () => deleteProfile(p.name), danger: true },
+    ]);
+  }
+}
+
 // ─── Data Fetch ──────────────────────────────────────────────────────────────
 async function refreshAll() {
   await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchTargets(), fetchWebhooks(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData()]);
@@ -137,14 +219,8 @@ function renderProfiles(profiles) {
   <td style="padding:8px">${authVal}</td>
   <td style="padding:8px">${accessBadge}</td>
   <td style="padding:8px">${blockedVal}</td>
-  <td style="padding:8px 12px">
-    <div style="display:flex;gap:6px;justify-content:flex-end">
-      ${p.port ? `<a class="btn btn-sm" href="${location.protocol}//${location.hostname}:${p.port}/" target="_blank" style="text-decoration:none">Open :${p.port}</a>` : ''}
-      <button class="btn btn-sm" onclick="copyProxyUrl('${esc(p.name)}', ${p.port || 0})">Copy URL</button>
-      ${p.hasAccessKey ? `<button class="btn btn-sm" onclick="copyProfileCredential('${esc(p.name)}')">Copy Key</button>` : ''}
-      <button class="btn btn-sm" onclick="editProfile('${esc(p.name)}')">Edit</button>
-      <button class="btn btn-danger btn-sm" onclick="deleteProfile('${esc(p.name)}')">Delete</button>
-    </div>
+  <td style="padding:8px 12px;text-align:right">
+    <button data-type="profile" data-name="${esc(p.name)}" onclick="showContextMenu(event,this)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:2px 10px;cursor:pointer;color:var(--text2);font-size:18px;line-height:1.2;letter-spacing:1px" title="Actions">&#8942;</button>
   </td>
 </tr>`;
   }).join('');
@@ -254,13 +330,8 @@ function renderTargets(targets) {
   <td style="padding:8px">${t.forwardPath ? '<span style="color:var(--green)">Yes</span>' : '<span style="color:var(--text3)">No</span>'}</td>
   <td style="padding:8px">${authBadge}</td>
   <td style="padding:8px;color:var(--accent2)">${t.active > 0 ? t.active : '<span style="color:var(--text3)">0</span>'}</td>
-  <td style="padding:8px 12px">
-    <div style="display:flex;gap:6px;justify-content:flex-end">
-      <button class="btn btn-sm" onclick="restartTargetAction('${esc(t.name)}')">Restart</button>
-      ${t.hasAuth ? `<button class="btn btn-sm" onclick="copyTargetCredential('${esc(t.name)}')">Copy Token</button>` : ''}
-      <button class="btn btn-sm" onclick="editTarget('${esc(t.name)}')">Edit</button>
-      <button class="btn btn-danger btn-sm" onclick="deleteTarget('${esc(t.name)}')">Delete</button>
-    </div>
+  <td style="padding:8px 12px;text-align:right">
+    <button data-type="target" data-name="${esc(t.name)}" onclick="showContextMenu(event,this)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:2px 10px;cursor:pointer;color:var(--text2);font-size:18px;line-height:1.2;letter-spacing:1px" title="Actions">&#8942;</button>
   </td>
 </tr>`;
   }).join('');
@@ -297,13 +368,24 @@ async function restartTargetAction(name) {
 
 // ─── Webhooks CRUD ───────────────────────────────────────────────────────────
 let _allWebhooks = [];
+let _dlqByWebhook = {}; // { [webhookName]: count }
 let editingWebhook = null;
 
 async function fetchWebhooks() {
   try {
-    const res = await api('/admin/webhooks'); if (!res.ok) return;
-    const d = await res.json();
+    const [wRes, dlqRes] = await Promise.all([api('/admin/webhooks'), api('/admin/webhooks/dlq')]);
+    if (!wRes.ok) return;
+    const d = await wRes.json();
     _allWebhooks = d.webhooks || [];
+
+    if (dlqRes.ok) {
+      const dlqData = await dlqRes.json();
+      _dlqByWebhook = {};
+      for (const e of (dlqData.queue || [])) {
+        _dlqByWebhook[e.webhookName] = (_dlqByWebhook[e.webhookName] || 0) + 1;
+      }
+    }
+
     filterWebhooks();
     document.getElementById('navWebhookBadge').textContent = _allWebhooks.length;
   } catch { }
@@ -329,6 +411,10 @@ function renderWebhooks(webhooks) {
       ? '<span style="color:var(--green)">Enabled</span>'
       : '<span style="color:var(--text3)">Public</span>';
     const numTargets = w.targets.length;
+    const dlqCount = _dlqByWebhook[w.name] || 0;
+    const dlqDot = dlqCount > 0
+      ? `<span style="position:absolute;top:2px;right:2px;width:7px;height:7px;background:var(--red);border-radius:50%;display:block" title="${dlqCount} failed deliveries"></span>`
+      : '';
     return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
   <td style="padding:8px 12px;font-weight:600">${esc(w.name)}</td>
   <td style="padding:8px">${statusBadge}</td>
@@ -336,16 +422,100 @@ function renderWebhooks(webhooks) {
   <td style="padding:8px;color:var(--text2)">${numTargets} destinations</td>
   <td style="padding:8px">${authBadge}</td>
   <td style="padding:8px;color:var(--accent2)">${w.active > 0 ? w.active : '<span style="color:var(--text3)">0</span>'}</td>
-  <td style="padding:8px 12px">
-    <div style="display:flex;gap:6px;justify-content:flex-end">
-      <button class="btn btn-sm" onclick="viewWebhookLogs('${esc(w.name)}')">Logs</button>
-      <button class="btn btn-sm" onclick="restartWebhookAction('${esc(w.name)}')">Restart</button>
-      <button class="btn btn-sm" onclick="editWebhook('${esc(w.name)}')">Edit</button>
-      <button class="btn btn-danger btn-sm" onclick="deleteWebhook('${esc(w.name)}')">Delete</button>
-    </div>
+  <td style="padding:8px 12px;text-align:right">
+    <span style="position:relative;display:inline-block">
+      <button data-type="webhook" data-name="${esc(w.name)}" onclick="showContextMenu(event,this)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:2px 10px;cursor:pointer;color:var(--text2);font-size:18px;line-height:1.2;letter-spacing:1px" title="Actions">&#8942;</button>
+      ${dlqDot}
+    </span>
   </td>
 </tr>`;
   }).join('');
+}
+
+// ─── DLQ Modal ───────────────────────────────────────────────────────────────
+let _dlqModalWebhook = null;
+let _dlqEntries = [];
+
+async function openDlqModal(webhookName) {
+  _dlqModalWebhook = webhookName;
+  const modal = document.getElementById('dlqModal');
+  document.getElementById('dlqModalTitle').textContent = `Failed Deliveries — ${webhookName}`;
+  modal.style.display = 'block';
+  await refreshDlqModal();
+}
+
+function closeDlqModal() {
+  document.getElementById('dlqModal').style.display = 'none';
+  _dlqModalWebhook = null;
+  _dlqEntries = [];
+}
+
+async function refreshDlqModal() {
+  try {
+    const url = '/admin/webhooks/dlq' + (_dlqModalWebhook ? '?webhook=' + encodeURIComponent(_dlqModalWebhook) : '');
+    const res = await api(url);
+    const d = await res.json();
+    _dlqEntries = d.queue || [];
+    renderDlqEntries();
+  } catch (e) { toast('Error loading DLQ: ' + e.message, 'error'); }
+}
+
+function renderDlqEntries() {
+  const c = document.getElementById('dlqList');
+  if (_dlqEntries.length === 0) {
+    c.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3)">No failed deliveries.</div>';
+    document.getElementById('dlqRetryAllBtn').style.display = 'none';
+    return;
+  }
+  document.getElementById('dlqRetryAllBtn').style.display = '';
+  c.innerHTML = _dlqEntries.map(e => `
+    <div id="dlq-${esc(e.id)}" style="border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-bottom:8px;background:var(--surface2)">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-family:'SF Mono',Monaco,monospace;font-size:12px;color:var(--accent2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.targetUrl)}">${esc(e.method)} ${esc(e.targetUrl)}</span>
+        <span style="font-size:11px;color:var(--text3);white-space:nowrap">${new Date(e.failedAt).toLocaleString()}</span>
+      </div>
+      <div style="margin-top:4px;font-size:11px;color:var(--red)">${esc(e.lastError)}</div>
+      <div style="margin-top:2px;font-size:11px;color:var(--text3)">${e.totalAttempts} attempt(s) &middot; req: ${esc(e.requestId.slice(0,8))}...</div>
+      <div style="margin-top:8px;display:flex;gap:6px">
+        <button class="btn btn-sm" onclick="dlqRetryOne('${esc(e.id)}')" ${e.retrying ? 'disabled' : ''}>${e.retrying ? 'Retrying…' : 'Retry'}</button>
+        <button class="btn btn-sm btn-danger" onclick="dlqDismissOne('${esc(e.id)}')">Dismiss</button>
+      </div>
+    </div>`).join('');
+}
+
+async function dlqRetryAll() {
+  document.getElementById('dlqRetryAllBtn').disabled = true;
+  try {
+    const body = _dlqModalWebhook ? { webhook: _dlqModalWebhook } : {};
+    const res = await api('/admin/webhooks/dlq/retry-all', { method: 'POST', body: JSON.stringify(body) });
+    const d = await res.json();
+    toast(`Retried ${d.retried}: ${d.succeeded} succeeded, ${d.failed} failed`);
+    await refreshDlqModal();
+    await fetchWebhooks();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+  document.getElementById('dlqRetryAllBtn').disabled = false;
+}
+
+async function dlqRetryOne(id) {
+  const entry = _dlqEntries.find(e => e.id === id);
+  if (entry) entry.retrying = true;
+  renderDlqEntries();
+  try {
+    const res = await api(`/admin/webhooks/dlq/${encodeURIComponent(id)}/retry`, { method: 'POST' });
+    const d = await res.json();
+    if (res.ok) toast('Delivery succeeded');
+    else toast('Retry failed: ' + (d.error || d.lastError || res.status), 'error');
+    await refreshDlqModal();
+    await fetchWebhooks();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function dlqDismissOne(id) {
+  try {
+    const res = await api(`/admin/webhooks/dlq/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (res.ok) { await refreshDlqModal(); await fetchWebhooks(); }
+    else toast('Dismiss failed', 'error');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 function viewWebhookLogs(name) {
@@ -383,6 +553,18 @@ function renderTemplateJS(template, data) {
 
 let aceEditors = {};
 
+function getAceTheme() {
+    const theme = document.documentElement.getAttribute('data-theme') || 'dark';
+    return theme === 'dark' ? 'ace/theme/twilight' : 'ace/theme/chrome';
+}
+
+function updateAceThemes() {
+    if (typeof ace === 'undefined') return;
+    const theme = getAceTheme();
+    Object.values(aceEditors).forEach(e => e.setTheme(theme));
+    if (fullEditor) fullEditor.setTheme(theme);
+}
+
 function initAceEditors() {
     if (typeof ace === 'undefined') return;
     Object.values(aceEditors).forEach(e => { try { e.destroy(); } catch {} });
@@ -395,7 +577,7 @@ function initAceEditors() {
         
         const editor = ace.edit(el, {
             mode: 'ace/mode/json',
-            theme: 'ace/theme/twilight',
+            theme: getAceTheme(),
             value: t.bodyTemplate || '',
             fontSize: 12,
             fontFamily: "'Consolas','Monaco','Courier New',monospace",
@@ -431,7 +613,7 @@ function openBodyEditor(index) {
     if (!fullEditor) {
         fullEditor = ace.edit('aceBodyFull', {
             mode: 'ace/mode/json',
-            theme: 'ace/theme/twilight',
+            theme: getAceTheme(),
             fontSize: 14,
             fontFamily: "'Consolas','Monaco','Courier New',monospace",
             showPrintMargin: false,
@@ -523,7 +705,11 @@ function updateAllPreviews() {
 
 async function fetchRecentWebhookPayload() {
     try {
-        const res = await api('/admin/requests?type=webhook&limit=1');
+        let url = '/admin/requests?type=webhook&limit=1';
+        if (editingWebhook && editingWebhook.name) {
+            url += '&target=' + encodeURIComponent(editingWebhook.name);
+        }
+        const res = await api(url);
         if (!res.ok) return toast('Could not fetch recent payload', 'error');
         const d = await res.json();
         if (d.requests && d.requests.length > 0 && d.requests[0].reqBody) {
@@ -539,9 +725,15 @@ async function fetchRecentWebhookPayload() {
     } catch { toast('Error fetching payload', 'error'); }
 }
 
+function toggleRetrySection() {
+  const enabled = document.getElementById('wRetryEnabled').checked;
+  const section = document.getElementById('wRetrySection');
+  section.style.display = enabled ? 'flex' : 'none';
+}
+
 function addWebhookTarget(target = "") {
   if (typeof target === 'string') {
-    webhookTargetState.push({ type: 'basic', url: target, method: 'POST', bodyTemplate: '', customHeaders: [], forwardHeaders: false });
+    webhookTargetState.push({ type: 'basic', url: target, method: 'POST', bodyTemplate: '', customHeaders: [], forwardHeaders: false, retry: null, retryOpen: false });
   } else {
     const headersArr = [];
     if (target.customHeaders) {
@@ -549,16 +741,32 @@ function addWebhookTarget(target = "") {
             headersArr.push({ key: k, value: v });
         }
     }
-    webhookTargetState.push({ 
-      type: 'custom', 
-      url: target.url || '', 
-      method: target.method || 'POST', 
+    webhookTargetState.push({
+      type: 'custom',
+      url: target.url || '',
+      method: target.method || 'POST',
       bodyTemplate: target.bodyTemplate || '',
       customHeaders: headersArr,
-      forwardHeaders: target.forwardHeaders === true
+      forwardHeaders: target.forwardHeaders === true,
+      retry: target.retry || null,
+      retryOpen: !!target.retry,
     });
   }
   renderWebhookTargets();
+}
+
+function toggleTargetRetry(index) {
+  const t = webhookTargetState[index];
+  t.retryOpen = !t.retryOpen;
+  if (t.retryOpen && !t.retry) {
+    t.retry = { maxRetries: 3, retryDelayMs: 1000, backoff: 'exponential', retryUntilSuccess: false };
+  }
+  renderWebhookTargets();
+}
+
+function updateTargetRetry(index, field, value) {
+  if (!webhookTargetState[index].retry) return;
+  webhookTargetState[index].retry[field] = value;
 }
 
 function removeWebhookTarget(index) {
@@ -663,6 +871,44 @@ function renderWebhookTargets() {
             </div>
           </div>
         ` : ''}
+
+        <!-- Per-destination retry override -->
+        <div style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);cursor:pointer" onclick="toggleTargetRetry(${i});return false">
+            <input type="checkbox" ${t.retryOpen ? 'checked' : ''} onclick="event.preventDefault()">
+            Override retry for this destination
+          </label>
+          ${t.retryOpen ? `
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;padding:8px;background:var(--surface2);border-radius:4px;border:1px solid var(--border)">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+              <div>
+                <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">Max retries</label>
+                <input type="number" min="1" max="20" value="${t.retry?.maxRetries ?? 3}" oninput="updateTargetRetry(${i},'maxRetries',+this.value)" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px;outline:none">
+              </div>
+              <div>
+                <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">Initial delay (ms)</label>
+                <input type="number" min="100" max="60000" step="100" value="${t.retry?.retryDelayMs ?? 1000}" oninput="updateTargetRetry(${i},'retryDelayMs',+this.value)" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px;outline:none">
+              </div>
+              <div>
+                <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">Backoff</label>
+                <select oninput="updateTargetRetry(${i},'backoff',this.value)" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px;outline:none">
+                  <option value="exponential" ${(t.retry?.backoff ?? 'exponential') === 'exponential' ? 'selected' : ''}>Exponential</option>
+                  <option value="fixed" ${t.retry?.backoff === 'fixed' ? 'selected' : ''}>Fixed</option>
+                </select>
+              </div>
+            </div>
+            <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer">
+              <input type="checkbox" ${t.retry?.retryUntilSuccess ? 'checked' : ''} onchange="updateTargetRetry(${i},'retryUntilSuccess',this.checked);document.getElementById('tRetryOnRow_${i}').style.display=this.checked?'none':'flex'">
+              <strong>Retry until success (2xx)</strong>
+            </label>
+            <div id="tRetryOnRow_${i}" style="display:${t.retry?.retryUntilSuccess ? 'none' : 'flex'};align-items:center;gap:6px">
+              <label style="font-size:10px;color:var(--text3);white-space:nowrap">Retry on codes</label>
+              <input type="text" value="${(t.retry?.retryOn ?? [429,502,503,504]).join(', ')}" placeholder="429, 502, 503, 504"
+                oninput="updateTargetRetry(${i},'retryOn',this.value.split(',').map(s=>parseInt(s.trim())).filter(n=>n>0))"
+                style="flex:1;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px;outline:none">
+            </div>
+          </div>` : ''}
+        </div>
       </div>
     </div>
   `}).join('');
@@ -685,6 +931,19 @@ function openWebhookModal(webhook = null) {
   }
   
   document.getElementById('wAuthToken').value = webhook ? (webhook.authToken || '') : '';
+
+  // Populate retry config
+  const r = webhook?.retry;
+  const retryEnabled = !!r;
+  document.getElementById('wRetryEnabled').checked = retryEnabled;
+  document.getElementById('wRetrySection').style.display = retryEnabled ? 'flex' : 'none';
+  document.getElementById('wRetryMax').value = r?.maxRetries ?? 3;
+  document.getElementById('wRetryDelay').value = r?.retryDelayMs ?? 1000;
+  document.getElementById('wRetryBackoff').value = r?.backoff ?? 'exponential';
+  document.getElementById('wRetryUntilSuccess').checked = !!r?.retryUntilSuccess;
+  document.getElementById('wRetryOn').value = (r?.retryOn ?? [429, 502, 503, 504]).join(', ');
+  document.getElementById('wRetryOnRow').style.display = r?.retryUntilSuccess ? 'none' : 'flex';
+
   document.getElementById('webhookModal').style.display = 'block';
 }
 
@@ -705,23 +964,42 @@ async function saveWebhook() {
               }
               if (Object.keys(headersObj).length === 0) headersObj = undefined;
           }
-          targetsRaw.push({
+          const dest = {
               url: t.url.trim(),
               method: t.method || 'POST',
               customHeaders: headersObj,
               forwardHeaders: t.forwardHeaders,
               bodyTemplate: t.bodyTemplate.trim() || undefined
-          });
+          };
+          if (t.retryOpen && t.retry) dest.retry = t.retry;
+          targetsRaw.push(dest);
       }
   }
 
-  const body = { 
-    name: document.getElementById('wName').value.trim(), 
-    port: parseInt(document.getElementById('wPort').value) || 0, 
-    targets: targetsRaw 
+  const wName = document.getElementById('wName').value.trim();
+  if (!wName) return toast('Name is required', 'error');
+  if (!/^[a-z0-9_-]+$/.test(wName)) return toast('Name may only contain lowercase letters, numbers, hyphens and underscores — no spaces', 'error');
+  if (wName.length < 2 || wName.length > 48) return toast('Name must be between 2 and 48 characters', 'error');
+
+  const body = {
+    name: wName,
+    port: parseInt(document.getElementById('wPort').value) || 0,
+    targets: targetsRaw
   };
   if (targetsRaw.length === 0) return toast('At least one valid destination is required', 'error');
   const at = document.getElementById('wAuthToken').value.trim(); if (at) body.authToken = at;
+
+  if (document.getElementById('wRetryEnabled').checked) {
+    const retryUntilSuccess = document.getElementById('wRetryUntilSuccess').checked;
+    body.retry = {
+      maxRetries: parseInt(document.getElementById('wRetryMax').value) || 3,
+      retryDelayMs: parseInt(document.getElementById('wRetryDelay').value) || 1000,
+      backoff: document.getElementById('wRetryBackoff').value,
+      retryUntilSuccess,
+      retryOn: retryUntilSuccess ? undefined : document.getElementById('wRetryOn').value
+        .split(',').map(s => parseInt(s.trim())).filter(n => n > 0),
+    };
+  }
   try {
     const res = await api('/admin/webhooks', { method: 'POST', body: JSON.stringify(body) }); const d = await res.json();
     if (res.ok) { toast('Webhook ' + (d.status || 'saved')); closeWebhookModal(); await fetchWebhooks(); } else toast(d.error || 'Failed', 'error');
