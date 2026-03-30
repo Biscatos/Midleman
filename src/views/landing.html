@@ -175,7 +175,7 @@
     /* info grid */
     .grid {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
       gap: 0;
       border: 1px solid #1a1a1f;
       border-radius: 10px;
@@ -351,6 +351,10 @@
         <div class="label">Profiles</div>
         <div class="val" id="gProfiles">--</div>
       </div>
+      <div class="grid-item">
+        <div class="label">Webhooks</div>
+        <div class="val" id="gWebhooks">--</div>
+      </div>
     </div>
 
     <div class="section-title">How it works</div>
@@ -376,6 +380,13 @@
           <h3>Live telemetry</h3>
           <p>Request counts, latency, and errors tracked per profile. Exportable via OpenTelemetry or the built-in
             dashboard.</p>
+        </div>
+      </div>
+      <div class="card">
+        <span class="card-num">04</span>
+        <div class="card-body">
+          <h3>Webhook fan-out</h3>
+          <p>Receive incoming payloads and asynchronously dispatch them to multiple destinations instantly with native Meta verification support.</p>
         </div>
       </div>
     </div>
@@ -408,6 +419,8 @@
         else gUptime.textContent = Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
 
         gProfiles.textContent = d.proxyProfiles;
+        const gWebhooks = document.getElementById('gWebhooks');
+        if (gWebhooks) gWebhooks.textContent = d.webhooks || 0;
       } catch {
         ind.classList.add('down');
         txt.textContent = 'unreachable';

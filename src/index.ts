@@ -336,7 +336,19 @@ const server = Bun.serve({
 
             if (url.pathname === '/dashboard' || url.pathname === '/dashboard/') {
                 const htmlPath = resolve(import.meta.dir, 'views/dashboard.html');
-                const html = readFileSync(htmlPath, 'utf-8');
+                let html = readFileSync(htmlPath, 'utf-8');
+                
+                try {
+                    const setupHtml = readFileSync(resolve(import.meta.dir, 'views/partials/_setup.html'), 'utf-8');
+                    const loginHtml = readFileSync(resolve(import.meta.dir, 'views/partials/_login.html'), 'utf-8');
+                    const appHtml = readFileSync(resolve(import.meta.dir, 'views/partials/_app.html'), 'utf-8');
+                    html = html.replace('<!-- INJECT_SETUP -->', setupHtml)
+                               .replace('<!-- INJECT_LOGIN -->', loginHtml)
+                               .replace('<!-- INJECT_APP -->', appHtml);
+                } catch (err) {
+                    console.error('Failed to load dashboard partials:', err);
+                }
+
                 return new Response(html, {
                     status: 200,
                     headers: { 'Content-Type': 'text/html; charset=utf-8' },
