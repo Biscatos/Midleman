@@ -727,8 +727,11 @@ async function fetchRecentWebhookPayload() {
 
 function toggleRetrySection() {
   const enabled = document.getElementById('wRetryEnabled').checked;
-  const section = document.getElementById('wRetrySection');
-  section.style.display = enabled ? 'flex' : 'none';
+  document.getElementById('wRetrySection').style.display = enabled ? 'flex' : 'none';
+  // hide/show per-destination retry overrides
+  document.querySelectorAll('.destination-retry-override').forEach(el => {
+    el.style.display = enabled ? 'none' : '';
+  });
 }
 
 function addWebhookTarget(target = "") {
@@ -873,7 +876,7 @@ function renderWebhookTargets() {
         ` : ''}
 
         <!-- Per-destination retry override -->
-        <div style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
+        <div class="destination-retry-override" style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px;${document.getElementById('wRetryEnabled')?.checked ? 'display:none' : ''}">
           <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);cursor:pointer" onclick="toggleTargetRetry(${i});return false">
             <input type="checkbox" ${t.retryOpen ? 'checked' : ''} onclick="event.preventDefault()">
             Override retry for this destination
@@ -944,7 +947,7 @@ function openWebhookModal(webhook = null) {
   document.getElementById('wRetryOn').value = (r?.retryOn ?? [429, 502, 503, 504]).join(', ');
   document.getElementById('wRetryOnRow').style.display = r?.retryUntilSuccess ? 'none' : 'flex';
 
-  document.getElementById('webhookModal').style.display = 'block';
+  document.getElementById('webhookModal').style.display = 'flex';
 }
 
 function closeWebhookModal() { document.getElementById('webhookModal').style.display = 'none'; editingWebhook = null; }
