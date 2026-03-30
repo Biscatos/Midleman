@@ -204,7 +204,8 @@ export function startTarget(target: ProxyTarget): TargetServer {
 
     const server = Bun.serve({
         port: target.port, // 0 = OS auto-assigns a free port
-        idleTimeout: 255,
+        idleTimeout: 0,
+        maxRequestBodySize: Number.MAX_SAFE_INTEGER,
 
         async fetch(req: Request): Promise<Response> {
             if (ts.isShuttingDown) {

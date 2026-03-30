@@ -18,7 +18,8 @@ const servers = new Map<string, ProxyServerInstance>();
 export function startProxyServer(profile: ProxyProfile, port: number): ProxyServerInstance {
     const server = Bun.serve({
         port,
-        idleTimeout: 255,
+        idleTimeout: 0,
+        maxRequestBodySize: Number.MAX_SAFE_INTEGER,
         async fetch(req: Request): Promise<Response> {
             const startTime = performance.now();
             return handleDirectProxy(req, profile, startTime);

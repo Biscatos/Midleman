@@ -225,9 +225,18 @@ export async function captureResponseBody(res: Response): Promise<{ body: string
 
     try {
         const contentType = res.headers.get('content-type') || '';
+        const contentLength = parseInt(res.headers.get('content-length') || '-1', 10);
+
         if (isBinaryContentType(contentType)) {
-            const length = parseInt(res.headers.get('content-length') || '0', 10);
-            return { body: `[binary: ${contentType}, ${length} bytes]`, size: length };
+            return { body: `[binary: ${contentType}${contentLength >= 0 ? ', ' + contentLength + ' bytes' : ''}]`, size: contentLength >= 0 ? contentLength : 0 };
+        }
+
+        // Skip cloning when size is unknown (chunked) or known to be large —
+        // cloning forces Bun to buffer the entire body in memory which causes
+        // "Maximum response size reached" on large or streaming responses.
+        if (contentLength < 0 || contentLength > 64 * 1024) {
+            const sizeLabel = contentLength >= 0 ? `${contentLength} bytes` : 'unknown size';
+            return { body: `[response body not captured: ${sizeLabel}]`, size: contentLength >= 0 ? contentLength : 0 };
         }
 
         const clone = res.clone();

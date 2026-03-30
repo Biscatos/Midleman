@@ -415,7 +415,8 @@ export function startWebhookServer(webhook: WebhookDistributor): WebhookServer {
 
     const server = Bun.serve({
         port: webhook.port, // 0 = OS auto-assigns
-        idleTimeout: 255,
+        idleTimeout: 0,
+        maxRequestBodySize: Number.MAX_SAFE_INTEGER,
 
         async fetch(req: Request): Promise<Response> {
             if (ws.isShuttingDown) {
