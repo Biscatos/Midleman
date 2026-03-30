@@ -1,87 +1,222 @@
 # Midleman
 
-Midleman is a high-performance, programmable HTTP proxy and API gateway built on [Bun](https://bun.sh/). Designed for infrastructure routing, request inspection, and edge proxying, it provides a centralized control plane for managing proxy targets, handling authentication bypasses, and analyzing API traffic.
+> High-performance HTTP proxy & API gateway built on [Bun](https://bun.sh/)
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Runtime: Bun](https://img.shields.io/badge/runtime-Bun-black?logo=bun)](https://bun.sh)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript)](https://www.typescriptlang.org/)
+
+Midleman is a self-hosted middleware layer that sits between your services and the outside world. It handles credential injection, multi-target routing, webhook fan-out with retries, and real-time traffic inspection — all managed through a built-in web dashboard.
+
+---
 
 ## Features
 
-- **Multi-Target Routing**: Create and manage isolated proxy profiles and named targets with independent or auto-assigned port allocations.
-- **Webhook Fan-out Engine**: Receive external webhooks and asynchronously dispatch the payload to multiple internal destinations simultaneously ("Fire-and-Forget"), with native Meta/Facebook verification support.
-- **Web Dashboard**: An embedded administrative interface for managing edge configurations and viewing request flows in real-time.
-- **Traffic Inspection**: Persistent request logging powered by SQLite, offering detailed payload, throughput, and latency inspection.
-- **Secure Access**: Native TOTP (Time-based One-Time Password) 2FA authentication for the administrative panel, alongside Token/Header-based protection for managed endpoints.
-- **Dynamic Configuration**: Modify port assignments, target URLs, and authentication methods at runtime without dropping active connections.
-- **Low Latency**: Sub-5ms processing overhead using Bun's native HTTP server. Fully binary-safe for large payload forwarding.
+- **Proxy Profiles** — Inject API credentials server-side so they are never exposed to clients. Share protected upstream APIs via public or key-gated links.
+- **Named Targets** — Reverse-proxy to multiple upstreams, each on its own auto-assigned port, with optional per-target auth.
+- **Webhook Fan-out** — Receive a single inbound webhook and dispatch it asynchronously to N destinations with body templating, custom headers, and retry logic.
+- **Retry Engine** — Configurable per-distributor and per-destination retry with exponential or fixed backoff. Includes a *retry until 2xx* mode for critical notifications.
+- **Dead Letter Queue** — Failed deliveries are captured in-memory with full replay capability from the dashboard.
+- **Web Dashboard** — Built-in admin UI for full CRUD, request log inspection, charts, and fanout detail.
+- **Traffic Logging** — SQLite-backed request/response capture with configurable retention and body size limits.
+- **TOTP 2FA** — First-run setup wizard generates a QR code for any authenticator app. All admin routes are session-protected.
+- **Meta Webhook Support** — Native `hub.challenge` verification for Facebook / WhatsApp / Instagram integrations.
+- **OpenTelemetry** — Optional traces and metrics export via OTLP. Compatible with Jaeger, Grafana, Prometheus.
+- **Low overhead** — Sub-5ms processing using Bun's native HTTP server.
 
-## Installation
+---
 
-Midleman requires [Bun](https://bun.sh/) version 1.0 or higher.
+## Quick Start
+
+### Requirements
+
+- [Bun](https://bun.sh/) >= 1.0
+
+### Run locally
 
 ```bash
-git clone <repository-url>
-cd midleman
+git clone https://github.com/Biscatos/Midleman.git
+cd Midleman
 bun install
-```
-
-## Configuration
-
-Copy the example environment file:
-```bash
 cp .env.example .env
-```
-
-The default administrative port is `3000`. Persistent data (configuration, SQLite logs, authentication state) is stored in the `data/` directory.
-
-## Usage
-
-Start the application:
-```bash
-# Development environment
 bun run dev
-
-# Production
-bun start
 ```
 
-Access the administrative dashboard at `http://localhost:3000/dashboard` to complete the initial setup and administrator TOTP configuration.
+Open `http://localhost:3000/dashboard` to complete the initial TOTP setup.
 
-## Docker Deployment
-
-Midleman supports containerized execution with persistent data volumes.
+### Docker
 
 ```bash
 docker-compose up -d
 ```
-*Note: Ensure the `/app/data` volume is properly mapped on the host machine to persist your configurations, request logs, and authentication keys across container restarts.*
 
-## Endpoint Management
+The admin dashboard is available at `http://localhost:3000/dashboard`.
+Proxy targets and webhook ports are auto-assigned starting at `4000`.
 
-Midleman allows the definition of three primary endpoint types:
+> Make sure the `./data` volume is mapped so configuration, logs, and auth state survive container restarts.
 
-1. **Proxy Profiles**: Designed for credential abstraction. Profiles automatically inject authorization headers (e.g., Bearer tokens, API keys) into outgoing requests, allowing internal API access to be securely shared via public or key-protected links.
-2. **Named Targets**: Configurable network endpoints running on dedicated ports. Used primarily for standard reverse-proxying, application routing, and environment obfuscation.
-3. **Webhook Distributors**: Native fan-out engine for receiving external webhooks and asynchronously dispatching the payload to multiple internal destinations simultaneously ("Fire-and-Forget").
+---
 
-### Webhook Authentication
-Webhooks can be secured by specifying an **Auth Token** in the Midleman Dashboard. When an Auth Token is defined, Midleman will only accept payload dispatches that include the token via one of the following methods:
-- **Header**: `X-Forward-Token: seu_token_aqui`
-- **Query Parameter**: `?token=seu_token_aqui`
+## Configuration
 
-#### Meta (Facebook/WhatsApp/Instagram) Integration
-Midleman features native support for **Meta Webhooks**. Meta requires endpoints to automatically respond to a `hub.challenge` verification request.
-To integrate Midleman with Meta:
-1. In the Meta App Dashboard, set the **Callback URL** to your Midleman server (e.g., `https://midleman.exemplo.com/webhook?token=seu_token`).
-2. Set the **Verify Token** in Meta to exactly match the **Auth Token** configured in Midleman.
-3. Midleman handles the `GET` handshake automatically and validates the payloads securely, fanning them out to all your internal services.
+All options are set via environment variables. Copy `.env.example` to get started.
 
-All configurations can be managed visually via the dashboard or programmatically via the underlying REST API located at `/admin`.
+### Core
 
-## Security Considerations
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3000` | Admin dashboard port (fixed) |
+| `DATA_DIR` | `./data` | Persistent storage directory |
+| `PORT_RANGE_START` | `4000` | Starting port for auto-assigned targets |
 
-- Dashboard and administrative API endpoints are fully protected behind session-based or token-based authentication.
-- Credentials injected by proxy profiles are strictly managed server-side and are never exposed to the client.
-- Strict rate limiting is enforced on all authentication attempts.
-- Configuration schemas validate strict URL structures and port constraints.
+### Named Targets
+
+Define one or more upstream targets using the `TARGET_` prefix:
+
+```env
+TARGET_API_URL=https://api.example.com
+TARGET_API_PORT=4001                  # omit or set to 0 for auto-assign
+TARGET_API_AUTH=secret_token          # optional per-target auth
+TARGET_API_FWDPATH=true               # append incoming path to target URL
+```
+
+### Proxy Profiles (Credential Injection)
+
+```env
+PROXY_INFOBIP_URL=https://api.infobip.com
+PROXY_INFOBIP_KEY=your_api_key
+PROXY_INFOBIP_HEADER=Authorization
+PROXY_INFOBIP_PREFIX=App
+PROXY_INFOBIP_ACCESS=public_link_key  # optional: protect the public link
+PROXY_INFOBIP_BLOCKED=.exe,.bat       # optional: block file extensions
+```
+
+### Request Logging
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REQUEST_LOG_ENABLED` | `true` | Enable SQLite request logging |
+| `REQUEST_LOG_RETENTION_DAYS` | `7` | Auto-purge after N days |
+| `REQUEST_LOG_MAX_BODY_SIZE` | `65536` | Max bytes captured per request body |
+
+### OpenTelemetry (optional)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OTEL_ENABLED` | `false` | Enable telemetry |
+| `OTEL_ENDPOINT` | — | OTLP HTTP endpoint (e.g. `http://otel-collector:4318`) |
+| `OTEL_SERVICE_NAME` | `midleman` | Service name in spans/metrics |
+| `OTEL_METRICS_INTERVAL` | `15000` | Metrics export interval (ms) |
+
+---
+
+## Webhook Fan-out
+
+Webhooks are configured from the dashboard. Each distributor listens on its own port and dispatches to multiple destinations in parallel.
+
+### Retry configuration
+
+```json
+{
+  "name": "payments",
+  "port": 4010,
+  "retry": {
+    "maxRetries": 5,
+    "retryDelayMs": 1000,
+    "backoff": "exponential",
+    "retryUntilSuccess": true
+  },
+  "targets": [
+    "https://service-a.internal/hook",
+    {
+      "url": "https://service-b.internal/notify",
+      "method": "POST",
+      "bodyTemplate": "{\"id\": \"{{order.id}}\", \"amount\": {{order.total}}}",
+      "retry": {
+        "maxRetries": 10,
+        "retryDelayMs": 500,
+        "retryUntilSuccess": true
+      }
+    }
+  ]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `maxRetries` | Attempts after the first failure |
+| `retryDelayMs` | Base delay between retries (ms) |
+| `backoff` | `exponential` (default) or `fixed` |
+| `retryOn` | HTTP status codes that trigger retry (default: `[429, 502, 503, 504]`) |
+| `retryUntilSuccess` | Retry on **any** non-2xx response |
+
+Failed deliveries that exhaust all retries are captured in the **Dead Letter Queue** and can be replayed individually or in bulk from the dashboard.
+
+### Meta (Facebook / WhatsApp / Instagram) Integration
+
+1. Set the **Callback URL** in Meta's App Dashboard to your Midleman endpoint, e.g. `https://midleman.example.com/webhook?token=your_token`
+2. Set the **Verify Token** in Meta to match the **Auth Token** configured in Midleman
+3. Midleman handles the `hub.challenge` handshake automatically
+
+---
+
+## Admin API
+
+All resources are available via REST under `/admin`:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/admin/webhooks` | List webhook distributors |
+| `POST` | `/admin/webhooks` | Create / update a distributor |
+| `DELETE` | `/admin/webhooks/:name` | Delete a distributor |
+| `POST` | `/admin/webhooks/:name/restart` | Restart a distributor |
+| `GET` | `/admin/webhooks/dlq` | List failed deliveries |
+| `POST` | `/admin/webhooks/dlq/retry-all` | Retry all failed deliveries |
+| `POST` | `/admin/webhooks/dlq/:id/retry` | Retry one delivery |
+| `DELETE` | `/admin/webhooks/dlq/:id` | Dismiss a failed delivery |
+| `GET` | `/admin/targets` | List named targets |
+| `POST` | `/admin/targets` | Create / update a target |
+| `GET` | `/admin/profiles` | List proxy profiles |
+| `POST` | `/admin/profiles` | Create / update a profile |
+| `GET` | `/admin/requests` | Query request logs |
+| `GET` | `/health` | Health check |
+
+All admin routes require a valid session cookie (obtained via dashboard login).
+
+---
+
+## Project Structure
+
+```
+src/
+├── index.ts                # Entry point — HTTP server & routing
+├── core/
+│   ├── config.ts           # Environment config loader
+│   ├── store.ts            # JSON persistence layer
+│   └── types.ts            # TypeScript interfaces
+├── servers/
+│   ├── webhook-server.ts   # Webhook fan-out + DLQ + retry engine
+│   ├── target-server.ts    # Named target servers
+│   ├── proxy-server.ts     # Proxy profile servers
+│   └── port-manager.ts     # Dynamic port allocation
+├── proxy/
+│   └── proxy.ts            # Request forwarding logic
+├── auth/
+│   └── auth.ts             # TOTP, sessions, rate limiting
+├── telemetry/
+│   ├── telemetry.ts        # OpenTelemetry setup
+│   └── request-log.ts      # SQLite logging
+└── views/                  # Dashboard HTML/CSS/JS
+```
+
+---
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+
+---
 
 ## License
 
-MIT
+[MIT](LICENSE)
