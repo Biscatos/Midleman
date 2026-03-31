@@ -1,3 +1,12 @@
+// ─── Key Generator ───────────────────────────────────────────────────────────
+function generateKey(targetInputId, length = 48) {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const arr = new Uint8Array(length);
+  crypto.getRandomValues(arr);
+  const key = Array.from(arr, b => chars[b % chars.length]).join('');
+  document.getElementById(targetInputId).value = key;
+}
+
 // ─── IP Tag Input ────────────────────────────────────────────────────────────
 const IpTagInput = (() => {
   const instances = new Map();

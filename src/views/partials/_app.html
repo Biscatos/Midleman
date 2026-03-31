@@ -354,11 +354,10 @@
                   placeholder="https://api.example.com"></div>
               <div class="form-group"><label>Port (optional, 0 = auto-assign)</label><input type="number" id="tPort"
                   placeholder="Auto-assign" min="0" max="65535"></div>
-              <div class="form-group"><label>Auth Token (optional)</label><input type="text" id="tAuthToken"
+              <div class="form-group"><label style="display:flex;justify-content:space-between;align-items:baseline">Auth Token (optional)<a href="javascript:void(0)" onclick="generateKey('tAuthToken')" style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></label><input type="text" id="tAuthToken"
                   placeholder="Leave empty for no auth"></div>
-              <div class="form-group" style="display:flex;align-items:center;gap:8px">
-                <input type="checkbox" id="tForwardPath" checked> <label for="tForwardPath" style="margin:0">Forward
-                  Path</label>
+              <div class="form-group" style="flex-direction:row;align-items:center;gap:8px">
+                <input type="checkbox" id="tForwardPath" checked> <label for="tForwardPath" style="margin:0">Forward Path</label>
               </div>
               <div class="form-group span-2"><label>Allowed IPs <span style="color:var(--text3);font-weight:400;font-size:11px">— CIDR, wildcard, or exact. Leave empty to allow all.</span></label><div id="tAllowedIps" class="ip-tag-wrap"></div></div>
             </div>
@@ -516,7 +515,7 @@
 
             <div id="wDestinationsContainer" style="display:flex;flex-direction:column;gap:8px"></div>
           </div>
-          <div class="form-group span-2"><label>Incoming Auth Token (optional)</label><input type="text" id="wAuthToken" placeholder="Leave empty for public access"></div>
+          <div class="form-group span-2"><label style="display:flex;justify-content:space-between;align-items:baseline">Incoming Auth Token (optional)<a href="javascript:void(0)" onclick="generateKey('wAuthToken')" style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></label><input type="text" id="wAuthToken" placeholder="Leave empty for public access"></div>
           <div class="form-group span-2"><label>Allowed IPs <span style="color:var(--text3);font-weight:400;font-size:11px">— CIDR, wildcard, or exact. Leave empty to allow all.</span></label><div id="wAllowedIps" class="ip-tag-wrap"></div></div>
 
           <!-- Default Retry Config -->
@@ -605,7 +604,7 @@
       </div>
       <div class="modal-body">
         <div class="form-grid">
-          <div class="form-group"><label>Proxy Name *</label><input type="text" id="pName" placeholder="e.g. infobip">
+          <div class="form-group span-2"><label>Proxy Name *</label><input type="text" id="pName" placeholder="e.g. infobip">
           </div>
           <div class="form-group span-2"><label>Target URL *</label><input type="url" id="pTargetUrl"
               placeholder="https://api.example.com"></div>
@@ -616,12 +615,12 @@
               placeholder="e.g. Authorization"></div>
           <div class="form-group"><label>Auth Prefix</label><input type="text" id="pAuthPrefix"
               placeholder="e.g. Bearer, App"></div>
-          <div class="form-group span-2"><label>API Key</label><input type="text" id="pApiKey"
-              placeholder="Your API key"></div>
+          <div class="form-group span-2"><label>Auth Value</label><input type="text" id="pApiKey"
+              placeholder="e.g. your API key or token"></div>
         </div>
         <div class="form-section">Access Control</div>
         <div class="form-grid">
-          <div class="form-group"><label>Access Key</label><input type="text" id="pAccessKey" placeholder="Optional">
+          <div class="form-group"><label style="display:flex;justify-content:space-between;align-items:baseline">Access Key<a href="javascript:void(0)" onclick="generateKey('pAccessKey')" style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></label><input type="text" id="pAccessKey" placeholder="Optional">
           </div>
           <div class="form-group"><label>Blocked Extensions</label><input type="text" id="pBlocked"
               placeholder=".exe, .bat, .sh"></div>

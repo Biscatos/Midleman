@@ -46,7 +46,12 @@
       "Bash(docker cp:*)",
       "Bash(docker restart:*)",
       "Bash(curl -s -H \"X-Forward-Token: 123456\" \"http://localhost:3000/admin/requests?limit=5\")",
-      "Bash(find /c/Users/Julio.rei/Documents/GitHub/Midleman -type f \\\\\\(-name *.html -o -name *.ts -o -name *.js \\\\\\))"
+      "Bash(find /c/Users/Julio.rei/Documents/GitHub/Midleman -type f \\\\\\(-name *.html -o -name *.ts -o -name *.js \\\\\\))",
+      "Bash(find /c/Users/Julio.rei/Documents/GitHub/Midleman/src -type f \\\\\\(-name *.tsx -o -name *.ts -o -name *.jsx -o -name *.js -o -name *.vue \\\\\\))",
+      "Bash(find /c/Users/Julio.rei/Documents/GitHub/Midleman/src -type f \\\\\\(-name *.html -o -name *.js -o -name *.ts \\\\\\) ! -path */node_modules/*)",
+      "Bash(xargs grep:*)",
+      "Bash(wc -l /c/Users/Julio.rei/Documents/GitHub/Midleman/src/views/js/*.js)",
+      "Bash(grep -n \"export.*handleProxyRequest\\\\|import.*handleProxyRequest\" \"c:\\\\Users\\\\Julio.rei\\\\Documents\\\\GitHub\\\\Midleman\\\\src\"/*.ts \"c:\\\\Users\\\\Julio.rei\\\\Documents\\\\GitHub\\\\Midleman\\\\src\\\\servers\"/*.ts)"
     ]
   }
 }

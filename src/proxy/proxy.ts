@@ -196,6 +196,10 @@ export async function handleProxyRequest(
         });
     }
 
+    // Detect browser vs API client (used for cookie policy and error responses)
+    const accept = req.headers.get('accept') || '';
+    const isBrowser = accept.includes('text/html');
+
     // Validate access key if configured
     let validatedAccessKey: string | null = null;
     if (profile.accessKey) {
@@ -212,30 +216,32 @@ export async function handleProxyRequest(
         const referer = req.headers.get('referer') || '';
         const refererIsFromProfile = referer.includes(`/proxy/${profileName}/`);
 
-        // A. X-Access-Key header — for API clients / Postman (no redirect, no cookie)
-        const headerKey = req.headers.get('x-access-key');
+        // A. X-Mid-Api-Key header — for API clients / Postman (no redirect, no cookie)
+        const headerKey = req.headers.get('x-mid-api-key');
         if (headerKey === profile.accessKey) {
             validatedAccessKey = profile.accessKey;
         }
 
         // B. Direct ?key= — redirect to strip key from URL and set cookie first.
-        //    The browser receives the cookie BEFORE loading the page, so all
-        //    sub-resources (CSS, JS, fonts) automatically include it. No race condition.
+        //    Only for browser requests — cookies are not used for API clients.
         if (!validatedAccessKey && providedKey === profile.accessKey) {
-            const clean = new URL(url.toString());
-            clean.searchParams.delete('key');
-            return new Response(null, {
-                status: 302,
-                headers: {
-                    'Location': clean.pathname + clean.search,
-                    'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(providedKey)}; Path=/proxy/${profileName}/; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
-                },
-            });
+            if (isBrowser) {
+                const clean = new URL(url.toString());
+                clean.searchParams.delete('key');
+                return new Response(null, {
+                    status: 302,
+                    headers: {
+                        'Location': clean.pathname + clean.search,
+                        'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(providedKey)}; Path=/proxy/${profileName}/; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
+                    },
+                });
+            }
+            validatedAccessKey = profile.accessKey;
         }
 
-        // C. Profile-scoped cookie — the only valid credential after the initial redirect.
+        // C. Profile-scoped cookie — only for browser sessions after the initial redirect.
         //    Cookie name includes profileName so different proxies never share auth state.
-        if (!validatedAccessKey) {
+        if (!validatedAccessKey && isBrowser) {
             const cookies = req.headers.get('cookie') || '';
             const m = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${profileName}=([^;]+)`));
             if (m && decodeURIComponent(m[1]) === profile.accessKey) {
@@ -574,11 +580,13 @@ if(location.pathname===P.slice(0,-1)){_r.call(history,null,"",P+location.search+
         durationMs,
     });
 
-    // Set profile cookie on ALL proxy responses (not just HTML)
-    // This ensures the cookie is available for deep sub-resources on subsequent requests
-    responseHeaders.append('Set-Cookie', `__proxy_profile=${profileName}; Path=/proxy/${profileName}/; SameSite=Lax`);
-    if (validatedAccessKey) {
-        responseHeaders.append('Set-Cookie', `__pk_${profileName}=${encodeURIComponent(validatedAccessKey)}; Path=/proxy/${profileName}/; SameSite=Lax`);
+    // Set profile cookies only for browser sub-resources (CSS, JS, fonts, images)
+    // API clients should not receive or depend on cookies
+    if (isBrowser || isAssetRequest(remainingPath, accept)) {
+        responseHeaders.append('Set-Cookie', `__proxy_profile=${profileName}; Path=/proxy/${profileName}/; SameSite=Lax`);
+        if (validatedAccessKey) {
+            responseHeaders.append('Set-Cookie', `__pk_${profileName}=${encodeURIComponent(validatedAccessKey)}; Path=/proxy/${profileName}/; SameSite=Lax`);
+        }
     }
 
     // Stream directly — body is never buffered for non-HTML responses
@@ -608,36 +616,42 @@ export async function handleDirectProxy(
         ? (profile.authPrefix ? `${profile.authPrefix} ${profile.apiKey}` : profile.apiKey)
         : '';
 
+    // Detect browser vs API client (used for cookie policy and error responses)
+    const accept = req.headers.get('accept') || '';
+    const isBrowser = accept.includes('text/html');
+
     // ── Access key validation ──
     let validatedAccessKey: string | null = null;
     if (profile.accessKey) {
         const providedKey = url.searchParams.get('key');
         const clientIP = getClientIP(req);
 
-        // A. X-Access-Key header — for API clients / Postman (no redirect, no cookie)
-        const headerKey = req.headers.get('x-access-key');
+        // A. X-Mid-Api-Key header — for API clients / Postman (no redirect, no cookie)
+        const headerKey = req.headers.get('x-mid-api-key');
         if (headerKey === profile.accessKey) {
             validatedAccessKey = profile.accessKey;
         }
 
         // B. Direct ?key= — redirect to strip key from URL and set cookie first.
-        //    Cookie is received by the browser BEFORE the page loads, so all
-        //    sub-resources (CSS, JS, fonts) automatically include it. No race condition.
+        //    Only for browser requests — cookies are not used for API clients.
         if (!validatedAccessKey && providedKey === profile.accessKey) {
-            const clean = new URL(url.toString());
-            clean.searchParams.delete('key');
-            return new Response(null, {
-                status: 302,
-                headers: {
-                    'Location': clean.pathname + clean.search,
-                    'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(providedKey)}; Path=/; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
-                },
-            });
+            if (isBrowser) {
+                const clean = new URL(url.toString());
+                clean.searchParams.delete('key');
+                return new Response(null, {
+                    status: 302,
+                    headers: {
+                        'Location': clean.pathname + clean.search,
+                        'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(providedKey)}; Path=/; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
+                    },
+                });
+            }
+            validatedAccessKey = profile.accessKey;
         }
 
-        // C. Profile-scoped cookie — the only valid credential after the initial redirect.
+        // C. Profile-scoped cookie — only for browser sessions after the initial redirect.
         //    Cookie name includes profileName so different proxies never share auth state.
-        if (!validatedAccessKey) {
+        if (!validatedAccessKey && isBrowser) {
             const cookies = req.headers.get('cookie') || '';
             const m = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${profileName}=([^;]+)`));
             if (m && decodeURIComponent(m[1]) === profile.accessKey) {
@@ -838,9 +852,9 @@ export async function handleDirectProxy(
         durationMs,
     });
 
-    // Set profile-scoped access key cookie for session persistence
-    // Cookie name includes profileName to prevent cross-proxy authentication leakage
-    if (validatedAccessKey) {
+    // Set profile-scoped access key cookie only for browser sessions
+    // API clients should not receive or depend on cookies
+    if (validatedAccessKey && isBrowser) {
         responseHeaders.append('Set-Cookie', `__pk_${profileName}=${encodeURIComponent(validatedAccessKey)}; Path=/; SameSite=Lax`);
     }
 
@@ -868,7 +882,7 @@ function unauthorizedResponse(req: Request, profileName: string): Response {
     if (!wantsBrowser) {
         return jsonResponse(401, {
             error: 'Unauthorized',
-            message: 'Valid ?key= parameter is required to access this resource',
+            message: 'Valid X-Mid-Api-Key header or ?key= parameter is required to access this resource',
         });
     }
 
@@ -967,11 +981,11 @@ function unauthorizedResponse(req: Request, profileName: string): Response {
 
     <div class="section">
       <p class="label">Request header</p>
-      <pre>X-Access-Key<span class="dim">:</span> <span class="hl">&lt;key&gt;</span></pre>
+      <pre>X-Mid-Api-Key<span class="dim">:</span> <span class="hl">&lt;key&gt;</span></pre>
     </div>
 
     <hr>
-    <p class="foot">Sessions are persisted via cookie after the first authenticated request.</p>
+    <p class="foot">Browser sessions are persisted via cookie after the first authenticated request.</p>
   </div>
 </body>
 </html>`;
