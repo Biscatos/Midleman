@@ -1,6 +1,7 @@
 import type { ProxyProfile } from '../core/types';
 import { startProxySpan, endProxySpan, recordProxyBlocked, recordProxyRedirect } from '../telemetry/telemetry';
-import { logRequest, captureRequestBody, captureResponseBody, headersToRecord } from '../telemetry/request-log';
+import { logRequest, captureRequestBody, headersToRecord } from '../telemetry/request-log';
+import { isIpAllowed } from '../core/ip-filter';
 
 // ─── Access Key Session Cache ───────────────────────────────────────────────
 // When a page is loaded with a valid ?key=, we cache the authorization so that
@@ -284,6 +285,11 @@ export async function handleProxyRequest(
     const requestId = req.headers.get('X-Request-ID') || crypto.randomUUID();
     const clientIp = getClientIP(req);
 
+    if (!isIpAllowed(clientIp, profile.allowedIps)) {
+        console.warn(`🚫 Proxy "${profileName}": blocked IP ${clientIp}`);
+        return jsonResponse(403, { error: 'Forbidden', message: 'Your IP address is not allowed to access this resource.' });
+    }
+
     // Forward to upstream — follow same-origin redirects internally (transparent to the client)
     let targetResponse!: Response;
     let currentUrl = targetUrl;
@@ -433,33 +439,31 @@ export async function handleProxyRequest(
     // End OpenTelemetry span
     endProxySpan(otelSpan, profileName, targetResponse.status, durationMs);
 
-    // Capture response body for request logging
-    const resCapture = await captureResponseBody(targetResponse);
-
-    // Log proxy request to SQLite
-    logRequest({
-        requestId,
-        type: 'proxy',
-        profileName,
-        method: req.method,
-        path: remainingPath,
-        targetUrl: currentUrl,
-        clientIp,
-        reqHeaders: headersToRecord(forwardHeaders),
-        reqBody: reqCapture.body,
-        reqBodySize: reqCapture.size,
-        resStatus: targetResponse.status,
-        resStatusText: targetResponse.statusText,
-        resHeaders: headersToRecord(responseHeaders),
-        resBody: resCapture.body,
-        resBodySize: resCapture.size,
-        durationMs,
-    });
-
-    // For HTML responses: generic rewriting so ANY upstream app works under /proxy/{profile}/
+    // For HTML responses: buffer once for URL rewriting (required) + logging.
+    // For everything else: stream targetResponse.body directly — zero buffering overhead.
     const contentType = responseHeaders.get('content-type') || '';
     if (contentType.includes('text/html')) {
-        let html = resCapture.body || '';
+        let html = await targetResponse.text();
+        const resBodySize = html.length;
+
+        logRequest({
+            requestId,
+            type: 'proxy',
+            profileName,
+            method: req.method,
+            path: remainingPath,
+            targetUrl: currentUrl,
+            clientIp,
+            reqHeaders: headersToRecord(forwardHeaders),
+            reqBody: reqCapture.body,
+            reqBodySize: reqCapture.size,
+            resStatus: targetResponse.status,
+            resStatusText: targetResponse.statusText,
+            resHeaders: headersToRecord(responseHeaders),
+            resBody: html,
+            resBodySize,
+            durationMs,
+        });
 
         // Compute base href from the actual request path so relative URLs
         // resolve correctly even in subdirectories.
@@ -550,6 +554,26 @@ if(location.pathname===P.slice(0,-1)){_r.call(history,null,"",P+location.search+
         });
     }
 
+    // Non-HTML: log metadata only, stream body directly without buffering.
+    logRequest({
+        requestId,
+        type: 'proxy',
+        profileName,
+        method: req.method,
+        path: remainingPath,
+        targetUrl: currentUrl,
+        clientIp,
+        reqHeaders: headersToRecord(forwardHeaders),
+        reqBody: reqCapture.body,
+        reqBodySize: reqCapture.size,
+        resStatus: targetResponse.status,
+        resStatusText: targetResponse.statusText,
+        resHeaders: headersToRecord(responseHeaders),
+        resBody: null,
+        resBodySize: parseInt(targetResponse.headers.get('content-length') || '0', 10),
+        durationMs,
+    });
+
     // Set profile cookie on ALL proxy responses (not just HTML)
     // This ensures the cookie is available for deep sub-resources on subsequent requests
     responseHeaders.append('Set-Cookie', `__proxy_profile=${profileName}; Path=/proxy/${profileName}/; SameSite=Lax`);
@@ -557,9 +581,7 @@ if(location.pathname===P.slice(0,-1)){_r.call(history,null,"",P+location.search+
         responseHeaders.append('Set-Cookie', `__pk_${profileName}=${encodeURIComponent(validatedAccessKey)}; Path=/proxy/${profileName}/; SameSite=Lax`);
     }
 
-    // Stream the original response body directly — never convert binary to string.
-    // resCapture was only used for logging; targetResponse.body is still intact
-    // because captureResponseBody clones text responses and skips binary ones.
+    // Stream directly — body is never buffered for non-HTML responses
     return new Response(targetResponse.body, {
         status: targetResponse.status,
         statusText: targetResponse.statusText,
@@ -663,6 +685,11 @@ export async function handleDirectProxy(
     const reqCapture = await captureRequestBody(req);
     const requestId = req.headers.get('X-Request-ID') || crypto.randomUUID();
     const clientIp = getClientIP(req);
+
+    if (!isIpAllowed(clientIp, profile.allowedIps)) {
+        console.warn(`🚫 Proxy "${profileName}": blocked IP ${clientIp}`);
+        return jsonResponse(403, { error: 'Forbidden', message: 'Your IP address is not allowed to access this resource.' });
+    }
 
     const forwardBody = req.method !== 'GET' && req.method !== 'HEAD' ? req.body : undefined;
 
@@ -798,9 +825,7 @@ export async function handleDirectProxy(
 
     endProxySpan(otelSpan, profileName, targetResponse.status, durationMs);
 
-    // Capture response for logging
-    const resCapture = await captureResponseBody(targetResponse);
-
+    // Log metadata only — stream body directly without buffering.
     logRequest({
         requestId, type: 'proxy', profileName,
         method: req.method, path: url.pathname, targetUrl: currentUrl, clientIp,
@@ -808,7 +833,8 @@ export async function handleDirectProxy(
         reqBody: reqCapture.body, reqBodySize: reqCapture.size,
         resStatus: targetResponse.status, resStatusText: targetResponse.statusText,
         resHeaders: headersToRecord(responseHeaders),
-        resBody: resCapture.body, resBodySize: resCapture.size,
+        resBody: null,
+        resBodySize: parseInt(targetResponse.headers.get('content-length') || '0', 10),
         durationMs,
     });
 

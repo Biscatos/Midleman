@@ -14,6 +14,7 @@ interface StoredProfile {
     authPrefix?: string;
     accessKey?: string;
     blockedExtensions?: string[];
+    allowedIps?: string[];
 }
 
 // Default path — override with DATA_DIR env var for Docker volumes
@@ -49,6 +50,7 @@ function toRuntime(stored: StoredProfile): ProxyProfile {
             stored.blockedExtensions.map(e => e.trim().toLowerCase().replace(/^\.?/, '.'))
         );
     }
+    if (stored.allowedIps && stored.allowedIps.length > 0) profile.allowedIps = stored.allowedIps;
 
     return profile;
 }
@@ -69,6 +71,7 @@ function toStored(profile: ProxyProfile): StoredProfile {
     if (profile.blockedExtensions && profile.blockedExtensions.size > 0) {
         stored.blockedExtensions = Array.from(profile.blockedExtensions);
     }
+    if (profile.allowedIps && profile.allowedIps.length > 0) stored.allowedIps = profile.allowedIps;
 
     return stored;
 }
@@ -159,6 +162,7 @@ interface StoredTarget {
     port: number;
     authToken?: string;
     forwardPath: boolean;
+    allowedIps?: string[];
 }
 
 /**
@@ -179,6 +183,7 @@ export function loadPersistedTargets(): ProxyTarget[] {
                 port: t.port,
                 authToken: t.authToken,
                 forwardPath: t.forwardPath !== false,
+                allowedIps: t.allowedIps?.length ? t.allowedIps : undefined,
             }));
     } catch (err) {
         console.warn('⚠️  Could not load targets.json:', err instanceof Error ? err.message : err);
@@ -198,6 +203,7 @@ export function persistTargets(targets: ProxyTarget[]): void {
             port: t.port,
             authToken: t.authToken,
             forwardPath: t.forwardPath,
+            allowedIps: t.allowedIps?.length ? t.allowedIps : undefined,
         }));
         writeFileSync(TARGETS_FILE, JSON.stringify(stored, null, 2), 'utf-8');
     } catch (err) {
@@ -253,6 +259,8 @@ interface StoredWebhook {
     port: number;
     targets: (string | import('./types').WebhookDestination)[];
     authToken?: string;
+    retry?: import('./types').WebhookRetryConfig;
+    allowedIps?: string[];
 }
 
 /**
@@ -272,6 +280,8 @@ export function loadPersistedWebhooks(): WebhookDistributor[] {
                 port: w.port,
                 targets: w.targets.map(t => typeof t === 'string' ? (t.endsWith('/') ? t.slice(0, -1) : t) : t),
                 authToken: w.authToken,
+                retry: w.retry,
+                allowedIps: w.allowedIps?.length ? w.allowedIps : undefined,
             }));
     } catch (err) {
         console.warn('⚠️  Could not load webhooks.json:', err instanceof Error ? err.message : err);
@@ -290,6 +300,8 @@ export function persistWebhooks(webhooks: WebhookDistributor[]): void {
             port: w.port,
             targets: w.targets,
             authToken: w.authToken,
+            retry: w.retry,
+            allowedIps: w.allowedIps?.length ? w.allowedIps : undefined,
         }));
         writeFileSync(WEBHOOKS_FILE, JSON.stringify(stored, null, 2), 'utf-8');
     } catch (err) {

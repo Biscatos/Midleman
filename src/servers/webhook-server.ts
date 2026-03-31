@@ -1,5 +1,6 @@
 import type { WebhookDistributor, WebhookRetryConfig } from '../core/types';
 import { logRequest, headersToRecord } from '../telemetry/request-log';
+import { isIpAllowed } from '../core/ip-filter';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -135,7 +136,11 @@ async function fetchWithRetry(
 
         try {
             const res = await fetch(url, { ...init, tls: { rejectUnauthorized: false } } as RequestInit);
-            const resText = await res.text().catch(() => null);
+            // Cap fanout response capture at 4KB for logging — skip for large/unknown-size responses.
+            const resContentLength = parseInt(res.headers.get('content-length') || '-1', 10);
+            const resText = resContentLength < 0 || resContentLength <= 4096
+                ? await res.text().catch(() => null)
+                : `[response not captured: ${resContentLength} bytes]`;
 
             if (attempt < maxRetries && shouldRetry(res.status)) {
                 console.warn(`🔁 [${label}] Got ${res.status}${retryUntilSuccess ? ' (retryUntilSuccess)' : ''}, will retry (${attempt + 1}/${maxRetries})`);
@@ -216,6 +221,11 @@ async function handleWebhookFanout(
     }
 
     const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown';
+
+    if (!isIpAllowed(clientIp, webhook.allowedIps)) {
+        console.warn(`🚫 [webhook:${webhook.name}]: blocked IP ${clientIp}`);
+        return jsonResponse(401, { error: 'Unauthorized', message: 'Your IP address is not allowed.' });
+    }
 
     // Prepare headers (strip Midleman auth, set request ID)
     const forwardHeaders = new Headers();

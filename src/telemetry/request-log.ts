@@ -155,34 +155,57 @@ const insertStmt = () => db?.prepare(`
 
 let _insertStmt: ReturnType<typeof insertStmt> | null = null;
 
-export function logRequest(entry: RequestLogEntry): void {
-    if (!db) return;
+// ─── Async Write Queue ───────────────────────────────────────────────────────
+// logRequest never blocks the event loop — entries are pushed to a queue and
+// flushed in a single WAL batch transaction on the next microtask tick.
 
+let _logQueue: RequestLogEntry[] = [];
+let _flushScheduled = false;
+
+function buildParams(entry: RequestLogEntry) {
+    return {
+        $requestId: entry.requestId,
+        $type: entry.type,
+        $profileName: entry.profileName || null,
+        $targetName: entry.targetName || null,
+        $method: entry.method,
+        $path: entry.path,
+        $targetUrl: entry.targetUrl,
+        $clientIp: entry.clientIp || null,
+        $reqHeaders: JSON.stringify(entry.reqHeaders),
+        $reqBody: entry.reqBody ? truncateBody(entry.reqBody) : null,
+        $reqBodySize: entry.reqBodySize || 0,
+        $resStatus: entry.resStatus || null,
+        $resStatusText: entry.resStatusText || null,
+        $resHeaders: entry.resHeaders ? JSON.stringify(entry.resHeaders) : null,
+        $resBody: entry.resBody ? truncateBody(entry.resBody) : null,
+        $resBodySize: entry.resBodySize || 0,
+        $durationMs: entry.durationMs || null,
+        $error: entry.error || null,
+    };
+}
+
+function flushLogQueue(): void {
+    _flushScheduled = false;
+    if (_logQueue.length === 0 || !db) return;
+    const batch = _logQueue.splice(0);
     try {
         if (!_insertStmt) _insertStmt = insertStmt();
-
-        _insertStmt?.run({
-            $requestId: entry.requestId,
-            $type: entry.type,
-            $profileName: entry.profileName || null,
-            $targetName: entry.targetName || null,
-            $method: entry.method,
-            $path: entry.path,
-            $targetUrl: entry.targetUrl,
-            $clientIp: entry.clientIp || null,
-            $reqHeaders: JSON.stringify(entry.reqHeaders),
-            $reqBody: entry.reqBody ? truncateBody(entry.reqBody) : null,
-            $reqBodySize: entry.reqBodySize || 0,
-            $resStatus: entry.resStatus || null,
-            $resStatusText: entry.resStatusText || null,
-            $resHeaders: entry.resHeaders ? JSON.stringify(entry.resHeaders) : null,
-            $resBody: entry.resBody ? truncateBody(entry.resBody) : null,
-            $resBodySize: entry.resBodySize || 0,
-            $durationMs: entry.durationMs || null,
-            $error: entry.error || null,
-        });
+        const stmt = _insertStmt!;
+        db.transaction(() => {
+            for (const entry of batch) stmt.run(buildParams(entry));
+        })();
     } catch (err) {
-        console.error('⚠️  Failed to log request:', err);
+        console.error('⚠️  Failed to flush log queue:', err);
+    }
+}
+
+export function logRequest(entry: RequestLogEntry): void {
+    if (!db) return;
+    _logQueue.push(entry);
+    if (!_flushScheduled) {
+        _flushScheduled = true;
+        queueMicrotask(flushLogQueue);
     }
 }
 
@@ -206,6 +229,13 @@ export async function captureRequestBody(req: Request): Promise<{ body: string |
         if (isBinaryContentType(contentType)) {
             const length = parseInt(req.headers.get('content-length') || '0', 10);
             return { body: `[binary: ${contentType}, ${length} bytes]`, size: length };
+        }
+
+        // Skip cloning when content-length is known to exceed capture limit —
+        // avoids allocating a second copy of a large body just for logging.
+        const contentLength = parseInt(req.headers.get('content-length') || '-1', 10);
+        if (contentLength > config.maxBodySize) {
+            return { body: `[request body not captured: ${contentLength} bytes]`, size: contentLength };
         }
 
         // Clone and read body

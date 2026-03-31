@@ -9,7 +9,7 @@ import {
 import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry/telemetry';
 import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart } from './telemetry/request-log';
 import { startTarget, stopTarget, stopAllTargets, restartTarget, getTargetStatus } from './servers/target-server';
-import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort } from './servers/proxy-server';
+import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort, isProxyServerRunning } from './servers/proxy-server';
 import { loadPortAssignments, assignAllPorts, assignProxyPort, assignTargetPort, assignWebhookPort, releaseProxyPort, releaseTargetPort, releaseWebhookPort, getTargetPort, getWebhookPort } from './servers/port-manager';
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout } from './servers/webhook-server';
 import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge } from './auth/auth';
@@ -300,17 +300,156 @@ const server = Bun.serve({
 
             // Health check
             if (url.pathname === '/health') {
-                const otelConfig = getTelemetryConfig();
-                return jsonRes(200, {
+                const uptimeSec = Math.floor((Date.now() - startedAt) / 1000);
+                const healthData = {
                     status: 'ok',
-                    uptime: Math.floor((Date.now() - startedAt) / 1000),
+                    uptime: uptimeSec,
                     activeRequests,
-                    proxyProfiles: config.proxyProfiles.length,
-                    proxyTargets: config.proxyTargets.length,
+                    proxies: config.proxyProfiles.length,
+                    targets: config.proxyTargets.length,
                     webhooks: config.webhooks.length,
-                    targets: getTargetStatus(),
-                    webhookServers: getWebhookStatus(),
-                    telemetry: { enabled: otelConfig.enabled, endpoint: otelConfig.endpoint },
+                };
+
+                const accept = req.headers.get('accept') || '';
+                if (!accept.includes('text/html')) {
+                    return jsonRes(200, healthData);
+                }
+
+                function fmtUptime(s: number): string {
+                    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600),
+                          m = Math.floor((s % 3600) / 60), sec = s % 60;
+                    if (d > 0) return `${d}d ${h}h ${m}m`;
+                    if (h > 0) return `${h}h ${m}m ${sec}s`;
+                    if (m > 0) return `${m}m ${sec}s`;
+                    return `${sec}s`;
+                }
+
+                const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Midleman — Health</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #111;
+      color: #ccc;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 24px;
+    }
+    .wrap { max-width: 400px; width: 100%; }
+    .wordmark {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: #444;
+      margin-bottom: 32px;
+    }
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #3a3;
+      flex-shrink: 0;
+    }
+    h1 {
+      font-size: 20px;
+      font-weight: 600;
+      color: #eee;
+      letter-spacing: -.01em;
+    }
+    .sub {
+      font-size: 13px;
+      color: #555;
+      margin-bottom: 36px;
+      padding-left: 18px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 1px;
+      background: #1e1e1e;
+      border: 1px solid #1e1e1e;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+    .cell {
+      background: #161616;
+      padding: 18px 16px;
+      text-align: center;
+    }
+    .cell-val {
+      font-size: 22px;
+      font-weight: 600;
+      color: #ddd;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -.02em;
+    }
+    .cell-label {
+      font-size: 11px;
+      color: #444;
+      margin-top: 4px;
+      font-weight: 500;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: #333;
+      padding-top: 16px;
+      border-top: 1px solid #1a1a1a;
+    }
+    .meta span { font-family: 'SF Mono', ui-monospace, monospace; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="wordmark">Midleman</div>
+    <div class="status-row">
+      <span class="dot"></span>
+      <h1>Operational</h1>
+    </div>
+    <p class="sub">All systems running</p>
+    <div class="grid">
+      <div class="cell">
+        <div class="cell-val">${healthData.proxies}</div>
+        <div class="cell-label">Proxies</div>
+      </div>
+      <div class="cell">
+        <div class="cell-val">${healthData.targets}</div>
+        <div class="cell-label">Targets</div>
+      </div>
+      <div class="cell">
+        <div class="cell-val">${healthData.webhooks}</div>
+        <div class="cell-label">Webhooks</div>
+      </div>
+    </div>
+    <div class="meta">
+      <span>uptime ${fmtUptime(uptimeSec)}</span>
+      <span>${healthData.activeRequests} active</span>
+    </div>
+  </div>
+</body>
+</html>`;
+
+                return new Response(html, {
+                    status: 200,
+                    headers: { 'Content-Type': 'text/html; charset=utf-8' },
                 });
             }
 
@@ -507,6 +646,7 @@ const server = Bun.serve({
                             port: s?.port ?? t.port,
                             forwardPath: t.forwardPath,
                             hasAuth: !!t.authToken,
+                            allowedIps: t.allowedIps || [],
                             running: s?.running ?? false,
                             active: s?.active ?? 0,
                         };
@@ -540,6 +680,7 @@ const server = Bun.serve({
                             port: target.port,
                             authToken: target.authToken || '',
                             forwardPath: target.forwardPath,
+                            allowedIps: target.allowedIps || [],
                             running: status?.running ?? false,
                             active: status?.active ?? 0,
                         },
@@ -562,6 +703,7 @@ const server = Bun.serve({
                         forwardPath: input.forwardPath !== false,
                     };
                     if (input.authToken) target.authToken = input.authToken as string;
+                    if (Array.isArray(input.allowedIps) && input.allowedIps.length) target.allowedIps = input.allowedIps as string[];
 
                     // Assign a port (auto or explicit)
                     const excludePorts = getTargetStatus().filter(s => s.name !== target.name).map(s => s.port).filter(Boolean);
@@ -617,6 +759,8 @@ const server = Bun.serve({
                             targets: w.targets,
                             port: s?.port ?? w.port,
                             hasAuth: !!w.authToken,
+                            retry: w.retry,
+                            allowedIps: w.allowedIps || [],
                             running: s?.running ?? false,
                             active: s?.active ?? 0,
                         };
@@ -694,6 +838,7 @@ const server = Bun.serve({
                             port: webhook.port,
                             authToken: webhook.authToken || '',
                             retry: webhook.retry,
+                            allowedIps: webhook.allowedIps || [],
                             running: status?.running ?? false,
                             active: status?.active ?? 0,
                         },
@@ -716,6 +861,7 @@ const server = Bun.serve({
                     };
                     if (input.authToken) webhook.authToken = input.authToken as string;
                     if (input.retry && typeof input.retry === 'object') webhook.retry = input.retry as import('./core/types').WebhookRetryConfig;
+                    if (Array.isArray(input.allowedIps) && input.allowedIps.length) webhook.allowedIps = input.allowedIps as string[];
 
                     // Assign a port (auto or explicit)
                     const existingIdx = config.webhooks.findIndex(w => w.name === webhook.name);
@@ -783,6 +929,19 @@ const server = Bun.serve({
 
 
                 // ── Profile CRUD ──
+                if (url.pathname.match(/^\/admin\/profiles\/[^/]+\/restart$/) && req.method === 'POST') {
+                    const name = url.pathname.split('/')[3]?.toLowerCase();
+                    const profile = config.proxyProfiles.find(p => p.name === name);
+                    if (!profile) return jsonRes(404, { error: `Profile "${name}" not found` });
+                    try {
+                        await restartProxyServer(name, profile);
+                        console.log(`🔄 Profile "${name}" restarted`);
+                        return jsonRes(200, { status: 'restarted', profile: name });
+                    } catch (err) {
+                        return jsonRes(500, { error: `Failed to restart: ${err instanceof Error ? err.message : err}` });
+                    }
+                }
+
                 if (url.pathname.startsWith('/admin/profiles/') && req.method === 'GET') {
                     const name = url.pathname.split('/')[3]?.toLowerCase();
                     if (!name) return jsonRes(400, { error: 'Profile name required' });
@@ -797,6 +956,9 @@ const server = Bun.serve({
                             authPrefix: profile.authPrefix || '',
                             accessKey: profile.accessKey || '',
                             blockedExtensions: profile.blockedExtensions ? Array.from(profile.blockedExtensions) : [],
+                            allowedIps: profile.allowedIps || [],
+                            port: getProxyServerPort(profile.name),
+                            running: isProxyServerRunning(profile.name),
                         },
                     });
                 }
@@ -809,7 +971,9 @@ const server = Bun.serve({
                         authPrefix: p.authPrefix,
                         hasAccessKey: !!p.accessKey,
                         blockedExtensions: p.blockedExtensions ? Array.from(p.blockedExtensions) : [],
+                        allowedIps: p.allowedIps || [],
                         port: getProxyServerPort(p.name),
+                        running: isProxyServerRunning(p.name),
                     }));
                     return jsonRes(200, { profiles });
                 }
@@ -835,6 +999,7 @@ const server = Bun.serve({
                             (input.blockedExtensions as string[]).map(e => e.trim().toLowerCase().replace(/^\.?/, '.'))
                         );
                     }
+                    if (Array.isArray(input.allowedIps) && input.allowedIps.length) profile.allowedIps = input.allowedIps as string[];
 
                     const idx = config.proxyProfiles.findIndex(p => p.name === profile.name);
                     if (idx >= 0) config.proxyProfiles[idx] = profile;
@@ -843,18 +1008,25 @@ const server = Bun.serve({
                     persistProfiles(config.proxyProfiles);
                     invalidateProfileCache();
 
-                    // Assign port and start/restart the proxy server
-                    const excludePorts = getProxyServerStatus().filter(s => s.name !== profile.name).map(s => s.port).filter(Boolean);
-                    const proxyPort = await assignProxyPort(profile.name, config.port, excludePorts);
+                    let proxyPort: number;
                     if (idx >= 0) {
+                        // Update: the server still owns its port — use it directly without probing.
+                        // Probing would fail (port in use) and cause a spurious reassignment.
+                        proxyPort = getProxyServerPort(profile.name) || 0;
+                        if (!proxyPort) {
+                            const excludePorts = getProxyServerStatus().map(s => s.port).filter(Boolean);
+                            proxyPort = await assignProxyPort(profile.name, config.port, excludePorts);
+                        }
                         await restartProxyServer(profile.name, profile, proxyPort);
+                        console.log(`✅ Profile "${profile.name}" updated (port ${proxyPort})`);
+                        return jsonRes(200, { status: 'updated', profile: profile.name, port: proxyPort });
                     } else {
+                        const excludePorts = getProxyServerStatus().map(s => s.port).filter(Boolean);
+                        proxyPort = await assignProxyPort(profile.name, config.port, excludePorts);
                         startProxyServer(profile, proxyPort);
+                        console.log(`✅ Profile "${profile.name}" created (port ${proxyPort})`);
+                        return jsonRes(200, { status: 'created', profile: profile.name, port: proxyPort });
                     }
-
-                    const action = idx >= 0 ? 'updated' : 'created';
-                    console.log(`✅ Profile "${profile.name}" ${action} (port ${proxyPort})`);
-                    return jsonRes(200, { status: action, profile: profile.name, port: proxyPort });
                 }
 
                 if (url.pathname.startsWith('/admin/profiles/') && req.method === 'DELETE') {

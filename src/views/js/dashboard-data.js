@@ -1,3 +1,111 @@
+// ─── IP Tag Input ────────────────────────────────────────────────────────────
+const IpTagInput = (() => {
+  const instances = new Map();
+
+  function _build(id) {
+    const wrap = document.getElementById(id);
+    if (!wrap) return null;
+
+    const state = { tags: [], wrap, input: null, renderChip: null, syncPlaceholder: null };
+
+    state.syncPlaceholder = () => {
+      state.input.placeholder = state.tags.length === 0 ? 'e.g. 192.168.1.0, 10.0.0.0/8, 172.16.*' : '';
+    };
+
+    state.renderChip = (ip) => {
+      const chip = document.createElement('span');
+      chip.className = 'ip-chip';
+      chip.appendChild(document.createTextNode(ip));
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.title = 'Remove';
+      btn.textContent = '\u00d7';
+      btn.addEventListener('click', () => {
+        const i = state.tags.indexOf(ip);
+        if (i >= 0) state.tags.splice(i, 1);
+        chip.remove();
+        state.syncPlaceholder();
+      });
+      chip.appendChild(btn);
+      return chip;
+    };
+
+    const addTags = (raw) => {
+      for (const ip of raw.split(/[\s,]+/).map(s => s.trim()).filter(Boolean)) {
+        if (!state.tags.includes(ip)) {
+          state.tags.push(ip);
+          wrap.insertBefore(state.renderChip(ip), state.input);
+        }
+      }
+      state.syncPlaceholder();
+    };
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'ip-tag-input';
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('spellcheck', 'false');
+    state.input = input;
+
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ',') {
+        e.preventDefault();
+        const val = input.value.replace(/,+$/, '').trim();
+        if (val) { addTags(val); input.value = ''; }
+      } else if (e.key === 'Backspace' && input.value === '' && state.tags.length > 0) {
+        state.tags.pop();
+        wrap.querySelectorAll('.ip-chip').forEach((c, i, a) => { if (i === a.length - 1) c.remove(); });
+        state.syncPlaceholder();
+      }
+    });
+    input.addEventListener('blur', () => {
+      const val = input.value.replace(/[,\s]+$/, '').trim();
+      if (val) { addTags(val); input.value = ''; }
+    });
+    input.addEventListener('input', () => {
+      if (input.value.includes(',')) {
+        const comma = input.value.lastIndexOf(',');
+        const before = input.value.substring(0, comma).trim();
+        if (before) { addTags(before); input.value = input.value.substring(comma + 1).trimStart(); }
+      }
+    });
+
+    wrap.addEventListener('click', e => { if (e.target === wrap) input.focus(); });
+    wrap.appendChild(input);
+    state.syncPlaceholder();
+    return state;
+  }
+
+  function init(id) {
+    if (!instances.has(id)) {
+      const s = _build(id);
+      if (s) instances.set(id, s);
+    }
+  }
+
+  function getValue(id) { return [...(instances.get(id)?.tags || [])]; }
+
+  function setValue(id, ips) {
+    const s = instances.get(id);
+    if (!s) return;
+    s.wrap.querySelectorAll('.ip-chip').forEach(c => c.remove());
+    s.tags.length = 0;
+    for (const ip of (ips || [])) {
+      if (ip && !s.tags.includes(ip)) {
+        s.tags.push(ip);
+        s.wrap.insertBefore(s.renderChip(ip), s.input);
+      }
+    }
+    s.syncPlaceholder();
+  }
+
+  return { init, getValue, setValue };
+})();
+
+IpTagInput.init('pAllowedIps');
+IpTagInput.init('tAllowedIps');
+IpTagInput.init('wAllowedIps');
+
 // ─── Action Dropdown Menu ────────────────────────────────────────────────────
 let _activeMenu = null;
 
@@ -24,9 +132,9 @@ function showActionMenu(btn, items) {
     }
     const el = document.createElement('button');
     el.textContent = item.label;
-    el.style.cssText = `display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:8px 14px;background:none;border:none;cursor:pointer;font-size:13px;color:${item.danger ? 'var(--red)' : 'var(--text)'};white-space:nowrap;`;
-    el.onmouseenter = () => el.style.background = 'var(--surface2)';
-    el.onmouseleave = () => el.style.background = '';
+    el.style.cssText = `appearance:none;-webkit-appearance:none;display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:8px 14px;background:transparent;border:none;cursor:pointer;font-size:13px;color:${item.danger ? 'var(--red)' : 'var(--text)'};white-space:nowrap;`;
+    el.onmouseenter = () => { el.style.background = 'var(--surface2)'; el.style.color = item.danger ? 'var(--red)' : 'var(--text)'; };
+    el.onmouseleave = () => { el.style.background = 'transparent'; el.style.color = item.danger ? 'var(--red)' : 'var(--text)'; };
     el.onclick = (e) => { e.stopPropagation(); _activeMenu?.remove(); _activeMenu = null; item.fn(); };
     menu.appendChild(el);
   }
@@ -73,6 +181,7 @@ function showContextMenu(e, btn) {
       p.port ? { label: `Open :${p.port}`, fn: () => window.open(`${location.protocol}//${location.hostname}:${p.port}/`, '_blank') } : null,
       { label: 'Copy URL', fn: () => copyProxyUrl(p.name, p.port || 0) },
       p.hasAccessKey ? { label: 'Copy Key', fn: () => copyProfileCredential(p.name) } : null,
+      { label: 'Restart', fn: () => restartProfileAction(p.name) },
       { label: 'Edit', fn: () => editProfile(p.name) },
       '---',
       { label: 'Delete', fn: () => deleteProfile(p.name), danger: true },
@@ -200,8 +309,11 @@ function filterProfiles() {
 
 function renderProfiles(profiles) {
   const c = document.getElementById('profileListBody');
-  if (profiles.length === 0) { c.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No profiles yet. Click "+ New Profile".</td></tr>'; return; }
+  if (profiles.length === 0) { c.innerHTML = '<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">No proxies yet. Click "+ New Proxy".</td></tr>'; return; }
   c.innerHTML = profiles.map(p => {
+    const statusBadge = p.running
+      ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px">Running</span>'
+      : '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>';
     const hasAuth = p.authHeader;
     const authVal = hasAuth
       ? esc(p.authHeader) + (p.authPrefix ? ` <span style="color:var(--text3)">(${esc(p.authPrefix)})</span>` : '')
@@ -209,15 +321,19 @@ function renderProfiles(profiles) {
     const accessBadge = p.hasAccessKey
       ? '<span style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:4px;font-size:11px">Protected</span>'
       : '<span style="color:var(--text3)">Public</span>';
+    const ipBadge = (p.allowedIps && p.allowedIps.length)
+      ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px" title="${esc(p.allowedIps.join(', '))}">IP restricted</span>`
+      : '';
     const blockedVal = p.blockedExtensions?.length
       ? `<span style="color:var(--red)">${esc(p.blockedExtensions.join(', '))}</span>`
       : '<span style="color:var(--text3)">None</span>';
     return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
   <td style="padding:8px 12px;font-weight:600">${esc(p.name)}</td>
+  <td style="padding:8px">${statusBadge}</td>
   <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${p.port || '<span style="color:var(--text3)">N/A</span>'}</td>
-  <td style="padding:8px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'SF Mono',Monaco,monospace;color:var(--text2)" title="${esc(p.targetUrl)}">${esc(p.targetUrl)}</td>
+  <td style="padding:8px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'SF Mono',Monaco,monospace;color:var(--text2)" title="${esc(p.targetUrl)}">${esc(p.targetUrl)}</td>
   <td style="padding:8px">${authVal}</td>
-  <td style="padding:8px">${accessBadge}</td>
+  <td style="padding:8px">${accessBadge}${ipBadge}</td>
   <td style="padding:8px">${blockedVal}</td>
   <td style="padding:8px 12px;text-align:right">
     <button data-type="profile" data-name="${esc(p.name)}" onclick="showContextMenu(event,this)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:2px 10px;cursor:pointer;color:var(--text2);font-size:18px;line-height:1.2;letter-spacing:1px" title="Actions">&#8942;</button>
@@ -229,7 +345,7 @@ function renderProfiles(profiles) {
 // ─── Profile CRUD ────────────────────────────────────────────────────────────
 function openProfileModal(profile = null) {
   editingProfile = profile;
-  document.getElementById('modalTitle').textContent = profile ? 'Edit Profile' : 'New Profile';
+  document.getElementById('modalTitle').textContent = profile ? 'Edit Proxy' : 'New Proxy';
   document.getElementById('pName').value = profile ? profile.name : ''; document.getElementById('pName').disabled = !!profile;
   document.getElementById('pTargetUrl').value = profile ? profile.targetUrl : '';
   document.getElementById('pApiKey').value = profile ? (profile.apiKey || '') : '';
@@ -237,6 +353,7 @@ function openProfileModal(profile = null) {
   document.getElementById('pAuthPrefix').value = profile ? (profile.authPrefix || '') : '';
   document.getElementById('pAccessKey').value = profile ? (profile.accessKey || '') : '';
   document.getElementById('pBlocked').value = profile?.blockedExtensions ? profile.blockedExtensions.join(', ') : '';
+  IpTagInput.setValue('pAllowedIps', profile?.allowedIps || []);
   document.getElementById('profileModal').classList.add('active');
 }
 function closeProfileModal() { document.getElementById('profileModal').classList.remove('active'); editingProfile = null; }
@@ -248,9 +365,10 @@ async function saveProfile() {
   if (v('pAuthPrefix')) body.authPrefix = v('pAuthPrefix');
   if (v('pAccessKey')) body.accessKey = v('pAccessKey');
   const blocked = v('pBlocked'); if (blocked) body.blockedExtensions = blocked.split(',').map(s => s.trim()).filter(Boolean);
+  const allowedIps = IpTagInput.getValue('pAllowedIps'); if (allowedIps.length) body.allowedIps = allowedIps;
   try {
     const res = await api('/admin/profiles', { method: 'POST', body: JSON.stringify(body) }); const d = await res.json();
-    if (res.ok) { toast('Profile ' + (d.status || 'saved')); closeProfileModal(); await fetchProfiles(); }
+    if (res.ok) { toast('Proxy ' + (d.status || 'saved')); closeProfileModal(); await fetchProfiles(); }
     else toast(d.error || 'Failed', 'error');
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -258,8 +376,8 @@ async function editProfile(name) {
   try { const res = await api('/admin/profiles/' + encodeURIComponent(name)); if (!res.ok) return toast('Not found', 'error'); openProfileModal((await res.json()).profile); } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 async function deleteProfile(name) {
-  if (!confirm('Delete "' + name + '"?')) return;
-  try { const res = await api('/admin/profiles/' + encodeURIComponent(name), { method: 'DELETE' }); if (res.ok) { toast('Deleted'); await fetchProfiles(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
+  if (!confirm('Delete proxy "' + name + '"?')) return;
+  try { const res = await api('/admin/profiles/' + encodeURIComponent(name), { method: 'DELETE' }); if (res.ok) { toast('Proxy deleted'); await fetchProfiles(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 function copyProxyUrl(name, port) {
   if (!port || port <= 0) { toast('No port assigned for "' + name + '"', 'error'); return; }
@@ -289,8 +407,11 @@ async function copyTargetCredential(name) {
 async function reloadProfiles() {
   try {
     const res = await api('/admin/reload', { method: 'POST' }); const d = await res.json();
-    if (res.ok) { toast('Reloaded: ' + (d.profiles || []).join(', ')); await fetchProfiles(); } else toast(d.error || 'Failed', 'error');
+    if (res.ok) { toast('Proxies reloaded: ' + (d.profiles || []).join(', ')); await fetchProfiles(); } else toast(d.error || 'Failed', 'error');
   } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+async function restartProfileAction(name) {
+  try { const res = await api('/admin/profiles/' + encodeURIComponent(name) + '/restart', { method: 'POST' }); if ((await res.json()).status) { toast('Proxy "' + name + '" restarted'); await fetchProfiles(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 // ─── Target CRUD ─────────────────────────────────────────────────────────────
@@ -322,13 +443,16 @@ function renderTargets(targets) {
     const authBadge = t.hasAuth
       ? '<span style="color:var(--green)">Enabled</span>'
       : '<span style="color:var(--text3)">Disabled</span>';
+    const tIpBadge = (t.allowedIps && t.allowedIps.length)
+      ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 6px;border-radius:4px;font-size:11px;margin-left:4px" title="${esc(t.allowedIps.join(', '))}">IP restricted</span>`
+      : '';
     return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
   <td style="padding:8px 12px;font-weight:600">${esc(t.name)}</td>
   <td style="padding:8px">${statusBadge}</td>
   <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${t.port}</td>
   <td style="padding:8px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'SF Mono',Monaco,monospace;color:var(--text2)" title="${esc(t.targetUrl)}">${esc(t.targetUrl)}</td>
   <td style="padding:8px">${t.forwardPath ? '<span style="color:var(--green)">Yes</span>' : '<span style="color:var(--text3)">No</span>'}</td>
-  <td style="padding:8px">${authBadge}</td>
+  <td style="padding:8px">${authBadge}${tIpBadge}</td>
   <td style="padding:8px;color:var(--accent2)">${t.active > 0 ? t.active : '<span style="color:var(--text3)">0</span>'}</td>
   <td style="padding:8px 12px;text-align:right">
     <button data-type="target" data-name="${esc(t.name)}" onclick="showContextMenu(event,this)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:2px 10px;cursor:pointer;color:var(--text2);font-size:18px;line-height:1.2;letter-spacing:1px" title="Actions">&#8942;</button>
@@ -344,12 +468,14 @@ function openTargetModal(target = null) {
   document.getElementById('tPort').value = target ? target.port : '';
   document.getElementById('tAuthToken').value = target ? (target.authToken || '') : '';
   document.getElementById('tForwardPath').checked = target ? target.forwardPath !== false : true;
+  IpTagInput.setValue('tAllowedIps', target?.allowedIps || []);
   document.getElementById('targetModal').style.display = 'block';
 }
 function closeTargetModal() { document.getElementById('targetModal').style.display = 'none'; editingTarget = null; }
 async function saveTarget() {
   const body = { name: document.getElementById('tName').value.trim(), targetUrl: document.getElementById('tTargetUrl').value.trim(), port: parseInt(document.getElementById('tPort').value) || 0, forwardPath: document.getElementById('tForwardPath').checked };
   const at = document.getElementById('tAuthToken').value.trim(); if (at) body.authToken = at;
+  const tIps = IpTagInput.getValue('tAllowedIps'); if (tIps.length) body.allowedIps = tIps;
   try {
     const res = await api('/admin/targets', { method: 'POST', body: JSON.stringify(body) }); const d = await res.json();
     if (res.ok) { toast('Target ' + (d.status || 'saved')); closeTargetModal(); await fetchTargets(); } else toast(d.error || 'Failed', 'error');
@@ -410,6 +536,9 @@ function renderWebhooks(webhooks) {
     const authBadge = w.hasAuth
       ? '<span style="color:var(--green)">Enabled</span>'
       : '<span style="color:var(--text3)">Public</span>';
+    const wIpBadge = (w.allowedIps && w.allowedIps.length)
+      ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 6px;border-radius:4px;font-size:11px;margin-left:4px" title="${esc(w.allowedIps.join(', '))}">IP restricted</span>`
+      : '';
     const numTargets = w.targets.length;
     const dlqCount = _dlqByWebhook[w.name] || 0;
     const dlqDot = dlqCount > 0
@@ -420,7 +549,7 @@ function renderWebhooks(webhooks) {
   <td style="padding:8px">${statusBadge}</td>
   <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${w.port}</td>
   <td style="padding:8px;color:var(--text2)">${numTargets} destinations</td>
-  <td style="padding:8px">${authBadge}</td>
+  <td style="padding:8px">${authBadge}${wIpBadge}</td>
   <td style="padding:8px;color:var(--accent2)">${w.active > 0 ? w.active : '<span style="color:var(--text3)">0</span>'}</td>
   <td style="padding:8px 12px;text-align:right">
     <span style="position:relative;display:inline-block">
@@ -934,6 +1063,7 @@ function openWebhookModal(webhook = null) {
   }
   
   document.getElementById('wAuthToken').value = webhook ? (webhook.authToken || '') : '';
+  IpTagInput.setValue('wAllowedIps', webhook?.allowedIps || []);
 
   // Populate retry config
   const r = webhook?.retry;
@@ -991,6 +1121,7 @@ async function saveWebhook() {
   };
   if (targetsRaw.length === 0) return toast('At least one valid destination is required', 'error');
   const at = document.getElementById('wAuthToken').value.trim(); if (at) body.authToken = at;
+  const wIps = IpTagInput.getValue('wAllowedIps'); if (wIps.length) body.allowedIps = wIps;
 
   if (document.getElementById('wRetryEnabled').checked) {
     const retryUntilSuccess = document.getElementById('wRetryUntilSuccess').checked;

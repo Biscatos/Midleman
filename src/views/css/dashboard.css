@@ -592,6 +592,70 @@ body {
   cursor: not-allowed;
 }
 
+/* ─── IP Tag Input ─────────────────────────────────────────────────────────── */
+.ip-tag-wrap {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  cursor: text;
+  min-height: 42px;
+  transition: border-color var(--transition);
+  align-items: center;
+}
+.ip-tag-wrap:focus-within {
+  border-color: var(--accent);
+}
+.ip-chip {
+  background: var(--surface3);
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  color: var(--text2);
+  font-size: 12px;
+  font-family: 'SF Mono', ui-monospace, monospace;
+  padding: 2px 4px 2px 8px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+.ip-chip button {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  margin: 0;
+  cursor: pointer;
+  color: var(--text3);
+  font-size: 15px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  border-radius: 3px;
+  transition: color var(--transition), background var(--transition);
+}
+.ip-chip button:hover {
+  color: var(--red);
+  background: var(--red-bg);
+}
+.ip-tag-input {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  outline: none;
+  font-size: 13px;
+  min-width: 140px;
+  flex: 1;
+  padding: 4px 4px;
+  font-family: inherit;
+}
+.ip-tag-input::placeholder {
+  color: var(--text3);
+}
+
 .checkbox-group {
   display: flex;
   align-items: center;

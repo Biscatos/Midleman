@@ -7,7 +7,7 @@
         </a>
 
         <div class="navbar-nav">
-          <button class="nav-link active" onclick="navigate('overview')">
+          <button class="nav-link active" data-page="overview" onclick="navigate('overview')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round">
               <rect x="3" y="3" width="7" height="9" rx="1" />
@@ -17,7 +17,7 @@
             </svg>
             Overview
           </button>
-          <button class="nav-link" onclick="navigate('requests')">
+          <button class="nav-link" data-page="requests" onclick="navigate('requests')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round">
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
@@ -25,7 +25,7 @@
             Requests
             <span class="nav-badge" id="navReqBadge">0</span>
           </button>
-          <button class="nav-link" onclick="navigate('targets')">
+          <button class="nav-link" data-page="targets" onclick="navigate('targets')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round">
               <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
@@ -33,7 +33,7 @@
             Targets
             <span class="nav-badge" id="navTargetBadge">0</span>
           </button>
-          <button class="nav-link" onclick="navigate('webhooks')">
+          <button class="nav-link" data-page="webhooks" onclick="navigate('webhooks')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="3" />
               <path d="M3 7V5a2 2 0 0 1 2-2h2" />
@@ -44,13 +44,13 @@
             Webhooks
             <span class="nav-badge" id="navWebhookBadge">0</span>
           </button>
-          <button class="nav-link" onclick="navigate('profiles')">
+          <button class="nav-link" data-page="profiles" onclick="navigate('profiles')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round">
               <rect x="2" y="7" width="20" height="14" rx="2" />
               <path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16" />
             </svg>
-            Profiles
+            Proxies
             <span class="nav-badge" id="navProfileBadge">0</span>
           </button>
         </div>
@@ -95,7 +95,7 @@
             <div class="stat-sub">in-flight</div>
           </div>
           <div class="stat-card" style="cursor:pointer" onclick="navigate('profiles')">
-            <div class="stat-label">Profiles</div>
+            <div class="stat-label">Proxies</div>
             <div class="stat-value" id="ovProfiles">--</div>
             <div class="stat-sub" id="ovProfileNames"></div>
           </div>
@@ -360,6 +360,7 @@
                 <input type="checkbox" id="tForwardPath" checked> <label for="tForwardPath" style="margin:0">Forward
                   Path</label>
               </div>
+              <div class="form-group span-2"><label>Allowed IPs <span style="color:var(--text3);font-weight:400;font-size:11px">— CIDR, wildcard, or exact. Leave empty to allow all.</span></label><div id="tAllowedIps" class="ip-tag-wrap"></div></div>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
               <button class="btn btn-sm" onclick="closeTargetModal()">Cancel</button>
@@ -413,12 +414,12 @@
       <div class="page" id="pageProfiles">
         <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
           <div>
-            <h2>Proxy Profiles</h2>
-            <p>Manage public proxy bypass endpoints for upstream APIs.</p>
+            <h2>Proxies</h2>
+            <p>Reverse proxies with auth injection — expose any upstream on a dedicated port with credentials hidden from clients.</p>
           </div>
           <div style="display:flex;gap:8px">
             <button class="btn btn-sm" onclick="reloadProfiles()">Reload</button>
-            <button class="btn btn-primary btn-sm" onclick="openProfileModal()">+ New Profile</button>
+            <button class="btn btn-primary btn-sm" onclick="openProfileModal()">+ New Proxy</button>
           </div>
         </div>
         <div class="card" style="margin-bottom:16px">
@@ -450,6 +451,7 @@
               <thead>
                 <tr style="background:var(--surface2);text-align:left">
                   <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Status</th>
                   <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Port</th>
                   <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Target URL</th>
                   <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Auth Header</th>
@@ -459,7 +461,7 @@
                 </tr>
               </thead>
               <tbody id="profileListBody">
-                <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
+                <tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
               </tbody>
             </table>
           </div>
@@ -515,6 +517,7 @@
             <div id="wDestinationsContainer" style="display:flex;flex-direction:column;gap:8px"></div>
           </div>
           <div class="form-group span-2"><label>Incoming Auth Token (optional)</label><input type="text" id="wAuthToken" placeholder="Leave empty for public access"></div>
+          <div class="form-group span-2"><label>Allowed IPs <span style="color:var(--text3);font-weight:400;font-size:11px">— CIDR, wildcard, or exact. Leave empty to allow all.</span></label><div id="wAllowedIps" class="ip-tag-wrap"></div></div>
 
           <!-- Default Retry Config -->
           <div class="form-group span-2">
@@ -598,11 +601,11 @@
   <div class="modal-overlay" id="profileModal">
     <div class="modal">
       <div class="modal-header">
-        <h3 id="modalTitle">New Profile</h3><button class="close-btn" onclick="closeProfileModal()">&times;</button>
+        <h3 id="modalTitle">New Proxy</h3><button class="close-btn" onclick="closeProfileModal()">&times;</button>
       </div>
       <div class="modal-body">
         <div class="form-grid">
-          <div class="form-group"><label>Profile Name *</label><input type="text" id="pName" placeholder="e.g. infobip">
+          <div class="form-group"><label>Proxy Name *</label><input type="text" id="pName" placeholder="e.g. infobip">
           </div>
           <div class="form-group span-2"><label>Target URL *</label><input type="url" id="pTargetUrl"
               placeholder="https://api.example.com"></div>
@@ -622,10 +625,11 @@
           </div>
           <div class="form-group"><label>Blocked Extensions</label><input type="text" id="pBlocked"
               placeholder=".exe, .bat, .sh"></div>
+          <div class="form-group span-2"><label>Allowed IPs <span style="color:var(--text3);font-weight:400;font-size:11px">— CIDR, wildcard, or exact. Leave empty to allow all.</span></label><div id="pAllowedIps" class="ip-tag-wrap"></div></div>
         </div>
       </div>
       <div class="modal-footer"><button class="btn" onclick="closeProfileModal()">Cancel</button><button
-          class="btn btn-primary" onclick="saveProfile()">Save Profile</button></div>
+          class="btn btn-primary" onclick="saveProfile()">Save Proxy</button></div>
     </div>
   </div>
 

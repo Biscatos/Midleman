@@ -178,8 +178,8 @@ function navigate(page) {
   document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
   const pageEl = document.getElementById('page' + page.charAt(0).toUpperCase() + page.slice(1));
   if (pageEl) pageEl.classList.add('active');
-  document.querySelectorAll('.nav-link').forEach(n => {
-    if (n.textContent.trim().toLowerCase().startsWith(page === 'requests' ? 'req' : page)) n.classList.add('active');
+  document.querySelectorAll('.nav-link[data-page]').forEach(n => {
+    if (n.dataset.page === page) n.classList.add('active');
   });
   if (page === 'requests') { rlPage = 1; fetchRequestLogs(); }
   if (page === 'targets') fetchTargets();

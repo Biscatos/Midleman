@@ -9,6 +9,7 @@ export interface ProxyProfile {
   authPrefix?: string;    // Optional prefix (e.g., "Bearer", "App")
   accessKey?: string;     // Optional key to protect the public link
   blockedExtensions?: Set<string>; // Optional set of blocked file extensions
+  allowedIps?: string[];  // Optional IP allowlist (exact, CIDR, wildcard). Empty = unrestricted.
 }
 
 /**
@@ -20,6 +21,7 @@ export interface ProxyTarget {
   port: number;           // Dedicated listening port (0 = auto-assign)
   authToken?: string;     // Per-target auth token (optional)
   forwardPath: boolean;   // Whether to append incoming path to target URL
+  allowedIps?: string[];  // Optional IP allowlist (exact, CIDR, wildcard). Empty = unrestricted.
 }
 
 export interface WebhookRetryConfig {
@@ -49,6 +51,7 @@ export interface WebhookDistributor {
   targets: (string | WebhookDestination)[];      // Array of upstream destinations
   authToken?: string;     // Optional auth token to restrict inbound requests
   retry?: WebhookRetryConfig; // Default retry config for all targets (can be overridden per-destination)
+  allowedIps?: string[];  // Optional IP allowlist (exact, CIDR, wildcard). Empty = unrestricted.
 }
 
 /**

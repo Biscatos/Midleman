@@ -1,6 +1,7 @@
 import type { ProxyTarget } from '../core/types';
 import { startTargetSpan, endTargetSpan } from '../telemetry/telemetry';
-import { logRequest, captureRequestBody, captureResponseBody, headersToRecord } from '../telemetry/request-log';
+import { logRequest, captureRequestBody, headersToRecord } from '../telemetry/request-log';
+import { isIpAllowed } from '../core/ip-filter';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -90,6 +91,11 @@ async function handleTargetForward(
     const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
         || req.headers.get('x-real-ip') || 'unknown';
 
+    if (!isIpAllowed(clientIp, target.allowedIps)) {
+        console.warn(`🚫 [${target.name}]: blocked IP ${clientIp}`);
+        return jsonResponse(403, { error: 'Forbidden', message: 'Your IP address is not allowed to access this resource.' });
+    }
+
     try {
         targetResponse = await fetch(targetUrl, {
             method: req.method,
@@ -130,8 +136,9 @@ async function handleTargetForward(
         });
     }
 
-    // Capture response
-    const resCapture = await captureResponseBody(targetResponse);
+    // Build response headers — do NOT buffer the response body.
+    // targetResponse.body is streamed directly to the client for zero added latency.
+    const resBodySize = parseInt(targetResponse.headers.get('content-length') || '0', 10);
     const responseHeaders = new Headers();
     for (const [key, value] of (targetResponse.headers as any)) {
         const lower = key.toLowerCase();
@@ -170,8 +177,8 @@ async function handleTargetForward(
         resStatus: targetResponse.status,
         resStatusText: targetResponse.statusText,
         resHeaders: headersToRecord(responseHeaders),
-        resBody: resCapture.body,
-        resBodySize: resCapture.size,
+        resBody: null,
+        resBodySize,
         durationMs,
     });
 
