@@ -2,6 +2,7 @@ import type { ProxyProfile } from '../core/types';
 import { startProxySpan, endProxySpan, recordProxyBlocked, recordProxyRedirect } from '../telemetry/telemetry';
 import { logRequest, captureRequestBody, headersToRecord } from '../telemetry/request-log';
 import { isIpAllowed } from '../core/ip-filter';
+import { verifyJwt } from '../auth/auth';
 
 // ─── Access Key Session Cache ───────────────────────────────────────────────
 // When a page is loaded with a valid ?key=, we cache the authorization so that
@@ -92,6 +93,21 @@ function getProfileMap(profiles: ProxyProfile[]): Map<string, CachedProfile> {
         }
     }
     return profileMap;
+}
+
+/**
+ * Check if a request has a valid proxy user JWT cookie for the given profile.
+ * Returns the username if valid, null otherwise.
+ */
+function checkProxyLoginAuth(req: Request, profileName: string): string | null {
+    const cookies = req.headers.get('cookie') || '';
+    const m = cookies.match(new RegExp(`(?:^|;\\s*)__midleman_auth_${profileName}=([^;]+)`));
+    if (!m) return null;
+    const token = decodeURIComponent(m[1]);
+    const payload = verifyJwt(token);
+    if (!payload) return null;
+    if (payload.profile !== profileName) return null;
+    return payload.username as string || null;
 }
 
 /**
@@ -200,18 +216,42 @@ export async function handleProxyRequest(
     const accept = req.headers.get('accept') || '';
     const isBrowser = accept.includes('text/html');
 
-    // Validate access key if configured
+    // ── Auth: login mode (JWT-based user authentication) ──
+    const effectiveAuthMode = profile.authMode || (profile.accessKey ? 'accessKey' : 'none');
+
+    if (effectiveAuthMode === 'login') {
+        // /auth/* routes should not be forwarded to upstream
+        if (remainingPath.startsWith('/auth/')) {
+            return jsonResponse(404, { error: 'Not Found' });
+        }
+
+        const proxyUser = checkProxyLoginAuth(req, profileName);
+        if (!proxyUser) {
+            if (profile.isWebApp) {
+                const isSubResource = isAssetRequest(remainingPath, req.headers.get('accept'));
+                if (isSubResource) {
+                    return jsonResponse(401, { error: 'Unauthorized' });
+                }
+                const redirectTo = encodeURIComponent(url.pathname + url.search);
+                return new Response(null, {
+                    status: 302,
+                    headers: { 'Location': `/proxy/${profileName}/auth/login?redirect=${redirectTo}` },
+                });
+            }
+            return jsonResponse(401, {
+                error: 'Unauthorized',
+                message: 'Authentication required. Use POST /proxy/' + profileName + '/auth/login with username and password.',
+            });
+        }
+    }
+
+    // ── Auth: access key mode ──
     let validatedAccessKey: string | null = null;
-    if (profile.accessKey) {
+    if (effectiveAuthMode === 'accessKey' && profile.accessKey) {
         const providedKey = url.searchParams.get('key');
         const clientIP = getClientIP(req);
 
         // ── Check if this is a sub-resource request ──
-        // Sub-resources (CSS, JS, images, fonts, etc.) loaded by the browser
-        // from an authenticated page should not be blocked. We detect them by:
-        //   1. The Referer header pointing to the same profile path, OR
-        //   2. The file extension being a known asset type, OR
-        //   3. An active session from a recent authenticated page load
         const isSubResource = isAssetRequest(remainingPath, req.headers.get('accept'));
         const referer = req.headers.get('referer') || '';
         const refererIsFromProfile = referer.includes(`/proxy/${profileName}/`);
@@ -223,7 +263,6 @@ export async function handleProxyRequest(
         }
 
         // B. Direct ?key= — redirect to strip key from URL and set cookie first.
-        //    Only for browser requests — cookies are not used for API clients.
         if (!validatedAccessKey && providedKey === profile.accessKey) {
             if (isBrowser) {
                 const clean = new URL(url.toString());
@@ -239,8 +278,7 @@ export async function handleProxyRequest(
             validatedAccessKey = profile.accessKey;
         }
 
-        // C. Profile-scoped cookie — only for browser sessions after the initial redirect.
-        //    Cookie name includes profileName so different proxies never share auth state.
+        // C. Profile-scoped cookie
         if (!validatedAccessKey && isBrowser) {
             const cookies = req.headers.get('cookie') || '';
             const m = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${profileName}=([^;]+)`));
@@ -361,7 +399,7 @@ export async function handleProxyRequest(
             fetchError instanceof Error ? fetchError : new Error(String(fetchError)));
 
         // Log failed proxy request
-        logRequest({
+        if (!profile.disableLogs) logRequest({
             requestId,
             type: 'proxy',
             profileName,
@@ -452,7 +490,7 @@ export async function handleProxyRequest(
         let html = await targetResponse.text();
         const resBodySize = html.length;
 
-        logRequest({
+        if (!profile.disableLogs) logRequest({
             requestId,
             type: 'proxy',
             profileName,
@@ -561,7 +599,7 @@ if(location.pathname===P.slice(0,-1)){_r.call(history,null,"",P+location.search+
     }
 
     // Non-HTML: log metadata only, stream body directly without buffering.
-    logRequest({
+    if (!profile.disableLogs) logRequest({
         requestId,
         type: 'proxy',
         profileName,
@@ -620,9 +658,38 @@ export async function handleDirectProxy(
     const accept = req.headers.get('accept') || '';
     const isBrowser = accept.includes('text/html');
 
+    // ── Auth: login mode (JWT-based user authentication) ──
+    const effectiveAuthMode = profile.authMode || (profile.accessKey ? 'accessKey' : 'none');
+
+    if (effectiveAuthMode === 'login') {
+        // /auth/* routes are handled by proxy-server.ts — never forward to upstream
+        if (url.pathname.startsWith('/auth/')) {
+            return jsonResponse(404, { error: 'Not Found' });
+        }
+
+        const proxyUser = checkProxyLoginAuth(req, profileName);
+        if (!proxyUser) {
+            if (profile.isWebApp) {
+                const isSubResource = isAssetRequest(url.pathname, accept);
+                if (isSubResource) {
+                    return jsonResponse(401, { error: 'Unauthorized' });
+                }
+                const redirectTo = encodeURIComponent(url.pathname + url.search);
+                return new Response(null, {
+                    status: 302,
+                    headers: { 'Location': `/auth/login?redirect=${redirectTo}` },
+                });
+            }
+            return jsonResponse(401, {
+                error: 'Unauthorized',
+                message: 'Authentication required. Use POST /auth/login with username and password.',
+            });
+        }
+    }
+
     // ── Access key validation ──
     let validatedAccessKey: string | null = null;
-    if (profile.accessKey) {
+    if (effectiveAuthMode === 'accessKey' && profile.accessKey) {
         const providedKey = url.searchParams.get('key');
         const clientIP = getClientIP(req);
 
@@ -633,7 +700,6 @@ export async function handleDirectProxy(
         }
 
         // B. Direct ?key= — redirect to strip key from URL and set cookie first.
-        //    Only for browser requests — cookies are not used for API clients.
         if (!validatedAccessKey && providedKey === profile.accessKey) {
             if (isBrowser) {
                 const clean = new URL(url.toString());
@@ -765,7 +831,7 @@ export async function handleDirectProxy(
         endProxySpan(otelSpan, profileName, 502, durationMs,
             fetchError instanceof Error ? fetchError : new Error(String(fetchError)));
 
-        logRequest({
+        if (!profile.disableLogs) logRequest({
             requestId, type: 'proxy', profileName,
             method: req.method, path: url.pathname, targetUrl, clientIp,
             reqHeaders: headersToRecord(forwardHeaders),
@@ -840,7 +906,7 @@ export async function handleDirectProxy(
     endProxySpan(otelSpan, profileName, targetResponse.status, durationMs);
 
     // Log metadata only — stream body directly without buffering.
-    logRequest({
+    if (!profile.disableLogs) logRequest({
         requestId, type: 'proxy', profileName,
         method: req.method, path: url.pathname, targetUrl: currentUrl, clientIp,
         reqHeaders: headersToRecord(forwardHeaders),

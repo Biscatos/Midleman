@@ -2,7 +2,7 @@ import { Database } from 'bun:sqlite';
 import { createHmac } from 'crypto';
 import { resolve } from 'path';
 import { mkdirSync } from 'fs';
-import type { AuthUser } from '../core/types';
+import type { AuthUser, ProxyUser } from '../core/types';
 
 // ─── Database ────────────────────────────────────────────────────────────────
 
@@ -30,6 +30,25 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+CREATE TABLE IF NOT EXISTS proxy_users (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    username     TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password     TEXT NOT NULL,
+    totp_secret  TEXT,
+    totp_enabled INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS proxy_user_profiles (
+    user_id      INTEGER NOT NULL REFERENCES proxy_users(id) ON DELETE CASCADE,
+    profile_name TEXT NOT NULL COLLATE NOCASE,
+    PRIMARY KEY (user_id, profile_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_proxy_user_profiles_profile ON proxy_user_profiles(profile_name);
+CREATE INDEX IF NOT EXISTS idx_proxy_user_profiles_user ON proxy_user_profiles(user_id);
 `;
 
 export function initAuth(dataDir: string, maxAge: number = 86400): void {
@@ -41,6 +60,17 @@ export function initAuth(dataDir: string, maxAge: number = 86400): void {
         db.exec('PRAGMA journal_mode = WAL');
         db.exec('PRAGMA synchronous = NORMAL');
         db.exec('PRAGMA foreign_keys = ON');
+
+        // Migrate old proxy_users table (had profile_name column, no totp fields)
+        try {
+            const info = db.prepare("PRAGMA table_info(proxy_users)").all() as any[];
+            const cols = info.map((c: any) => c.name);
+            if (cols.includes('profile_name') && !cols.includes('totp_secret')) {
+                console.log('🔄 Migrating proxy_users table to new schema...');
+                db.exec('DROP TABLE IF EXISTS proxy_users');
+            }
+        } catch {}
+
         db.exec(CREATE_TABLES);
         cleanExpiredSessions();
         setInterval(cleanExpiredSessions, 60 * 60 * 1000);
@@ -236,6 +266,218 @@ setInterval(() => {
         if (entry.resetAt < now) attempts.delete(ip);
     }
 }, 5 * 60 * 1000);
+
+// ─── Global Proxy User Management ──────────────────────────────────────────
+
+export async function createProxyUser(username: string, password: string): Promise<ProxyUser> {
+    if (!db) throw new Error('Auth not initialized');
+    const hash = await Bun.password.hash(password, 'bcrypt');
+    db.prepare('INSERT INTO proxy_users (username, password) VALUES ($u, $p)')
+        .run({ $u: username, $p: hash });
+    const row = db.prepare('SELECT id, username, totp_enabled, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
+    return { id: row.id, username: row.username, totpEnabled: !!row.totp_enabled, createdAt: row.created_at };
+}
+
+export function listAllProxyUsers(): ProxyUser[] {
+    if (!db) return [];
+    const rows = db.prepare('SELECT id, username, totp_enabled, created_at FROM proxy_users ORDER BY username').all() as any[];
+    return rows.map(r => ({ id: r.id, username: r.username, totpEnabled: !!r.totp_enabled, createdAt: r.created_at }));
+}
+
+export function getProxyUser(id: number): ProxyUser | null {
+    if (!db) return null;
+    const row = db.prepare('SELECT id, username, totp_enabled, created_at FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
+    if (!row) return null;
+    return { id: row.id, username: row.username, totpEnabled: !!row.totp_enabled, createdAt: row.created_at };
+}
+
+export function deleteProxyUser(id: number): boolean {
+    if (!db) return false;
+    const result = db.prepare('DELETE FROM proxy_users WHERE id = $id').run({ $id: id });
+    return result.changes > 0;
+}
+
+export async function updateProxyUserPassword(id: number, newPassword: string): Promise<boolean> {
+    if (!db) return false;
+    const hash = await Bun.password.hash(newPassword, 'bcrypt');
+    const result = db.prepare("UPDATE proxy_users SET password = $p, updated_at = datetime('now') WHERE id = $id")
+        .run({ $p: hash, $id: id });
+    return result.changes > 0;
+}
+
+/** Verify proxy user credentials. Returns user + totpSecret (for TOTP step) or null. */
+export async function verifyProxyUserCredentials(username: string, password: string): Promise<{ user: ProxyUser; totpSecret: string | null } | null> {
+    if (!db) return null;
+    const row = db.prepare('SELECT id, username, password, totp_secret, totp_enabled, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
+    if (!row) return null;
+    const valid = await Bun.password.verify(password, row.password);
+    if (!valid) return null;
+    return {
+        user: { id: row.id, username: row.username, totpEnabled: !!row.totp_enabled, createdAt: row.created_at },
+        totpSecret: row.totp_secret || null,
+    };
+}
+
+/** Check if a proxy user has access to a specific profile. */
+export function proxyUserHasProfile(userId: number, profileName: string): boolean {
+    if (!db) return false;
+    const row = db.prepare('SELECT 1 FROM proxy_user_profiles WHERE user_id = $uid AND profile_name = $pn')
+        .get({ $uid: userId, $pn: profileName.toLowerCase() }) as any;
+    return !!row;
+}
+
+// ─── Proxy User ↔ Profile Association ───────────────────────────────────────
+
+export function assignProxyUserToProfile(userId: number, profileName: string): boolean {
+    if (!db) return false;
+    try {
+        db.prepare('INSERT OR IGNORE INTO proxy_user_profiles (user_id, profile_name) VALUES ($uid, $pn)')
+            .run({ $uid: userId, $pn: profileName.toLowerCase() });
+        return true;
+    } catch { return false; }
+}
+
+export function removeProxyUserFromProfile(userId: number, profileName: string): boolean {
+    if (!db) return false;
+    const result = db.prepare('DELETE FROM proxy_user_profiles WHERE user_id = $uid AND profile_name = $pn')
+        .run({ $uid: userId, $pn: profileName.toLowerCase() });
+    return result.changes > 0;
+}
+
+export function listProxyUsersForProfile(profileName: string): ProxyUser[] {
+    if (!db) return [];
+    const rows = db.prepare(`
+        SELECT pu.id, pu.username, pu.totp_enabled, pu.created_at
+        FROM proxy_users pu
+        JOIN proxy_user_profiles pup ON pu.id = pup.user_id
+        WHERE pup.profile_name = $pn
+        ORDER BY pu.username
+    `).all({ $pn: profileName.toLowerCase() }) as any[];
+    return rows.map(r => ({ id: r.id, username: r.username, totpEnabled: !!r.totp_enabled, createdAt: r.created_at }));
+}
+
+export function listProfilesForProxyUser(userId: number): string[] {
+    if (!db) return [];
+    const rows = db.prepare('SELECT profile_name FROM proxy_user_profiles WHERE user_id = $uid ORDER BY profile_name')
+        .all({ $uid: userId }) as any[];
+    return rows.map(r => r.profile_name);
+}
+
+export function removeAllProfileAssociations(profileName: string): number {
+    if (!db) return 0;
+    const result = db.prepare('DELETE FROM proxy_user_profiles WHERE profile_name = $pn').run({ $pn: profileName.toLowerCase() });
+    return result.changes;
+}
+
+// ─── Proxy User TOTP Setup ─────────────────────────────────────────────────
+
+export function setupProxyUserTotp(userId: number, totpSecret: string): boolean {
+    if (!db) return false;
+    const result = db.prepare("UPDATE proxy_users SET totp_secret = $t, totp_enabled = 1, updated_at = datetime('now') WHERE id = $id")
+        .run({ $t: totpSecret, $id: userId });
+    return result.changes > 0;
+}
+
+export function disableProxyUserTotp(userId: number): boolean {
+    if (!db) return false;
+    const result = db.prepare("UPDATE proxy_users SET totp_secret = NULL, totp_enabled = 0, updated_at = datetime('now') WHERE id = $id")
+        .run({ $id: userId });
+    return result.changes > 0;
+}
+
+export function getProxyUserTotpSecret(userId: number): string | null {
+    if (!db) return null;
+    const row = db.prepare('SELECT totp_secret FROM proxy_users WHERE id = $id').get({ $id: userId }) as any;
+    return row?.totp_secret || null;
+}
+
+// ─── Proxy Login Challenge Tokens ───────────────────────────────────────────
+// After credentials are verified, we issue a short-lived challenge token.
+// The client must then either verify TOTP or set up TOTP before getting the JWT.
+
+const proxyLoginChallenges = new Map<string, { userId: number; username: string; totpSecret: string | null; totpEnabled: boolean; profileName: string; expiresAt: number }>();
+
+export function createProxyLoginChallenge(userId: number, username: string, totpSecret: string | null, totpEnabled: boolean, profileName: string): string {
+    const token = crypto.randomUUID();
+    proxyLoginChallenges.set(token, { userId, username, totpSecret, totpEnabled, profileName, expiresAt: Date.now() + CHALLENGE_TTL });
+    return token;
+}
+
+export function consumeProxyLoginChallenge(token: string): { userId: number; username: string; totpSecret: string | null; totpEnabled: boolean; profileName: string } | null {
+    const entry = proxyLoginChallenges.get(token);
+    if (!entry) return null;
+    proxyLoginChallenges.delete(token);
+    if (entry.expiresAt < Date.now()) return null;
+    return entry;
+}
+
+/** Peek at challenge without consuming (for TOTP setup step). */
+export function peekProxyLoginChallenge(token: string): { userId: number; username: string; totpSecret: string | null; totpEnabled: boolean; profileName: string } | null {
+    const entry = proxyLoginChallenges.get(token);
+    if (!entry || entry.expiresAt < Date.now()) return null;
+    return entry;
+}
+
+// Cleanup proxy challenges
+setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of proxyLoginChallenges) {
+        if (v.expiresAt < now) proxyLoginChallenges.delete(k);
+    }
+}, 60 * 1000);
+
+// ─── JWT (HS256) for Proxy User Auth ────────────────────────────────────────
+
+let jwtSecret: string = '';
+let jwtMaxAge: number = 86400; // 24h default
+
+export function initJwt(secret?: string, maxAge?: number): void {
+    // Generate a random secret if none provided (persists only for server lifetime)
+    jwtSecret = secret || base32Encode(crypto.getRandomValues(new Uint8Array(32)));
+    if (maxAge) jwtMaxAge = maxAge;
+}
+
+function base64UrlEncode(data: Uint8Array | string): string {
+    const str = typeof data === 'string' ? data : Buffer.from(data).toString('base64');
+    return (typeof data === 'string' ? Buffer.from(data).toString('base64') : str)
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64UrlDecode(str: string): string {
+    const padded = str + '='.repeat((4 - str.length % 4) % 4);
+    return Buffer.from(padded.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8');
+}
+
+export function signJwt(payload: Record<string, unknown>): string {
+    const header = base64UrlEncode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+    const exp = Math.floor(Date.now() / 1000) + jwtMaxAge;
+    const body = base64UrlEncode(JSON.stringify({ ...payload, exp, iat: Math.floor(Date.now() / 1000) }));
+    const signature = base64UrlEncode(
+        createHmac('sha256', jwtSecret).update(`${header}.${body}`).digest()
+    );
+    return `${header}.${body}.${signature}`;
+}
+
+export function verifyJwt(token: string): Record<string, unknown> | null {
+    try {
+        const parts = token.split('.');
+        if (parts.length !== 3) return null;
+        const [header, body, signature] = parts;
+        const expectedSig = base64UrlEncode(
+            createHmac('sha256', jwtSecret).update(`${header}.${body}`).digest()
+        );
+        if (signature !== expectedSig) return null;
+        const payload = JSON.parse(base64UrlDecode(body));
+        if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+        return payload;
+    } catch {
+        return null;
+    }
+}
+
+export function getJwtMaxAge(): number {
+    return jwtMaxAge;
+}
 
 // ─── Cookie Helpers ──────────────────────────────────────────────────────────
 

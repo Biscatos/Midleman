@@ -9,10 +9,10 @@ import {
 import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry/telemetry';
 import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart } from './telemetry/request-log';
 import { startTarget, stopTarget, stopAllTargets, restartTarget, getTargetStatus } from './servers/target-server';
-import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort, isProxyServerRunning } from './servers/proxy-server';
+import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort, isProxyServerRunning, setProxyLoginTemplate, setProxyLogo } from './servers/proxy-server';
 import { loadPortAssignments, assignAllPorts, assignProxyPort, assignTargetPort, assignWebhookPort, releaseProxyPort, releaseTargetPort, releaseWebhookPort, getTargetPort, getWebhookPort } from './servers/port-manager';
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout } from './servers/webhook-server';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge } from './auth/auth';
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp } from './auth/auth';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
 import { resolve } from 'path';
@@ -45,18 +45,24 @@ initRequestLog(config.requestLog);
 // Initialize auth
 initAuth(config.requestLog.dataDir, config.auth.sessionMaxAge);
 
+// Initialize JWT for proxy user authentication
+initJwt(process.env.JWT_SECRET, config.auth.sessionMaxAge);
+
 // Load port assignments from disk
 loadPortAssignments();
 
 // Load templates & assets
 const errorTemplate = readFileSync(resolve(import.meta.dir, 'views/error.html'), 'utf-8');
 const landingPage = readFileSync(resolve(import.meta.dir, 'views/landing.html'), 'utf-8');
+const proxyLoginTemplate = readFileSync(resolve(import.meta.dir, 'views/proxy-login.html'), 'utf-8');
+setProxyLoginTemplate(proxyLoginTemplate);
 let logoSvg: Uint8Array | null = null;
 try {
     logoSvg = new Uint8Array(readFileSync(resolve(import.meta.dir, 'views/logo.png')));
 } catch (err) {
     console.warn('⚠️  Logo not found in src/views/logo.png');
 }
+setProxyLogo(logoSvg);
 
 function renderErrorPage(statusCode: number, title: string, message: string): Response {
     const html = errorTemplate
@@ -942,7 +948,7 @@ const server = Bun.serve({
                     }
                 }
 
-                if (url.pathname.startsWith('/admin/profiles/') && req.method === 'GET') {
+                if (url.pathname.match(/^\/admin\/profiles\/[^/]+$/) && req.method === 'GET') {
                     const name = url.pathname.split('/')[3]?.toLowerCase();
                     if (!name) return jsonRes(400, { error: 'Profile name required' });
                     const profile = config.proxyProfiles.find(p => p.name === name);
@@ -955,6 +961,10 @@ const server = Bun.serve({
                             authHeader: profile.authHeader,
                             authPrefix: profile.authPrefix || '',
                             accessKey: profile.accessKey || '',
+                            authMode: profile.authMode || 'none',
+                            require2fa: !!profile.require2fa,
+                            isWebApp: !!profile.isWebApp,
+                            disableLogs: !!profile.disableLogs,
                             blockedExtensions: profile.blockedExtensions ? Array.from(profile.blockedExtensions) : [],
                             allowedIps: profile.allowedIps || [],
                             port: getProxyServerPort(profile.name),
@@ -970,6 +980,10 @@ const server = Bun.serve({
                         authHeader: p.authHeader,
                         authPrefix: p.authPrefix,
                         hasAccessKey: !!p.accessKey,
+                        authMode: p.authMode || 'none',
+                        require2fa: !!p.require2fa,
+                        isWebApp: !!p.isWebApp,
+                        disableLogs: !!p.disableLogs,
                         blockedExtensions: p.blockedExtensions ? Array.from(p.blockedExtensions) : [],
                         allowedIps: p.allowedIps || [],
                         port: getProxyServerPort(p.name),
@@ -994,6 +1008,12 @@ const server = Bun.serve({
                     if (input.authHeader) profile.authHeader = input.authHeader as string;
                     if (input.authPrefix) profile.authPrefix = input.authPrefix as string;
                     if (input.accessKey) profile.accessKey = input.accessKey as string;
+                    if (input.authMode && ['none', 'accessKey', 'login'].includes(input.authMode as string)) {
+                        profile.authMode = input.authMode as 'none' | 'accessKey' | 'login';
+                    }
+                    if (typeof input.require2fa === 'boolean') profile.require2fa = input.require2fa;
+                    if (typeof input.isWebApp === 'boolean') profile.isWebApp = input.isWebApp;
+                    if (typeof input.disableLogs === 'boolean') profile.disableLogs = input.disableLogs;
                     if (input.blockedExtensions) {
                         profile.blockedExtensions = new Set(
                             (input.blockedExtensions as string[]).map(e => e.trim().toLowerCase().replace(/^\.?/, '.'))
@@ -1029,7 +1049,7 @@ const server = Bun.serve({
                     }
                 }
 
-                if (url.pathname.startsWith('/admin/profiles/') && req.method === 'DELETE') {
+                if (url.pathname.match(/^\/admin\/profiles\/[^/]+$/) && req.method === 'DELETE') {
                     const name = url.pathname.split('/')[3]?.toLowerCase();
                     if (!name) return jsonRes(400, { error: 'Profile name required' });
                     const idx = config.proxyProfiles.findIndex(p => p.name === name);
@@ -1039,8 +1059,111 @@ const server = Bun.serve({
                     invalidateProfileCache();
                     await stopProxyServer(name);
                     releaseProxyPort(name);
+                    removeAllProfileAssociations(name);
                     console.log(`🗑️  Profile "${name}" deleted`);
                     return jsonRes(200, { status: 'deleted', profile: name });
+                }
+
+                // ── Global Proxy Users CRUD ──
+
+                // GET /admin/proxy-users — list all global proxy users
+                if (url.pathname === '/admin/proxy-users' && req.method === 'GET') {
+                    const users = listAllProxyUsers().map(u => ({
+                        ...u,
+                        profiles: listProfilesForProxyUser(u.id),
+                    }));
+                    return jsonRes(200, { users });
+                }
+
+                // POST /admin/proxy-users — create a new global proxy user
+                if (url.pathname === '/admin/proxy-users' && req.method === 'POST') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const username = (body.username || '').trim();
+                    const password = body.password || '';
+                    if (!username || username.length < 2) return jsonRes(400, { error: 'Username must be at least 2 characters' });
+                    if (!password || password.length < 6) return jsonRes(400, { error: 'Password must be at least 6 characters' });
+
+                    try {
+                        const user = await createProxyUser(username, password);
+                        // Optionally assign to profiles
+                        const profiles: string[] = Array.isArray(body.profiles) ? body.profiles : [];
+                        for (const pn of profiles) {
+                            assignProxyUserToProfile(user.id, pn);
+                        }
+                        console.log(`✅ Proxy user "${username}" created`);
+                        return jsonRes(200, { status: 'created', user: { ...user, profiles } });
+                    } catch (err: any) {
+                        if (err.message?.includes('UNIQUE')) return jsonRes(409, { error: 'Username already exists' });
+                        return jsonRes(500, { error: err.message || 'Failed to create user' });
+                    }
+                }
+
+                // GET /admin/proxy-users/:id — get a single proxy user
+                if (url.pathname.match(/^\/admin\/proxy-users\/\d+$/) && req.method === 'GET') {
+                    const userId = parseInt(url.pathname.split('/').pop()!, 10);
+                    const user = getProxyUser(userId);
+                    if (!user) return jsonRes(404, { error: 'User not found' });
+                    return jsonRes(200, { user: { ...user, profiles: listProfilesForProxyUser(userId) } });
+                }
+
+                // PUT /admin/proxy-users/:id — update user (password, reset 2fa)
+                if (url.pathname.match(/^\/admin\/proxy-users\/\d+$/) && req.method === 'PUT') {
+                    const userId = parseInt(url.pathname.split('/').pop()!, 10);
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    if (body.password) {
+                        if (body.password.length < 6) return jsonRes(400, { error: 'Password must be at least 6 characters' });
+                        const updated = await updateProxyUserPassword(userId, body.password);
+                        if (!updated) return jsonRes(404, { error: 'User not found' });
+                    }
+                    if (body.reset2fa) {
+                        disableProxyUserTotp(userId);
+                    }
+                    return jsonRes(200, { status: 'updated' });
+                }
+
+                // DELETE /admin/proxy-users/:id — delete a global proxy user
+                if (url.pathname.match(/^\/admin\/proxy-users\/\d+$/) && req.method === 'DELETE') {
+                    const userId = parseInt(url.pathname.split('/').pop()!, 10);
+                    const deleted = deleteProxyUser(userId);
+                    if (!deleted) return jsonRes(404, { error: 'User not found' });
+                    console.log(`🗑️  Proxy user #${userId} deleted`);
+                    return jsonRes(200, { status: 'deleted' });
+                }
+
+                // ── Profile ↔ User Association ──
+
+                // GET /admin/profiles/:name/users — list users assigned to a profile
+                if (url.pathname.match(/^\/admin\/profiles\/[^/]+\/users$/) && req.method === 'GET') {
+                    const name = url.pathname.split('/')[3]?.toLowerCase();
+                    const profile = config.proxyProfiles.find(p => p.name === name);
+                    if (!profile) return jsonRes(404, { error: `Profile "${name}" not found` });
+                    const users = listProxyUsersForProfile(name);
+                    return jsonRes(200, { users });
+                }
+
+                // POST /admin/profiles/:name/users — assign user(s) to a profile
+                if (url.pathname.match(/^\/admin\/profiles\/[^/]+\/users$/) && req.method === 'POST') {
+                    const name = url.pathname.split('/')[3]?.toLowerCase();
+                    const profile = config.proxyProfiles.find(p => p.name === name);
+                    if (!profile) return jsonRes(404, { error: `Profile "${name}" not found` });
+
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const userId = body.userId;
+                    if (!userId) return jsonRes(400, { error: 'userId is required' });
+                    assignProxyUserToProfile(userId, name);
+                    return jsonRes(200, { status: 'assigned' });
+                }
+
+                // DELETE /admin/profiles/:name/users/:userId — remove user from profile
+                if (url.pathname.match(/^\/admin\/profiles\/[^/]+\/users\/\d+$/) && req.method === 'DELETE') {
+                    const parts = url.pathname.split('/');
+                    const name = parts[3]?.toLowerCase();
+                    const userId = parseInt(parts[5], 10);
+                    removeProxyUserFromProfile(userId, name);
+                    return jsonRes(200, { status: 'removed' });
                 }
 
                 const accept = req.headers.get('Accept') || '';

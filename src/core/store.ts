@@ -13,6 +13,10 @@ interface StoredProfile {
     authHeader?: string;
     authPrefix?: string;
     accessKey?: string;
+    authMode?: 'none' | 'accessKey' | 'login';
+    require2fa?: boolean;
+    isWebApp?: boolean;
+    disableLogs?: boolean;
     blockedExtensions?: string[];
     allowedIps?: string[];
 }
@@ -44,6 +48,10 @@ function toRuntime(stored: StoredProfile): ProxyProfile {
     };
     if (stored.apiKey) profile.apiKey = stored.apiKey;
     if (stored.authHeader) profile.authHeader = stored.authHeader;
+    if (stored.authMode) profile.authMode = stored.authMode;
+    if (stored.require2fa) profile.require2fa = stored.require2fa;
+    if (stored.isWebApp) profile.isWebApp = stored.isWebApp;
+    if (stored.disableLogs) profile.disableLogs = stored.disableLogs;
 
     if (stored.blockedExtensions && stored.blockedExtensions.length > 0) {
         profile.blockedExtensions = new Set(
@@ -68,6 +76,10 @@ function toStored(profile: ProxyProfile): StoredProfile {
 
     if (profile.authPrefix) stored.authPrefix = profile.authPrefix;
     if (profile.accessKey) stored.accessKey = profile.accessKey;
+    if (profile.authMode && profile.authMode !== 'none') stored.authMode = profile.authMode;
+    if (profile.require2fa) stored.require2fa = profile.require2fa;
+    if (profile.isWebApp) stored.isWebApp = profile.isWebApp;
+    if (profile.disableLogs) stored.disableLogs = profile.disableLogs;
     if (profile.blockedExtensions && profile.blockedExtensions.size > 0) {
         stored.blockedExtensions = Array.from(profile.blockedExtensions);
     }

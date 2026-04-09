@@ -53,6 +53,17 @@
             Proxies
             <span class="nav-badge" id="navProfileBadge">0</span>
           </button>
+          <button class="nav-link" data-page="proxyusers" onclick="navigate('proxyusers')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4-4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M22 21v-2a4 4 0 00-3-3.87" />
+              <path d="M16 3.13a4 4 0 010 7.75" />
+            </svg>
+            Users
+            <span class="nav-badge" id="navProxyUserBadge">0</span>
+          </button>
         </div>
 
         <div class="navbar-right">
@@ -467,6 +478,37 @@
         </div>
       </div>
 
+      <!-- ═══ PROXY USERS ═══ -->
+      <div class="page" id="pageProxyusers">
+        <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <h2>Proxy Users</h2>
+            <p>Global user accounts for proxy login authentication. Assign users to profiles to grant access.</p>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm" onclick="openNewProxyUserModal()">+ New User</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body" style="padding:0;overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead>
+                <tr style="background:var(--surface2);text-align:left">
+                  <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Username</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">2FA</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Profiles</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Created</th>
+                  <th style="padding:10px 12px"></th>
+                </tr>
+              </thead>
+              <tbody id="proxyUserListBody">
+                <tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
       <!-- ═══ SETTINGS ═══ -->
     </div>
   </div>
@@ -620,15 +662,127 @@
         </div>
         <div class="form-section">Access Control</div>
         <div class="form-grid">
-          <div class="form-group"><label style="display:flex;justify-content:space-between;align-items:baseline">Access Key<a href="javascript:void(0)" onclick="generateKey('pAccessKey')" style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></label><input type="text" id="pAccessKey" placeholder="Optional">
+          <div class="form-group span-2">
+            <label>Auth Mode</label>
+            <select id="pAuthMode" onchange="toggleProfileAuthMode()" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px">
+              <option value="none">Public (no authentication)</option>
+              <option value="accessKey">Access Key (static token)</option>
+              <option value="login">User Login (JWT)</option>
+            </select>
+          </div>
+          <div class="form-group" id="pAccessKeyGroup" style="display:none"><label style="display:flex;justify-content:space-between;align-items:baseline">Access Key<a href="javascript:void(0)" onclick="generateKey('pAccessKey')" style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></label><input type="text" id="pAccessKey" placeholder="Optional">
+          </div>
+          <div class="form-group" id="pRequire2faGroup" style="display:none">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="pRequire2fa" style="cursor:pointer;accent-color:var(--accent)">
+              <span>Require 2FA</span>
+            </label>
+            <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Users without 2FA will be prompted to set it up on first login.</span>
+          </div>
+          <div class="form-group" id="pIsWebAppGroup" style="display:none">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="pIsWebApp" style="cursor:pointer;accent-color:var(--accent)">
+              <span>Web Application</span>
+            </label>
+            <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Redirect unauthenticated requests to the login page instead of returning a JSON error.</span>
           </div>
           <div class="form-group"><label>Blocked Extensions</label><input type="text" id="pBlocked"
               placeholder=".exe, .bat, .sh"></div>
           <div class="form-group span-2"><label>Allowed IPs <span style="color:var(--text3);font-weight:400;font-size:11px">— CIDR, wildcard, or exact. Leave empty to allow all.</span></label><div id="pAllowedIps" class="ip-tag-wrap"></div></div>
         </div>
+        <div class="form-section">Options</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="pDisableLogs" style="cursor:pointer;accent-color:var(--accent)">
+              <span>Disable Request Logs</span>
+            </label>
+            <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Skip logging requests and responses for this proxy.</span>
+          </div>
+        </div>
       </div>
       <div class="modal-footer"><button class="btn" onclick="closeProfileModal()">Cancel</button><button
           class="btn btn-primary" onclick="saveProfile()">Save Proxy</button></div>
+    </div>
+  </div>
+
+  <!-- New Proxy User Modal -->
+  <div class="modal-overlay" id="newProxyUserModal">
+    <div class="modal" style="max-width:440px">
+      <div class="modal-header">
+        <h3>New Proxy User</h3><button class="close-btn" onclick="closeNewProxyUserModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="npuError" style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);color:#fca5a5;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px"></div>
+        <div class="form-grid" style="gap:12px">
+          <div class="form-group span-2"><label>Username *</label><input type="text" id="npuUsername" placeholder="e.g. joao.silva" autocomplete="off"></div>
+          <div class="form-group span-2"><label>Password * (min 6 characters)</label><input type="password" id="npuPassword" placeholder="Password" autocomplete="new-password"></div>
+          <div class="form-group span-2">
+            <label>Assign to Profiles</label>
+            <div id="npuProfileChecks" style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer"><button class="btn" onclick="closeNewProxyUserModal()">Cancel</button><button class="btn btn-primary" onclick="saveNewProxyUser()">Create User</button></div>
+    </div>
+  </div>
+
+  <!-- Manage Profile Users Modal (assign/remove users from a profile) -->
+  <div class="modal-overlay" id="profileUsersModal">
+    <div class="modal" style="max-width:520px">
+      <div class="modal-header">
+        <h3 id="profileUsersTitle">Manage Users</h3><button class="close-btn" onclick="closeProfileUsersModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+          <select id="pfuAddSelect" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
+            <option value="">Select user to add...</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="assignUserToCurrentProfile()" style="white-space:nowrap">Assign</button>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:var(--surface2);text-align:left">
+              <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Username</th>
+              <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">2FA</th>
+              <th style="padding:8px 12px"></th>
+            </tr>
+          </thead>
+          <tbody id="pfuListBody">
+            <tr><td colspan="3" style="padding:20px;text-align:center;color:var(--text3)">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-footer"><button class="btn" onclick="closeProfileUsersModal()">Close</button></div>
+    </div>
+  </div>
+
+  <!-- Manage User Proxies Modal (assign/remove proxies from a user) -->
+  <div class="modal-overlay" id="userProfilesModal">
+    <div class="modal" style="max-width:520px">
+      <div class="modal-header">
+        <h3 id="userProfilesTitle">Proxies</h3><button class="close-btn" onclick="closeUserProfilesModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+          <select id="upAddSelect" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
+            <option value="">Select proxy to assign...</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="assignProfileToCurrentUser()" style="white-space:nowrap">Assign</button>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:var(--surface2);text-align:left">
+              <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Proxy</th>
+              <th style="padding:8px 12px"></th>
+            </tr>
+          </thead>
+          <tbody id="upListBody">
+            <tr><td colspan="2" style="padding:20px;text-align:center;color:var(--text3)">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-footer"><button class="btn" onclick="closeUserProfilesModal()">Close</button></div>
     </div>
   </div>
 

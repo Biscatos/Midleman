@@ -186,10 +186,12 @@ function showContextMenu(e, btn) {
   } else if (type === 'profile') {
     const p = _allProfiles.find(x => x.name === name);
     if (!p) return;
+    const authMode = p.authMode || (p.hasAccessKey ? 'accessKey' : 'none');
     showActionMenu(btn, [
       p.port ? { label: `Open :${p.port}`, fn: () => window.open(`${location.protocol}//${location.hostname}:${p.port}/`, '_blank') } : null,
       { label: 'Copy URL', fn: () => copyProxyUrl(p.name, p.port || 0) },
-      p.hasAccessKey ? { label: 'Copy Key', fn: () => copyProfileCredential(p.name) } : null,
+      authMode === 'accessKey' && p.hasAccessKey ? { label: 'Copy Key', fn: () => copyProfileCredential(p.name) } : null,
+      authMode === 'login' ? { label: 'Manage Users', fn: () => openProxyUsersModal(p.name) } : null,
       { label: 'Restart', fn: () => restartProfileAction(p.name) },
       { label: 'Edit', fn: () => editProfile(p.name) },
       '---',
@@ -200,7 +202,7 @@ function showContextMenu(e, btn) {
 
 // ─── Data Fetch ──────────────────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchTargets(), fetchWebhooks(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData()]);
+  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchTargets(), fetchWebhooks(), fetchProxyUsers(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData()]);
 }
 
 async function fetchHealth() {
@@ -327,8 +329,11 @@ function renderProfiles(profiles) {
     const authVal = hasAuth
       ? esc(p.authHeader) + (p.authPrefix ? ` <span style="color:var(--text3)">(${esc(p.authPrefix)})</span>` : '')
       : '<span style="color:var(--text3)">Passthrough</span>';
-    const accessBadge = p.hasAccessKey
-      ? '<span style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:4px;font-size:11px">Protected</span>'
+    const authMode = p.authMode || (p.hasAccessKey ? 'accessKey' : 'none');
+    const accessBadge = authMode === 'login'
+      ? '<span style="background:var(--blue-bg,rgba(59,130,246,0.1));color:var(--blue,#60a5fa);padding:2px 8px;border-radius:4px;font-size:11px">Login</span>'
+      : authMode === 'accessKey'
+      ? '<span style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:4px;font-size:11px">Key</span>'
       : '<span style="color:var(--text3)">Public</span>';
     const ipBadge = (p.allowedIps && p.allowedIps.length)
       ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px" title="${esc(p.allowedIps.join(', '))}">IP restricted</span>`
@@ -361,9 +366,20 @@ function openProfileModal(profile = null) {
   document.getElementById('pAuthHeader').value = profile ? (profile.authHeader || '') : '';
   document.getElementById('pAuthPrefix').value = profile ? (profile.authPrefix || '') : '';
   document.getElementById('pAccessKey').value = profile ? (profile.accessKey || '') : '';
+  document.getElementById('pAuthMode').value = profile ? (profile.authMode || 'none') : 'none';
+  document.getElementById('pRequire2fa').checked = profile ? !!profile.require2fa : false;
+  document.getElementById('pIsWebApp').checked = profile ? !!profile.isWebApp : false;
+  document.getElementById('pDisableLogs').checked = profile ? !!profile.disableLogs : false;
   document.getElementById('pBlocked').value = profile?.blockedExtensions ? profile.blockedExtensions.join(', ') : '';
   IpTagInput.setValue('pAllowedIps', profile?.allowedIps || []);
+  toggleProfileAuthMode();
   document.getElementById('profileModal').classList.add('active');
+}
+function toggleProfileAuthMode() {
+  const mode = document.getElementById('pAuthMode').value;
+  document.getElementById('pAccessKeyGroup').style.display = mode === 'accessKey' ? '' : 'none';
+  document.getElementById('pRequire2faGroup').style.display = mode === 'login' ? '' : 'none';
+  document.getElementById('pIsWebAppGroup').style.display = mode === 'login' ? '' : 'none';
 }
 function closeProfileModal() { document.getElementById('profileModal').classList.remove('active'); editingProfile = null; }
 async function saveProfile() {
@@ -372,7 +388,14 @@ async function saveProfile() {
   if (v('pApiKey')) body.apiKey = v('pApiKey');
   if (v('pAuthHeader')) body.authHeader = v('pAuthHeader');
   if (v('pAuthPrefix')) body.authPrefix = v('pAuthPrefix');
-  if (v('pAccessKey')) body.accessKey = v('pAccessKey');
+  const authMode = v('pAuthMode');
+  body.authMode = authMode;
+  if (authMode === 'accessKey' && v('pAccessKey')) body.accessKey = v('pAccessKey');
+  if (authMode === 'login') {
+    body.require2fa = document.getElementById('pRequire2fa').checked;
+    body.isWebApp = document.getElementById('pIsWebApp').checked;
+  }
+  body.disableLogs = document.getElementById('pDisableLogs').checked;
   const blocked = v('pBlocked'); if (blocked) body.blockedExtensions = blocked.split(',').map(s => s.trim()).filter(Boolean);
   const allowedIps = IpTagInput.getValue('pAllowedIps'); if (allowedIps.length) body.allowedIps = allowedIps;
   try {
@@ -421,6 +444,296 @@ async function reloadProfiles() {
 }
 async function restartProfileAction(name) {
   try { const res = await api('/admin/profiles/' + encodeURIComponent(name) + '/restart', { method: 'POST' }); if ((await res.json()).status) { toast('Proxy "' + name + '" restarted'); await fetchProfiles(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+// ─── Global Proxy Users ─────────────────────────────────────────────────────
+let _allProxyUsers = [];
+
+async function fetchProxyUsers() {
+  try {
+    const res = await api('/admin/proxy-users');
+    if (!res.ok) return;
+    const d = await res.json();
+    _allProxyUsers = d.users || [];
+    document.getElementById('navProxyUserBadge').textContent = _allProxyUsers.length;
+    renderProxyUsers(_allProxyUsers);
+  } catch {}
+}
+
+function renderProxyUsers(users) {
+  const c = document.getElementById('proxyUserListBody');
+  if (!c) return;
+  if (users.length === 0) {
+    c.innerHTML = '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">No users yet. Click "+ New User".</td></tr>';
+    return;
+  }
+  c.innerHTML = users.map(u => {
+    const twoFa = u.totpEnabled
+      ? '<span style="color:var(--green)">Enabled</span>'
+      : '<span style="color:var(--text3)">Off</span>';
+    const profiles = (u.profiles || []).map(p => `<span style="background:var(--surface2);padding:1px 6px;border-radius:3px;font-size:11px;font-family:monospace">${esc(p)}</span>`).join(' ');
+    return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
+      <td style="padding:8px 12px;font-weight:600">${esc(u.username)}</td>
+      <td style="padding:8px">${twoFa}</td>
+      <td style="padding:8px">${profiles || '<span style="color:var(--text3)">None</span>'}</td>
+      <td style="padding:8px;color:var(--text3);font-size:12px">${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '-'}</td>
+      <td style="padding:8px 12px;text-align:right;white-space:nowrap">
+        <button onclick="openUserProfilesModal(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Manage proxies">Proxies</button>
+        <button onclick="resetProxyUserPw(${u.id})" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Reset password">Reset Pw</button>
+        ${u.totpEnabled ? `<button onclick="reset2fa(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--orange);font-size:11px;margin-right:4px" title="Reset 2FA">Reset 2FA</button>` : ''}
+        <button onclick="deleteProxyUserAction(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px" title="Delete user">Delete</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function openNewProxyUserModal() {
+  document.getElementById('npuUsername').value = '';
+  document.getElementById('npuPassword').value = '';
+  document.getElementById('npuError').style.display = 'none';
+  document.getElementById('newProxyUserModal').classList.add('active');
+  // Build profile checkboxes — fetch fresh
+  const container = document.getElementById('npuProfileChecks');
+  container.innerHTML = '<span style="font-size:12px;color:var(--text3)">Loading...</span>';
+  try {
+    const res = await api('/admin/profiles');
+    const profiles = res.ok ? ((await res.json()).profiles || []) : _allProfiles;
+    const loginProfiles = profiles.filter(p => (p.authMode || 'none') === 'login');
+    if (loginProfiles.length === 0) {
+      container.innerHTML = '<span style="font-size:12px;color:var(--text3)">No proxies with login auth mode. Create one first.</span>';
+    } else {
+      container.innerHTML = loginProfiles.map(p =>
+        `<label style="display:flex;align-items:center;gap:6px;padding:3px 0;cursor:pointer;font-size:13px"><input type="checkbox" value="${esc(p.name)}" style="accent-color:var(--accent)"> ${esc(p.name)}</label>`
+      ).join('');
+    }
+  } catch {
+    container.innerHTML = '<span style="font-size:12px;color:var(--red)">Failed to load proxies.</span>';
+  }
+}
+function closeNewProxyUserModal() { document.getElementById('newProxyUserModal').classList.remove('active'); }
+
+async function saveNewProxyUser() {
+  const errEl = document.getElementById('npuError');
+  errEl.style.display = 'none';
+  const username = document.getElementById('npuUsername').value.trim();
+  const password = document.getElementById('npuPassword').value;
+  if (!username || username.length < 2) { errEl.textContent = 'Username must be at least 2 characters'; errEl.style.display = 'block'; return; }
+  if (!password || password.length < 6) { errEl.textContent = 'Password must be at least 6 characters'; errEl.style.display = 'block'; return; }
+  const profiles = [...document.querySelectorAll('#npuProfileChecks input:checked')].map(c => c.value);
+  try {
+    const res = await api('/admin/proxy-users', {
+      method: 'POST', body: JSON.stringify({ username, password, profiles }),
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || 'Failed'; errEl.style.display = 'block'; return; }
+    toast('User "' + username + '" created');
+    closeNewProxyUserModal();
+    fetchProxyUsers();
+  } catch (e) { errEl.textContent = 'Error: ' + e.message; errEl.style.display = 'block'; }
+}
+
+async function deleteProxyUserAction(id, username) {
+  if (!confirm('Delete user "' + username + '"? This will revoke all profile access.')) return;
+  try {
+    const res = await api('/admin/proxy-users/' + id, { method: 'DELETE' });
+    if (res.ok) { toast('User deleted'); fetchProxyUsers(); } else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function resetProxyUserPw(id) {
+  const newPass = prompt('Enter new password (min 6 characters):');
+  if (!newPass) return;
+  if (newPass.length < 6) { toast('Password must be at least 6 characters', 'error'); return; }
+  try {
+    const res = await api('/admin/proxy-users/' + id, { method: 'PUT', body: JSON.stringify({ password: newPass }) });
+    if (res.ok) { toast('Password updated'); } else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function reset2fa(id, username) {
+  if (!confirm('Reset 2FA for "' + username + '"? They will need to set it up again on next login.')) return;
+  try {
+    const res = await api('/admin/proxy-users/' + id, { method: 'PUT', body: JSON.stringify({ reset2fa: true }) });
+    if (res.ok) { toast('2FA reset'); fetchProxyUsers(); } else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+// ─── Profile ↔ User Association ─────────────────────────────────────────────
+let _profileUsersProfile = null;
+
+function openProxyUsersModal(profileName) {
+  _profileUsersProfile = profileName;
+  document.getElementById('profileUsersTitle').textContent = 'Users — ' + profileName;
+  document.getElementById('profileUsersModal').classList.add('active');
+  refreshProfileUsers();
+}
+function closeProfileUsersModal() {
+  document.getElementById('profileUsersModal').classList.remove('active');
+  _profileUsersProfile = null;
+}
+
+async function refreshProfileUsers() {
+  if (!_profileUsersProfile) return;
+  const body = document.getElementById('pfuListBody');
+  body.innerHTML = '<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--text3)">Loading...</td></tr>';
+  try {
+    const [assignedRes, allRes] = await Promise.all([
+      api('/admin/profiles/' + encodeURIComponent(_profileUsersProfile) + '/users'),
+      api('/admin/proxy-users'),
+    ]);
+    if (!assignedRes.ok) {
+      const err = await assignedRes.json().catch(() => ({}));
+      body.innerHTML = `<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--red)">${esc(err.error || 'Failed to load')}</td></tr>`;
+      return;
+    }
+    const [assignedData, allData] = await Promise.all([
+      assignedRes.json(),
+      allRes.ok ? allRes.json() : Promise.resolve({ users: _allProxyUsers }),
+    ]);
+    const assigned = assignedData.users || [];
+    const allUsers = allData.users || _allProxyUsers;
+    const assignedIds = new Set(assigned.map(u => u.id));
+
+    // Populate the "add" dropdown with unassigned users
+    const sel = document.getElementById('pfuAddSelect');
+    sel.innerHTML = '<option value="">Select user to add...</option>';
+    allUsers.filter(u => !assignedIds.has(u.id)).forEach(u => {
+      sel.innerHTML += `<option value="${u.id}">${esc(u.username)}</option>`;
+    });
+
+    if (assigned.length === 0) {
+      body.innerHTML = '<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--text3)">No users assigned. Use the dropdown above.</td></tr>';
+      return;
+    }
+    body.innerHTML = assigned.map(u => `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px 12px;font-weight:600">${esc(u.username)}</td>
+      <td style="padding:8px">${u.totpEnabled ? '<span style="color:var(--green)">Enabled</span>' : '<span style="color:var(--text3)">Off</span>'}</td>
+      <td style="padding:8px 12px;text-align:right">
+        <button onclick="removeUserFromProfile(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px" title="Remove access">Remove</button>
+      </td>
+    </tr>`).join('');
+  } catch (e) {
+    body.innerHTML = '<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--red)">Error: ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+async function assignUserToCurrentProfile() {
+  if (!_profileUsersProfile) return;
+  const sel = document.getElementById('pfuAddSelect');
+  const assignBtn = sel.nextElementSibling;
+  const userId = parseInt(sel.value, 10);
+  if (!userId) { toast('Select a user first', 'error'); return; }
+  sel.disabled = true;
+  assignBtn.disabled = true;
+  assignBtn.textContent = 'Assigning...';
+  try {
+    const res = await api('/admin/profiles/' + encodeURIComponent(_profileUsersProfile) + '/users', {
+      method: 'POST', body: JSON.stringify({ userId }),
+    });
+    if (res.ok) {
+      toast('User assigned');
+      await refreshProfileUsers();
+      fetchProxyUsers();
+    } else {
+      const d = await res.json();
+      toast(d.error || 'Failed', 'error');
+    }
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+  } finally {
+    sel.disabled = false;
+    assignBtn.disabled = false;
+    assignBtn.textContent = 'Assign';
+  }
+}
+
+async function removeUserFromProfile(userId, username) {
+  if (!_profileUsersProfile) return;
+  if (!confirm('Remove "' + username + '" from this profile?')) return;
+  const btn = document.querySelector(`#pfuListBody button[onclick*="removeUserFromProfile(${userId},"]`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Removing...'; }
+  try {
+    const res = await api('/admin/profiles/' + encodeURIComponent(_profileUsersProfile) + '/users/' + userId, { method: 'DELETE' });
+    if (res.ok) { toast('User removed'); await refreshProfileUsers(); fetchProxyUsers(); }
+    else { const d = await res.json(); toast(d.error || 'Failed', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Remove'; } }
+  } catch (e) { toast('Error: ' + e.message, 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Remove'; } }
+}
+
+// ─── User ↔ Profile Association (from user side) ─────────────────────────────
+let _userProfilesUserId = null;
+let _userProfilesUsername = null;
+
+function openUserProfilesModal(userId, username) {
+  _userProfilesUserId = userId;
+  _userProfilesUsername = username;
+  document.getElementById('userProfilesTitle').textContent = 'Proxies — ' + username;
+  document.getElementById('userProfilesModal').classList.add('active');
+  refreshUserProfiles();
+}
+function closeUserProfilesModal() {
+  document.getElementById('userProfilesModal').classList.remove('active');
+  _userProfilesUserId = null;
+  _userProfilesUsername = null;
+}
+
+async function refreshUserProfiles() {
+  if (!_userProfilesUserId) return;
+  const body = document.getElementById('upListBody');
+  try {
+    const [allProfilesRes, allUsersRes] = await Promise.all([
+      api('/admin/profiles'),
+      api('/admin/proxy-users'),
+    ]);
+    const allProfiles = allProfilesRes.ok ? (await allProfilesRes.json()).profiles || [] : _allProfiles;
+    const allUsers = allUsersRes.ok ? (await allUsersRes.json()).users || [] : _allProxyUsers;
+    const user = allUsers.find(u => u.id === _userProfilesUserId);
+    const assignedNames = new Set((user?.profiles || []).map(p => p.toLowerCase()));
+    const loginProfiles = allProfiles.filter(p => (p.authMode || 'none') === 'login');
+
+    // Dropdown: unassigned login profiles
+    const sel = document.getElementById('upAddSelect');
+    sel.innerHTML = '<option value="">Select proxy to assign...</option>';
+    loginProfiles.filter(p => !assignedNames.has(p.name.toLowerCase())).forEach(p => {
+      sel.innerHTML += `<option value="${esc(p.name)}">${esc(p.name)}</option>`;
+    });
+
+    const assigned = loginProfiles.filter(p => assignedNames.has(p.name.toLowerCase()));
+    if (assigned.length === 0) {
+      body.innerHTML = '<tr><td colspan="2" style="padding:20px;text-align:center;color:var(--text3)">No proxies assigned.</td></tr>';
+      return;
+    }
+    body.innerHTML = assigned.map(p => `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px 12px;font-weight:600;font-family:monospace">${esc(p.name)}</td>
+      <td style="padding:8px 12px;text-align:right">
+        <button onclick="removeProfileFromCurrentUser('${esc(p.name)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px">Remove</button>
+      </td>
+    </tr>`).join('');
+  } catch (e) {
+    body.innerHTML = '<tr><td colspan="2" style="padding:20px;text-align:center;color:var(--red)">Error: ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+async function assignProfileToCurrentUser() {
+  if (!_userProfilesUserId) return;
+  const profileName = document.getElementById('upAddSelect').value;
+  if (!profileName) { toast('Select a proxy first', 'error'); return; }
+  try {
+    const res = await api('/admin/profiles/' + encodeURIComponent(profileName) + '/users', {
+      method: 'POST', body: JSON.stringify({ userId: _userProfilesUserId }),
+    });
+    if (res.ok) { toast('Proxy assigned'); refreshUserProfiles(); fetchProxyUsers(); }
+    else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function removeProfileFromCurrentUser(profileName) {
+  if (!_userProfilesUserId) return;
+  if (!confirm('Remove access to "' + profileName + '"?')) return;
+  try {
+    const res = await api('/admin/profiles/' + encodeURIComponent(profileName) + '/users/' + _userProfilesUserId, { method: 'DELETE' });
+    if (res.ok) { toast('Access removed'); refreshUserProfiles(); fetchProxyUsers(); }
+    else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 // ─── Target CRUD ─────────────────────────────────────────────────────────────

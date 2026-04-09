@@ -8,6 +8,10 @@ export interface ProxyProfile {
   authHeader?: string;    // Header name for the API key (e.g., "Authorization")
   authPrefix?: string;    // Optional prefix (e.g., "Bearer", "App")
   accessKey?: string;     // Optional key to protect the public link
+  authMode?: 'none' | 'accessKey' | 'login'; // Auth mode: none=public, accessKey=static key, login=user login with JWT
+  require2fa?: boolean;   // If true, users MUST have TOTP enabled to access this profile (login mode only)
+  isWebApp?: boolean;     // If true, treat as a web application (show login page instead of JSON 401)
+  disableLogs?: boolean;  // If true, skip request/response logging for this profile
   blockedExtensions?: Set<string>; // Optional set of blocked file extensions
   allowedIps?: string[];  // Optional IP allowlist (exact, CIDR, wildcard). Empty = unrestricted.
 }
@@ -86,6 +90,16 @@ export interface Config {
 export interface AuthUser {
   id: number;
   username: string;
+  createdAt: string;
+}
+
+/**
+ * A global proxy user that can be granted access to one or more profiles.
+ */
+export interface ProxyUser {
+  id: number;
+  username: string;
+  totpEnabled: boolean;
   createdAt: string;
 }
 
