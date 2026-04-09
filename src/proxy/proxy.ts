@@ -121,7 +121,8 @@ export async function handleProxyRequest(
     req: Request,
     url: URL,
     profiles: ProxyProfile[],
-    startTime: number
+    startTime: number,
+    renderLoginHtml?: (profileName: string, require2fa: boolean) => string
 ): Promise<Response> {
     // Parse: /proxy/{profileName}/...rest
     const pathParts = url.pathname.split('/');
@@ -202,7 +203,7 @@ export async function handleProxyRequest(
                 fixedUrl.searchParams.set('key', resolvedKey);
             }
 
-            return handleProxyRequest(req, fixedUrl, profiles, startTime);
+            return handleProxyRequest(req, fixedUrl, profiles, startTime, renderLoginHtml);
         }
 
         const available = Array.from(map.keys()).join(', ') || 'none';
@@ -231,6 +232,13 @@ export async function handleProxyRequest(
                 const isSubResource = isAssetRequest(remainingPath, req.headers.get('accept'));
                 if (isSubResource) {
                     return jsonResponse(401, { error: 'Unauthorized' });
+                }
+                if (renderLoginHtml) {
+                    const html = renderLoginHtml(profile.name, !!profile.require2fa);
+                    return new Response(html, {
+                        status: 401,
+                        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                    });
                 }
                 const redirectTo = encodeURIComponent(url.pathname + url.search);
                 return new Response(null, {
@@ -644,6 +652,7 @@ export async function handleDirectProxy(
     req: Request,
     profile: ProxyProfile,
     startTime: number,
+    renderLoginHtml?: (profileName: string, require2fa: boolean) => string
 ): Promise<Response> {
     const url = new URL(req.url);
     const pathWithSearch = url.pathname + url.search;
@@ -673,6 +682,13 @@ export async function handleDirectProxy(
                 const isSubResource = isAssetRequest(url.pathname, accept);
                 if (isSubResource) {
                     return jsonResponse(401, { error: 'Unauthorized' });
+                }
+                if (renderLoginHtml) {
+                    const html = renderLoginHtml(profile.name, !!profile.require2fa);
+                    return new Response(html, {
+                        status: 401,
+                        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                    });
                 }
                 const redirectTo = encodeURIComponent(url.pathname + url.search);
                 return new Response(null, {
@@ -1090,6 +1106,11 @@ function isAssetRequest(path: string, accept: string | null): boolean {
     // Check file extension
     const ext = getExtFromPath(path);
     if (ext && ASSET_EXTENSIONS.has(ext)) return true;
+    
+    // If the browser explicitly accepts HTML, it is requesting a document, not a sub-resource
+    // (Modern browsers include image/webp in the Accept header for documents)
+    if (accept && accept.includes('text/html')) return false;
+
     // Check Accept header — browsers send specific accept types for sub-resources
     if (accept) {
         if (accept.includes('text/css')) return true;

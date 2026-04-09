@@ -172,7 +172,13 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                 }
             }
 
-            return handleDirectProxy(req, profile, startTime);
+            const renderLoginHtml = (profileName: string, require2fa: boolean) => {
+                return proxyLoginHtml
+                    .replace(/\{\{PROFILE_NAME\}\}/g, profileName)
+                    .replace(/\{\{REQUIRE_2FA\}\}/g, require2fa ? 'true' : 'false');
+            };
+
+            return handleDirectProxy(req, profile, startTime, renderLoginHtml);
         },
         error(err: Error) {
             console.error(`[proxy:${profile.name}] server error:`, err);

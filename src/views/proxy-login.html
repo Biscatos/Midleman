@@ -407,8 +407,15 @@
           btn.innerHTML = '<span class="spinner"></span>';
         }
       }
-      const redirect = new URLSearchParams(window.location.search).get('redirect') || '/';
-      window.location.href = redirect;
+      const searchParams = new URLSearchParams(window.location.search);
+      const redirect = searchParams.get('redirect');
+      if (redirect) {
+        window.location.href = redirect;
+      } else if (window.location.pathname.endsWith('/auth/login')) {
+        window.location.href = '/';
+      } else {
+        window.location.reload();
+      }
     }
 
     function copySecret() {
