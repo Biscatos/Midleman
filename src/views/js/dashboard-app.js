@@ -87,7 +87,7 @@ function showAuthError(id, msg) {
   const el = document.getElementById(id);
   el.textContent = msg; el.style.display = 'block';
 }
-function hideAuthError(id) { document.getElementById(id).style.display = 'none'; }
+function hideAuthError(id) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
 
 async function setupStep2() {
   hideAuthError('setupError');
