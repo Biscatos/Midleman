@@ -124,25 +124,7 @@ export async function assignProxyPort(name: string, adminPort: number, excludePo
     return port;
 }
 
-/**
- * Assign a single new port for a target (e.g., added via admin API).
- */
-export async function assignTargetPort(name: string, configuredPort: number, adminPort: number, excludePorts: number[]): Promise<number> {
-    if (configuredPort > 0) {
-        portMap.targets[name] = configuredPort;
-        save();
-        return configuredPort;
-    }
-    const proxies = Object.values(portMap.proxies);
-    const targetsWithoutSelf = Object.entries(portMap.targets).filter(([k]) => k !== name).map(([_, v]) => v);
-    const webhooks = Object.values(portMap.webhooks || {});
-    
-    const used = new Set<number>([adminPort, ...excludePorts, ...proxies, ...targetsWithoutSelf, ...webhooks]);
-    const port = await allocate(used, portMap.targets[name]);
-    portMap.targets[name] = port;
-    save();
-    return port;
-}
+
 
 /**
  * Assign a single new port for a webhook distributor (e.g., added via admin API).
@@ -170,10 +152,7 @@ export function releaseProxyPort(name: string): void {
     save();
 }
 
-export function releaseTargetPort(name: string): void {
-    delete portMap.targets[name];
-    save();
-}
+
 
 export function releaseWebhookPort(name: string): void {
     delete portMap.webhooks[name];
@@ -184,9 +163,7 @@ export function getProxyPort(name: string): number | undefined {
     return portMap.proxies[name];
 }
 
-export function getTargetPort(name: string): number | undefined {
-    return portMap.targets[name];
-}
+
 
 export function getWebhookPort(name: string): number | undefined {
     return portMap.webhooks[name];

@@ -79,6 +79,26 @@
       background: #005ea6;
     }
 
+    .topbar-right a.gh {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #a1a1aa;
+      border: 1px solid #27272a;
+    }
+
+    .topbar-right a.gh:hover {
+      color: #e4e4e7;
+      border-color: #3f3f46;
+      background: #18181b;
+    }
+
+    .topbar-right a.gh svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+
     /* main content */
     .main {
       max-width: 580px;
@@ -268,10 +288,80 @@
     /* footer */
     footer {
       max-width: 580px;
-      margin: 40px auto;
+      margin: 48px auto 32px;
       padding: 0 24px;
+    }
+
+    .footer-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 0;
+      border-top: 1px solid #1a1a1f;
+    }
+
+    .footer-brand {
       font-size: 12px;
-      color: #27272a;
+      color: #3f3f46;
+    }
+
+    .gh-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid #27272a;
+      text-decoration: none;
+      transition: border-color 0.15s;
+    }
+
+    .gh-badge:hover {
+      border-color: #3f3f46;
+    }
+
+    .gh-badge-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      background: #18181b;
+      color: #d4d4d8;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .gh-badge-left svg {
+      width: 15px;
+      height: 15px;
+      fill: currentColor;
+    }
+
+    .gh-stat {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 5px 9px;
+      background: #111114;
+      color: #71717a;
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      border-left: 1px solid #27272a;
+      transition: color 0.15s;
+    }
+
+    .gh-badge:hover .gh-stat {
+      color: #a1a1aa;
+    }
+
+    .gh-stat svg {
+      width: 12px;
+      height: 12px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
 
     @media (max-width: 600px) {
@@ -315,6 +405,10 @@
       <span>Midleman</span>
     </div>
     <div class="topbar-right">
+      <a href="https://github.com/Biscatos/Midleman" class="gh" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
       <a href="/health">Status</a>
       <a href="/dashboard" class="primary">Dashboard</a>
     </div>
@@ -393,7 +487,25 @@
 
   </main>
 
-  <footer>midleman</footer>
+  <footer>
+    <div class="footer-inner">
+      <span class="footer-brand">midleman &mdash; open source</span>
+      <a href="https://github.com/Biscatos/Midleman" class="gh-badge" target="_blank" rel="noopener">
+        <span class="gh-badge-left">
+          <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          Midleman
+        </span>
+        <span class="gh-stat" id="ghStars">
+          <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          &mdash;
+        </span>
+        <span class="gh-stat" id="ghForks">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></svg>
+          &mdash;
+        </span>
+      </a>
+    </div>
+  </footer>
 
   <script>
     (async () => {
@@ -427,6 +539,19 @@
         gStatus.textContent = 'offline';
         gStatus.classList.add('err');
       }
+    })();
+
+    // Fetch GitHub stats
+    (async () => {
+      try {
+        const r = await fetch('https://api.github.com/repos/Biscatos/Midleman');
+        if (!r.ok) return;
+        const d = await r.json();
+        const stars = document.getElementById('ghStars');
+        const forks = document.getElementById('ghForks');
+        if (stars) stars.innerHTML = stars.querySelector('svg').outerHTML + ' ' + (d.stargazers_count ?? 0);
+        if (forks) forks.innerHTML = forks.querySelector('svg').outerHTML + ' ' + (d.forks_count ?? 0);
+      } catch {}
     })();
   </script>
 </body>

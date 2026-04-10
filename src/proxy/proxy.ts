@@ -1,6 +1,6 @@
 import type { ProxyProfile } from '../core/types';
 import { startProxySpan, endProxySpan, recordProxyBlocked, recordProxyRedirect } from '../telemetry/telemetry';
-import { logRequest, captureRequestBody, headersToRecord } from '../telemetry/request-log';
+import { logRequest, captureRequestBody, captureResponseBody, headersToRecord } from '../telemetry/request-log';
 import { isIpAllowed } from '../core/ip-filter';
 import { verifyJwt } from '../auth/auth';
 
@@ -606,7 +606,12 @@ if(location.pathname===P.slice(0,-1)){_r.call(history,null,"",P+location.search+
         });
     }
 
-    // Non-HTML: log metadata only, stream body directly without buffering.
+    // Non-HTML: capture response body for logging, then stream.
+    let resCapture: { body: string | null; size: number } = { body: null, size: 0 };
+    if (!profile.disableLogs) {
+        resCapture = await captureResponseBody(targetResponse);
+    }
+
     if (!profile.disableLogs) logRequest({
         requestId,
         type: 'proxy',
@@ -621,8 +626,8 @@ if(location.pathname===P.slice(0,-1)){_r.call(history,null,"",P+location.search+
         resStatus: targetResponse.status,
         resStatusText: targetResponse.statusText,
         resHeaders: headersToRecord(responseHeaders),
-        resBody: null,
-        resBodySize: parseInt(targetResponse.headers.get('content-length') || '0', 10),
+        resBody: resCapture.body,
+        resBodySize: resCapture.size || parseInt(targetResponse.headers.get('content-length') || '0', 10),
         durationMs,
     });
 
@@ -921,7 +926,12 @@ export async function handleDirectProxy(
 
     endProxySpan(otelSpan, profileName, targetResponse.status, durationMs);
 
-    // Log metadata only — stream body directly without buffering.
+    // Non-HTML: capture response body for logging, then stream.
+    let resCapture: { body: string | null; size: number } = { body: null, size: 0 };
+    if (!profile.disableLogs) {
+        resCapture = await captureResponseBody(targetResponse);
+    }
+
     if (!profile.disableLogs) logRequest({
         requestId, type: 'proxy', profileName,
         method: req.method, path: url.pathname, targetUrl: currentUrl, clientIp,
@@ -929,8 +939,8 @@ export async function handleDirectProxy(
         reqBody: reqCapture.body, reqBodySize: reqCapture.size,
         resStatus: targetResponse.status, resStatusText: targetResponse.statusText,
         resHeaders: headersToRecord(responseHeaders),
-        resBody: null,
-        resBodySize: parseInt(targetResponse.headers.get('content-length') || '0', 10),
+        resBody: resCapture.body,
+        resBodySize: resCapture.size || parseInt(targetResponse.headers.get('content-length') || '0', 10),
         durationMs,
     });
 

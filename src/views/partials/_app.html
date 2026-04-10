@@ -1,789 +1,813 @@
-  <div class="app" style="display:none">
-    <nav class="navbar">
-      <div class="navbar-inner">
-        <a class="navbar-brand" href="/dashboard">
-          <img src="/logo.png" alt="Midleman">
-          <span class="navbar-brand-name"><span>Mid</span>leman</span>
+<div class="app" style="display:none">
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <a class="navbar-brand" href="/dashboard">
+        <img src="/logo.png" alt="Midleman">
+        <span class="navbar-brand-name"><span>Mid</span>leman</span>
+      </a>
+
+      <div class="navbar-nav">
+        <button class="nav-link active" data-page="overview" onclick="navigate('overview')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="9" rx="1" />
+            <rect x="14" y="3" width="7" height="5" rx="1" />
+            <rect x="14" y="12" width="7" height="9" rx="1" />
+            <rect x="3" y="16" width="7" height="5" rx="1" />
+          </svg>
+          Overview
+        </button>
+        <button class="nav-link" data-page="requests" onclick="navigate('requests')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+          </svg>
+          Requests
+          <span class="nav-badge" id="navReqBadge">0</span>
+        </button>
+        <button class="nav-link" data-page="profiles" onclick="navigate('profiles')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <rect x="2" y="7" width="20" height="14" rx="2" />
+            <path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16" />
+          </svg>
+          Proxies
+          <span class="nav-badge" id="navProfileBadge">0</span>
+        </button>
+        <button class="nav-link" data-page="webhooks" onclick="navigate('webhooks')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+            <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+            <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+            <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+          </svg>
+          Webhooks
+          <span class="nav-badge" id="navWebhookBadge">0</span>
+        </button>
+
+        <button class="nav-link" data-page="proxyusers" onclick="navigate('proxyusers')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4-4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M22 21v-2a4 4 0 00-3-3.87" />
+            <path d="M16 3.13a4 4 0 010 7.75" />
+          </svg>
+          Users
+          <span class="nav-badge" id="navProxyUserBadge">0</span>
+        </button>
+      </div>
+
+      <div class="navbar-right">
+        <div class="navbar-status">
+          <span class="status-dot offline" id="navDot"></span>
+          <span id="navStatus">Connecting...</span>
+          <span id="navUptime" style="color:var(--text3)"></span>
+        </div>
+        <span class="navbar-user" id="navUser"></span>
+        <a href="https://github.com/Biscatos/Midleman" target="_blank" rel="noopener" class="theme-toggle"
+          title="GitHub Repository" style="text-decoration:none">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z" />
+          </svg>
         </a>
-
-        <div class="navbar-nav">
-          <button class="nav-link active" data-page="overview" onclick="navigate('overview')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round">
-              <rect x="3" y="3" width="7" height="9" rx="1" />
-              <rect x="14" y="3" width="7" height="5" rx="1" />
-              <rect x="14" y="12" width="7" height="9" rx="1" />
-              <rect x="3" y="16" width="7" height="5" rx="1" />
-            </svg>
-            Overview
-          </button>
-          <button class="nav-link" data-page="requests" onclick="navigate('requests')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-            </svg>
-            Requests
-            <span class="nav-badge" id="navReqBadge">0</span>
-          </button>
-          <button class="nav-link" data-page="targets" onclick="navigate('targets')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round">
-              <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-            </svg>
-            Targets
-            <span class="nav-badge" id="navTargetBadge">0</span>
-          </button>
-          <button class="nav-link" data-page="webhooks" onclick="navigate('webhooks')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M3 7V5a2 2 0 0 1 2-2h2" />
-              <path d="M17 3h2a2 2 0 0 1 2 2v2" />
-              <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
-              <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
-            </svg>
-            Webhooks
-            <span class="nav-badge" id="navWebhookBadge">0</span>
-          </button>
-          <button class="nav-link" data-page="profiles" onclick="navigate('profiles')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round">
-              <rect x="2" y="7" width="20" height="14" rx="2" />
-              <path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16" />
-            </svg>
-            Proxies
-            <span class="nav-badge" id="navProfileBadge">0</span>
-          </button>
-          <button class="nav-link" data-page="proxyusers" onclick="navigate('proxyusers')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round">
-              <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4-4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M22 21v-2a4 4 0 00-3-3.87" />
-              <path d="M16 3.13a4 4 0 010 7.75" />
-            </svg>
-            Users
-            <span class="nav-badge" id="navProxyUserBadge">0</span>
-          </button>
-        </div>
-
-        <div class="navbar-right">
-          <div class="navbar-status">
-            <span class="status-dot offline" id="navDot"></span>
-            <span id="navStatus">Connecting...</span>
-            <span id="navUptime" style="color:var(--text3)"></span>
-          </div>
-          <span class="navbar-user" id="navUser"></span>
-          <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeBtn">&#9790;</button>
-          <button class="logout-btn" onclick="doLogout()" title="Logout">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-              stroke-linecap="round" stroke-linejoin="round">
-              <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-          </button>
-        </div>
-      </div>
-    </nav>
-
-    <div class="content">
-      <!-- ═══ OVERVIEW ═══ -->
-      <div class="page active" id="pageOverview">
-        <div class="page-header">
-          <h2>Dashboard</h2>
-          <p><span class="live-dot"></span>Real-time overview</p>
-        </div>
-
-        <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-label">Status</div>
-            <div class="stat-value" id="ovStatus" style="color:var(--text3)">--</div>
-            <div class="stat-sub" id="ovUptime"></div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Requests</div>
-            <div class="stat-value" id="ovActive">--</div>
-            <div class="stat-sub">in-flight</div>
-          </div>
-          <div class="stat-card" style="cursor:pointer" onclick="navigate('profiles')">
-            <div class="stat-label">Proxies</div>
-            <div class="stat-value" id="ovProfiles">--</div>
-            <div class="stat-sub" id="ovProfileNames"></div>
-          </div>
-          <div class="stat-card" style="cursor:pointer" onclick="navigate('webhooks')">
-            <div class="stat-label">Webhooks</div>
-            <div class="stat-value" id="ovWebhooks">--</div>
-            <div class="stat-sub">active fans</div>
-          </div>
-        </div>
-
-        <!-- Charts -->
-        <div class="charts-row">
-          <div class="chart-card">
-            <div class="chart-header">Traffic <span id="chartTrafficLabel">last 24h</span></div>
-            <div class="chart-body" style="position:relative">
-              <canvas id="chartTimeline" height="160" style="cursor:crosshair"></canvas>
-              <div id="chartTooltip" style="display:none;position:fixed;z-index:999;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;box-shadow:var(--shadow);pointer-events:none;white-space:nowrap"></div>
-            </div>
-          </div>
-          <div class="chart-card">
-            <div class="chart-header">Breakdown</div>
-            <div class="chart-body" id="chartBreakdown">
-              <div style="color:var(--text3);font-size:13px;text-align:center;padding:20px">Loading...</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Quick metrics -->
-        <div class="card" id="ovQuickMetricsCard">
-          <div class="card-header">
-            <h3>Activity</h3>
-            <button class="btn btn-sm btn-ghost" onclick="navigate('requests')">View all &rarr;</button>
-          </div>
-          <div class="card-body" id="ovQuickMetrics">
-            <div style="color:var(--text3);font-size:14px;text-align:center;padding:20px">Loading...</div>
-          </div>
-        </div>
-
-        <!-- Recent requests live feed -->
-        <div class="card">
-          <div class="card-header">
-            <h3>Recent Requests</h3>
-            <span style="font-size:12px;color:var(--text3);font-family:'JetBrains Mono',monospace" id="ovFeedCount"></span>
-          </div>
-          <div class="card-body" style="padding:0;overflow-x:auto">
-            <table style="width:100%;border-collapse:collapse;font-size:13px">
-              <thead>
-                <tr style="background:var(--surface2);text-align:left">
-                  <th style="padding:8px 12px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Time</th>
-                  <th style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Type</th>
-                  <th style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Method</th>
-                  <th style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Path</th>
-                  <th style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Status</th>
-                  <th style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Duration</th>
-                </tr>
-              </thead>
-              <tbody id="ovRecentBody">
-                <tr>
-                  <td colspan="6" style="padding:30px;text-align:center;color:var(--text3)">Waiting for requests...</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- ═══ REQUEST LOG ═══ -->
-      <div class="page" id="pageRequests">
-        <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
-          <div>
-            <h2>Request Log</h2>
-            <p>Full request/response history with payload details. <span id="reqLogStats"
-                style="color:var(--text3)"></span></p>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px">
-              <input type="checkbox" id="rlAutoRefresh" checked style="accent-color:var(--accent)"> Auto-refresh
-            </label>
-            <button class="btn btn-sm" onclick="fetchRequestLogs()">Refresh</button>
-          </div>
-        </div>
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-body" style="padding:12px 16px">
-            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-              <input type="text" id="rlSearch" placeholder="Search path, URL, request ID..."
-                style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
-                onkeydown="if(event.key==='Enter')fetchRequestLogs()">
-              <select id="rlType"
-                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
-                onchange="fetchRequestLogs()">
-                <option value="">All types</option>
-                <option value="target">Target</option>
-                <option value="proxy">Proxy</option>
-                <option value="webhook">Webhook</option>
-              </select>
-              <select id="rlMethod"
-                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
-                onchange="fetchRequestLogs()">
-                <option value="">All methods</option>
-                <option value="GET">GET</option>
-                <option value="POST">POST</option>
-                <option value="PUT">PUT</option>
-                <option value="PATCH">PATCH</option>
-                <option value="DELETE">DELETE</option>
-              </select>
-              <select id="rlStatus"
-                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
-                onchange="fetchRequestLogs()">
-                <option value="">All statuses</option>
-                <option value="200">200</option>
-                <option value="201">201</option>
-                <option value="301">301</option>
-                <option value="302">302</option>
-                <option value="400">400</option>
-                <option value="401">401</option>
-                <option value="403">403</option>
-                <option value="404">404</option>
-                <option value="500">500</option>
-                <option value="502">502</option>
-              </select>
-              <button class="btn btn-sm btn-primary" onclick="fetchRequestLogs()">Filter</button>
-            </div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-body" style="padding:0;overflow-x:auto">
-            <table id="reqLogTable" style="width:100%;border-collapse:collapse;font-size:13px">
-              <thead>
-                <tr style="background:var(--surface2);text-align:left">
-                  <th
-                    style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                    Time</th>
-                  <th
-                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                    Type</th>
-                  <th
-                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                    Method</th>
-                  <th
-                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                    Path</th>
-                  <th
-                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                    Status</th>
-                  <th
-                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                    Duration</th>
-                  <th
-                    style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                    Size</th>
-                  <th style="padding:10px 12px"></th>
-                </tr>
-              </thead>
-              <tbody id="reqLogBody">
-                <tr>
-                  <td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <div id="reqLogPagination"
-          style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--text2)">
-          <span id="reqLogInfo"></span>
-          <div style="display:flex;gap:6px">
-            <button class="btn btn-sm" id="rlPrev" onclick="reqLogPrevPage()" disabled>Prev</button>
-            <button class="btn btn-sm" id="rlNext" onclick="reqLogNextPage()" disabled>Next</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Request Detail Modal -->
-      <div id="reqDetailModal"
-        style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);overflow-y:auto">
-        <div class="rdm-panel">
-          <div class="rdm-header">
-            <div class="rdm-header-left">
-              <h3 id="reqDetailTitle" class="rdm-title">Request Detail</h3>
-            </div>
-            <button onclick="closeReqDetail()" class="rdm-close">&times;</button>
-          </div>
-          <div id="reqDetailContent" class="rdm-body"></div>
-        </div>
-      </div>
-
-      <!-- ═══ TARGETS ═══ -->
-      <div class="page" id="pageTargets">
-        <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
-          <div>
-            <h2>Targets</h2>
-            <p>Named forwarding targets, each on its own port.</p>
-          </div>
-          <button class="btn btn-primary btn-sm" onclick="openTargetModal()">+ New Target</button>
-        </div>
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-body" style="padding:12px 16px">
-            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-              <input type="text" id="targetSearch" placeholder="Search name, URL..."
-                style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
-                oninput="filterTargets()">
-              <select id="targetStatusFilter"
-                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
-                onchange="filterTargets()">
-                <option value="">All statuses</option>
-                <option value="running">Running</option>
-                <option value="stopped">Stopped</option>
-              </select>
-              <select id="targetAuthFilter"
-                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
-                onchange="filterTargets()">
-                <option value="">All auth</option>
-                <option value="enabled">Auth enabled</option>
-                <option value="disabled">Auth disabled</option>
-              </select>
-            </div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-body" style="padding:0;overflow-x:auto">
-            <table id="targetTable" style="width:100%;border-collapse:collapse;font-size:13px">
-              <thead>
-                <tr style="background:var(--surface2);text-align:left">
-                  <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Status</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Port</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Target URL</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Forward Path</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Auth</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">In-Flight</th>
-                  <th style="padding:10px 12px"></th>
-                </tr>
-              </thead>
-              <tbody id="targetListBody">
-                <tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- Target Modal -->
-      <div id="targetModal"
-        style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px)">
-        <div
-          style="max-width:560px;margin:60px auto;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)">
-          <div
-            style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border)">
-            <h3 id="targetModalTitle" style="font-size:16px;font-weight:600">New Target</h3>
-            <button onclick="closeTargetModal()"
-              style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
-          </div>
-          <div style="padding:20px">
-            <div class="form-grid" style="gap:12px">
-              <div class="form-group"><label>Name</label><input type="text" id="tName" placeholder="api"></div>
-              <div class="form-group"><label>Target URL</label><input type="text" id="tTargetUrl"
-                  placeholder="https://api.example.com"></div>
-              <div class="form-group"><label>Port (optional, 0 = auto-assign)</label><input type="number" id="tPort"
-                  placeholder="Auto-assign" min="0" max="65535"></div>
-              <div class="form-group"><label style="display:flex;justify-content:space-between;align-items:baseline">Auth Token (optional)<a href="javascript:void(0)" onclick="generateKey('tAuthToken')" style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></label><input type="text" id="tAuthToken"
-                  placeholder="Leave empty for no auth"></div>
-              <div class="form-group" style="flex-direction:row;align-items:center;gap:8px">
-                <input type="checkbox" id="tForwardPath" checked> <label for="tForwardPath" style="margin:0">Forward Path</label>
-              </div>
-              <div class="form-group span-2"><label>Allowed IPs <span style="color:var(--text3);font-weight:400;font-size:11px">— CIDR, wildcard, or exact. Leave empty to allow all.</span></label><div id="tAllowedIps" class="ip-tag-wrap"></div></div>
-            </div>
-            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
-              <button class="btn btn-sm" onclick="closeTargetModal()">Cancel</button>
-              <button class="btn btn-primary btn-sm" onclick="saveTarget()">Save Target</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ═══ WEBHOOKS ═══ -->
-      <div class="page" id="pageWebhooks">
-        <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
-          <div>
-            <h2>Webhooks</h2>
-            <p>Fan-out incoming payloads to multiple destination URLs.</p>
-          </div>
-          <button class="btn btn-primary btn-sm" onclick="openWebhookModal()">+ New Webhook</button>
-        </div>
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-body" style="padding:12px 16px">
-            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-              <input type="text" id="webhookSearch" placeholder="Search name..."
-                style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
-                oninput="filterWebhooks()">
-            </div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-body" style="padding:0;overflow-x:auto">
-            <table id="webhookTable" style="width:100%;border-collapse:collapse;font-size:13px">
-              <thead>
-                <tr style="background:var(--surface2);text-align:left">
-                  <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Status</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Port</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Targets</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Auth</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">In-Flight</th>
-                  <th style="padding:10px 12px"></th>
-                </tr>
-              </thead>
-              <tbody id="webhookListBody">
-                <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- ═══ PROFILES ═══ -->
-      <div class="page" id="pageProfiles">
-        <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
-          <div>
-            <h2>Proxies</h2>
-            <p>Reverse proxies with auth injection — expose any upstream on a dedicated port with credentials hidden from clients.</p>
-          </div>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-sm" onclick="reloadProfiles()">Reload</button>
-            <button class="btn btn-primary btn-sm" onclick="openProfileModal()">+ New Proxy</button>
-          </div>
-        </div>
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-body" style="padding:12px 16px">
-            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-              <input type="text" id="profileSearch" placeholder="Search name, URL..."
-                style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
-                oninput="filterProfiles()">
-              <select id="profileAuthFilter"
-                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
-                onchange="filterProfiles()">
-                <option value="">All auth</option>
-                <option value="enabled">Auth enabled</option>
-                <option value="passthrough">Passthrough</option>
-              </select>
-              <select id="profileAccessFilter"
-                style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
-                onchange="filterProfiles()">
-                <option value="">All access</option>
-                <option value="protected">Protected</option>
-                <option value="public">Public</option>
-              </select>
-            </div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-body" style="padding:0;overflow-x:auto">
-            <table id="profileTable" style="width:100%;border-collapse:collapse;font-size:13px">
-              <thead>
-                <tr style="background:var(--surface2);text-align:left">
-                  <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Status</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Port</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Target URL</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Auth Header</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Access</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Blocked Ext.</th>
-                  <th style="padding:10px 12px"></th>
-                </tr>
-              </thead>
-              <tbody id="profileListBody">
-                <tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- ═══ PROXY USERS ═══ -->
-      <div class="page" id="pageProxyusers">
-        <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
-          <div>
-            <h2>Proxy Users</h2>
-            <p>Global user accounts for proxy login authentication. Assign users to profiles to grant access.</p>
-          </div>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-primary btn-sm" onclick="openNewProxyUserModal()">+ New User</button>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-body" style="padding:0;overflow-x:auto">
-            <table style="width:100%;border-collapse:collapse;font-size:13px">
-              <thead>
-                <tr style="background:var(--surface2);text-align:left">
-                  <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Username</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">2FA</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Profiles</th>
-                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Created</th>
-                  <th style="padding:10px 12px"></th>
-                </tr>
-              </thead>
-              <tbody id="proxyUserListBody">
-                <tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- ═══ SETTINGS ═══ -->
-    </div>
-  </div>
-
-  <!-- Webhook Modal -->
-  <div id="webhookModal"
-    style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;padding:24px 16px">
-    <div
-      style="max-width:600px;width:100%;max-height:90vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)">
-      <div
-        style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0">
-        <h3 id="webhookModalTitle" style="font-size:16px;font-weight:600">New Webhook Distributor</h3>
-        <button onclick="closeWebhookModal()"
-          style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
-      </div>
-      <div style="padding:20px;overflow-y:auto;flex:1">
-        <div class="form-grid" style="gap:12px">
-          <div class="form-group">
-            <label>Name</label>
-            <input type="text" id="wName" placeholder="payments-fanout"
-              pattern="[a-z0-9_\-]+"
-              oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9_\-]/g,'')"
-              autocomplete="off" spellcheck="false">
-            <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">Lowercase letters, numbers, <code>-</code> and <code>_</code> only. No spaces.</span>
-          </div>
-          <div class="form-group"><label>Port (optional, 0 = auto)</label><input type="number" id="wPort"
-              placeholder="Auto-assign" min="0" max="65535"></div>
-          
-          <div class="form-group span-2">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-              <span style="font-weight:600;font-size:13px">Destinations</span>
-              <div style="display:flex;gap:6px">
-                <button class="btn btn-sm" onclick="toggleTestPayload()" style="padding:2px 8px;font-size:11px" tabindex="-1">Toggle Test Payload</button>
-                <button class="btn btn-sm" onclick="addWebhookTarget()" style="padding:2px 8px;font-size:11px">+ Add Action</button>
-              </div>
-            </div>
-            
-            <div id="wTestPayloadContainer" style="display:none;margin-bottom:12px;padding:10px;background:var(--surface2);border:1px dashed var(--border);border-radius:4px">
-              <label style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-                <span style="font-size:12px">Test Payload (JSON)</span>
-                <button class="btn btn-sm" onclick="fetchRecentWebhookPayload()" style="padding:2px 8px;font-size:10px" tabindex="-1">Fetch recent request</button>
-              </label>
-              <textarea id="wTestPayload" rows="3" placeholder='{"event":"order.created", "data": {"id": 123}}' style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;color:var(--text);font-family:monospace;font-size:11px;resize:vertical" oninput="updateAllPreviews()"></textarea>
-              <div style="font-size:10px;color:var(--text3);margin-top:4px">Evaluated template variables will be shown inline inside your Custom Actions.</div>
-            </div>
-
-            <div id="wDestinationsContainer" style="display:flex;flex-direction:column;gap:8px"></div>
-          </div>
-          <div class="form-group span-2"><label style="display:flex;justify-content:space-between;align-items:baseline">Incoming Auth Token (optional)<a href="javascript:void(0)" onclick="generateKey('wAuthToken')" style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></label><input type="text" id="wAuthToken" placeholder="Leave empty for public access"></div>
-          <div class="form-group span-2"><label>Allowed IPs <span style="color:var(--text3);font-weight:400;font-size:11px">— CIDR, wildcard, or exact. Leave empty to allow all.</span></label><div id="wAllowedIps" class="ip-tag-wrap"></div></div>
-
-          <!-- Default Retry Config -->
-          <div class="form-group span-2">
-            <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
-              <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface2);cursor:pointer;user-select:none" onclick="toggleRetrySection()">
-                <input type="checkbox" id="wRetryEnabled" onclick="event.stopPropagation();toggleRetrySection()" style="cursor:pointer">
-                <span style="font-size:13px;font-weight:600">Default Retry</span>
-                <span style="font-size:11px;color:var(--text3);font-weight:400">applies to all destinations unless overridden</span>
-              </label>
-              <div id="wRetrySection" style="display:none;padding:12px;display:none;flex-direction:column;gap:10px">
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-                  <div>
-                    <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Max retries</label>
-                    <input type="number" id="wRetryMax" min="1" max="20" value="3" style="width:100%;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
-                  </div>
-                  <div>
-                    <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Initial delay (ms)</label>
-                    <input type="number" id="wRetryDelay" min="100" max="60000" step="100" value="1000" style="width:100%;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
-                  </div>
-                  <div>
-                    <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Backoff</label>
-                    <select id="wRetryBackoff" style="width:100%;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
-                      <option value="exponential">Exponential</option>
-                      <option value="fixed">Fixed</option>
-                    </select>
-                  </div>
-                </div>
-                <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer" title="Retry on ANY non-2xx response, not just the codes below">
-                  <input type="checkbox" id="wRetryUntilSuccess" onchange="document.getElementById('wRetryOnRow').style.display=this.checked?'none':'flex'">
-                  <strong>Retry until success (2xx)</strong>
-                  <span style="color:var(--text3);font-size:11px">— ignores the status code list below, retries on any non-2xx</span>
-                </label>
-                <div id="wRetryOnRow" style="display:flex;align-items:center;gap:8px">
-                  <label style="font-size:11px;color:var(--text2);white-space:nowrap">Retry on status codes</label>
-                  <input type="text" id="wRetryOn" value="429, 502, 503, 504" placeholder="429, 502, 503, 504" style="flex:1;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border);flex-shrink:0;background:var(--surface);border-radius:0 0 var(--radius) var(--radius)">
-        <button class="btn btn-sm" onclick="closeWebhookModal()">Cancel</button>
-        <button class="btn btn-primary btn-sm" onclick="saveWebhook()">Save Webhook</button>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" id="themeBtn">&#9790;</button>
+        <button class="logout-btn" onclick="doLogout()" title="Logout">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+        </button>
       </div>
     </div>
-  </div>
+  </nav>
 
-  <!-- Full-screen Body Editor Modal -->
-  <div id="bodyEditorModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);z-index:1100;padding:24px;">
-    <div style="height:100%;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);overflow:hidden;border:1px solid var(--border)">
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--surface2)">
-        <span style="font-weight:600;font-size:14px">Body Template Editor</span>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-sm" onclick="closeBodyEditor()" style="padding:4px 12px">Cancel</button>
-          <button class="btn btn-primary btn-sm" onclick="saveBodyEditor()" style="padding:4px 12px">Apply</button>
+  <div class="content">
+    <!-- ═══ OVERVIEW ═══ -->
+    <div class="page active" id="pageOverview">
+      <div class="page-header">
+        <h2>Dashboard</h2>
+        <p><span class="live-dot"></span>Real-time overview</p>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Status</div>
+          <div class="stat-value" id="ovStatus" style="color:var(--text3)">--</div>
+          <div class="stat-sub" id="ovUptime"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Requests</div>
+          <div class="stat-value" id="ovActive">--</div>
+          <div class="stat-sub">in-flight</div>
+        </div>
+        <div class="stat-card" style="cursor:pointer" onclick="navigate('profiles')">
+          <div class="stat-label">Proxies</div>
+          <div class="stat-value" id="ovProfiles">--</div>
+          <div class="stat-sub" id="ovProfileNames"></div>
+        </div>
+        <div class="stat-card" style="cursor:pointer" onclick="navigate('webhooks')">
+          <div class="stat-label">Webhooks</div>
+          <div class="stat-value" id="ovWebhooks">--</div>
+          <div class="stat-sub">active fans</div>
         </div>
       </div>
-      <div id="aceBodyFull" style="flex:1;width:100%"></div>
-      <div style="padding:6px 16px;border-top:1px solid var(--border);background:var(--surface2);font-size:11px;color:var(--text3)">
-        Use <code style="background:rgba(0,120,212,0.15);padding:1px 4px;border-radius:3px;color:var(--accent)">{{variable.path}}</code> syntax to interpolate incoming payload values. Standard JSON syntax is highlighted automatically.
+
+      <!-- Charts -->
+      <div class="charts-row">
+        <div class="chart-card">
+          <div class="chart-header">Traffic <span id="chartTrafficLabel">last 24h</span></div>
+          <div class="chart-body" style="position:relative">
+            <canvas id="chartTimeline" height="160" style="cursor:crosshair"></canvas>
+            <div id="chartTooltip"
+              style="display:none;position:fixed;z-index:999;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;box-shadow:var(--shadow);pointer-events:none;white-space:nowrap">
+            </div>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header">Breakdown</div>
+          <div class="chart-body" id="chartBreakdown">
+            <div style="color:var(--text3);font-size:13px;text-align:center;padding:20px">Loading...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick metrics -->
+      <div class="card" id="ovQuickMetricsCard">
+        <div class="card-header">
+          <h3>Activity</h3>
+          <button class="btn btn-sm btn-ghost" onclick="navigate('requests')">View all &rarr;</button>
+        </div>
+        <div class="card-body" id="ovQuickMetrics">
+          <div style="color:var(--text3);font-size:14px;text-align:center;padding:20px">Loading...</div>
+        </div>
+      </div>
+
+      <!-- Recent requests live feed -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Recent Requests</h3>
+          <span style="font-size:12px;color:var(--text3);font-family:'JetBrains Mono',monospace"
+            id="ovFeedCount"></span>
+        </div>
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--surface2);text-align:left">
+                <th
+                  style="padding:8px 12px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">
+                  Time</th>
+                <th
+                  style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">
+                  Type</th>
+                <th
+                  style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">
+                  Method</th>
+                <th
+                  style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">
+                  Path</th>
+                <th
+                  style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">
+                  Status</th>
+                <th
+                  style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">
+                  Duration</th>
+              </tr>
+            </thead>
+            <tbody id="ovRecentBody">
+              <tr>
+                <td colspan="6" style="padding:30px;text-align:center;color:var(--text3)">Waiting for requests...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- DLQ Modal -->
-  <div id="dlqModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px)" onclick="if(event.target===this)closeDlqModal()">
-    <div style="max-width:600px;margin:60px auto;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);display:flex;flex-direction:column;max-height:80vh">
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0">
-        <h3 id="dlqModalTitle" style="font-size:16px;font-weight:600">Failed Deliveries</h3>
+    <!-- ═══ REQUEST LOG ═══ -->
+    <div class="page" id="pageRequests">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h2>Request Log</h2>
+          <p>Full request/response history with payload details. <span id="reqLogStats"
+              style="color:var(--text3)"></span></p>
+        </div>
         <div style="display:flex;gap:8px;align-items:center">
-          <button id="dlqRetryAllBtn" class="btn" style="padding:4px 14px;font-size:12px;background:var(--accent);color:#fff;border:none" onclick="dlqRetryAll()">Retry All</button>
-          <button onclick="closeDlqModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
+          <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px">
+            <input type="checkbox" id="rlAutoRefresh" checked style="accent-color:var(--accent)"> Auto-refresh
+          </label>
+          <button class="btn btn-sm" onclick="fetchRequestLogs()">Refresh</button>
         </div>
       </div>
-      <div id="dlqList" style="padding:16px;overflow-y:auto;flex:1"></div>
-    </div>
-  </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-body" style="padding:12px 16px">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <input type="text" id="rlSearch" placeholder="Search path, URL, request ID..."
+              style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
+              onkeydown="if(event.key==='Enter')fetchRequestLogs()">
+            <select id="rlType"
+              style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+              onchange="fetchRequestLogs()">
+              <option value="">All types</option>
 
-  <!-- Profile Modal -->
-  <div class="modal-overlay" id="profileModal">
-    <div class="modal">
-      <div class="modal-header">
-        <h3 id="modalTitle">New Proxy</h3><button class="close-btn" onclick="closeProfileModal()">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-grid">
-          <div class="form-group span-2"><label>Proxy Name *</label><input type="text" id="pName" placeholder="e.g. infobip">
+              <option value="proxy">Proxy</option>
+              <option value="webhook">Webhook</option>
+            </select>
+            <select id="rlMethod"
+              style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+              onchange="fetchRequestLogs()">
+              <option value="">All methods</option>
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+              <option value="PUT">PUT</option>
+              <option value="PATCH">PATCH</option>
+              <option value="DELETE">DELETE</option>
+            </select>
+            <select id="rlStatus"
+              style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+              onchange="fetchRequestLogs()">
+              <option value="">All statuses</option>
+              <option value="200">200</option>
+              <option value="201">201</option>
+              <option value="301">301</option>
+              <option value="302">302</option>
+              <option value="400">400</option>
+              <option value="401">401</option>
+              <option value="403">403</option>
+              <option value="404">404</option>
+              <option value="500">500</option>
+              <option value="502">502</option>
+            </select>
+            <button class="btn btn-sm btn-primary" onclick="fetchRequestLogs()">Filter</button>
           </div>
-          <div class="form-group span-2"><label>Target URL *</label><input type="url" id="pTargetUrl"
-              placeholder="https://api.example.com"></div>
         </div>
-        <div class="form-section">Authentication (optional)</div>
-        <div class="form-grid">
-          <div class="form-group"><label>Auth Header</label><input type="text" id="pAuthHeader"
-              placeholder="e.g. Authorization"></div>
-          <div class="form-group"><label>Auth Prefix</label><input type="text" id="pAuthPrefix"
-              placeholder="e.g. Bearer, App"></div>
-          <div class="form-group span-2"><label>Auth Value</label><input type="text" id="pApiKey"
-              placeholder="e.g. your API key or token"></div>
+      </div>
+      <div class="card">
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table id="reqLogTable" style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--surface2);text-align:left">
+                <th
+                  style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Time</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Type</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Method</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Path</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Status</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Duration</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Size</th>
+                <th style="padding:10px 12px"></th>
+              </tr>
+            </thead>
+            <tbody id="reqLogBody">
+              <tr>
+                <td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <div class="form-section">Access Control</div>
-        <div class="form-grid">
-          <div class="form-group span-2">
-            <label>Auth Mode</label>
-            <select id="pAuthMode" onchange="toggleProfileAuthMode()" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px">
-              <option value="none">Public (no authentication)</option>
-              <option value="accessKey">Access Key (static token)</option>
-              <option value="login">User Login (JWT)</option>
+      </div>
+      <div id="reqLogPagination"
+        style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--text2)">
+        <span id="reqLogInfo"></span>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm" id="rlPrev" onclick="reqLogPrevPage()" disabled>Prev</button>
+          <button class="btn btn-sm" id="rlNext" onclick="reqLogNextPage()" disabled>Next</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Request Detail Modal -->
+    <div id="reqDetailModal"
+      style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);overflow-y:auto">
+      <div class="rdm-panel">
+        <div class="rdm-header">
+          <div class="rdm-header-left">
+            <h3 id="reqDetailTitle" class="rdm-title">Request Detail</h3>
+          </div>
+          <button onclick="closeReqDetail()" class="rdm-close">&times;</button>
+        </div>
+        <div id="reqDetailContent" class="rdm-body"></div>
+      </div>
+    </div>
+
+
+
+    <!-- ═══ WEBHOOKS ═══ -->
+    <div class="page" id="pageWebhooks">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h2>Webhooks</h2>
+          <p>Fan-out incoming payloads to multiple destination URLs.</p>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="openWebhookModal()">+ New Webhook</button>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-body" style="padding:12px 16px">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <input type="text" id="webhookSearch" placeholder="Search name..."
+              style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
+              oninput="filterWebhooks()">
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table id="webhookTable" style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--surface2);text-align:left">
+                <th
+                  style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Name</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Status</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Port</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Targets</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Auth</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  In-Flight</th>
+                <th style="padding:10px 12px"></th>
+              </tr>
+            </thead>
+            <tbody id="webhookListBody">
+              <tr>
+                <td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PROFILES ═══ -->
+    <div class="page" id="pageProfiles">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h2>Proxies</h2>
+          <p>Reverse proxies with auth injection — expose any upstream on a dedicated port with credentials hidden from
+            clients.</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm" onclick="reloadProfiles()">Reload</button>
+          <button class="btn btn-primary btn-sm" onclick="openProfileModal()">+ New Proxy</button>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-body" style="padding:12px 16px">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <input type="text" id="profileSearch" placeholder="Search name, URL..."
+              style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
+              oninput="filterProfiles()">
+            <select id="profileAuthFilter"
+              style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+              onchange="filterProfiles()">
+              <option value="">All auth</option>
+              <option value="enabled">Auth enabled</option>
+              <option value="passthrough">Passthrough</option>
+            </select>
+            <select id="profileAccessFilter"
+              style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+              onchange="filterProfiles()">
+              <option value="">All access</option>
+              <option value="protected">Protected</option>
+              <option value="public">Public</option>
             </select>
           </div>
-          <div class="form-group" id="pAccessKeyGroup" style="display:none"><label style="display:flex;justify-content:space-between;align-items:baseline">Access Key<a href="javascript:void(0)" onclick="generateKey('pAccessKey')" style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></label><input type="text" id="pAccessKey" placeholder="Optional">
-          </div>
-          <div class="form-group" id="pRequire2faGroup" style="display:none">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="pRequire2fa" style="cursor:pointer;accent-color:var(--accent)">
-              <span>Require 2FA</span>
-            </label>
-            <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Users without 2FA will be prompted to set it up on first login.</span>
-          </div>
-          <div class="form-group" id="pIsWebAppGroup" style="display:none">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="pIsWebApp" style="cursor:pointer;accent-color:var(--accent)">
-              <span>Web Application</span>
-            </label>
-            <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Redirect unauthenticated requests to the login page instead of returning a JSON error.</span>
-          </div>
-          <div class="form-group"><label>Blocked Extensions</label><input type="text" id="pBlocked"
-              placeholder=".exe, .bat, .sh"></div>
-          <div class="form-group span-2"><label>Allowed IPs <span style="color:var(--text3);font-weight:400;font-size:11px">— CIDR, wildcard, or exact. Leave empty to allow all.</span></label><div id="pAllowedIps" class="ip-tag-wrap"></div></div>
         </div>
-        <div class="form-section">Options</div>
-        <div class="form-grid">
-          <div class="form-group">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="pDisableLogs" style="cursor:pointer;accent-color:var(--accent)">
-              <span>Disable Request Logs</span>
+      </div>
+      <div class="card">
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table id="profileTable" style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--surface2);text-align:left">
+                <th
+                  style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Name</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Status</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Port</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Target URL</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Auth Header</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Access</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Blocked Ext.</th>
+                <th style="padding:10px 12px"></th>
+              </tr>
+            </thead>
+            <tbody id="profileListBody">
+              <tr>
+                <td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PROXY USERS ═══ -->
+    <div class="page" id="pageProxyusers">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h2>Proxy Users</h2>
+          <p>Global user accounts for proxy login authentication. Assign users to profiles to grant access.</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" onclick="openNewProxyUserModal()">+ New User</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--surface2);text-align:left">
+                <th
+                  style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Username</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  2FA</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Profiles</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+                  Created</th>
+                <th style="padding:10px 12px"></th>
+              </tr>
+            </thead>
+            <tbody id="proxyUserListBody">
+              <tr>
+                <td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ SETTINGS ═══ -->
+  </div>
+</div>
+
+<!-- Webhook Modal -->
+<div id="webhookModal"
+  style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;padding:24px 16px">
+  <div
+    style="max-width:600px;width:100%;max-height:90vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)">
+    <div
+      style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0">
+      <h3 id="webhookModalTitle" style="font-size:16px;font-weight:600">New Webhook Distributor</h3>
+      <button onclick="closeWebhookModal()"
+        style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
+    </div>
+    <div style="padding:20px;overflow-y:auto;flex:1">
+      <div class="form-grid" style="gap:12px">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" id="wName" placeholder="payments-fanout" pattern="[a-z0-9_\-]+"
+            oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9_\-]/g,'')" autocomplete="off"
+            spellcheck="false">
+          <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">Lowercase letters, numbers,
+            <code>-</code> and <code>_</code> only. No spaces.</span>
+        </div>
+        <div class="form-group"><label>Port (optional, 0 = auto)</label><input type="number" id="wPort"
+            placeholder="Auto-assign" min="0" max="65535"></div>
+
+        <div class="form-group span-2">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <span style="font-weight:600;font-size:13px">Destinations</span>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-sm" onclick="toggleTestPayload()" style="padding:2px 8px;font-size:11px"
+                tabindex="-1">Toggle Test Payload</button>
+              <button class="btn btn-sm" onclick="addWebhookTarget()" style="padding:2px 8px;font-size:11px">+ Add
+                Action</button>
+            </div>
+          </div>
+
+          <div id="wTestPayloadContainer"
+            style="display:none;margin-bottom:12px;padding:10px;background:var(--surface2);border:1px dashed var(--border);border-radius:4px">
+            <label style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+              <span style="font-size:12px">Test Payload (JSON)</span>
+              <button class="btn btn-sm" onclick="fetchRecentWebhookPayload()" style="padding:2px 8px;font-size:10px"
+                tabindex="-1">Fetch recent request</button>
             </label>
-            <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Skip logging requests and responses for this proxy.</span>
+            <textarea id="wTestPayload" rows="3" placeholder='{"event":"order.created", "data": {"id": 123}}'
+              style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;color:var(--text);font-family:monospace;font-size:11px;resize:vertical"
+              oninput="updateAllPreviews()"></textarea>
+            <div style="font-size:10px;color:var(--text3);margin-top:4px">Evaluated template variables will be shown
+              inline inside your Custom Actions.</div>
+          </div>
+
+          <div id="wDestinationsContainer" style="display:flex;flex-direction:column;gap:8px"></div>
+        </div>
+        <div class="form-group span-2"><label
+            style="display:flex;justify-content:space-between;align-items:baseline">Incoming Auth Token (optional)<a
+              href="javascript:void(0)" onclick="generateKey('wAuthToken')"
+              style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></label><input type="text"
+            id="wAuthToken" placeholder="Leave empty for public access"></div>
+        <div class="form-group span-2"><label>Allowed IPs <span
+              style="color:var(--text3);font-weight:400;font-size:11px">— CIDR, wildcard, or exact. Leave empty to allow
+              all.</span></label>
+          <div id="wAllowedIps" class="ip-tag-wrap"></div>
+        </div>
+
+        <!-- Default Retry Config -->
+        <div class="form-group span-2">
+          <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
+            <label
+              style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface2);cursor:pointer;user-select:none"
+              onclick="toggleRetrySection()">
+              <input type="checkbox" id="wRetryEnabled" onclick="event.stopPropagation();toggleRetrySection()"
+                style="cursor:pointer">
+              <span style="font-size:13px;font-weight:600">Default Retry</span>
+              <span style="font-size:11px;color:var(--text3);font-weight:400">applies to all destinations unless
+                overridden</span>
+            </label>
+            <div id="wRetrySection" style="display:none;padding:12px;display:none;flex-direction:column;gap:10px">
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+                <div>
+                  <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Max retries</label>
+                  <input type="number" id="wRetryMax" min="1" max="20" value="3"
+                    style="width:100%;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Initial delay
+                    (ms)</label>
+                  <input type="number" id="wRetryDelay" min="100" max="60000" step="100" value="1000"
+                    style="width:100%;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Backoff</label>
+                  <select id="wRetryBackoff"
+                    style="width:100%;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
+                    <option value="exponential">Exponential</option>
+                    <option value="fixed">Fixed</option>
+                  </select>
+                </div>
+              </div>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"
+                title="Retry on ANY non-2xx response, not just the codes below">
+                <input type="checkbox" id="wRetryUntilSuccess"
+                  onchange="document.getElementById('wRetryOnRow').style.display=this.checked?'none':'flex'">
+                <strong>Retry until success (2xx)</strong>
+                <span style="color:var(--text3);font-size:11px">— ignores the status code list below, retries on any
+                  non-2xx</span>
+              </label>
+              <div id="wRetryOnRow" style="display:flex;align-items:center;gap:8px">
+                <label style="font-size:11px;color:var(--text2);white-space:nowrap">Retry on status codes</label>
+                <input type="text" id="wRetryOn" value="429, 502, 503, 504" placeholder="429, 502, 503, 504"
+                  style="flex:1;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
+              </div>
+            </div>
           </div>
         </div>
       </div>
-      <div class="modal-footer"><button class="btn" onclick="closeProfileModal()">Cancel</button><button
-          class="btn btn-primary" onclick="saveProfile()">Save Proxy</button></div>
+    </div>
+    <div
+      style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border);flex-shrink:0;background:var(--surface);border-radius:0 0 var(--radius) var(--radius)">
+      <button class="btn btn-sm" onclick="closeWebhookModal()">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="saveWebhook()">Save Webhook</button>
     </div>
   </div>
+</div>
 
-  <!-- New Proxy User Modal -->
-  <div class="modal-overlay" id="newProxyUserModal">
-    <div class="modal" style="max-width:440px">
-      <div class="modal-header">
-        <h3>New Proxy User</h3><button class="close-btn" onclick="closeNewProxyUserModal()">&times;</button>
+<!-- Full-screen Body Editor Modal -->
+<div id="bodyEditorModal"
+  style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);z-index:1100;padding:24px;">
+  <div
+    style="height:100%;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);overflow:hidden;border:1px solid var(--border)">
+    <div
+      style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--surface2)">
+      <span style="font-weight:600;font-size:14px">Body Template Editor</span>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm" onclick="closeBodyEditor()" style="padding:4px 12px">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="saveBodyEditor()" style="padding:4px 12px">Apply</button>
       </div>
-      <div class="modal-body">
-        <div id="npuError" style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);color:#fca5a5;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px"></div>
-        <div class="form-grid" style="gap:12px">
-          <div class="form-group span-2"><label>Username *</label><input type="text" id="npuUsername" placeholder="e.g. joao.silva" autocomplete="off"></div>
-          <div class="form-group span-2"><label>Password * (min 6 characters)</label><input type="password" id="npuPassword" placeholder="Password" autocomplete="new-password"></div>
-          <div class="form-group span-2">
-            <label>Assign to Profiles</label>
-            <div id="npuProfileChecks" style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px"></div>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer"><button class="btn" onclick="closeNewProxyUserModal()">Cancel</button><button class="btn btn-primary" onclick="saveNewProxyUser()">Create User</button></div>
+    </div>
+    <div id="aceBodyFull" style="flex:1;width:100%"></div>
+    <div
+      style="padding:6px 16px;border-top:1px solid var(--border);background:var(--surface2);font-size:11px;color:var(--text3)">
+      Use <code
+        style="background:rgba(0,120,212,0.15);padding:1px 4px;border-radius:3px;color:var(--accent)">{{variable.path}}</code>
+      syntax to interpolate incoming payload values. Standard JSON syntax is highlighted automatically.
     </div>
   </div>
+</div>
 
-  <!-- Manage Profile Users Modal (assign/remove users from a profile) -->
-  <div class="modal-overlay" id="profileUsersModal">
-    <div class="modal" style="max-width:520px">
-      <div class="modal-header">
-        <h3 id="profileUsersTitle">Manage Users</h3><button class="close-btn" onclick="closeProfileUsersModal()">&times;</button>
+<!-- DLQ Modal -->
+<div id="dlqModal"
+  style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px)"
+  onclick="if(event.target===this)closeDlqModal()">
+  <div
+    style="max-width:600px;margin:60px auto;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);display:flex;flex-direction:column;max-height:80vh">
+    <div
+      style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0">
+      <h3 id="dlqModalTitle" style="font-size:16px;font-weight:600">Failed Deliveries</h3>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button id="dlqRetryAllBtn" class="btn"
+          style="padding:4px 14px;font-size:12px;background:var(--accent);color:#fff;border:none"
+          onclick="dlqRetryAll()">Retry All</button>
+        <button onclick="closeDlqModal()"
+          style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
       </div>
-      <div class="modal-body">
-        <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
-          <select id="pfuAddSelect" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
-            <option value="">Select user to add...</option>
+    </div>
+    <div id="dlqList" style="padding:16px;overflow-y:auto;flex:1"></div>
+  </div>
+</div>
+
+<!-- Profile Modal -->
+<div class="modal-overlay" id="profileModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modalTitle">New Proxy</h3><button class="close-btn" onclick="closeProfileModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-group span-2"><label>Proxy Name *</label><input type="text" id="pName"
+            placeholder="e.g. infobip">
+        </div>
+        <div class="form-group span-2"><label>Target URL *</label><input type="url" id="pTargetUrl"
+            placeholder="https://api.example.com"></div>
+      </div>
+      <div class="form-section">Authentication (optional)</div>
+      <div class="form-grid">
+        <div class="form-group"><label>Auth Header</label><input type="text" id="pAuthHeader"
+            placeholder="e.g. Authorization"></div>
+        <div class="form-group"><label>Auth Prefix</label><input type="text" id="pAuthPrefix"
+            placeholder="e.g. Bearer, App"></div>
+        <div class="form-group span-2"><label>Auth Value</label><input type="text" id="pApiKey"
+            placeholder="e.g. your API key or token"></div>
+      </div>
+      <div class="form-section">Access Control</div>
+      <div class="form-grid">
+        <div class="form-group span-2">
+          <label>Auth Mode</label>
+          <select id="pAuthMode" onchange="toggleProfileAuthMode()"
+            style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px">
+            <option value="none">Public (no authentication)</option>
+            <option value="accessKey">Access Key (static token)</option>
+            <option value="login">User Login (JWT)</option>
           </select>
-          <button class="btn btn-primary btn-sm" onclick="assignUserToCurrentProfile()" style="white-space:nowrap">Assign</button>
         </div>
-        <table style="width:100%;border-collapse:collapse;font-size:13px">
-          <thead>
-            <tr style="background:var(--surface2);text-align:left">
-              <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Username</th>
-              <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">2FA</th>
-              <th style="padding:8px 12px"></th>
-            </tr>
-          </thead>
-          <tbody id="pfuListBody">
-            <tr><td colspan="3" style="padding:20px;text-align:center;color:var(--text3)">Loading...</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="modal-footer"><button class="btn" onclick="closeProfileUsersModal()">Close</button></div>
-    </div>
-  </div>
-
-  <!-- Manage User Proxies Modal (assign/remove proxies from a user) -->
-  <div class="modal-overlay" id="userProfilesModal">
-    <div class="modal" style="max-width:520px">
-      <div class="modal-header">
-        <h3 id="userProfilesTitle">Proxies</h3><button class="close-btn" onclick="closeUserProfilesModal()">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
-          <select id="upAddSelect" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
-            <option value="">Select proxy to assign...</option>
-          </select>
-          <button class="btn btn-primary btn-sm" onclick="assignProfileToCurrentUser()" style="white-space:nowrap">Assign</button>
+        <div class="form-group" id="pAccessKeyGroup" style="display:none"><label
+            style="display:flex;justify-content:space-between;align-items:baseline">Access Key<a
+              href="javascript:void(0)" onclick="generateKey('pAccessKey')"
+              style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></label><input type="text"
+            id="pAccessKey" placeholder="Optional">
         </div>
-        <table style="width:100%;border-collapse:collapse;font-size:13px">
-          <thead>
-            <tr style="background:var(--surface2);text-align:left">
-              <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Proxy</th>
-              <th style="padding:8px 12px"></th>
-            </tr>
-          </thead>
-          <tbody id="upListBody">
-            <tr><td colspan="2" style="padding:20px;text-align:center;color:var(--text3)">Loading...</td></tr>
-          </tbody>
-        </table>
+        <div class="form-group" id="pRequire2faGroup" style="display:none">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="pRequire2fa" style="cursor:pointer;accent-color:var(--accent)">
+            <span>Require 2FA</span>
+          </label>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Users without 2FA will be
+            prompted to set it up on first login.</span>
+        </div>
+        <div class="form-group" id="pIsWebAppGroup" style="display:none">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="pIsWebApp" style="cursor:pointer;accent-color:var(--accent)">
+            <span>Web Application</span>
+          </label>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Redirect unauthenticated requests
+            to the login page instead of returning a JSON error.</span>
+        </div>
+        <div class="form-group"><label>Blocked Extensions</label><input type="text" id="pBlocked"
+            placeholder=".exe, .bat, .sh"></div>
+        <div class="form-group span-2"><label>Allowed IPs <span
+              style="color:var(--text3);font-weight:400;font-size:11px">— CIDR, wildcard, or exact. Leave empty to allow
+              all.</span></label>
+          <div id="pAllowedIps" class="ip-tag-wrap"></div>
+        </div>
       </div>
-      <div class="modal-footer"><button class="btn" onclick="closeUserProfilesModal()">Close</button></div>
+      <div class="form-section">Options</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="pDisableLogs" style="cursor:pointer;accent-color:var(--accent)">
+            <span>Disable Request Logs</span>
+          </label>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Skip logging requests and
+            responses for this proxy.</span>
+        </div>
+      </div>
     </div>
+    <div class="modal-footer"><button class="btn" onclick="closeProfileModal()">Cancel</button><button
+        class="btn btn-primary" onclick="saveProfile()">Save Proxy</button></div>
   </div>
+</div>
 
-  <div class="toast" id="toast"></div>
+<!-- New Proxy User Modal -->
+<div class="modal-overlay" id="newProxyUserModal">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <h3>New Proxy User</h3><button class="close-btn" onclick="closeNewProxyUserModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="npuError"
+        style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);color:#fca5a5;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px">
+      </div>
+      <div class="form-grid" style="gap:12px">
+        <div class="form-group span-2"><label>Username *</label><input type="text" id="npuUsername"
+            placeholder="e.g. joao.silva" autocomplete="off"></div>
+        <div class="form-group span-2"><label>Password * (min 6 characters)</label><input type="password"
+            id="npuPassword" placeholder="Password" autocomplete="new-password"></div>
+        <div class="form-group span-2">
+          <label>Assign to Profiles</label>
+          <div id="npuProfileChecks"
+            style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px">
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeNewProxyUserModal()">Cancel</button><button
+        class="btn btn-primary" onclick="saveNewProxyUser()">Create User</button></div>
+  </div>
+</div>
+
+<!-- Manage Profile Users Modal (assign/remove users from a profile) -->
+<div class="modal-overlay" id="profileUsersModal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <h3 id="profileUsersTitle">Manage Users</h3><button class="close-btn"
+        onclick="closeProfileUsersModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+        <select id="pfuAddSelect"
+          style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
+          <option value="">Select user to add...</option>
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="assignUserToCurrentProfile()"
+          style="white-space:nowrap">Assign</button>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="background:var(--surface2);text-align:left">
+            <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+              Username</th>
+            <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">2FA</th>
+            <th style="padding:8px 12px"></th>
+          </tr>
+        </thead>
+        <tbody id="pfuListBody">
+          <tr>
+            <td colspan="3" style="padding:20px;text-align:center;color:var(--text3)">Loading...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeProfileUsersModal()">Close</button></div>
+  </div>
+</div>
+
+<!-- Manage User Proxies Modal (assign/remove proxies from a user) -->
+<div class="modal-overlay" id="userProfilesModal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <h3 id="userProfilesTitle">Proxies</h3><button class="close-btn"
+        onclick="closeUserProfilesModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+        <select id="upAddSelect"
+          style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
+          <option value="">Select proxy to assign...</option>
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="assignProfileToCurrentUser()"
+          style="white-space:nowrap">Assign</button>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="background:var(--surface2);text-align:left">
+            <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
+              Proxy</th>
+            <th style="padding:8px 12px"></th>
+          </tr>
+        </thead>
+        <tbody id="upListBody">
+          <tr>
+            <td colspan="2" style="padding:20px;text-align:center;color:var(--text3)">Loading...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeUserProfilesModal()">Close</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>

@@ -14,19 +14,15 @@ export interface ProxyProfile {
   disableLogs?: boolean;  // If true, skip request/response logging for this profile
   blockedExtensions?: Set<string>; // Optional set of blocked file extensions
   allowedIps?: string[];  // Optional IP allowlist (exact, CIDR, wildcard). Empty = unrestricted.
+  
+  // -- Target/Standalone Proxy Features --
+  port?: number;          // Dedicated listening port. If 0, auto-assigns. If omitted, uses the main proxy root prefix (/proxy/{name}/).
+  forwardPath?: boolean;  // Whether to append incoming path to target URL (defaults to true)
+  passthrough?: boolean;  // If true, disable HTML rewriting and stream unconditionally
+  authToken?: string;     // Simple token auth (X-Forward-Token or ?token=) for API connections
 }
 
-/**
- * Named target — each gets its own Bun.serve() on a dedicated port.
- */
-export interface ProxyTarget {
-  name: string;           // Unique identifier (e.g., "api", "webhook")
-  targetUrl: string;      // Upstream URL to forward to
-  port: number;           // Dedicated listening port (0 = auto-assign)
-  authToken?: string;     // Per-target auth token (optional)
-  forwardPath: boolean;   // Whether to append incoming path to target URL
-  allowedIps?: string[];  // Optional IP allowlist (exact, CIDR, wildcard). Empty = unrestricted.
-}
+
 
 export interface WebhookRetryConfig {
   maxRetries: number;           // Number of retry attempts after the first failure (0 = no retries)
@@ -67,7 +63,6 @@ export interface Config {
   authToken?: string; // Optional: if not set, authentication is disabled
   forwardPath: boolean; // If false, don't append path to target URL
   proxyProfiles: ProxyProfile[]; // Configured proxy bypass profiles
-  proxyTargets: ProxyTarget[];   // Named targets with dedicated ports
   webhooks: WebhookDistributor[]; // Configured webhook distributors
   otel: {
     enabled: boolean;

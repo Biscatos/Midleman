@@ -30,6 +30,36 @@ function updateThemeIcon(theme) {
 initTheme();
 
 // ─── Init ────────────────────────────────────────────────────────────────────
+let appIntervals = [];
+
+async function startApp(username) {
+  loggedInUser = username;
+  document.getElementById('navUser').textContent = loggedInUser;
+  document.querySelector('.app').style.display = 'flex';
+  
+  // Hide auth panels if visible
+  document.getElementById('authLogin').classList.remove('active');
+  document.getElementById('authSetup').classList.remove('active');
+
+  // Immediately set it to Connecting and resolve health check fast to show Online
+  document.getElementById('navDot').className = 'status-dot online';
+  document.getElementById('navStatus').textContent = 'Connecting...';
+  
+  await fetchHealth(); // Do this immediately to set 'Online' UI instantly
+  
+  // Trigger rest of initializations concurrently without blocking UI main thread
+  refreshAll().catch(e => console.error('Dashboard refresh error:', e));
+
+  if (appIntervals.length === 0) {
+    appIntervals.push(setInterval(fetchHealth, 5000));
+    appIntervals.push(setInterval(fetchRecentRequests, 3000));
+    appIntervals.push(setInterval(fetchChartData, 15000));
+    appIntervals.push(setInterval(() => {
+      if (currentPage === 'requests' && document.getElementById('rlAutoRefresh').checked) fetchRequestLogs();
+    }, 5000));
+  }
+}
+
 (async function init() {
   try {
     const res = await fetch('/auth/status');
@@ -48,16 +78,7 @@ initTheme();
     }
 
     // Authenticated
-    loggedInUser = status.username;
-    document.getElementById('navUser').textContent = loggedInUser;
-    document.querySelector('.app').style.display = 'flex';
-    await refreshAll();
-    setInterval(fetchHealth, 5000);
-    setInterval(fetchRecentRequests, 3000);
-    setInterval(fetchChartData, 15000);
-    setInterval(() => {
-      if (currentPage === 'requests' && document.getElementById('rlAutoRefresh').checked) fetchRequestLogs();
-    }, 5000);
+    startApp(status.username);
   } catch (e) {
     console.error('Init error:', e);
   }
@@ -116,7 +137,7 @@ async function completeSetup() {
     const res = await fetch('/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: user, password: pass, totpSecret: setupTotpSecret, totpCode: code }) });
     const data = await res.json();
     if (!res.ok) return showAuthError('setupError', data.error || 'Failed');
-    window.location.reload();
+    startApp(data.username);
   } catch (e) { showAuthError('setupError', 'Error: ' + e.message); }
 }
 
@@ -154,7 +175,7 @@ async function doLoginStep2() {
     const res = await fetch('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ challengeToken: loginChallengeToken, totpCode: code }) });
     const data = await res.json();
     if (!res.ok) { showAuthError('loginTotpError', data.error || 'Invalid code'); document.getElementById('loginBtn2').disabled = false; document.getElementById('loginBtn2').textContent = 'Sign In'; return; }
-    window.location.reload();
+    startApp(data.username);
   } catch (e) { showAuthError('loginTotpError', 'Error: ' + e.message); document.getElementById('loginBtn2').disabled = false; document.getElementById('loginBtn2').textContent = 'Sign In'; }
 }
 

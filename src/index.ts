@@ -1,16 +1,14 @@
-import { loadConfig, reloadEnvFile, loadProxyProfiles, loadProxyTargets } from './core/config';
-import { UnauthorizedError, type ProxyProfile, type ProxyTarget } from './core/types';
+import { loadConfig, reloadEnvFile, loadProxyProfiles } from './core/config';
+import { UnauthorizedError, type ProxyProfile } from './core/types';
 import { invalidateProfileCache } from './proxy/proxy';
 import {
     loadPersistedProfiles, persistProfiles, mergeProfiles, validateProfileInput,
-    loadPersistedTargets, persistTargets, mergeTargets, validateTargetInput,
     loadPersistedWebhooks, persistWebhooks, validateWebhookInput
 } from './core/store';
 import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry/telemetry';
 import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart } from './telemetry/request-log';
-import { startTarget, stopTarget, stopAllTargets, restartTarget, getTargetStatus } from './servers/target-server';
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort, isProxyServerRunning, setProxyLoginTemplate, setProxyLogo } from './servers/proxy-server';
-import { loadPortAssignments, assignAllPorts, assignProxyPort, assignTargetPort, assignWebhookPort, releaseProxyPort, releaseTargetPort, releaseWebhookPort, getTargetPort, getWebhookPort } from './servers/port-manager';
+import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort, releaseProxyPort, releaseWebhookPort, getWebhookPort } from './servers/port-manager';
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout } from './servers/webhook-server';
 import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp } from './auth/auth';
 import { readFileSync } from 'fs';
@@ -29,9 +27,7 @@ const config = loadConfig();
 const persistedProfiles = loadPersistedProfiles();
 config.proxyProfiles = mergeProfiles(config.proxyProfiles, persistedProfiles);
 
-// Merge env targets with persisted targets
-const persistedTargets = loadPersistedTargets();
-config.proxyTargets = mergeTargets(config.proxyTargets, persistedTargets);
+
 
 // Load persisted webhooks
 config.webhooks = loadPersistedWebhooks();
@@ -81,9 +77,7 @@ console.log(`🚀 Midleman starting...`);
 if (config.proxyProfiles.length > 0) {
     console.log(`🔓 Proxy Profiles: ${config.proxyProfiles.map(p => p.name).join(', ')}`);
 }
-if (config.proxyTargets.length > 0) {
-    console.log(`🎯 Named Targets: ${config.proxyTargets.map(t => t.name).join(', ')}`);
-}
+
 if (config.webhooks.length > 0) {
     console.log(`📡 Webhooks: ${config.webhooks.map(w => w.name).join(', ')}`);
 }
@@ -127,7 +121,7 @@ function checkAdminAuth(req: Request, url: URL): Response | null {
 
 const portAssignments = await assignAllPorts(
     config.proxyProfiles.map(p => p.name),
-    config.proxyTargets.map(t => ({ name: t.name, configuredPort: t.port })),
+    [],
     config.webhooks.map(w => w.name),
     config.port,
 );
@@ -141,15 +135,7 @@ for (const profile of config.proxyProfiles) {
     }
 }
 
-for (const target of config.proxyTargets) {
-    const assignedPort = portAssignments.targets[target.name];
-    const t = { ...target, port: assignedPort };
-    try {
-        startTarget(t);
-    } catch (err) {
-        console.error(`❌ Failed to start target "${target.name}":`, err instanceof Error ? err.message : err);
-    }
-}
+
 
 for (const webhook of config.webhooks) {
     const assignedPort = portAssignments.webhooks[webhook.name];
@@ -312,7 +298,6 @@ const server = Bun.serve({
                     uptime: uptimeSec,
                     activeRequests,
                     proxies: config.proxyProfiles.length,
-                    targets: config.proxyTargets.length,
                     webhooks: config.webhooks.length,
                 };
 
@@ -437,10 +422,6 @@ const server = Bun.serve({
         <div class="cell-label">Proxies</div>
       </div>
       <div class="cell">
-        <div class="cell-val">${healthData.targets}</div>
-        <div class="cell-label">Targets</div>
-      </div>
-      <div class="cell">
         <div class="cell-val">${healthData.webhooks}</div>
         <div class="cell-label">Webhooks</div>
       </div>
@@ -515,11 +496,6 @@ const server = Bun.serve({
                         endpoints: {
                             'GET /dashboard': 'Web dashboard',
                             'GET /admin/config': 'Get current configuration',
-                            'GET /admin/targets': 'List all named targets',
-                            'GET /admin/targets/:name': 'Get target details',
-                            'POST /admin/targets': 'Create or update a target',
-                            'DELETE /admin/targets/:name': 'Remove a target',
-                            'POST /admin/targets/:name/restart': 'Restart a target server',
                             'GET /admin/profiles': 'List all proxy profiles',
                             'GET /admin/profiles/:name': 'Get profile details',
                             'POST /admin/profiles': 'Create or update a profile',
@@ -538,7 +514,6 @@ const server = Bun.serve({
                         },
                         telemetry: getTelemetryConfig(),
                         activeProfiles: config.proxyProfiles.length,
-                        activeTargets: getTargetStatus(),
                     });
                 }
 
@@ -550,10 +525,7 @@ const server = Bun.serve({
                     config.proxyProfiles = mergeProfiles(envProfiles, persisted);
                     invalidateProfileCache();
 
-                    // Reload targets
-                    const envTargets = loadProxyTargets();
-                    const persistedTgts = loadPersistedTargets();
-                    config.proxyTargets = mergeTargets(envTargets, persistedTgts);
+
 
                     // Reload webhooks
                     config.webhooks = loadPersistedWebhooks();
@@ -561,7 +533,7 @@ const server = Bun.serve({
                     // Reassign all ports
                     const newPorts = await assignAllPorts(
                         config.proxyProfiles.map(p => p.name),
-                        config.proxyTargets.map(t => ({ name: t.name, configuredPort: t.port })),
+                        [],
                         config.webhooks.map(w => w.name),
                         config.port,
                     );
@@ -575,15 +547,7 @@ const server = Bun.serve({
                         }
                     }
 
-                    // Restart all target servers
-                    await stopAllTargets();
-                    for (const target of config.proxyTargets) {
-                        const assignedPort = newPorts.targets[target.name];
-                        const t = { ...target, port: assignedPort };
-                        try { startTarget(t); } catch (err) {
-                            console.error(`❌ Failed to restart target "${target.name}":`, err instanceof Error ? err.message : err);
-                        }
-                    }
+
 
                     // Restart all webhook servers
                     await stopAllWebhooks();
@@ -595,11 +559,10 @@ const server = Bun.serve({
                         }
                     }
 
-                    console.log(`🔄 Reloaded: profiles=[${config.proxyProfiles.map(p => p.name).join(', ')}] targets=[${config.proxyTargets.map(t => t.name).join(', ')}] webhooks=[${config.webhooks.map(w => w.name).join(', ')}]`);
+                    console.log(`🔄 Reloaded: profiles=[${config.proxyProfiles.map(p => p.name).join(', ')}] webhooks=[${config.webhooks.map(w => w.name).join(', ')}]`);
                     return jsonRes(200, {
                         status: 'reloaded',
                         profiles: config.proxyProfiles.map(p => p.name),
-                        targets: config.proxyTargets.map(t => t.name),
                         webhooks: config.webhooks.map(w => w.name),
                     });
                 }
@@ -641,119 +604,7 @@ const server = Bun.serve({
                     return jsonRes(200, detail as unknown as Record<string, unknown>);
                 }
 
-                // ── Target CRUD ──
-                if (url.pathname === '/admin/targets' && req.method === 'GET') {
-                    const status = getTargetStatus();
-                    const targets = config.proxyTargets.map(t => {
-                        const s = status.find(s => s.name === t.name);
-                        return {
-                            name: t.name,
-                            targetUrl: t.targetUrl,
-                            port: s?.port ?? t.port,
-                            forwardPath: t.forwardPath,
-                            hasAuth: !!t.authToken,
-                            allowedIps: t.allowedIps || [],
-                            running: s?.running ?? false,
-                            active: s?.active ?? 0,
-                        };
-                    });
-                    return jsonRes(200, { targets });
-                }
 
-                if (url.pathname.match(/^\/admin\/targets\/[^/]+\/restart$/) && req.method === 'POST') {
-                    const name = url.pathname.split('/')[3]?.toLowerCase();
-                    const target = config.proxyTargets.find(t => t.name === name);
-                    if (!target) return jsonRes(404, { error: `Target "${name}" not found` });
-                    try {
-                        const portToUse = getTargetPort(name) || target.port;
-                        await restartTarget({ ...target, port: portToUse });
-                        return jsonRes(200, { status: 'restarted', target: name });
-                    } catch (err) {
-                        return jsonRes(500, { error: `Failed to restart: ${err instanceof Error ? err.message : err}` });
-                    }
-                }
-
-                if (url.pathname.startsWith('/admin/targets/') && req.method === 'GET') {
-                    const name = url.pathname.split('/')[3]?.toLowerCase();
-                    if (!name) return jsonRes(400, { error: 'Target name required' });
-                    const target = config.proxyTargets.find(t => t.name === name);
-                    if (!target) return jsonRes(404, { error: `Target "${name}" not found` });
-                    const status = getTargetStatus().find(s => s.name === name);
-                    return jsonRes(200, {
-                        target: {
-                            name: target.name,
-                            targetUrl: target.targetUrl,
-                            port: target.port,
-                            authToken: target.authToken || '',
-                            forwardPath: target.forwardPath,
-                            allowedIps: target.allowedIps || [],
-                            running: status?.running ?? false,
-                            active: status?.active ?? 0,
-                        },
-                    });
-                }
-
-                if (url.pathname === '/admin/targets' && req.method === 'POST') {
-                    let body: unknown;
-                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
-
-                    const error = validateTargetInput(body);
-                    if (error) return jsonRes(400, { error });
-
-                    const input = body as Record<string, unknown>;
-                    const configuredPort = input.port ? parseInt(String(input.port), 10) : 0;
-                    const target: ProxyTarget = {
-                        name: (input.name as string).toLowerCase(),
-                        targetUrl: (input.targetUrl as string).replace(/\/$/, ''),
-                        port: configuredPort,
-                        forwardPath: input.forwardPath !== false,
-                    };
-                    if (input.authToken) target.authToken = input.authToken as string;
-                    if (Array.isArray(input.allowedIps) && input.allowedIps.length) target.allowedIps = input.allowedIps as string[];
-
-                    // Assign a port (auto or explicit)
-                    const excludePorts = getTargetStatus().filter(s => s.name !== target.name).map(s => s.port).filter(Boolean);
-                    const assignedPort = await assignTargetPort(target.name, configuredPort, config.port, excludePorts);
-                    const targetWithPort = { ...target, port: assignedPort };
-
-                    // Update or add config entry (store configured port, not assigned)
-                    const idx = config.proxyTargets.findIndex(t => t.name === target.name);
-                    if (idx >= 0) {
-                        config.proxyTargets[idx] = target;
-                    } else {
-                        config.proxyTargets.push(target);
-                    }
-
-                    // Persist
-                    persistTargets(config.proxyTargets);
-
-                    // Start/restart the server with the assigned port
-                    try {
-                        await restartTarget(targetWithPort);
-                    } catch (err) {
-                        console.error(`⚠️  Target "${target.name}" saved but failed to start:`, err);
-                    }
-
-                    const action = idx >= 0 ? 'updated' : 'created';
-                    console.log(`✅ Target "${target.name}" ${action} (port ${assignedPort})`);
-                    return jsonRes(200, { status: action, target: target.name, port: assignedPort });
-                }
-
-                if (url.pathname.startsWith('/admin/targets/') && req.method === 'DELETE') {
-                    const name = url.pathname.split('/')[3]?.toLowerCase();
-                    if (!name) return jsonRes(400, { error: 'Target name required' });
-
-                    const idx = config.proxyTargets.findIndex(t => t.name === name);
-                    if (idx === -1) return jsonRes(404, { error: `Target "${name}" not found` });
-
-                    config.proxyTargets.splice(idx, 1);
-                    persistTargets(config.proxyTargets);
-                    await stopTarget(name);
-                    releaseTargetPort(name);
-
-                    console.log(`🗑️  Target "${name}" deleted`);
-                    return jsonRes(200, { status: 'deleted', target: name });
-                }
 
                 // ── Webhook CRUD ──
                 if (url.pathname === '/admin/webhooks' && req.method === 'GET') {
@@ -1221,7 +1072,6 @@ const shutdown = async (signal: string) => {
 
     // Stop all proxy and target servers
     await stopAllProxyServers();
-    await stopAllTargets();
     await stopAllWebhooks();
 
     // Wait for main server requests

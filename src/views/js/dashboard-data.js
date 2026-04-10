@@ -112,7 +112,6 @@ const IpTagInput = (() => {
 })();
 
 IpTagInput.init('pAllowedIps');
-IpTagInput.init('tAllowedIps');
 IpTagInput.init('wAllowedIps');
 
 // ─── Action Dropdown Menu ────────────────────────────────────────────────────
@@ -173,16 +172,6 @@ function showContextMenu(e, btn) {
       '---',
       { label: 'Delete', fn: () => deleteWebhook(name), danger: true },
     ]);
-  } else if (type === 'target') {
-    const t = _allTargets.find(x => x.name === name);
-    if (!t) return;
-    showActionMenu(btn, [
-      { label: 'Restart', fn: () => restartTargetAction(name) },
-      t.hasAuth ? { label: 'Copy Token', fn: () => copyTargetCredential(name) } : null,
-      { label: 'Edit', fn: () => editTarget(name) },
-      '---',
-      { label: 'Delete', fn: () => deleteTarget(name), danger: true },
-    ]);
   } else if (type === 'profile') {
     const p = _allProfiles.find(x => x.name === name);
     if (!p) return;
@@ -202,7 +191,7 @@ function showContextMenu(e, btn) {
 
 // ─── Data Fetch ──────────────────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchTargets(), fetchWebhooks(), fetchProxyUsers(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData()]);
+  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchProxyUsers(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData()]);
 }
 
 async function fetchHealth() {
@@ -215,7 +204,7 @@ async function fetchHealth() {
     document.getElementById('ovStatus').style.color = 'var(--green)';
     document.getElementById('ovUptime').textContent = 'Uptime: ' + fmtUptime(d.uptime);
     document.getElementById('ovActive').textContent = d.activeRequests;
-    document.getElementById('ovProfiles').textContent = (d.proxyProfiles || 0) + (d.proxyTargets || 0);
+    document.getElementById('ovProfiles').textContent = d.proxyProfiles || 0;
     document.getElementById('ovWebhooks').textContent = d.webhooks || 0;
   } catch {
     document.getElementById('navDot').className = 'status-dot offline';
@@ -271,7 +260,7 @@ async function fetchRecentRequests() {
         ? '<span style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:4px;font-size:11px">proxy' + (r.profileName ? ' / ' + esc(r.profileName) : '') + '</span>'
         : r.type === 'webhook'
         ? '<span style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:4px;font-size:11px">webhook' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>'
-        : '<span style="background:var(--blue-bg);color:var(--blue);padding:2px 8px;border-radius:4px;font-size:11px">target' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>';
+        : '<span style="background:var(--blue-bg);color:var(--blue);padding:2px 8px;border-radius:4px;font-size:11px">other' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>';
       const methodCls = r.method === 'GET' ? 'color:var(--green)' : r.method === 'POST' ? 'color:var(--blue)' : r.method === 'DELETE' ? 'color:var(--red)' : 'color:var(--orange)';
       const flash = isNew && i === 0 ? 'animation:flash 1s ease' : '';
       return `<tr style="border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;${flash}" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''" onclick="navigate('requests');setTimeout(()=>openReqDetail(${r.id}),300)">
@@ -426,16 +415,7 @@ async function copyProfileCredential(name) {
     navigator.clipboard.writeText(key).then(() => toast('Access key copied')).catch(() => prompt('Copy:', key));
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
-async function copyTargetCredential(name) {
-  try {
-    const res = await api('/admin/targets/' + encodeURIComponent(name));
-    if (!res.ok) return toast('Not found', 'error');
-    const { target } = await res.json();
-    const token = target.authToken;
-    if (!token) return toast('No auth token set', 'error');
-    navigator.clipboard.writeText(token).then(() => toast('Auth token copied')).catch(() => prompt('Copy:', token));
-  } catch (e) { toast('Error: ' + e.message, 'error'); }
-}
+
 async function reloadProfiles() {
   try {
     const res = await api('/admin/reload', { method: 'POST' }); const d = await res.json();
@@ -736,83 +716,20 @@ async function removeProfileFromCurrentUser(profileName) {
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
-// ─── Target CRUD ─────────────────────────────────────────────────────────────
-async function fetchTargets() {
-  try { const res = await api('/admin/targets'); if (!res.ok) return; const d = await res.json(); _allTargets = d.targets || []; filterTargets(); document.getElementById('navTargetBadge').textContent = _allTargets.length; } catch { }
-}
 
-function filterTargets() {
-  const search = (document.getElementById('targetSearch')?.value || '').toLowerCase();
-  const statusF = document.getElementById('targetStatusFilter')?.value || '';
-  const authF = document.getElementById('targetAuthFilter')?.value || '';
-  const filtered = _allTargets.filter(t => {
-    if (search && !t.name.toLowerCase().includes(search) && !t.targetUrl.toLowerCase().includes(search)) return false;
-    if (statusF === 'running' && !t.running) return false;
-    if (statusF === 'stopped' && t.running) return false;
-    if (authF === 'enabled' && !t.hasAuth) return false;
-    if (authF === 'disabled' && t.hasAuth) return false;
-    return true;
-  });
-  renderTargets(filtered);
-}
-function renderTargets(targets) {
-  const c = document.getElementById('targetListBody');
-  if (targets.length === 0) { c.innerHTML = '<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">No targets yet. Click "+ New Target".</td></tr>'; return; }
-  c.innerHTML = targets.map(t => {
-    const statusBadge = t.running
-      ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px">Running</span>'
-      : '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>';
-    const authBadge = t.hasAuth
-      ? '<span style="color:var(--green)">Enabled</span>'
-      : '<span style="color:var(--text3)">Disabled</span>';
-    const tIpBadge = (t.allowedIps && t.allowedIps.length)
-      ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 6px;border-radius:4px;font-size:11px;margin-left:4px" title="${esc(t.allowedIps.join(', '))}">IP restricted</span>`
-      : '';
-    return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
-  <td style="padding:8px 12px;font-weight:600">${esc(t.name)}</td>
-  <td style="padding:8px">${statusBadge}</td>
-  <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${t.port}</td>
-  <td style="padding:8px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'SF Mono',Monaco,monospace;color:var(--text2)" title="${esc(t.targetUrl)}">${esc(t.targetUrl)}</td>
-  <td style="padding:8px">${t.forwardPath ? '<span style="color:var(--green)">Yes</span>' : '<span style="color:var(--text3)">No</span>'}</td>
-  <td style="padding:8px">${authBadge}${tIpBadge}</td>
-  <td style="padding:8px;color:var(--accent2)">${t.active > 0 ? t.active : '<span style="color:var(--text3)">0</span>'}</td>
-  <td style="padding:8px 12px;text-align:right">
-    <button data-type="target" data-name="${esc(t.name)}" onclick="showContextMenu(event,this)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:2px 10px;cursor:pointer;color:var(--text2);font-size:18px;line-height:1.2;letter-spacing:1px" title="Actions">&#8942;</button>
-  </td>
-</tr>`;
-  }).join('');
-}
-function openTargetModal(target = null) {
-  editingTarget = target;
-  document.getElementById('targetModalTitle').textContent = target ? 'Edit Target' : 'New Target';
-  document.getElementById('tName').value = target ? target.name : ''; document.getElementById('tName').disabled = !!target;
-  document.getElementById('tTargetUrl').value = target ? target.targetUrl : '';
-  document.getElementById('tPort').value = target ? target.port : '';
-  document.getElementById('tAuthToken').value = target ? (target.authToken || '') : '';
-  document.getElementById('tForwardPath').checked = target ? target.forwardPath !== false : true;
-  IpTagInput.setValue('tAllowedIps', target?.allowedIps || []);
-  document.getElementById('targetModal').style.display = 'block';
-}
-function closeTargetModal() { document.getElementById('targetModal').style.display = 'none'; editingTarget = null; }
-async function saveTarget() {
-  const body = { name: document.getElementById('tName').value.trim(), targetUrl: document.getElementById('tTargetUrl').value.trim(), port: parseInt(document.getElementById('tPort').value) || 0, forwardPath: document.getElementById('tForwardPath').checked };
-  const at = document.getElementById('tAuthToken').value.trim(); if (at) body.authToken = at;
-  const tIps = IpTagInput.getValue('tAllowedIps'); if (tIps.length) body.allowedIps = tIps;
-  try {
-    const res = await api('/admin/targets', { method: 'POST', body: JSON.stringify(body) }); const d = await res.json();
-    if (res.ok) { toast('Target ' + (d.status || 'saved')); closeTargetModal(); await fetchTargets(); } else toast(d.error || 'Failed', 'error');
-  } catch (e) { toast('Error: ' + e.message, 'error'); }
-}
-async function editTarget(name) {
-  try { const res = await api('/admin/targets/' + encodeURIComponent(name)); if (!res.ok) return toast('Not found', 'error'); openTargetModal((await res.json()).target); } catch (e) { toast('Error: ' + e.message, 'error'); }
-}
-async function deleteTarget(name) {
-  if (!confirm('Delete target "' + name + '"?')) return;
-  try { const res = await api('/admin/targets/' + encodeURIComponent(name), { method: 'DELETE' }); if (res.ok) { toast('Deleted'); await fetchTargets(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
-}
-async function restartTargetAction(name) {
-  try { const res = await api('/admin/targets/' + encodeURIComponent(name) + '/restart', { method: 'POST' }); if ((await res.json()).status) { toast('Restarted "' + name + '"'); await fetchTargets(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
-}
+// ─── Targets (deprecated — removed) ─────────────────────────────────────────
+let _allTargets = [];
+function fetchTargets() { _allTargets = []; }
+function filterTargets() {}
+function renderTargets() {}
+function openTargetModal() {}
+function closeTargetModal() {}
+function saveTarget() {}
+function editTarget() {}
+function deleteTarget() {}
+function restartTargetAction() {}
+function copyTargetCredential() {}
+
 
 // ─── Webhooks CRUD ───────────────────────────────────────────────────────────
 let _allWebhooks = [];

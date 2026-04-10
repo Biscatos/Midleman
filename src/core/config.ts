@@ -1,4 +1,4 @@
-import type { Config, ProxyProfile, ProxyTarget } from './types';
+import type { Config, ProxyProfile } from './types';
 import { ConfigError } from './types';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
@@ -48,43 +48,41 @@ export function loadProxyProfiles(): ProxyProfile[] {
     const profiles = new Map<string, Partial<ProxyProfile>>();
 
     for (const [key, value] of Object.entries(process.env)) {
-        if (!key.startsWith('PROXY_') || !value) continue;
+        if (!value) continue;
 
-        // Parse: PROXY_{NAME}_{FIELD}
-        const parts = key.substring(6).split('_'); // Remove "PROXY_"
+        let prefix = '';
+        if (key.startsWith('PROXY_')) prefix = 'PROXY_';
+        else if (key.startsWith('TARGET_') && key !== 'TARGET_URL') prefix = 'TARGET_';
+        else continue;
+
+        const parts = key.substring(prefix.length).split('_');
         if (parts.length < 2) continue;
 
-        // The last part is the field, everything before is the profile name
         const field = parts[parts.length - 1];
         const name = parts.slice(0, -1).join('_').toLowerCase();
 
         if (!profiles.has(name)) {
-            profiles.set(name, { name });
+            profiles.set(name, { name, passthrough: prefix === 'TARGET_', forwardPath: true });
         }
 
         const profile = profiles.get(name)!;
 
-        switch (field) {
-            case 'URL':
-                profile.targetUrl = value.endsWith('/') ? value.slice(0, -1) : value;
-                break;
-            case 'KEY':
-                profile.apiKey = value;
-                break;
-            case 'HEADER':
-                profile.authHeader = value;
-                break;
-            case 'PREFIX':
-                profile.authPrefix = value;
-                break;
-            case 'ACCESS':
-                profile.accessKey = value;
-                break;
-            case 'BLOCKED':
-                profile.blockedExtensions = new Set(
-                    value.split(',').map(e => e.trim().toLowerCase().replace(/^\.?/, '.'))
-                );
-                break;
+        if (prefix === 'PROXY_') {
+            switch (field) {
+                case 'URL': profile.targetUrl = value.endsWith('/') ? value.slice(0, -1) : value; break;
+                case 'KEY': profile.apiKey = value; break;
+                case 'HEADER': profile.authHeader = value; break;
+                case 'PREFIX': profile.authPrefix = value; break;
+                case 'ACCESS': profile.accessKey = value; break;
+                case 'BLOCKED': profile.blockedExtensions = new Set(value.split(',').map(e => e.trim().toLowerCase().replace(/^\.?/, '.'))); break;
+            }
+        } else {
+            switch (field) {
+                case 'URL': profile.targetUrl = value.endsWith('/') ? value.slice(0, -1) : value; break;
+                case 'PORT': profile.port = parseInt(value, 10); break;
+                case 'AUTH': profile.authToken = value; break;
+                case 'FWDPATH': profile.forwardPath = value !== 'false'; break;
+            }
         }
     }
 
@@ -110,72 +108,7 @@ export function loadProxyProfiles(): ProxyProfile[] {
     return validProfiles;
 }
 
-/**
- * Scan environment variables for named targets.
- * Pattern: TARGET_{NAME}_URL, TARGET_{NAME}_PORT, etc.
- * Note: TARGET_URL (no name) is the legacy single-target var and is NOT parsed here.
- */
-export function loadProxyTargets(): ProxyTarget[] {
-    const targets = new Map<string, Partial<ProxyTarget>>();
 
-    for (const [key, value] of Object.entries(process.env)) {
-        if (!key.startsWith('TARGET_') || !value) continue;
-
-        // Skip the legacy TARGET_URL variable
-        if (key === 'TARGET_URL') continue;
-
-        // Parse: TARGET_{NAME}_{FIELD}
-        const parts = key.substring(7).split('_'); // Remove "TARGET_"
-        if (parts.length < 2) continue;
-
-        // The last part is the field, everything before is the target name
-        const field = parts[parts.length - 1];
-        const name = parts.slice(0, -1).join('_').toLowerCase();
-
-        if (!targets.has(name)) {
-            targets.set(name, { name, forwardPath: true });
-        }
-
-        const target = targets.get(name)!;
-
-        switch (field) {
-            case 'URL':
-                target.targetUrl = value.endsWith('/') ? value.slice(0, -1) : value;
-                break;
-            case 'PORT':
-                target.port = parseInt(value, 10);
-                break;
-            case 'AUTH':
-                target.authToken = value;
-                break;
-            case 'FWDPATH':
-                target.forwardPath = value !== 'false';
-                break;
-        }
-    }
-
-    const validTargets: ProxyTarget[] = [];
-
-    for (const [name, target] of targets) {
-        if (!target.targetUrl) {
-            console.warn(`⚠️  Target "${name}" is incomplete (needs URL). Skipping.`);
-            continue;
-        }
-        if (!target.port) target.port = 0; // 0 = auto-assign at startup
-
-        // Validate URL format
-        try {
-            new URL(target.targetUrl);
-        } catch {
-            console.warn(`⚠️  Target "${name}" has an invalid URL: ${target.targetUrl}. Skipping.`);
-            continue;
-        }
-
-        validTargets.push(target as ProxyTarget);
-    }
-
-    return validTargets;
-}
 
 /**
  * Load and validate environment configuration
@@ -189,7 +122,6 @@ export function loadConfig(): Config {
 
     // Load proxy profiles and targets
     const proxyProfiles = loadProxyProfiles();
-    const proxyTargets = loadProxyTargets();
 
     // OpenTelemetry configuration
     const otel = {
@@ -219,7 +151,6 @@ export function loadConfig(): Config {
         authToken,
         forwardPath,
         proxyProfiles,
-        proxyTargets,
         webhooks: [], // Populated in index.ts from store
         otel,
         requestLog,
