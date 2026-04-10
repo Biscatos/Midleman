@@ -1,12 +1,10 @@
 // ─── State ───────────────────────────────────────────────────────────────────
 const THEME_KEY = 'midleman_theme';
 let editingProfile = null;
-let editingTarget = null;
 let currentPage = 'overview';
 let lastReqLogId = 0;
 let setupTotpSecret = '';
 let loggedInUser = null;
-let _allTargets = [];
 let _allProfiles = [];
 
 // ─── Theme ───────────────────────────────────────────────────────────────────
@@ -203,7 +201,7 @@ function navigate(page) {
     if (n.dataset.page === page) n.classList.add('active');
   });
   if (page === 'requests') { rlPage = 1; fetchRequestLogs(); }
-  if (page === 'targets') fetchTargets();
+
 }
 
 // ─── API ─────────────────────────────────────────────────────────────────────
