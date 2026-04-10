@@ -121,7 +121,6 @@ function checkAdminAuth(req: Request, url: URL): Response | null {
 
 const portAssignments = await assignAllPorts(
     config.proxyProfiles.map(p => p.name),
-    [],
     config.webhooks.map(w => w.name),
     config.port,
 );
@@ -533,7 +532,6 @@ const server = Bun.serve({
                     // Reassign all ports
                     const newPorts = await assignAllPorts(
                         config.proxyProfiles.map(p => p.name),
-                        [],
                         config.webhooks.map(w => w.name),
                         config.port,
                     );

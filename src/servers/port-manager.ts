@@ -5,7 +5,6 @@ import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 
 interface PortMap {
     proxies: Record<string, number>;
-    targets: Record<string, number>;
     webhooks: Record<string, number>;
 }
 
@@ -15,7 +14,7 @@ const DATA_DIR = process.env.DATA_DIR || resolve(process.cwd(), 'data');
 const PORTS_FILE = resolve(DATA_DIR, 'ports.json');
 export const PORT_RANGE_START = parseInt(process.env.PORT_RANGE_START || '4000', 10);
 
-let portMap: PortMap = { proxies: {}, targets: {}, webhooks: {} };
+let portMap: PortMap = { proxies: {}, webhooks: {} };
 
 // ─── Persistence ─────────────────────────────────────────────────────────────
 
@@ -24,7 +23,7 @@ export function loadPortAssignments(): void {
         portMap = JSON.parse(readFileSync(PORTS_FILE, 'utf-8'));
         if (!portMap.webhooks) portMap.webhooks = {};
     } catch {
-        portMap = { proxies: {}, targets: {}, webhooks: {} };
+        portMap = { proxies: {}, webhooks: {} };
     }
 }
 
@@ -70,30 +69,15 @@ async function allocate(used: Set<number>, preferred?: number): Promise<number> 
  */
 export async function assignAllPorts(
     proxyNames: string[],
-    targets: { name: string; configuredPort: number }[],
     webhookNames: string[],
     adminPort: number,
-): Promise<{ proxies: Record<string, number>; targets: Record<string, number>; webhooks: Record<string, number> }> {
+): Promise<{ proxies: Record<string, number>; webhooks: Record<string, number> }> {
     const used = new Set<number>([adminPort]);
-
-    // Reserve all explicitly configured target ports first
-    for (const t of targets) {
-        if (t.configuredPort > 0) used.add(t.configuredPort);
-    }
 
     const proxies: Record<string, number> = {};
     for (const name of proxyNames) {
         const port = await allocate(used, portMap.proxies[name]);
         proxies[name] = port;
-        used.add(port);
-    }
-
-    const targetPorts: Record<string, number> = {};
-    for (const t of targets) {
-        const port = t.configuredPort > 0
-            ? t.configuredPort
-            : await allocate(used, portMap.targets[t.name]);
-        targetPorts[t.name] = port;
         used.add(port);
     }
 
@@ -104,9 +88,9 @@ export async function assignAllPorts(
         used.add(port);
     }
 
-    portMap = { proxies, targets: targetPorts, webhooks: webhookPorts };
+    portMap = { proxies, webhooks: webhookPorts };
     save();
-    return { proxies, targets: targetPorts, webhooks: webhookPorts };
+    return { proxies, webhooks: webhookPorts };
 }
 
 /**
@@ -114,10 +98,9 @@ export async function assignAllPorts(
  */
 export async function assignProxyPort(name: string, adminPort: number, excludePorts: number[]): Promise<number> {
     const proxiesWithoutSelf = Object.entries(portMap.proxies).filter(([k]) => k !== name).map(([_, v]) => v);
-    const targets = Object.values(portMap.targets);
     const webhooks = Object.values(portMap.webhooks || {});
     
-    const used = new Set<number>([adminPort, ...excludePorts, ...proxiesWithoutSelf, ...targets, ...webhooks]);
+    const used = new Set<number>([adminPort, ...excludePorts, ...proxiesWithoutSelf, ...webhooks]);
     const port = await allocate(used, portMap.proxies[name]);
     portMap.proxies[name] = port;
     save();
@@ -137,10 +120,9 @@ export async function assignWebhookPort(name: string, configuredPort: number, ad
         return configuredPort;
     }
     const proxies = Object.values(portMap.proxies);
-    const targets = Object.values(portMap.targets);
     const webhooksWithoutSelf = Object.entries(portMap.webhooks).filter(([k]) => k !== name).map(([_, v]) => v);
 
-    const used = new Set<number>([adminPort, ...excludePorts, ...proxies, ...targets, ...webhooksWithoutSelf]);
+    const used = new Set<number>([adminPort, ...excludePorts, ...proxies, ...webhooksWithoutSelf]);
     const port = await allocate(used, portMap.webhooks[name]);
     portMap.webhooks[name] = port;
     save();

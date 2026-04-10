@@ -58,7 +58,7 @@ async function startApp(username) {
   }
 }
 
-(async function init() {
+window.addEventListener('load', async function init() {
   try {
     const res = await fetch('/auth/status');
     const status = await res.json();
@@ -80,7 +80,7 @@ async function startApp(username) {
   } catch (e) {
     console.error('Init error:', e);
   }
-})();
+});
 
 // ─── Auth Functions ──────────────────────────────────────────────────────────
 function showAuthError(id, msg) {

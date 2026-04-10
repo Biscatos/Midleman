@@ -28,8 +28,8 @@ CREATE TABLE IF NOT EXISTS request_logs (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     request_id      TEXT NOT NULL,
     timestamp       TEXT NOT NULL DEFAULT (datetime('now')),
-    type            TEXT NOT NULL,          -- 'target' or 'proxy'
-    profile_name    TEXT,                   -- null for target requests
+    type            TEXT NOT NULL,          -- 'proxy' or 'webhook'
+    profile_name    TEXT,                   -- associated profile name
     target_name     TEXT,                   -- named target identifier (null for legacy/proxy)
     method          TEXT NOT NULL,
     path            TEXT NOT NULL,

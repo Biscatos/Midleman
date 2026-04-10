@@ -17,13 +17,15 @@
         <div class="auth-error" id="setupError"></div>
 
         <div class="auth-step active" id="setupStep1">
-          <div class="form-group"><label>Username</label><input type="text" id="setupUser" placeholder="admin"
-              autocomplete="username"></div>
-          <div class="form-group"><label>Password</label><input type="password" id="setupPass"
-              placeholder="Min. 6 characters" autocomplete="new-password"></div>
-          <div class="form-group"><label>Confirm Password</label><input type="password" id="setupPass2"
-              placeholder="Repeat password" autocomplete="new-password"></div>
-          <button class="btn btn-primary" onclick="setupStep2()">Continue to 2FA Setup</button>
+          <form onsubmit="event.preventDefault(); setupStep2();" style="display: contents;">
+            <div class="form-group"><label>Username</label><input type="text" id="setupUser" placeholder="admin"
+                autocomplete="username"></div>
+            <div class="form-group"><label>Password</label><input type="password" id="setupPass"
+                placeholder="Min. 6 characters" autocomplete="new-password"></div>
+            <div class="form-group"><label>Confirm Password</label><input type="password" id="setupPass2"
+                placeholder="Repeat password" autocomplete="new-password"></div>
+            <button type="submit" class="btn btn-primary">Continue to 2FA Setup</button>
+          </form>
         </div>
 
         <div class="auth-step" id="setupStep2">
@@ -32,12 +34,14 @@
           <div class="qr-container" id="setupQrContainer"></div>
           <p style="font-size:12px;color:#52525b;text-align:center;margin-bottom:4px">Or enter this key manually:</p>
           <div class="totp-secret-box" id="setupSecretDisplay"></div>
-          <div class="form-group"><label>Enter 6-digit code to verify</label><input type="text" id="setupTotpCode"
-              placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code"
-              style="text-align:center;font-size:24px;letter-spacing:8px;font-weight:700"></div>
-          <button class="btn btn-primary" onclick="completeSetup()">Create Account</button>
-          <button class="btn" style="width:100%;justify-content:center;margin-top:8px"
-            onclick="backToStep1()">Back</button>
+          <form onsubmit="event.preventDefault(); completeSetup();" style="display: contents;">
+            <div class="form-group"><label>Enter 6-digit code to verify</label><input type="text" id="setupTotpCode"
+                placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code"
+                style="text-align:center;font-size:24px;letter-spacing:8px;font-weight:700"></div>
+            <button type="submit" class="btn btn-primary">Create Account</button>
+            <button type="button" class="btn" style="width:100%;justify-content:center;margin-top:8px"
+              onclick="backToStep1()">Back</button>
+          </form>
         </div>
       </div>
     </main>
