@@ -12,11 +12,10 @@ Midleman is a self-hosted middleware layer that sits between your services and t
 
 ## Features
 
-- **Proxy Profiles** — Inject API credentials server-side so they are never exposed to clients. Share protected upstream APIs via public or key-gated links.
-- **Named Targets** — Reverse-proxy to multiple upstreams, each on its own auto-assigned port, with optional per-target auth.
-- **Webhook Fan-out** — Receive a single inbound webhook and dispatch it asynchronously to N destinations with body templating, custom headers, and retry logic.
-- **Retry Engine** — Configurable per-distributor and per-destination retry with exponential or fixed backoff. Includes a *retry until 2xx* mode for critical notifications.
-- **Dead Letter Queue** — Failed deliveries are captured in-memory with full replay capability from the dashboard.
+- **Proxy Profiles** — Inject API credentials server-side so they are never exposed to clients. Share protected upstream APIs via public or key-gated links. Configurable `forwardPath` to control whether the incoming path is appended to the upstream URL.
+- **Webhook Fan-out** — Receive a single inbound webhook and dispatch it asynchronously to N destinations. Custom actions support optional body templates (pass-through by default), custom headers, method override, and header forwarding.
+- **Retry Engine** — Configurable per-distributor and per-destination retry with exponential or fixed backoff. Includes a *retry until 2xx* mode (with `maxRetries` as a hard cap).
+- **Dead Letter Queue** — Failed deliveries are persisted to disk (`dlq.json`) and survive restarts. Full replay from the dashboard.
 - **Web Dashboard** — Built-in admin UI for full CRUD, request log inspection, charts, and fanout detail.
 - **Traffic Logging** — SQLite-backed request/response capture with configurable retention and body size limits.
 - **TOTP 2FA** — First-run setup wizard generates a QR code for any authenticator app. All admin routes are session-protected.
@@ -68,17 +67,6 @@ All options are set via environment variables. Copy `.env.example` to get starte
 | `PORT` | `3000` | Admin dashboard port (fixed) |
 | `DATA_DIR` | `./data` | Persistent storage directory |
 | `PORT_RANGE_START` | `4000` | Starting port for auto-assigned targets |
-
-### Named Targets
-
-Define one or more upstream targets using the `TARGET_` prefix:
-
-```env
-TARGET_API_URL=https://api.example.com
-TARGET_API_PORT=4001                  # omit or set to 0 for auto-assign
-TARGET_API_AUTH=secret_token          # optional per-target auth
-TARGET_API_FWDPATH=true               # append incoming path to target URL
-```
 
 ### Proxy Profiles (Credential Injection)
 
@@ -144,13 +132,13 @@ Webhooks are configured from the dashboard. Each distributor listens on its own 
 
 | Field | Description |
 |-------|-------------|
-| `maxRetries` | Attempts after the first failure |
+| `maxRetries` | Max attempts after the first failure — acts as a hard cap even with `retryUntilSuccess` |
 | `retryDelayMs` | Base delay between retries (ms) |
 | `backoff` | `exponential` (default) or `fixed` |
 | `retryOn` | HTTP status codes that trigger retry (default: `[429, 502, 503, 504]`) |
-| `retryUntilSuccess` | Retry on **any** non-2xx response |
+| `retryUntilSuccess` | Retry on **any** non-2xx response (ignores `retryOn`, respects `maxRetries`) |
 
-Failed deliveries that exhaust all retries are captured in the **Dead Letter Queue** and can be replayed individually or in bulk from the dashboard.
+Failed deliveries that exhaust all retries are captured in the **Dead Letter Queue**, persisted to `data/dlq.json`, and can be replayed individually or in bulk from the dashboard. The DLQ survives process restarts and unexpected crashes.
 
 ### Meta (Facebook / WhatsApp / Instagram) Integration
 
@@ -174,8 +162,6 @@ All resources are available via REST under `/admin`:
 | `POST` | `/admin/webhooks/dlq/retry-all` | Retry all failed deliveries |
 | `POST` | `/admin/webhooks/dlq/:id/retry` | Retry one delivery |
 | `DELETE` | `/admin/webhooks/dlq/:id` | Dismiss a failed delivery |
-| `GET` | `/admin/targets` | List named targets |
-| `POST` | `/admin/targets` | Create / update a target |
 | `GET` | `/admin/profiles` | List proxy profiles |
 | `POST` | `/admin/profiles` | Create / update a profile |
 | `GET` | `/admin/requests` | Query request logs |
@@ -196,7 +182,6 @@ src/
 │   └── types.ts            # TypeScript interfaces
 ├── servers/
 │   ├── webhook-server.ts   # Webhook fan-out + DLQ + retry engine
-│   ├── target-server.ts    # Named target servers
 │   ├── proxy-server.ts     # Proxy profile servers
 │   └── port-manager.ts     # Dynamic port allocation
 ├── proxy/
