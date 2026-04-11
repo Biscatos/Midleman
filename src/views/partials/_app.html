@@ -468,7 +468,7 @@
 <div id="webhookModal"
   style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;padding:24px 16px">
   <div
-    style="max-width:600px;width:100%;max-height:90vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)">
+    style="max-width:900px;width:100%;max-height:92vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)">
     <div
       style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0">
       <h3 id="webhookModalTitle" style="font-size:16px;font-weight:600">New Webhook Distributor</h3>
@@ -541,7 +541,7 @@
             <div id="wRetrySection" style="display:none;padding:12px;display:none;flex-direction:column;gap:10px">
               <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
                 <div>
-                  <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Max retries</label>
+                  <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Max retries <span id="wRetryMaxCapHint" style="display:none;color:var(--orange);font-size:10px">(hard cap)</span></label>
                   <input type="number" id="wRetryMax" min="1" max="20" value="3"
                     style="width:100%;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
                 </div>
@@ -563,7 +563,7 @@
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"
                 title="Retry on ANY non-2xx response, not just the codes below">
                 <input type="checkbox" id="wRetryUntilSuccess"
-                  onchange="document.getElementById('wRetryOnRow').style.display=this.checked?'none':'flex'">
+                  onchange="document.getElementById('wRetryOnRow').style.display=this.checked?'none':'flex';document.getElementById('wRetryMaxCapHint').style.display=this.checked?'inline':'none'">
                 <strong>Retry until success (2xx)</strong>
                 <span style="color:var(--text3);font-size:11px">— ignores the status code list below, retries on any
                   non-2xx</span>
@@ -703,6 +703,13 @@
           </label>
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Skip logging requests and
             responses for this proxy.</span>
+        </div>
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="pForwardPath" style="cursor:pointer;accent-color:var(--accent)">
+            <span>Forward PATH</span>
+          </label>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Append the incoming request path to the target URL.</span>
         </div>
       </div>
     </div>

@@ -316,7 +316,9 @@ export async function handleProxyRequest(
 
     // Build the target URL
     const queryString = url.search;
-    const targetUrl = profile.targetUrl + remainingPath + queryString;
+    const targetUrl = profile.forwardPath !== false
+        ? profile.targetUrl + remainingPath + queryString
+        : profile.targetUrl + queryString;
 
     // Build headers with upstream authentication
     const forwardHeaders = new Headers();
@@ -767,7 +769,9 @@ export async function handleDirectProxy(
     }
 
     // ── Build target URL (transparent: path goes directly to upstream) ──
-    const targetUrl = profile.targetUrl + url.pathname + url.search;
+    const targetUrl = profile.forwardPath !== false
+        ? profile.targetUrl + url.pathname + url.search
+        : profile.targetUrl + url.search;
 
     // ── Build headers ──
     const forwardHeaders = new Headers();

@@ -1,6 +1,7 @@
 import type { WebhookDistributor, WebhookRetryConfig } from '../core/types';
 import { logRequest, headersToRecord } from '../telemetry/request-log';
 import { isIpAllowed } from '../core/ip-filter';
+import { loadPersistedDlq, persistDlq, type StoredFailedFanout } from '../core/store';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -38,7 +39,50 @@ export interface FailedFanout {
     retrying: boolean;
 }
 
-const deadLetterQueue: FailedFanout[] = [];
+// ─── DLQ helpers ────────────────────────────────────────────────────────────
+
+function serializeDlqEntry(e: FailedFanout): StoredFailedFanout {
+    let body: string | null = null;
+    let bodyEncoding: StoredFailedFanout['bodyEncoding'] = 'none';
+    if (e.body instanceof ArrayBuffer) {
+        body = Buffer.from(e.body).toString('base64');
+        bodyEncoding = 'base64';
+    } else if (typeof e.body === 'string') {
+        body = e.body;
+        bodyEncoding = 'text';
+    }
+    const { retrying: _r, ...rest } = e;
+    return { ...rest, body, bodyEncoding };
+}
+
+function deserializeDlqEntry(s: StoredFailedFanout): FailedFanout {
+    let body: ArrayBuffer | string | null = null;
+    if (s.bodyEncoding === 'base64' && s.body !== null) {
+        body = Buffer.from(s.body, 'base64').buffer as ArrayBuffer;
+    } else if (s.bodyEncoding === 'text') {
+        body = s.body;
+    }
+    return { ...s, body, retryConfig: s.retryConfig as WebhookRetryConfig | undefined, retrying: false };
+}
+
+// Load from disk on startup
+const deadLetterQueue: FailedFanout[] = loadPersistedDlq().map(deserializeDlqEntry);
+
+// Immediate synchronous flush (used for new failures and shutdown)
+export function flushDlqSync(): void {
+    if (_dlqFlushTimer) { clearTimeout(_dlqFlushTimer); _dlqFlushTimer = null; }
+    persistDlq(deadLetterQueue.map(serializeDlqEntry));
+}
+
+// Debounced flush — for non-critical updates (dismiss, retry metadata)
+let _dlqFlushTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleDlqFlush(): void {
+    if (_dlqFlushTimer) clearTimeout(_dlqFlushTimer);
+    _dlqFlushTimer = setTimeout(() => {
+        persistDlq(deadLetterQueue.map(serializeDlqEntry));
+        _dlqFlushTimer = null;
+    }, 500);
+}
 
 export function getDeadLetterQueue(): FailedFanout[] {
     return deadLetterQueue;
@@ -48,6 +92,7 @@ export function dismissFailedFanout(id: string): boolean {
     const idx = deadLetterQueue.findIndex(e => e.id === id);
     if (idx === -1) return false;
     deadLetterQueue.splice(idx, 1);
+    scheduleDlqFlush();
     return true;
 }
 
@@ -76,12 +121,14 @@ export async function retryFailedFanout(id: string): Promise<{ ok: boolean; stat
         entry.lastError = `HTTP ${res.status}`;
         entry.failedAt = Date.now();
         entry.retrying = false;
+        scheduleDlqFlush();
         return { ok: false, status: res.status, error: entry.lastError };
     } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         entry.lastError = errorMsg;
         entry.failedAt = Date.now();
         entry.retrying = false;
+        scheduleDlqFlush();
         return { ok: false, error: errorMsg };
     }
 }
@@ -101,6 +148,7 @@ function enqueueFailedFanout(entry: Omit<FailedFanout, 'id' | 'failedAt' | 'retr
         deadLetterQueue.shift(); // drop oldest
     }
     deadLetterQueue.push({ ...entry, id: crypto.randomUUID(), failedAt: Date.now(), retrying: false });
+    flushDlqSync(); // write immediately — a crash right after a failure must not lose the entry
 }
 
 // ─── Retry Helper ───────────────────────────────────────────────────────────

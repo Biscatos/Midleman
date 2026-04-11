@@ -359,6 +359,7 @@ function openProfileModal(profile = null) {
   document.getElementById('pRequire2fa').checked = profile ? !!profile.require2fa : false;
   document.getElementById('pIsWebApp').checked = profile ? !!profile.isWebApp : false;
   document.getElementById('pDisableLogs').checked = profile ? !!profile.disableLogs : false;
+  document.getElementById('pForwardPath').checked = profile ? profile.forwardPath !== false : true;
   document.getElementById('pBlocked').value = profile?.blockedExtensions ? profile.blockedExtensions.join(', ') : '';
   IpTagInput.setValue('pAllowedIps', profile?.allowedIps || []);
   toggleProfileAuthMode();
@@ -385,6 +386,7 @@ async function saveProfile() {
     body.isWebApp = document.getElementById('pIsWebApp').checked;
   }
   body.disableLogs = document.getElementById('pDisableLogs').checked;
+  body.forwardPath = document.getElementById('pForwardPath').checked;
   const blocked = v('pBlocked'); if (blocked) body.blockedExtensions = blocked.split(',').map(s => s.trim()).filter(Boolean);
   const allowedIps = IpTagInput.getValue('pAllowedIps'); if (allowedIps.length) body.allowedIps = allowedIps;
   try {
@@ -1104,7 +1106,7 @@ function toggleRetrySection() {
 
 function addWebhookTarget(target = "") {
   if (typeof target === 'string') {
-    webhookTargetState.push({ type: 'basic', url: target, method: 'POST', bodyTemplate: '', customHeaders: [], forwardHeaders: false, retry: null, retryOpen: false });
+    webhookTargetState.push({ type: 'basic', url: target, method: 'POST', bodyTemplate: '', customBody: false, customHeaders: [], forwardHeaders: false, retry: null, retryOpen: false });
   } else {
     const headersArr = [];
     if (target.customHeaders) {
@@ -1117,6 +1119,7 @@ function addWebhookTarget(target = "") {
       url: target.url || '',
       method: target.method || 'POST',
       bodyTemplate: target.bodyTemplate || '',
+      customBody: !!target.bodyTemplate,
       customHeaders: headersArr,
       forwardHeaders: target.forwardHeaders === true,
       retry: target.retry || null,
@@ -1229,7 +1232,13 @@ function renderWebhookTargets() {
             </div>
 
             <div style="display:flex;flex-direction:column;gap:4px">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+              <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none">
+                <input type="checkbox" ${t.customBody ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'customBody', this.checked); renderWebhookTargets()" style="cursor:pointer;accent-color:var(--accent)">
+                <span style="font-weight:600">Custom Body</span>
+                <span style="color:var(--text3);font-weight:400">— leave unchecked to forward the incoming body as-is</span>
+              </label>
+              ${t.customBody ? `
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;margin-top:2px">
                 <span style="font-size:11px;color:var(--text2)">Body Template (JSON)</span>
                 <button onclick="openBodyEditor(${i})" class="btn" style="padding:2px 6px;font-size:10px;display:flex;align-items:center;gap:4px">
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
@@ -1239,6 +1248,7 @@ function renderWebhookTargets() {
               <div id="aceBody_${i}" style="width:100%; min-height:100px; border-radius:4px; border:1px solid var(--border);"></div>
               <div style="font-size:10px;color:var(--text3);margin-top:3px;margin-left:2px">Supports JSON + <code style="background:rgba(0,120,212,0.15);padding:1px 4px;border-radius:3px;color:var(--accent);font-size:10px">{{template.vars}}</code></div>
               <div id="previewBody_${i}" style="display:none;font-size:10px;color:var(--accent);margin-top:2px;margin-left:4px;white-space:pre-wrap;font-family:monospace"></div>
+              ` : `<div id="aceBody_${i}" style="display:none"></div><div id="previewBody_${i}" style="display:none"></div>`}
             </div>
           </div>
         ` : ''}
@@ -1253,7 +1263,7 @@ function renderWebhookTargets() {
           <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;padding:8px;background:var(--surface2);border-radius:4px;border:1px solid var(--border)">
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
               <div>
-                <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">Max retries</label>
+                <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">Max retries${t.retry?.retryUntilSuccess ? ' <span style="color:var(--orange);font-size:10px">(hard cap)</span>' : ''}</label>
                 <input type="number" min="1" max="20" value="${t.retry?.maxRetries ?? 3}" oninput="updateTargetRetry(${i},'maxRetries',+this.value)" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px;outline:none">
               </div>
               <div>
@@ -1269,7 +1279,7 @@ function renderWebhookTargets() {
               </div>
             </div>
             <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer">
-              <input type="checkbox" ${t.retry?.retryUntilSuccess ? 'checked' : ''} onchange="updateTargetRetry(${i},'retryUntilSuccess',this.checked);document.getElementById('tRetryOnRow_${i}').style.display=this.checked?'none':'flex'">
+              <input type="checkbox" ${t.retry?.retryUntilSuccess ? 'checked' : ''} onchange="updateTargetRetry(${i},'retryUntilSuccess',this.checked);document.getElementById('tRetryOnRow_${i}').style.display=this.checked?'none':'flex';renderWebhookTargets()">
               <strong>Retry until success (2xx)</strong>
             </label>
             <div id="tRetryOnRow_${i}" style="display:${t.retry?.retryUntilSuccess ? 'none' : 'flex'};align-items:center;gap:6px">
@@ -1341,7 +1351,7 @@ async function saveWebhook() {
               method: t.method || 'POST',
               customHeaders: headersObj,
               forwardHeaders: t.forwardHeaders,
-              bodyTemplate: t.bodyTemplate.trim() || undefined
+              bodyTemplate: (t.customBody && t.bodyTemplate.trim()) ? t.bodyTemplate.trim() : undefined
           };
           if (t.retryOpen && t.retry) dest.retry = t.retry;
           targetsRaw.push(dest);

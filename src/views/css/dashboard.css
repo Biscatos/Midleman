@@ -641,7 +641,8 @@ body {
   color: var(--red);
   background: var(--red-bg);
 }
-.ip-tag-input {
+.ip-tag-input,
+.ip-tag-wrap .ip-tag-input {
   border: none;
   background: transparent;
   color: var(--text);
@@ -651,6 +652,7 @@ body {
   flex: 1;
   padding: 4px 4px;
   font-family: inherit;
+  box-shadow: none;
 }
 .ip-tag-input::placeholder {
   color: var(--text3);

@@ -30,6 +30,7 @@ const DATA_DIR = process.env.DATA_DIR || resolve(process.cwd(), 'data');
 const PROFILES_FILE = resolve(DATA_DIR, 'profiles.json');
 const TARGETS_FILE = resolve(DATA_DIR, 'targets.json');
 const WEBHOOKS_FILE = resolve(DATA_DIR, 'webhooks.json');
+const DLQ_FILE = resolve(DATA_DIR, 'dlq.json');
 
 /**
  * Ensure the data directory exists.
@@ -260,6 +261,51 @@ export function persistWebhooks(webhooks: WebhookDistributor[]): void {
     } catch (err) {
         console.error('❌ Could not save webhooks.json:', err instanceof Error ? err.message : err);
         throw err;
+    }
+}
+
+// ─── DLQ Persistence ────────────────────────────────────────────────────────
+
+/**
+ * On-disk representation of a FailedFanout.
+ * ArrayBuffer bodies are stored as base64 to survive JSON serialization.
+ */
+export interface StoredFailedFanout {
+    id: string;
+    webhookName: string;
+    requestId: string;
+    targetUrl: string;
+    method: string;
+    headers: Record<string, string>;
+    body: string | null;         // base64 if bodyEncoding='base64', raw string if 'text', null if 'none'
+    bodyEncoding: 'base64' | 'text' | 'none';
+    bodyPreview: string | null;
+    bodySize: number;
+    path: string;
+    clientIp: string;
+    retryConfig: unknown;
+    lastError: string;
+    totalAttempts: number;
+    failedAt: number;
+}
+
+export function loadPersistedDlq(): StoredFailedFanout[] {
+    try {
+        if (!existsSync(DLQ_FILE)) return [];
+        const raw = readFileSync(DLQ_FILE, 'utf-8');
+        return JSON.parse(raw) as StoredFailedFanout[];
+    } catch (err) {
+        console.warn('⚠️  Could not load dlq.json:', err instanceof Error ? err.message : err);
+        return [];
+    }
+}
+
+export function persistDlq(entries: StoredFailedFanout[]): void {
+    try {
+        ensureDataDir();
+        writeFileSync(DLQ_FILE, JSON.stringify(entries, null, 2), 'utf-8');
+    } catch (err) {
+        console.error('❌ Could not save dlq.json:', err instanceof Error ? err.message : err);
     }
 }
 
