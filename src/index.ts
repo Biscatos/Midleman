@@ -785,7 +785,7 @@ const server = Bun.serve({
 
                 // ── Profile CRUD ──
                 if (url.pathname.match(/^\/admin\/profiles\/[^/]+\/restart$/) && req.method === 'POST') {
-                    const name = url.pathname.split('/')[3]?.toLowerCase();
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
                     const profile = config.proxyProfiles.find(p => p.name === name);
                     if (!profile) return jsonRes(404, { error: `Profile "${name}" not found` });
                     try {
@@ -798,7 +798,7 @@ const server = Bun.serve({
                 }
 
                 if (url.pathname.match(/^\/admin\/profiles\/[^/]+$/) && req.method === 'GET') {
-                    const name = url.pathname.split('/')[3]?.toLowerCase();
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
                     if (!name) return jsonRes(400, { error: 'Profile name required' });
                     const profile = config.proxyProfiles.find(p => p.name === name);
                     if (!profile) return jsonRes(404, { error: `Profile "${name}" not found` });
@@ -908,7 +908,7 @@ const server = Bun.serve({
                 }
 
                 if (url.pathname.match(/^\/admin\/profiles\/[^/]+$/) && req.method === 'DELETE') {
-                    const name = url.pathname.split('/')[3]?.toLowerCase();
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
                     if (!name) return jsonRes(400, { error: 'Profile name required' });
                     const idx = config.proxyProfiles.findIndex(p => p.name === name);
                     if (idx === -1) return jsonRes(404, { error: `Profile "${name}" not found` });
@@ -994,7 +994,7 @@ const server = Bun.serve({
 
                 // GET /admin/profiles/:name/users — list users assigned to a profile
                 if (url.pathname.match(/^\/admin\/profiles\/[^/]+\/users$/) && req.method === 'GET') {
-                    const name = url.pathname.split('/')[3]?.toLowerCase();
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
                     const profile = config.proxyProfiles.find(p => p.name === name);
                     if (!profile) return jsonRes(404, { error: `Profile "${name}" not found` });
                     const users = listProxyUsersForProfile(name);
@@ -1003,7 +1003,7 @@ const server = Bun.serve({
 
                 // POST /admin/profiles/:name/users — assign user(s) to a profile
                 if (url.pathname.match(/^\/admin\/profiles\/[^/]+\/users$/) && req.method === 'POST') {
-                    const name = url.pathname.split('/')[3]?.toLowerCase();
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
                     const profile = config.proxyProfiles.find(p => p.name === name);
                     if (!profile) return jsonRes(404, { error: `Profile "${name}" not found` });
 
@@ -1018,7 +1018,7 @@ const server = Bun.serve({
                 // DELETE /admin/profiles/:name/users/:userId — remove user from profile
                 if (url.pathname.match(/^\/admin\/profiles\/[^/]+\/users\/\d+$/) && req.method === 'DELETE') {
                     const parts = url.pathname.split('/');
-                    const name = parts[3]?.toLowerCase();
+                    const name = decodeURIComponent(parts[3] || '').toLowerCase();
                     const userId = parseInt(parts[5], 10);
                     removeProxyUserFromProfile(userId, name);
                     return jsonRes(200, { status: 'removed' });
