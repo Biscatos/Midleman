@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Criar Conta — {{LOGIN_TITLE}}</title>
+  <link rel="icon" href="{{LOGIN_LOGO_URL}}" type="image/x-icon">
+  <link rel="shortcut icon" href="{{LOGIN_LOGO_URL}}">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #3a3d55; border-radius: 99px; }
+    * { scrollbar-width: thin; scrollbar-color: #3a3d55 transparent; }
+    :root {
+      --bg: #080a0f; --text: #fafafa; --text2: #52525b; --text3: #71717a;
+      --input-bg: rgba(255,255,255,0.04); --input-bdr: rgba(255,255,255,0.09);
+      --input-text: #d4d4d8; --input-ph: #3f3f46;
+      --focus: #0078d4; --btn: #0078d4; --btn-hover: #005ea6; --btn-active: #004c8a;
+      --err-bg: rgba(220,38,38,0.08); --err-bdr: rgba(220,38,38,0.15); --err-text: #dc2626;
+      --ok-bg: rgba(0,184,92,0.08); --ok-bdr: rgba(0,184,92,0.2); --ok-text: #00b85c;
+      --footer: #27272a; --info-bg: rgba(255,255,255,0.03); --info-bdr: rgba(255,255,255,0.07);
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f4f5f7; --text: #0f1015; --text2: #52525b; --text3: #71717a;
+        --input-bg: rgba(0,0,0,0.04); --input-bdr: rgba(0,0,0,0.12);
+        --input-text: #0f1015; --input-ph: #a1a1aa;
+        --focus: #0078d4; --btn: #0078d4; --btn-hover: #005ea6; --btn-active: #004c8a;
+        --err-bg: rgba(220,38,38,0.06); --err-bdr: rgba(220,38,38,0.15); --err-text: #dc2626;
+        --ok-bg: rgba(0,184,92,0.06); --ok-bdr: rgba(0,184,92,0.15); --ok-text: #008a44;
+        --footer: #c4c4cc; --info-bg: rgba(0,0,0,0.03); --info-bdr: rgba(0,0,0,0.08);
+      }
+      ::-webkit-scrollbar-thumb { background: #c4c9d8; }
+      * { scrollbar-color: #c4c9d8 transparent; }
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; }
+    canvas#bg { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+    .main { position: relative; z-index: 1; width: 100%; max-width: 400px; padding: 60px 24px 48px; }
+    h2 { font-size: 30px; font-weight: 300; letter-spacing: -0.4px; line-height: 1.2; margin-bottom: 6px; }
+    .greeting { font-size: 14px; color: var(--text3); margin-bottom: 28px; line-height: 1.5; }
+    .info-box { background: var(--info-bg); border: 1px solid var(--info-bdr); border-radius: 8px; padding: 12px 14px; margin-bottom: 24px; }
+    .info-row { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+    .info-row + .info-row { margin-top: 6px; }
+    .info-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text3); white-space: nowrap; min-width: 44px; }
+    .info-val { color: var(--text2); word-break: break-all; }
+    .note-row { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--info-bdr); font-size: 12px; color: var(--text3); font-style: italic; line-height: 1.5; }
+    .error { background: var(--err-bg); border: 1px solid var(--err-bdr); color: var(--err-text); padding: 12px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; margin-bottom: 20px; display: none; }
+    .error.visible { display: block; }
+    .success-box { background: var(--ok-bg); border: 1px solid var(--ok-bdr); color: var(--ok-text); padding: 20px; border-radius: 10px; font-size: 14px; font-weight: 500; display: none; line-height: 1.6; }
+    .success-box.visible { display: block; }
+    .success-box svg { display: block; margin-bottom: 10px; }
+    .form-group { margin-bottom: 18px; }
+    .form-group label { display: block; font-size: 11px; font-weight: 500; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .form-group input { width: 100%; height: 44px; padding: 12px; font-size: 14px; border-radius: 8px; border: 1px solid var(--input-bdr); background: var(--input-bg); color: var(--input-text); outline: none; transition: border-color .15s; font-family: inherit; }
+    .form-group input:focus { border-color: var(--focus); }
+    .form-group input::placeholder { color: var(--input-ph); }
+    .form-group input:-webkit-autofill, .form-group input:-webkit-autofill:hover, .form-group input:-webkit-autofill:focus {
+      border-color: transparent;
+      -webkit-box-shadow: inset 0 0 0 1000px rgba(12,14,20,0.97), 0 0 0 1px rgba(255,255,255,0.09);
+      box-shadow: inset 0 0 0 1000px rgba(12,14,20,0.97), 0 0 0 1px rgba(255,255,255,0.09);
+      -webkit-text-fill-color: var(--input-text); caret-color: var(--input-text);
+    }
+    @media (prefers-color-scheme: light) {
+      .form-group input:-webkit-autofill, .form-group input:-webkit-autofill:hover, .form-group input:-webkit-autofill:focus {
+        -webkit-box-shadow: inset 0 0 0 1000px rgba(234,236,242,0.97), 0 0 0 1px rgba(0,0,0,0.12);
+        box-shadow: inset 0 0 0 1000px rgba(234,236,242,0.97), 0 0 0 1px rgba(0,0,0,0.12);
+        -webkit-text-fill-color: var(--input-text);
+      }
+    }
+    .pw-row { position: relative; }
+    .pw-row input { padding-right: 42px; }
+    .pw-eye { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text3); cursor: pointer; padding: 2px; display: flex; align-items: center; }
+    .pw-eye:hover { color: var(--text2); }
+    .pw-strength { height: 2px; border-radius: 2px; margin-top: 6px; transition: all .3s; background: rgba(255,255,255,0.08); }
+    .pw-hint { font-size: 11px; color: var(--text3); margin-top: 4px; }
+    .btn-primary { width: 100%; height: 48px; border-radius: 8px; border: none; background: var(--btn); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; transition: background .15s; font-family: inherit; }
+    .btn-primary:hover { background: var(--btn-hover); }
+    .btn-primary:active { background: var(--btn-active); }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-primary .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: spin .6s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .footer { position: relative; z-index: 1; text-align: center; font-size: 11px; color: var(--footer); padding: 20px; text-transform: uppercase; letter-spacing: .08em; }
+    @media (max-width: 480px) { .main { padding: 48px 20px 40px; } h2 { font-size: 26px; } }
+  </style>
+</head>
+<body>
+  <canvas id="bg"></canvas>
+
+  <main class="main">
+
+    <!-- Invalid / expired -->
+    <div id="invalidBox" style="display:{{INVALID_DISPLAY}}">
+      <h2 style="margin-bottom:12px">Link inválido</h2>
+      <p style="color:var(--text3);font-size:14px;line-height:1.6">{{INVALID_MSG}}</p>
+    </div>
+
+    <!-- Valid invite -->
+    <div id="formBox" style="display:{{FORM_DISPLAY}}">
+      <h2 id="pageTitle">Criar conta</h2>
+      <p class="greeting" id="pageGreeting"></p>
+
+      <!-- Info box: email + note -->
+      <div class="info-box" id="infoBox">
+        <div class="info-row">
+          <span class="info-label">Email</span>
+          <span class="info-val" id="emailDisplay"></span>
+        </div>
+        <div class="note-row" id="noteDisplay" style="display:none"></div>
+      </div>
+
+      <div class="error" id="regError"></div>
+      <div class="success-box" id="regSuccess">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+        </svg>
+        <div id="regSuccessMsg"></div>
+      </div>
+
+      <!-- New user: password form -->
+      <div id="newUserForm">
+        <div class="form-group">
+          <label>Palavra-passe</label>
+          <div class="pw-row">
+            <input type="password" id="invPassword" placeholder="Mínimo 6 caracteres" autocomplete="new-password" oninput="checkStrength(this.value)">
+            <button type="button" class="pw-eye" onclick="togglePw('invPassword',this)" tabindex="-1">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+          <div class="pw-strength" id="pwBar"></div>
+          <div class="pw-hint" id="pwHint"></div>
+        </div>
+        <div class="form-group">
+          <label>Confirmar palavra-passe</label>
+          <div class="pw-row">
+            <input type="password" id="invPassword2" placeholder="Repita a palavra-passe" autocomplete="new-password">
+            <button type="button" class="pw-eye" onclick="togglePw('invPassword2',this)" tabindex="-1">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+        </div>
+        <button class="btn-primary" id="regBtn" onclick="doRegister()">Criar conta e aceitar</button>
+      </div>
+
+      <!-- Returning user: just accept -->
+      <div id="returningUserForm" style="display:none">
+        <button class="btn-primary" id="acceptBtn" onclick="doAccept()">Aceitar acesso</button>
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">{{LOGIN_TITLE}}</footer>
+
+  <script>
+    // Animated background
+    (function () {
+      const canvas = document.getElementById('bg'), ctx = canvas.getContext('2d');
+      const N = 38, D = 160, S = 0.28; let W, H, nodes;
+      const light = window.matchMedia('(prefers-color-scheme: light)');
+      function resize() { W = canvas.width = innerWidth; H = canvas.height = innerHeight; }
+      function mk() { return { x: Math.random()*W, y: Math.random()*H, vx: (Math.random()-.5)*S, vy: (Math.random()-.5)*S, r: Math.random()*1.5+1 }; }
+      function init() { resize(); nodes = Array.from({length:N}, mk); }
+      function draw() {
+        ctx.clearRect(0,0,W,H);
+        const lm = light.matches ? 0.10 : 0.18, dc = light.matches ? 'rgba(59,91,219,0.18)' : 'rgba(99,125,255,0.35)';
+        for (let i=0;i<nodes.length;i++) for (let j=i+1;j<nodes.length;j++) {
+          const dx=nodes[i].x-nodes[j].x, dy=nodes[i].y-nodes[j].y, d=Math.sqrt(dx*dx+dy*dy);
+          if (d<D) { ctx.strokeStyle=`rgba(59,91,219,${(1-d/D)*lm})`; ctx.lineWidth=0.8; ctx.beginPath(); ctx.moveTo(nodes[i].x,nodes[i].y); ctx.lineTo(nodes[j].x,nodes[j].y); ctx.stroke(); }
+        }
+        ctx.fillStyle=dc; for (const n of nodes) { ctx.beginPath(); ctx.arc(n.x,n.y,n.r,0,Math.PI*2); ctx.fill(); }
+      }
+      function tick() { for (const n of nodes) { n.x+=n.vx; n.y+=n.vy; if(n.x<0||n.x>W) n.vx*=-1; if(n.y<0||n.y>H) n.vy*=-1; } draw(); requestAnimationFrame(tick); }
+      addEventListener('resize', resize); init(); tick();
+    })();
+
+    const TOKEN     = '{{TOKEN}}';
+    const EMAIL     = '{{EMAIL}}';
+    const INV_NAME  = '{{INVITED_NAME}}';
+    const NOTE      = '{{NOTE}}';
+    const IS_RETURNING = {{IS_RETURNING}};
+
+    // Render page state
+    document.getElementById('emailDisplay').textContent = EMAIL;
+    if (NOTE) { const n = document.getElementById('noteDisplay'); n.textContent = NOTE; n.style.display = 'block'; }
+
+    if (IS_RETURNING) {
+      const name = INV_NAME ? INV_NAME.split(' ')[0] : '';
+      document.getElementById('pageTitle').textContent = 'Bem-vindo' + (name ? ', ' + name : '') + '!';
+      document.getElementById('pageGreeting').textContent = 'Já tem uma conta. Clique em Aceitar para ativar o seu acesso.';
+      document.getElementById('newUserForm').style.display = 'none';
+      document.getElementById('returningUserForm').style.display = 'block';
+    } else {
+      const name = INV_NAME ? INV_NAME.split(' ')[0] : '';
+      document.getElementById('pageTitle').textContent = 'Criar conta' + (name ? ', ' + name : '');
+      document.getElementById('pageGreeting').textContent = 'Defina a sua palavra-passe para activar o acesso.';
+    }
+
+    function togglePw(id, btn) {
+      const inp = document.getElementById(id), isT = inp.type === 'text';
+      inp.type = isT ? 'password' : 'text';
+      btn.innerHTML = isT
+        ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
+        : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+    }
+
+    function checkStrength(v) {
+      const bar = document.getElementById('pwBar'), hint = document.getElementById('pwHint');
+      if (!v) { bar.style.width='0'; bar.style.background='rgba(255,255,255,0.08)'; hint.textContent=''; return; }
+      let s=0;
+      if(v.length>=8) s++; if(v.length>=12) s++;
+      if(/[A-Z]/.test(v)) s++; if(/[0-9]/.test(v)) s++; if(/[^A-Za-z0-9]/.test(v)) s++;
+      const l=[{w:'20%',c:'#dc2626',t:'Muito fraca'},{w:'40%',c:'#dc2626',t:'Fraca'},{w:'60%',c:'#f59e0b',t:'Razoável'},{w:'80%',c:'#00b85c',t:'Boa'},{w:'100%',c:'#00b85c',t:'Forte'}][Math.min(s,4)];
+      bar.style.width=l.w; bar.style.background=l.c; hint.textContent=l.t; hint.style.color=l.c;
+    }
+
+    function showError(msg) { const e=document.getElementById('regError'); e.textContent=msg; e.classList.add('visible'); }
+    function clearError() { document.getElementById('regError').classList.remove('visible'); }
+
+    function showSuccess(msg) {
+      document.getElementById('newUserForm').style.display='none';
+      document.getElementById('returningUserForm').style.display='none';
+      document.getElementById('regSuccessMsg').textContent=msg;
+      document.getElementById('regSuccess').classList.add('visible');
+    }
+
+    async function doRegister() {
+      clearError();
+      const pw  = document.getElementById('invPassword').value;
+      const pw2 = document.getElementById('invPassword2').value;
+      if (!pw || pw.length < 6) { showError('A palavra-passe deve ter pelo menos 6 caracteres.'); return; }
+      if (pw !== pw2) { showError('As palavras-passe não coincidem.'); return; }
+      const btn = document.getElementById('regBtn');
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+      try {
+        const res = await fetch('/invite/' + TOKEN + '/register', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pw }),
+        });
+        const data = await res.json();
+        if (!res.ok) { showError(data.error || 'Erro ao criar conta.'); btn.disabled=false; btn.textContent='Criar conta e aceitar'; return; }
+        showSuccess('Conta criada com sucesso. Já pode fazer login com o seu email e palavra-passe.');
+      } catch { showError('Erro de rede. Tente novamente.'); btn.disabled=false; btn.textContent='Criar conta e aceitar'; }
+    }
+
+    async function doAccept() {
+      const btn = document.getElementById('acceptBtn');
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+      try {
+        const res = await fetch('/invite/' + TOKEN + '/register', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: '' }),
+        });
+        const data = await res.json();
+        if (!res.ok) { document.getElementById('regError').textContent=data.error||'Erro.'; document.getElementById('regError').classList.add('visible'); btn.disabled=false; btn.textContent='Aceitar acesso'; return; }
+        showSuccess('Acesso ativado com sucesso. Já pode fazer login com as suas credenciais existentes.');
+      } catch { document.getElementById('regError').textContent='Erro de rede.'; document.getElementById('regError').classList.add('visible'); btn.disabled=false; btn.textContent='Aceitar acesso'; }
+    }
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !IS_RETURNING) doRegister();
+    });
+  </script>
+</body>
+</html>

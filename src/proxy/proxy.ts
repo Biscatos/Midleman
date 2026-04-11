@@ -368,8 +368,8 @@ export async function handleProxyRequest(
                 headers: forwardHeaders,
                 body: i === 0 ? forwardBody : undefined,
                 redirect: 'manual',
-                // @ts-ignore — Bun-specific: ignore self-signed / expired upstream certs
-                tls: { rejectUnauthorized: false },
+                // @ts-ignore — Bun-specific TLS option
+                tls: { rejectUnauthorized: !profile.allowSelfSignedTls && process.env.ALLOW_SELF_SIGNED_TLS !== 'true' },
             });
 
             // Not a redirect — we're done
@@ -819,8 +819,8 @@ export async function handleDirectProxy(
                 headers: forwardHeaders,
                 body: i === 0 ? forwardBody : undefined,
                 redirect: 'manual',
-                // @ts-ignore — Bun-specific: ignore self-signed / expired upstream certs
-                tls: { rejectUnauthorized: false },
+                // @ts-ignore — Bun-specific TLS option
+                tls: { rejectUnauthorized: !profile.allowSelfSignedTls && process.env.ALLOW_SELF_SIGNED_TLS !== 'true' },
             });
 
             if (targetResponse.status < 300 || targetResponse.status >= 400) break;

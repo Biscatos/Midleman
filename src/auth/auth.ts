@@ -34,6 +34,8 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE TABLE IF NOT EXISTS proxy_users (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     username     TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    full_name    TEXT NOT NULL DEFAULT '',
+    email        TEXT NOT NULL DEFAULT '' COLLATE NOCASE,
     password     TEXT NOT NULL,
     totp_secret  TEXT,
     totp_enabled INTEGER NOT NULL DEFAULT 0,
@@ -49,6 +51,18 @@ CREATE TABLE IF NOT EXISTS proxy_user_profiles (
 
 CREATE INDEX IF NOT EXISTS idx_proxy_user_profiles_profile ON proxy_user_profiles(profile_name);
 CREATE INDEX IF NOT EXISTS idx_proxy_user_profiles_user ON proxy_user_profiles(user_id);
+
+CREATE TABLE IF NOT EXISTS invite_tokens (
+    token        TEXT PRIMARY KEY,
+    note         TEXT NOT NULL DEFAULT '',
+    profiles     TEXT NOT NULL DEFAULT '',
+    email        TEXT NOT NULL DEFAULT '',
+    invited_name TEXT NOT NULL DEFAULT '',
+    expires_at   TEXT NOT NULL,
+    used_at      TEXT,
+    used_by      TEXT,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 export function initAuth(dataDir: string, maxAge: number = 86400): void {
@@ -68,6 +82,32 @@ export function initAuth(dataDir: string, maxAge: number = 86400): void {
             if (cols.includes('profile_name') && !cols.includes('totp_secret')) {
                 console.log('🔄 Migrating proxy_users table to new schema...');
                 db.exec('DROP TABLE IF EXISTS proxy_users');
+            } else {
+                // Add full_name and email columns if missing (additive migration)
+                if (!cols.includes('full_name')) {
+                    db.exec("ALTER TABLE proxy_users ADD COLUMN full_name TEXT NOT NULL DEFAULT ''");
+                    console.log('🔄 Migrated proxy_users: added full_name column');
+                }
+                if (!cols.includes('email')) {
+                    db.exec("ALTER TABLE proxy_users ADD COLUMN email TEXT NOT NULL DEFAULT ''");
+                    console.log('🔄 Migrated proxy_users: added email column');
+                }
+            }
+        } catch {}
+
+        // Migrate invite_tokens: add email/invited_name if missing
+        try {
+            const info = db.prepare("PRAGMA table_info(invite_tokens)").all() as any[];
+            if (info.length > 0) {
+                const cols = info.map((c: any) => c.name);
+                if (!cols.includes('email')) {
+                    db.exec("ALTER TABLE invite_tokens ADD COLUMN email TEXT NOT NULL DEFAULT ''");
+                    console.log('🔄 Migrated invite_tokens: added email column');
+                }
+                if (!cols.includes('invited_name')) {
+                    db.exec("ALTER TABLE invite_tokens ADD COLUMN invited_name TEXT NOT NULL DEFAULT ''");
+                    console.log('🔄 Migrated invite_tokens: added invited_name column');
+                }
             }
         } catch {}
 
@@ -169,8 +209,8 @@ export function generateTotpSecret(username: string): { secret: string; otpauthU
 export function verifyTotp(secret: string, code: string): boolean {
     const key = base32Decode(secret);
     const now = BigInt(Math.floor(Date.now() / 1000 / 30));
-    // Accept ±1 window (90s total)
-    for (let i = -1n; i <= 1n; i++) {
+    // Accept current + 1 forward window only (clock skew tolerance, no replay of past codes)
+    for (let i = 0n; i <= 1n; i++) {
         if (generateHotp(key, now + i) === code.trim()) return true;
     }
     return false;
@@ -219,8 +259,13 @@ function cleanExpiredSessions(): void {
 
 const loginChallenges = new Map<string, { userId: number; username: string; totpSecret: string; expiresAt: number }>();
 const CHALLENGE_TTL = 5 * 60 * 1000; // 5 minutes
+const MAX_CHALLENGES = 5_000;
 
 export function createLoginChallenge(userId: number, username: string, totpSecret: string): string {
+    if (loginChallenges.size >= MAX_CHALLENGES) {
+        const oldest = loginChallenges.keys().next().value;
+        if (oldest) loginChallenges.delete(oldest);
+    }
     const token = crypto.randomUUID();
     loginChallenges.set(token, { userId, username, totpSecret, expiresAt: Date.now() + CHALLENGE_TTL });
     return token;
@@ -247,12 +292,17 @@ setInterval(() => {
 const attempts = new Map<string, { count: number; resetAt: number }>();
 const MAX_ATTEMPTS = 5;
 const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const MAX_RATE_LIMIT_ENTRIES = 10_000; // prevent unbounded growth under distributed attacks
 
-export function checkRateLimit(ip: string): boolean {
+export function checkRateLimit(key: string): boolean {
     const now = Date.now();
-    const entry = attempts.get(ip);
+    if (attempts.size >= MAX_RATE_LIMIT_ENTRIES) {
+        const oldest = attempts.keys().next().value;
+        if (oldest) attempts.delete(oldest);
+    }
+    const entry = attempts.get(key);
     if (!entry || entry.resetAt < now) {
-        attempts.set(ip, { count: 1, resetAt: now + WINDOW_MS });
+        attempts.set(key, { count: 1, resetAt: now + WINDOW_MS });
         return true;
     }
     entry.count++;
@@ -262,33 +312,36 @@ export function checkRateLimit(ip: string): boolean {
 // Cleanup old entries periodically
 setInterval(() => {
     const now = Date.now();
-    for (const [ip, entry] of attempts) {
-        if (entry.resetAt < now) attempts.delete(ip);
+    for (const [key, entry] of attempts) {
+        if (entry.resetAt < now) attempts.delete(key);
     }
 }, 5 * 60 * 1000);
 
 // ─── Global Proxy User Management ──────────────────────────────────────────
 
-export async function createProxyUser(username: string, password: string): Promise<ProxyUser> {
+function rowToProxyUser(r: any): ProxyUser {
+    return { id: r.id, username: r.username, fullName: r.full_name || '', email: r.email || '', totpEnabled: !!r.totp_enabled, createdAt: r.created_at };
+}
+
+export async function createProxyUser(username: string, password: string, fullName = '', email = ''): Promise<ProxyUser> {
     if (!db) throw new Error('Auth not initialized');
     const hash = await Bun.password.hash(password, 'bcrypt');
-    db.prepare('INSERT INTO proxy_users (username, password) VALUES ($u, $p)')
-        .run({ $u: username, $p: hash });
-    const row = db.prepare('SELECT id, username, totp_enabled, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
-    return { id: row.id, username: row.username, totpEnabled: !!row.totp_enabled, createdAt: row.created_at };
+    db.prepare('INSERT INTO proxy_users (username, full_name, email, password) VALUES ($u, $fn, $em, $p)')
+        .run({ $u: username, $fn: fullName.trim(), $em: email.trim().toLowerCase(), $p: hash });
+    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
+    return rowToProxyUser(row);
 }
 
 export function listAllProxyUsers(): ProxyUser[] {
     if (!db) return [];
-    const rows = db.prepare('SELECT id, username, totp_enabled, created_at FROM proxy_users ORDER BY username').all() as any[];
-    return rows.map(r => ({ id: r.id, username: r.username, totpEnabled: !!r.totp_enabled, createdAt: r.created_at }));
+    const rows = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_at FROM proxy_users ORDER BY username').all() as any[];
+    return rows.map(rowToProxyUser);
 }
 
 export function getProxyUser(id: number): ProxyUser | null {
     if (!db) return null;
-    const row = db.prepare('SELECT id, username, totp_enabled, created_at FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
-    if (!row) return null;
-    return { id: row.id, username: row.username, totpEnabled: !!row.totp_enabled, createdAt: row.created_at };
+    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_at FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
+    return row ? rowToProxyUser(row) : null;
 }
 
 export function deleteProxyUser(id: number): boolean {
@@ -305,15 +358,40 @@ export async function updateProxyUserPassword(id: number, newPassword: string): 
     return result.changes > 0;
 }
 
-/** Verify proxy user credentials. Returns user + totpSecret (for TOTP step) or null. */
-export async function verifyProxyUserCredentials(username: string, password: string): Promise<{ user: ProxyUser; totpSecret: string | null } | null> {
+/** Find an existing proxy user by email or username (case-insensitive). */
+export function findProxyUserByEmailOrUsername(email: string, username: string): ProxyUser | null {
     if (!db) return null;
-    const row = db.prepare('SELECT id, username, password, totp_secret, totp_enabled, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
+    if (email) {
+        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_at FROM proxy_users WHERE email = $e AND email != \'\'').get({ $e: email.toLowerCase() }) as any;
+        if (row) return rowToProxyUser(row);
+    }
+    if (username) {
+        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
+        if (row) return rowToProxyUser(row);
+    }
+    return null;
+}
+
+export function updateProxyUserInfo(id: number, fullName: string, email: string): boolean {
+    if (!db) return false;
+    const result = db.prepare("UPDATE proxy_users SET full_name = $fn, email = $em, updated_at = datetime('now') WHERE id = $id")
+        .run({ $fn: fullName.trim(), $em: email.trim().toLowerCase(), $id: id });
+    return result.changes > 0;
+}
+
+/** Verify proxy user credentials by username OR email. Returns user + totpSecret or null. */
+export async function verifyProxyUserCredentials(login: string, password: string): Promise<{ user: ProxyUser; totpSecret: string | null } | null> {
+    if (!db) return null;
+    // Try username first, then email
+    let row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, created_at FROM proxy_users WHERE username = $u').get({ $u: login }) as any;
+    if (!row && login.includes('@')) {
+        row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, created_at FROM proxy_users WHERE email = $e').get({ $e: login.toLowerCase() }) as any;
+    }
     if (!row) return null;
     const valid = await Bun.password.verify(password, row.password);
     if (!valid) return null;
     return {
-        user: { id: row.id, username: row.username, totpEnabled: !!row.totp_enabled, createdAt: row.created_at },
+        user: rowToProxyUser(row),
         totpSecret: row.totp_secret || null,
     };
 }
@@ -347,13 +425,13 @@ export function removeProxyUserFromProfile(userId: number, profileName: string):
 export function listProxyUsersForProfile(profileName: string): ProxyUser[] {
     if (!db) return [];
     const rows = db.prepare(`
-        SELECT pu.id, pu.username, pu.totp_enabled, pu.created_at
+        SELECT pu.id, pu.username, pu.full_name, pu.email, pu.totp_enabled, pu.created_at
         FROM proxy_users pu
         JOIN proxy_user_profiles pup ON pu.id = pup.user_id
         WHERE pup.profile_name = $pn
         ORDER BY pu.username
     `).all({ $pn: profileName.toLowerCase() }) as any[];
-    return rows.map(r => ({ id: r.id, username: r.username, totpEnabled: !!r.totp_enabled, createdAt: r.created_at }));
+    return rows.map(rowToProxyUser);
 }
 
 export function listProfilesForProxyUser(userId: number): string[] {
@@ -398,6 +476,10 @@ export function getProxyUserTotpSecret(userId: number): string | null {
 const proxyLoginChallenges = new Map<string, { userId: number; username: string; totpSecret: string | null; totpEnabled: boolean; profileName: string; expiresAt: number }>();
 
 export function createProxyLoginChallenge(userId: number, username: string, totpSecret: string | null, totpEnabled: boolean, profileName: string): string {
+    if (proxyLoginChallenges.size >= MAX_CHALLENGES) {
+        const oldest = proxyLoginChallenges.keys().next().value;
+        if (oldest) proxyLoginChallenges.delete(oldest);
+    }
     const token = crypto.randomUUID();
     proxyLoginChallenges.set(token, { userId, username, totpSecret, totpEnabled, profileName, expiresAt: Date.now() + CHALLENGE_TTL });
     return token;
@@ -432,8 +514,12 @@ let jwtSecret: string = '';
 let jwtMaxAge: number = 86400; // 24h default
 
 export function initJwt(secret?: string, maxAge?: number): void {
-    // Generate a random secret if none provided (persists only for server lifetime)
-    jwtSecret = secret || base32Encode(crypto.getRandomValues(new Uint8Array(32)));
+    if (!secret) {
+        console.warn('⚠️  JWT_SECRET not set — generating a random secret. All proxy sessions will be invalidated on restart. Set JWT_SECRET env var for persistence.');
+        jwtSecret = base32Encode(crypto.getRandomValues(new Uint8Array(32)));
+    } else {
+        jwtSecret = secret;
+    }
     if (maxAge) jwtMaxAge = maxAge;
 }
 
@@ -497,4 +583,69 @@ export function sessionCookie(sessionId: string, cookieName: string, maxAge: num
 
 export function clearSessionCookie(cookieName: string): string {
     return `${cookieName}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`;
+}
+
+// ─── Invite Tokens ───────────────────────────────────────────────────────────
+
+export interface InviteToken {
+    token: string;
+    note: string;
+    profileName: string;
+    email: string;
+    invitedName: string;
+    expiresAt: string;
+    usedAt: string | null;
+    usedBy: string | null;
+    createdAt: string;
+}
+
+function rowToInvite(row: any): InviteToken {
+    return {
+        token: row.token,
+        note: row.note,
+        profileName: row.profiles || '',
+        email: row.email || '',
+        invitedName: row.invited_name || '',
+        expiresAt: row.expires_at,
+        usedAt: row.used_at || null,
+        usedBy: row.used_by || null,
+        createdAt: row.created_at,
+    };
+}
+
+export function createInviteToken(profileName: string, email: string, invitedName: string, note: string, expiresInHours: number): InviteToken {
+    if (!db) throw new Error('Auth not initialized');
+    const token = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + expiresInHours * 3_600_000).toISOString();
+    db.prepare('INSERT INTO invite_tokens (token, note, profiles, email, invited_name, expires_at) VALUES ($t, $n, $p, $em, $in, $e)')
+        .run({ $t: token, $n: note, $p: profileName.toLowerCase(), $em: email.trim().toLowerCase(), $in: invitedName.trim(), $e: expiresAt });
+    return { token, note, profileName: profileName.toLowerCase(), email: email.trim().toLowerCase(), invitedName: invitedName.trim(), expiresAt, usedAt: null, usedBy: null, createdAt: new Date().toISOString() };
+}
+
+export function getInviteToken(token: string): InviteToken | null {
+    if (!db) return null;
+    const row = db.prepare('SELECT * FROM invite_tokens WHERE token = $t').get({ $t: token }) as any;
+    return row ? rowToInvite(row) : null;
+}
+
+export function listInviteTokens(): InviteToken[] {
+    if (!db) return [];
+    const rows = db.prepare('SELECT * FROM invite_tokens ORDER BY created_at DESC').all() as any[];
+    return rows.map(rowToInvite);
+}
+
+/** Mark token as used. Returns false if expired, already used, or not found. */
+export function useInviteToken(token: string, username: string): boolean {
+    if (!db) return false;
+    const now = new Date().toISOString();
+    const result = db.prepare(
+        "UPDATE invite_tokens SET used_at = $ua, used_by = $ub WHERE token = $t AND used_at IS NULL AND expires_at > $now"
+    ).run({ $ua: now, $ub: username, $t: token, $now: now });
+    return result.changes > 0;
+}
+
+export function revokeInviteToken(token: string): boolean {
+    if (!db) return false;
+    const result = db.prepare('DELETE FROM invite_tokens WHERE token = $t').run({ $t: token });
+    return result.changes > 0;
 }

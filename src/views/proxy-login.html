@@ -494,7 +494,7 @@
           showStep('step2verify'); document.getElementById('totpVerifyCode').value = ''; document.getElementById('totpVerifyCode').focus();
         } else if (data.status === 'totp_setup') {
           setupTotpSecret = data.totpSecret;
-          document.getElementById('qrImage').src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(data.otpauthUrl);
+          document.getElementById('qrImage').src = data.qrDataUrl || '';
           document.getElementById('secretCode').textContent = data.totpSecret;
           showStep('step2setup'); document.getElementById('totpSetupCode').value = ''; document.getElementById('totpSetupCode').focus();
         }
@@ -536,8 +536,13 @@
       const activeStep = document.querySelector('.step.active');
       if (activeStep) { const btn = activeStep.querySelector('.btn-primary'); if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; } }
       const redirect = new URLSearchParams(window.location.search).get('redirect');
-      if (redirect) window.location.href = redirect;
-      else if (window.location.pathname.endsWith('/auth/login')) window.location.href = '/';
+      if (redirect) {
+        try {
+          const u = new URL(redirect, window.location.origin);
+          if (u.origin === window.location.origin) { window.location.href = u.pathname + u.search + u.hash; }
+          else window.location.href = '/';
+        } catch { window.location.href = '/'; }
+      } else if (window.location.pathname.endsWith('/auth/login')) window.location.href = '/';
       else window.location.reload();
     }
 

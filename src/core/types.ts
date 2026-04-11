@@ -22,6 +22,7 @@ export interface ProxyProfile {
   authToken?: string;     // Simple token auth (X-Forward-Token or ?token=) for API connections
   loginTitle?: string;    // Custom brand title shown on the proxy login page (login mode only)
   loginLogo?: string;     // Custom logo URL shown on the proxy login page (login mode only)
+  allowSelfSignedTls?: boolean; // If true, skip TLS certificate validation for this upstream (for internal services)
 }
 
 
@@ -96,6 +97,8 @@ export interface AuthUser {
 export interface ProxyUser {
   id: number;
   username: string;
+  fullName: string;
+  email: string;
   totpEnabled: boolean;
   createdAt: string;
 }

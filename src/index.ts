@@ -10,7 +10,7 @@ import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDeta
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort, isProxyServerRunning, setProxyLoginTemplate, setProxyLogo } from './servers/proxy-server';
 import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort, releaseProxyPort, releaseWebhookPort, getWebhookPort } from './servers/port-manager';
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync } from './servers/webhook-server';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp } from './auth/auth';
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken } from './auth/auth';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
 import { resolve } from 'path';
@@ -69,7 +69,7 @@ function renderErrorPage(statusCode: number, title: string, message: string): Re
         .replace(/\{\{MESSAGE\}\}/g, message);
     return new Response(html, {
         status: statusCode,
-        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        headers: { 'Content-Type': 'text/html; charset=utf-8', ...SECURITY_HEADERS },
     });
 }
 
@@ -82,11 +82,18 @@ if (config.webhooks.length > 0) {
     console.log(`📡 Webhooks: ${config.webhooks.map(w => w.name).join(', ')}`);
 }
 
+const SECURITY_HEADERS: Record<string, string> = {
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
+};
+
 /** Shorthand for JSON responses */
 function jsonRes(status: number, body: Record<string, unknown>): Response {
     return new Response(JSON.stringify(body), {
         status,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...SECURITY_HEADERS },
     });
 }
 
@@ -151,7 +158,7 @@ for (const webhook of config.webhooks) {
 const server = Bun.serve({
     port: config.port,
     idleTimeout: 0,
-    maxRequestBodySize: Number.MAX_SAFE_INTEGER,
+    maxRequestBodySize: 50 * 1024 * 1024, // 50MB
 
     async fetch(req: Request): Promise<Response> {
         if (isShuttingDown) {
@@ -479,6 +486,92 @@ const server = Bun.serve({
                     status: 200,
                     headers: { 'Content-Type': 'text/html; charset=utf-8' },
                 });
+            }
+
+            // ===== Public Invite Pages =====
+            if (url.pathname.match(/^\/invite\/[^/]+$/) && req.method === 'GET') {
+                const token = url.pathname.split('/')[2];
+                const invite = getInviteToken(token);
+                const profile = invite ? config.proxyProfiles.find(p => p.name === invite.profileName) : null;
+                const loginTitle = profile?.loginTitle || profile?.name || 'Acesso';
+                const SAFE_LOGO_RE = /^(https:\/\/|data:image\/(png|jpeg|gif|webp);base64,)[A-Za-z0-9+/=.\-_~:@!$&'()*+,;%?#[\]]+$/;
+                const loginLogoUrl = (profile?.loginLogo && SAFE_LOGO_RE.test(profile.loginLogo)) ? profile.loginLogo
+                    : (profile?.targetUrl ? (() => { try { return new URL(profile.targetUrl).origin + '/favicon.ico'; } catch { return '/logo.png'; } })() : '/logo.png');
+
+                const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+                if (!invite || invite.usedAt || new Date(invite.expiresAt) < new Date()) {
+                    const msg = !invite ? 'Link de acesso não encontrado.' : invite.usedAt ? 'Este link de acesso já foi utilizado.' : 'Este link de acesso expirou.';
+                    const errHtml = readFileSync(resolve(import.meta.dir, 'views/invite.html'), 'utf-8')
+                        .replace(/\{\{TOKEN\}\}/g, '')
+                        .replace(/\{\{LOGIN_TITLE\}\}/g, esc(loginTitle))
+                        .replace(/\{\{LOGIN_LOGO_URL\}\}/g, loginLogoUrl)
+                        .replace(/\{\{INVITED_NAME\}\}/g, '')
+                        .replace(/\{\{EMAIL\}\}/g, '')
+                        .replace(/\{\{NOTE\}\}/g, '')
+                        .replace(/\{\{IS_RETURNING\}\}/g, 'false')
+                        .replace(/\{\{INVALID_MSG\}\}/g, msg)
+                        .replace(/\{\{INVALID_DISPLAY\}\}/g, 'block')
+                        .replace(/\{\{FORM_DISPLAY\}\}/g, 'none');
+                    return new Response(errHtml, { status: 410, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+                }
+
+                // Check if the invited email already has an account
+                const existingUser = invite.email ? findProxyUserByEmailOrUsername(invite.email, '') : null;
+                const isReturning = !!existingUser;
+
+                const inviteHtml = readFileSync(resolve(import.meta.dir, 'views/invite.html'), 'utf-8')
+                    .replace(/\{\{TOKEN\}\}/g, token)
+                    .replace(/\{\{LOGIN_TITLE\}\}/g, esc(loginTitle))
+                    .replace(/\{\{LOGIN_LOGO_URL\}\}/g, loginLogoUrl)
+                    .replace(/\{\{INVITED_NAME\}\}/g, esc(invite.invitedName || existingUser?.fullName || ''))
+                    .replace(/\{\{EMAIL\}\}/g, esc(invite.email))
+                    .replace(/\{\{NOTE\}\}/g, esc(invite.note))
+                    .replace(/\{\{IS_RETURNING\}\}/g, isReturning ? 'true' : 'false')
+                    .replace(/\{\{INVALID_MSG\}\}/g, '')
+                    .replace(/\{\{INVALID_DISPLAY\}\}/g, 'none')
+                    .replace(/\{\{FORM_DISPLAY\}\}/g, 'block');
+                return new Response(inviteHtml, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+            }
+
+            if (url.pathname.match(/^\/invite\/[^/]+\/register$/) && req.method === 'POST') {
+                const token = url.pathname.split('/')[2];
+                const invite = getInviteToken(token);
+                if (!invite || invite.usedAt || new Date(invite.expiresAt) < new Date()) {
+                    return jsonRes(410, { error: 'Link de acesso inválido, expirado ou já utilizado.' });
+                }
+
+                // Email and identity come from the invite — not from user input
+                const email = invite.email;
+                const fullName = invite.invitedName || '';
+                // Derive username from email (part before @, cleaned up)
+                const derivedUsername = email.split('@')[0].toLowerCase().replace(/[^a-z0-9._\-]/g, '');
+
+                // Check if user already exists
+                const existing = findProxyUserByEmailOrUsername(email, '');
+                if (existing) {
+                    assignProxyUserToProfile(existing.id, invite.profileName);
+                    useInviteToken(token, existing.username);
+                    console.log(`✅ Existing user "${existing.username}" linked to profile "${invite.profileName}" via invite`);
+                    return jsonRes(200, { status: 'linked', username: existing.username, profileName: invite.profileName });
+                }
+
+                // New user — only password comes from the form
+                let body: any;
+                try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                const password = body.password || '';
+                if (!password || password.length < 6) return jsonRes(400, { error: 'A palavra-passe deve ter pelo menos 6 caracteres.' });
+
+                try {
+                    const user = await createProxyUser(derivedUsername, password, fullName, email);
+                    assignProxyUserToProfile(user.id, invite.profileName);
+                    useInviteToken(token, user.username);
+                    console.log(`✅ Proxy user "${user.username}" created via invite for profile "${invite.profileName}"`);
+                    return jsonRes(200, { status: 'created', username: user.username, profileName: invite.profileName });
+                } catch (err: any) {
+                    if (err.message?.includes('UNIQUE')) return jsonRes(409, { error: 'Já existe uma conta com este email. Recarregue a página.' });
+                    return jsonRes(500, { error: err.message || 'Erro ao criar conta.' });
+                }
             }
 
             // ===== Admin API =====
@@ -817,6 +910,7 @@ const server = Bun.serve({
                             forwardPath: profile.forwardPath !== false,
                             loginTitle: profile.loginTitle || '',
                             loginLogo: profile.loginLogo || '',
+                            allowSelfSignedTls: !!profile.allowSelfSignedTls,
                             blockedExtensions: profile.blockedExtensions ? Array.from(profile.blockedExtensions) : [],
                             allowedIps: profile.allowedIps || [],
                             port: getProxyServerPort(profile.name),
@@ -841,6 +935,7 @@ const server = Bun.serve({
                         forwardPath: p.forwardPath !== false,
                         loginTitle: p.loginTitle || '',
                         loginLogo: p.loginLogo || '',
+                        allowSelfSignedTls: !!p.allowSelfSignedTls,
                         port: getProxyServerPort(p.name),
                         running: isProxyServerRunning(p.name),
                     }));
@@ -872,6 +967,7 @@ const server = Bun.serve({
                     if (typeof input.forwardPath === 'boolean') profile.forwardPath = input.forwardPath;
                     if (typeof input.loginTitle === 'string' && input.loginTitle) profile.loginTitle = input.loginTitle;
                     if (typeof input.loginLogo === 'string' && input.loginLogo) profile.loginLogo = input.loginLogo;
+                    if (typeof input.allowSelfSignedTls === 'boolean') profile.allowSelfSignedTls = input.allowSelfSignedTls;
                     if (input.blockedExtensions) {
                         profile.blockedExtensions = new Set(
                             (input.blockedExtensions as string[]).map(e => e.trim().toLowerCase().replace(/^\.?/, '.'))
@@ -939,12 +1035,14 @@ const server = Bun.serve({
                     try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
                     const username = (body.username || '').trim();
                     const password = body.password || '';
+                    const fullName = (body.fullName || '').trim();
+                    const email = (body.email || '').trim().toLowerCase();
                     if (!username || username.length < 2) return jsonRes(400, { error: 'Username must be at least 2 characters' });
                     if (!password || password.length < 6) return jsonRes(400, { error: 'Password must be at least 6 characters' });
+                    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonRes(400, { error: 'Invalid email address' });
 
                     try {
-                        const user = await createProxyUser(username, password);
-                        // Optionally assign to profiles
+                        const user = await createProxyUser(username, password, fullName, email);
                         const profiles: string[] = Array.isArray(body.profiles) ? body.profiles : [];
                         for (const pn of profiles) {
                             assignProxyUserToProfile(user.id, pn);
@@ -965,7 +1063,7 @@ const server = Bun.serve({
                     return jsonRes(200, { user: { ...user, profiles: listProfilesForProxyUser(userId) } });
                 }
 
-                // PUT /admin/proxy-users/:id — update user (password, reset 2fa)
+                // PUT /admin/proxy-users/:id — update user (password, info, reset 2fa)
                 if (url.pathname.match(/^\/admin\/proxy-users\/\d+$/) && req.method === 'PUT') {
                     const userId = parseInt(url.pathname.split('/').pop()!, 10);
                     let body: any;
@@ -974,6 +1072,13 @@ const server = Bun.serve({
                         if (body.password.length < 6) return jsonRes(400, { error: 'Password must be at least 6 characters' });
                         const updated = await updateProxyUserPassword(userId, body.password);
                         if (!updated) return jsonRes(404, { error: 'User not found' });
+                    }
+                    if (typeof body.fullName === 'string' || typeof body.email === 'string') {
+                        const current = getProxyUser(userId);
+                        if (!current) return jsonRes(404, { error: 'User not found' });
+                        const email = (body.email ?? current.email).trim().toLowerCase();
+                        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonRes(400, { error: 'Invalid email address' });
+                        updateProxyUserInfo(userId, (body.fullName ?? current.fullName).trim(), email);
                     }
                     if (body.reset2fa) {
                         disableProxyUserTotp(userId);
@@ -1022,6 +1127,38 @@ const server = Bun.serve({
                     const userId = parseInt(parts[5], 10);
                     removeProxyUserFromProfile(userId, name);
                     return jsonRes(200, { status: 'removed' });
+                }
+
+                // ── Invite Tokens ──
+                // GET /admin/invites — list all invite tokens
+                if (url.pathname === '/admin/invites' && req.method === 'GET') {
+                    return jsonRes(200, { invites: listInviteTokens() });
+                }
+
+                // POST /admin/invites — create invite token
+                if (url.pathname === '/admin/invites' && req.method === 'POST') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const profileName = (body.profileName || '').trim().toLowerCase();
+                    if (!profileName) return jsonRes(400, { error: 'profileName is required' });
+                    const profileExists = config.proxyProfiles.some(p => p.name === profileName);
+                    if (!profileExists) return jsonRes(404, { error: `Profile "${profileName}" not found` });
+                    const email = (body.email || '').trim().toLowerCase();
+                    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonRes(400, { error: 'Valid email is required' });
+                    const invitedName = (body.invitedName || '').trim().slice(0, 100);
+                    const note = (body.note || '').trim().slice(0, 200);
+                    const expiresInHours = Math.min(Math.max(parseInt(body.expiresInHours) || 48, 1), 720);
+                    const invite = createInviteToken(profileName, email, invitedName, note, expiresInHours);
+                    console.log(`✅ Invite for "${profileName}" to "${email}" created (expires in ${expiresInHours}h)`);
+                    return jsonRes(200, { invite });
+                }
+
+                // DELETE /admin/invites/:token — revoke invite token
+                if (url.pathname.match(/^\/admin\/invites\/[^/]+$/) && req.method === 'DELETE') {
+                    const token = url.pathname.split('/')[3];
+                    const revoked = revokeInviteToken(token);
+                    if (!revoked) return jsonRes(404, { error: 'Invite not found' });
+                    return jsonRes(200, { status: 'revoked' });
                 }
 
                 const accept = req.headers.get('Accept') || '';

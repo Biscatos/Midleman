@@ -201,6 +201,7 @@ function navigate(page) {
     if (n.dataset.page === page) n.classList.add('active');
   });
   if (page === 'requests') { rlPage = 1; fetchRequestLogs(); }
+  if (page === 'proxyusers') { fetchProxyUsers(); fetchInvites(); }
 
 }
 

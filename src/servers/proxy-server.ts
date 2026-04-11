@@ -1,6 +1,7 @@
 import type { ProxyProfile } from '../core/types';
 import { handleDirectProxy } from '../proxy/proxy';
 import { verifyProxyUserCredentials, signJwt, getJwtMaxAge, checkRateLimit, proxyUserHasProfile, createProxyLoginChallenge, consumeProxyLoginChallenge, peekProxyLoginChallenge, generateTotpSecret, verifyTotp, setupProxyUserTotp } from '../auth/auth';
+import QRCode from 'qrcode';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -35,10 +36,16 @@ export function setProxyLogo(bytes: Uint8Array | null): void {
     logoBytes = bytes;
 }
 
+const SECURITY_HEADERS: Record<string, string> = {
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+};
+
 function jsonRes(status: number, body: Record<string, unknown>): Response {
     return new Response(JSON.stringify(body), {
         status,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...SECURITY_HEADERS },
     });
 }
 
@@ -48,7 +55,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
     const server = Bun.serve({
         port,
         idleTimeout: 0,
-        maxRequestBodySize: Number.MAX_SAFE_INTEGER,
+        maxRequestBodySize: 50 * 1024 * 1024, // 50MB
         async fetch(req: Request): Promise<Response> {
             const startTime = performance.now();
             const url = new URL(req.url);
@@ -76,22 +83,24 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                         .replace(/\{\{LOGIN_LOGO_URL\}\}/g, loginLogoUrl)
                     return new Response(html, {
                         status: 200,
-                        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                        headers: { 'Content-Type': 'text/html; charset=utf-8', ...SECURITY_HEADERS },
                     });
                 }
 
                 // POST /auth/login — Step 1: verify credentials, return challenge token
                 if (url.pathname === '/auth/login' && req.method === 'POST') {
                     const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
-                    if (!checkRateLimit(clientIp)) {
-                        return jsonRes(429, { error: 'Too many attempts. Try again in 15 minutes.' });
-                    }
 
                     let body: any;
                     try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
                     const username = (body.username || '').trim();
                     const password = body.password || '';
                     if (!username || !password) return jsonRes(400, { error: 'Username and password required' });
+
+                    // Rate limit by IP and by username to prevent both IP-spoofing and username enumeration
+                    if (!checkRateLimit(clientIp) || !checkRateLimit(`u:${username.toLowerCase()}`)) {
+                        return jsonRes(429, { error: 'Too many attempts. Try again in 15 minutes.' });
+                    }
 
                     const cred = await verifyProxyUserCredentials(username, password);
                     if (!cred) return jsonRes(401, { error: 'Invalid username or password' });
@@ -124,13 +133,14 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                         // User already has TOTP → ask for code
                         return jsonRes(200, { status: 'totp_required', challengeToken });
                     } else {
-                        // 2FA required by profile but user hasn't set it up → generate QR
+                        // 2FA required by profile but user hasn't set it up → generate QR server-side
                         const totp = generateTotpSecret(cred.user.username);
+                        const qrDataUrl = await QRCode.toDataURL(totp.otpauthUrl, { width: 200, margin: 2 }).catch(() => null);
                         return jsonRes(200, {
                             status: 'totp_setup',
                             challengeToken,
                             totpSecret: totp.secret,
-                            otpauthUrl: totp.otpauthUrl,
+                            qrDataUrl,
                         });
                     }
                 }

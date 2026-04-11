@@ -25,6 +25,7 @@ interface StoredProfile {
     authToken?: string;
     loginTitle?: string;
     loginLogo?: string;
+    allowSelfSignedTls?: boolean;
 }
 
 // Default path — override with DATA_DIR env var for Docker volumes
@@ -73,6 +74,7 @@ function toRuntime(stored: StoredProfile): ProxyProfile {
     if (stored.authToken !== undefined) profile.authToken = stored.authToken;
     if (stored.loginTitle !== undefined) profile.loginTitle = stored.loginTitle;
     if (stored.loginLogo !== undefined) profile.loginLogo = stored.loginLogo;
+    if (stored.allowSelfSignedTls !== undefined) profile.allowSelfSignedTls = stored.allowSelfSignedTls;
 
     return profile;
 }
@@ -105,6 +107,7 @@ function toStored(profile: ProxyProfile): StoredProfile {
     if (profile.authToken !== undefined) stored.authToken = profile.authToken;
     if (profile.loginTitle !== undefined) stored.loginTitle = profile.loginTitle;
     if (profile.loginLogo !== undefined) stored.loginLogo = profile.loginLogo;
+    if (profile.allowSelfSignedTls !== undefined) stored.allowSelfSignedTls = profile.allowSelfSignedTls;
 
     return stored;
 }
@@ -190,15 +193,24 @@ export function validateProfileInput(input: unknown): string | null {
     const p = input as Record<string, unknown>;
 
     if (!p.name || typeof p.name !== 'string') return '"name" is required (string)';
+    if (p.name.length > 64) return '"name" must be 64 characters or fewer';
     if (!p.targetUrl || typeof p.targetUrl !== 'string') return '"targetUrl" is required (string)';
+    if (p.targetUrl.length > 2048) return '"targetUrl" must be 2048 characters or fewer';
     if (p.apiKey !== undefined && typeof p.apiKey !== 'string') return '"apiKey" must be a string';
+    if (typeof p.apiKey === 'string' && p.apiKey.length > 512) return '"apiKey" must be 512 characters or fewer';
     if (p.authHeader !== undefined && typeof p.authHeader !== 'string') return '"authHeader" must be a string';
+    if (typeof p.authHeader === 'string' && p.authHeader.length > 128) return '"authHeader" must be 128 characters or fewer';
     if (p.port !== undefined && p.port !== null && p.port !== 0) {
         if (typeof p.port !== 'number' || p.port < 1 || p.port > 65535) return '"port" must be a number between 1 and 65535 (or 0/omitted for auto-assign)';
     }
     if (p.authToken !== undefined && typeof p.authToken !== 'string') return '"authToken" must be a string';
+    if (typeof p.authToken === 'string' && p.authToken.length > 256) return '"authToken" must be 256 characters or fewer';
     if (p.forwardPath !== undefined && typeof p.forwardPath !== 'boolean') return '"forwardPath" must be a boolean';
     if (p.passthrough !== undefined && typeof p.passthrough !== 'boolean') return '"passthrough" must be a boolean';
+    if (p.loginTitle !== undefined && typeof p.loginTitle !== 'string') return '"loginTitle" must be a string';
+    if (typeof p.loginTitle === 'string' && p.loginTitle.length > 64) return '"loginTitle" must be 64 characters or fewer';
+    if (p.loginLogo !== undefined && typeof p.loginLogo !== 'string') return '"loginLogo" must be a string';
+    if (typeof p.loginLogo === 'string' && p.loginLogo.length > 200_000) return '"loginLogo" exceeds maximum size (200KB)';
 
     // Validate URL
     try {

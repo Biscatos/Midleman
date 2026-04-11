@@ -291,10 +291,15 @@ function isBinaryContentType(ct: string): boolean {
         lower.includes('application/wasm');
 }
 
+const REDACTED_HEADERS = new Set([
+    'authorization', 'cookie', 'set-cookie', 'x-api-key', 'x-auth-token',
+    'x-forward-token', 'proxy-authorization', 'x-access-token',
+]);
+
 export function headersToRecord(headers: Headers): Record<string, string> {
     const result: Record<string, string> = {};
     headers.forEach((value, key) => {
-        result[key] = value;
+        result[key] = REDACTED_HEADERS.has(key.toLowerCase()) ? '[redacted]' : value;
     });
     return result;
 }

@@ -143,11 +143,20 @@ export async function retryAllFailedFanouts(webhookName?: string): Promise<{ ret
     return { retried: targets.length, succeeded, failed: targets.length - succeeded };
 }
 
+const DLQ_MAX_BODY_SIZE = 256 * 1024; // 256KB per entry body
+
 function enqueueFailedFanout(entry: Omit<FailedFanout, 'id' | 'failedAt' | 'retrying'>) {
     if (deadLetterQueue.length >= DLQ_MAX_SIZE) {
         deadLetterQueue.shift(); // drop oldest
     }
-    deadLetterQueue.push({ ...entry, id: crypto.randomUUID(), failedAt: Date.now(), retrying: false });
+    // Cap body size to prevent large payloads bloating the DLQ
+    let body = entry.body;
+    if (body instanceof ArrayBuffer && body.byteLength > DLQ_MAX_BODY_SIZE) {
+        body = body.slice(0, DLQ_MAX_BODY_SIZE);
+    } else if (typeof body === 'string' && body.length > DLQ_MAX_BODY_SIZE) {
+        body = body.slice(0, DLQ_MAX_BODY_SIZE);
+    }
+    deadLetterQueue.push({ ...entry, body, id: crypto.randomUUID(), failedAt: Date.now(), retrying: false });
     flushDlqSync(); // write immediately — a crash right after a failure must not lose the entry
 }
 
@@ -183,7 +192,7 @@ async function fetchWithRetry(
         }
 
         try {
-            const res = await fetch(url, { ...init, tls: { rejectUnauthorized: false } } as RequestInit);
+            const res = await fetch(url, { ...init, tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' } } as RequestInit);
             // Cap fanout response capture at 4KB for logging — skip for large/unknown-size responses.
             const resContentLength = parseInt(res.headers.get('content-length') || '-1', 10);
             const resText = resContentLength < 0 || resContentLength <= 4096
@@ -293,14 +302,19 @@ async function handleWebhookFanout(
 
     function renderTemplate(template: string, data: any): string {
         if (!data) return template;
+        const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
         return template.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_, path) => {
+            const parts = path.split('.');
+            if (parts.length > 5) return ''; // max depth
             let val = data;
-            for (const k of path.split('.')) {
-                if (val === undefined || val === null) break;
+            for (const k of parts) {
+                if (BLOCKED_KEYS.has(k) || val === undefined || val === null) return '';
+                if (!Object.prototype.hasOwnProperty.call(val, k)) return '';
                 val = val[k];
             }
             if (val === undefined || val === null) return '';
-            return typeof val === 'object' ? JSON.stringify(val) : String(val);
+            if (typeof val === 'object') return JSON.stringify(val).slice(0, 4096);
+            return String(val).slice(0, 4096);
         });
     }
 
@@ -474,7 +488,7 @@ export function startWebhookServer(webhook: WebhookDistributor): WebhookServer {
     const server = Bun.serve({
         port: webhook.port, // 0 = OS auto-assigns
         idleTimeout: 0,
-        maxRequestBodySize: Number.MAX_SAFE_INTEGER,
+        maxRequestBodySize: 50 * 1024 * 1024, // 50MB
 
         async fetch(req: Request): Promise<Response> {
             if (ws.isShuttingDown) {

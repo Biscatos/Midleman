@@ -426,34 +426,63 @@
     <div class="page" id="pageProxyusers">
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
-          <h2>Proxy Users</h2>
-          <p>Global user accounts for proxy login authentication. Assign users to profiles to grant access.</p>
+          <h2>Utilizadores</h2>
+          <p>Contas de acesso aos proxies. Crie utilizadores diretamente ou convide por link.</p>
         </div>
         <div style="display:flex;gap:8px">
-          <button class="btn btn-primary btn-sm" onclick="openNewProxyUserModal()">+ New User</button>
+          <button class="btn btn-sm" onclick="openCreateInviteModal()" style="display:inline-flex;align-items:center;gap:6px">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+            Convidar
+          </button>
+          <button class="btn btn-primary btn-sm" onclick="openNewProxyUserModal()">+ Novo Utilizador</button>
         </div>
       </div>
-      <div class="card">
+
+      <!-- Users Table -->
+      <div class="card" style="margin-bottom:16px">
         <div class="card-body" style="padding:0;overflow-x:auto">
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
               <tr style="background:var(--surface2);text-align:left">
-                <th
-                  style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Username</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  2FA</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Profiles</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Created</th>
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Nome</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Email / Utilizador</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">2FA</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Proxies</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Criado</th>
                 <th style="padding:10px 12px"></th>
               </tr>
             </thead>
             <tbody id="proxyUserListBody">
               <tr>
-                <td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td>
+                <td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">A carregar...</td>
               </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Invites Section -->
+      <div class="card">
+        <div class="card-header">
+          <h3 style="display:flex;align-items:center;gap:8px">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+            Links de Convite
+          </h3>
+          <button class="btn btn-sm btn-ghost" onclick="fetchInvites()">Atualizar</button>
+        </div>
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--surface2);text-align:left">
+                <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Convidado</th>
+                <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Proxies</th>
+                <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Estado</th>
+                <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Expira</th>
+                <th style="padding:8px 12px"></th>
+              </tr>
+            </thead>
+            <tbody id="inviteListBody">
+              <tr><td colspan="5" style="padding:30px;text-align:center;color:var(--text3)">A carregar...</td></tr>
             </tbody>
           </table>
         </div>
@@ -632,7 +661,7 @@
 
 <!-- Profile Modal -->
 <div class="modal-overlay" id="profileModal">
-  <div class="modal">
+  <div class="modal" style="max-width:780px">
     <div class="modal-header">
       <h3 id="modalTitle">New Proxy</h3><button class="close-btn" onclick="closeProfileModal()">&times;</button>
     </div>
@@ -731,6 +760,13 @@
           </label>
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Append the incoming request path to the target URL.</span>
         </div>
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="pAllowSelfSignedTls" style="cursor:pointer;accent-color:var(--accent)">
+            <span>Allow Self-Signed TLS</span>
+          </label>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Skip certificate validation for this upstream. Use only for internal services.</span>
+        </div>
       </div>
     </div>
     <div class="modal-footer"><button class="btn" onclick="closeProfileModal()">Cancel</button><button
@@ -740,30 +776,36 @@
 
 <!-- New Proxy User Modal -->
 <div class="modal-overlay" id="newProxyUserModal">
-  <div class="modal" style="max-width:440px">
+  <div class="modal" style="max-width:480px">
     <div class="modal-header">
-      <h3>New Proxy User</h3><button class="close-btn" onclick="closeNewProxyUserModal()">&times;</button>
+      <h3>Novo Utilizador</h3><button class="close-btn" onclick="closeNewProxyUserModal()">&times;</button>
     </div>
-    <form onsubmit="event.preventDefault(); saveNewProxyUser();" style="display: contents;">
+    <form onsubmit="event.preventDefault(); _editUserId ? saveEditProxyUser() : saveNewProxyUser();" style="display: contents;">
       <div class="modal-body">
         <div id="npuError"
           style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);color:#fca5a5;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px">
         </div>
         <div class="form-grid" style="gap:12px">
-          <div class="form-group span-2"><label>Username *</label><input type="text" id="npuUsername"
-              placeholder="e.g. joao.silva" autocomplete="off"></div>
-          <div class="form-group span-2"><label>Password * (min 6 characters)</label><input type="password"
-              id="npuPassword" placeholder="Password" autocomplete="new-password"></div>
+          <div class="form-group span-2"><label>Nome Completo</label><input type="text" id="npuFullName"
+              placeholder="ex: João Silva" autocomplete="off"></div>
+          <div class="form-group span-2"><label>Email</label><input type="email" id="npuEmail"
+              placeholder="ex: joao@empresa.com" autocomplete="off">
+            <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">Permite login por email.</span>
+          </div>
+          <div class="form-group span-2"><label>Nome de utilizador *</label><input type="text" id="npuUsername"
+              placeholder="ex: joao.silva" autocomplete="off"></div>
+          <div class="form-group span-2"><label>Palavra-passe * (mín. 6 caracteres)</label><input type="password"
+              id="npuPassword" placeholder="Palavra-passe" autocomplete="new-password"></div>
           <div class="form-group span-2">
-            <label>Assign to Profiles</label>
+            <label>Atribuir a Proxies</label>
             <div id="npuProfileChecks"
               style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px">
             </div>
           </div>
         </div>
       </div>
-      <div class="modal-footer"><button type="button" class="btn" onclick="closeNewProxyUserModal()">Cancel</button><button
-          type="submit" class="btn btn-primary">Create User</button></div>
+      <div class="modal-footer"><button type="button" class="btn" onclick="closeNewProxyUserModal()">Cancelar</button><button
+          type="submit" class="btn btn-primary">Criar Utilizador</button></div>
     </form>
   </div>
 </div>
@@ -836,6 +878,73 @@
       </table>
     </div>
     <div class="modal-footer"><button class="btn" onclick="closeUserProfilesModal()">Close</button></div>
+  </div>
+</div>
+
+<!-- Create Invite Modal -->
+<div class="modal-overlay" id="createInviteModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <h3>Gerar Link de Convite</h3>
+      <button class="close-btn" onclick="closeCreateInviteModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="inviteGenError" style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);color:#fca5a5;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px"></div>
+
+      <!-- Result area (hidden until generated) -->
+      <div id="inviteGenResult" style="display:none;margin-bottom:16px">
+        <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px;display:flex;align-items:center;gap:6px">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+          Link gerado com sucesso
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="text" id="inviteLinkInput" readonly
+            style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:12px;font-family:monospace;outline:none">
+          <button onclick="copyInviteLink()" id="copyInviteBtn"
+            style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0">Copiar</button>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px">Partilhe este link com o utilizador. Só pode ser usado uma vez.</div>
+      </div>
+
+      <div class="form-grid" style="gap:12px" id="inviteGenForm">
+        <div class="form-group span-2">
+          <label>Proxy <span style="color:var(--red)">*</span></label>
+          <select id="invProfileSelect" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px">
+            <option value="">A carregar...</option>
+          </select>
+          <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">A página de registo usará o nome e logo deste proxy.</span>
+        </div>
+        <div class="form-group span-2">
+          <label>Email do convidado <span style="color:var(--red)">*</span></label>
+          <input type="email" id="invEmailInput" placeholder="ex: joao.silva@empresa.com" autocomplete="off">
+          <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">Se já tiver conta, o acesso é vinculado automaticamente.</span>
+        </div>
+        <div class="form-group span-2">
+          <label>Nome do convidado <span style="color:var(--text3);font-weight:400">(opcional)</span></label>
+          <input type="text" id="invNameInput" placeholder="ex: João Silva" maxlength="100" autocomplete="off">
+        </div>
+        <div class="form-group span-2">
+          <label>Nota <span style="color:var(--text3);font-weight:400">(opcional)</span></label>
+          <input type="text" id="invNoteInput" placeholder="ex: Acesso ao painel de relatórios" maxlength="200" autocomplete="off">
+          <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">Texto de contexto visível na página de registo.</span>
+        </div>
+        <div class="form-group span-2">
+          <label>Validade</label>
+          <select id="invExpirySelect" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px">
+            <option value="24">24 horas</option>
+            <option value="48" selected>48 horas</option>
+            <option value="72">3 dias</option>
+            <option value="168">7 dias</option>
+            <option value="336">14 dias</option>
+            <option value="720">30 dias</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer" id="inviteGenFooter">
+      <button class="btn" onclick="closeCreateInviteModal()">Fechar</button>
+      <button class="btn btn-primary" onclick="generateInvite()" id="inviteGenBtn">Gerar Link</button>
+    </div>
   </div>
 </div>
 
