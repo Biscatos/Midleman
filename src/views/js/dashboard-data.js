@@ -864,6 +864,7 @@ async function generateInvite() {
   const email = document.getElementById('invEmailInput').value.trim();
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = 'Introduza um email válido para o convidado.'; errEl.style.display = 'block'; return; }
   const invitedName = document.getElementById('invNameInput').value.trim();
+  if (!invitedName) { errEl.textContent = 'Introduza o nome do convidado.'; errEl.style.display = 'block'; return; }
   const note = document.getElementById('invNoteInput').value.trim();
   const expiresInHours = parseInt(document.getElementById('invExpirySelect').value, 10);
   const btn = document.getElementById('inviteGenBtn');

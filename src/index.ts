@@ -1146,6 +1146,7 @@ const server = Bun.serve({
                     const email = (body.email || '').trim().toLowerCase();
                     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonRes(400, { error: 'Valid email is required' });
                     const invitedName = (body.invitedName || '').trim().slice(0, 100);
+                    if (!invitedName) return jsonRes(400, { error: 'invitedName is required' });
                     const note = (body.note || '').trim().slice(0, 200);
                     const expiresInHours = Math.min(Math.max(parseInt(body.expiresInHours) || 48, 1), 720);
                     const invite = createInviteToken(profileName, email, invitedName, note, expiresInHours);
