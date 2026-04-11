@@ -686,6 +686,26 @@
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Redirect unauthenticated requests
             to the login page instead of returning a JSON error.</span>
         </div>
+        <div class="form-group" id="pLoginTitleGroup" style="display:none">
+          <label>Login Page Title</label>
+          <input type="text" id="pLoginTitle" placeholder="Midleman">
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px">Brand name shown on the proxy login page. Leave empty to use "Midleman".</span>
+        </div>
+        <div class="form-group" id="pLoginLogoGroup" style="display:none">
+          <label>Login Page Logo</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="text" id="pLoginLogo" placeholder="https://example.com/logo.png" style="flex:1" oninput="updateLogoPreview()">
+            <label style="cursor:pointer;flex-shrink:0">
+              <span class="btn btn-sm" style="pointer-events:none">Upload</span>
+              <input type="file" id="pLoginLogoFile" accept="image/*" style="display:none" onchange="handleLogoUpload(this)">
+            </label>
+          </div>
+          <div id="pLoginLogoPreview" style="display:none;margin-top:8px">
+            <img id="pLoginLogoImg" src="" style="height:40px;width:40px;object-fit:contain;border-radius:6px;border:1px solid var(--border);background:var(--surface2);padding:4px">
+            <button type="button" onclick="clearLogo()" style="margin-left:8px;background:none;border:none;color:var(--red);cursor:pointer;font-size:12px">Remove</button>
+          </div>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Upload an image or paste a URL. Leave empty to use the Midleman logo.</span>
+        </div>
         <div class="form-group"><label>Blocked Extensions</label><input type="text" id="pBlocked"
             placeholder=".exe, .bat, .sh"></div>
         <div class="form-group span-2"><label>Allowed IPs <span

@@ -23,6 +23,8 @@ interface StoredProfile {
     forwardPath?: boolean;
     passthrough?: boolean;
     authToken?: string;
+    loginTitle?: string;
+    loginLogo?: string;
 }
 
 // Default path — override with DATA_DIR env var for Docker volumes
@@ -69,6 +71,8 @@ function toRuntime(stored: StoredProfile): ProxyProfile {
     if (stored.forwardPath !== undefined) profile.forwardPath = stored.forwardPath;
     if (stored.passthrough !== undefined) profile.passthrough = stored.passthrough;
     if (stored.authToken !== undefined) profile.authToken = stored.authToken;
+    if (stored.loginTitle !== undefined) profile.loginTitle = stored.loginTitle;
+    if (stored.loginLogo !== undefined) profile.loginLogo = stored.loginLogo;
 
     return profile;
 }
@@ -99,6 +103,8 @@ function toStored(profile: ProxyProfile): StoredProfile {
     if (profile.forwardPath !== undefined) stored.forwardPath = profile.forwardPath;
     if (profile.passthrough !== undefined) stored.passthrough = profile.passthrough;
     if (profile.authToken !== undefined) stored.authToken = profile.authToken;
+    if (profile.loginTitle !== undefined) stored.loginTitle = profile.loginTitle;
+    if (profile.loginLogo !== undefined) stored.loginLogo = profile.loginLogo;
 
     return stored;
 }

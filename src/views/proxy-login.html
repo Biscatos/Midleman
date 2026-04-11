@@ -3,143 +3,236 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sign In — {{PROFILE_NAME}} — Midleman</title>
+  <title>Sign In — {{LOGIN_TITLE}}</title>
+  <link rel="icon" href="{{LOGIN_LOGO_URL}}" type="image/x-icon">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #3a3d55; border-radius: 99px; }
+    ::-webkit-scrollbar-thumb:hover { background: #5d6180; }
+    * { scrollbar-width: thin; scrollbar-color: #3a3d55 transparent; }
+
+    :root {
+      --bg:         #080a0f;
+      --text:       #fafafa;
+      --text2:      #52525b;
+      --text3:      #71717a;
+      --input-bg:   #0e0e11;
+      --input-bdr:  #1a1a1f;
+      --input-text: #d4d4d8;
+      --input-ph:   #3f3f46;
+      --focus:      #0078d4;
+      --btn:        #0078d4;
+      --btn-hover:  #005ea6;
+      --btn-active: #004c8a;
+      --badge-bg:   #18181b;
+      --badge-bdr:  #27272a;
+      --badge-text: #a1a1aa;
+      --err-bg:     rgba(220,38,38,0.08);
+      --err-bdr:    rgba(220,38,38,0.15);
+      --err-text:   #dc2626;
+      --back-bdr:   #27272a;
+      --back-hover: #18181b;
+      --secret-bg:  #0e0e11;
+      --secret-bdr: #27272a;
+      --footer:     #27272a;
+      --node-line:  59,91,219;
+      --node-dot:   rgba(99,125,255,0.35);
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg:         #f4f5f7;
+        --text:       #0f1015;
+        --text2:      #52525b;
+        --text3:      #71717a;
+        --input-bg:   #ffffff;
+        --input-bdr:  #e2e4ea;
+        --input-text: #0f1015;
+        --input-ph:   #a1a1aa;
+        --focus:      #0078d4;
+        --btn:        #0078d4;
+        --btn-hover:  #005ea6;
+        --btn-active: #004c8a;
+        --badge-bg:   #ebebee;
+        --badge-bdr:  #d4d4d8;
+        --badge-text: #52525b;
+        --err-bg:     rgba(220,38,38,0.06);
+        --err-bdr:    rgba(220,38,38,0.15);
+        --err-text:   #dc2626;
+        --back-bdr:   #d4d4d8;
+        --back-hover: #ebebee;
+        --secret-bg:  #ebebee;
+        --secret-bdr: #d4d4d8;
+        --footer:     #c4c4cc;
+        --node-line:  59,91,219;
+        --node-dot:   rgba(59,91,219,0.18);
+      }
+      ::-webkit-scrollbar-thumb { background: #c4c9d8; }
+      ::-webkit-scrollbar-thumb:hover { background: #9aa0b4; }
+      * { scrollbar-color: #c4c9d8 transparent; }
+    }
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-      background: #0a0a0a;
-      color: #e4e4e7;
+      background: var(--bg);
+      color: var(--text);
       min-height: 100vh;
       display: flex;
       flex-direction: column;
-    }
-    .topbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 24px;
-      border-bottom: 1px solid #1a1a1a;
-    }
-    .topbar-left {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 14px;
-      font-weight: 600;
-      color: #a1a1aa;
-    }
-    .topbar-left img { width: 22px; height: 22px; border-radius: 4px; }
-    .topbar-right a { font-size: 13px; color: #52525b; text-decoration: none; }
-    .topbar-right a:hover { color: #a1a1aa; }
-    .main {
-      flex: 1;
-      display: flex;
       align-items: center;
       justify-content: center;
-      padding: 40px 20px;
+      overflow: hidden;
     }
-    .card { width: 100%; max-width: 380px; }
-    .brand { text-align: center; margin-bottom: 32px; }
-    .brand img { width: 40px; height: 40px; border-radius: 8px; }
-    h2 { font-size: 22px; font-weight: 700; color: #fafafa; margin-bottom: 6px; }
-    .subtitle { font-size: 14px; color: #71717a; margin-bottom: 24px; }
+
+    canvas#bg {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    .main {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 420px;
+      padding: 80px 24px 60px;
+    }
+
+    h2 {
+      font-size: 36px;
+      font-weight: 300;
+      color: var(--text);
+      letter-spacing: -0.5px;
+      line-height: 1.2;
+      margin-bottom: 8px;
+    }
+
+    .welcome {
+      font-size: 14px;
+      color: var(--text3);
+      margin-bottom: 32px;
+      line-height: 1.5;
+    }
+
+    .subtitle {
+      font-size: 14px;
+      color: var(--text3);
+      line-height: 1.6;
+      margin-bottom: 28px;
+    }
+
     .profile-badge {
       display: inline-block;
-      background: #18181b;
-      border: 1px solid #27272a;
+      background: var(--badge-bg);
+      border: 1px solid var(--badge-bdr);
       border-radius: 6px;
       padding: 2px 10px;
       font-size: 13px;
       font-weight: 600;
-      color: #a1a1aa;
+      color: var(--badge-text);
       font-family: 'SF Mono', ui-monospace, monospace;
     }
+
     .error {
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid rgba(239, 68, 68, 0.25);
-      color: #fca5a5;
-      padding: 10px 14px;
+      background: var(--err-bg);
+      border: 1px solid var(--err-bdr);
+      color: var(--err-text);
+      padding: 12px 16px;
       border-radius: 8px;
       font-size: 13px;
-      margin-bottom: 16px;
+      font-weight: 500;
+      margin-bottom: 20px;
       display: none;
     }
     .error.visible { display: block; }
-    .form-group { margin-bottom: 16px; }
+
+    .form-group { margin-bottom: 20px; }
     .form-group label {
       display: block;
-      font-size: 13px;
+      font-size: 11px;
       font-weight: 500;
-      color: #a1a1aa;
-      margin-bottom: 6px;
+      color: var(--text2);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
     }
     .form-group input {
       width: 100%;
-      padding: 10px 14px;
-      border-radius: 8px;
-      border: 1px solid #27272a;
-      background: #18181b;
-      color: #fafafa;
+      height: 44px;
+      padding: 12px;
       font-size: 14px;
+      border-radius: 8px;
+      border: 1px solid var(--input-bdr);
+      background: var(--input-bg);
+      color: var(--input-text);
       outline: none;
       transition: border-color .15s;
+      font-family: inherit;
     }
-    .form-group input:focus {
-      border-color: #3f3f46;
-      box-shadow: 0 0 0 2px rgba(63,63,70,.3);
-    }
-    .form-group input::placeholder { color: #3f3f46; }
+    .form-group input:focus { border-color: var(--focus); }
+    .form-group input::placeholder { color: var(--input-ph); }
+
     .totp-input {
       text-align: center;
       font-size: 24px;
       letter-spacing: 8px;
       font-weight: 700;
     }
+
     .btn-primary {
       width: 100%;
-      height: 42px;
+      height: 48px;
       border-radius: 8px;
       border: none;
-      background: #fafafa;
-      color: #09090b;
-      font-size: 14px;
+      background: var(--btn);
+      color: #fff;
+      font-size: 13px;
       font-weight: 600;
       cursor: pointer;
-      display: flex;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
+      gap: 8px;
+      margin-top: 12px;
       transition: background .15s;
+      font-family: inherit;
     }
-    .btn-primary:hover { background: #e4e4e7; }
-    .btn-primary:active { background: #d4d4d8; }
+    .btn-primary:hover { background: var(--btn-hover); }
+    .btn-primary:active { background: var(--btn-active); }
     .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
     .btn-primary .spinner {
       width: 16px; height: 16px;
-      border: 2px solid rgba(9,9,11,.25);
-      border-top-color: #09090b;
+      border: 2px solid rgba(255,255,255,.3);
+      border-top-color: #fff;
       border-radius: 50%;
       animation: spin .6s linear infinite;
-      flex-shrink: 0;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+
     .btn-back {
       width: 100%;
+      height: 40px;
       justify-content: center;
       margin-top: 8px;
       font-size: 13px;
-      color: #71717a;
-      border: 1px solid #27272a;
+      color: var(--text3);
+      border: 1px solid var(--back-bdr);
       background: transparent;
       cursor: pointer;
       border-radius: 8px;
-      height: 40px;
       display: inline-flex;
       align-items: center;
+      transition: background .15s, color .15s;
+      font-family: inherit;
     }
-    .btn-back:hover { background: #18181b; }
+    .btn-back:hover { background: var(--back-hover); color: var(--text2); }
+
     .step { display: none; }
     .step.active { display: block; }
+
     .qr-wrap {
       text-align: center;
       margin: 16px 0;
@@ -149,279 +242,280 @@
       display: inline-block;
     }
     .qr-wrap img { width: 180px; height: 180px; }
+
     .setup-info {
       font-size: 13px;
-      color: #a1a1aa;
+      color: var(--text3);
       line-height: 1.6;
       margin-bottom: 16px;
     }
+
     .secret-code {
       font-family: 'SF Mono', ui-monospace, monospace;
       font-size: 12px;
-      background: #18181b;
-      border: 1px solid #27272a;
+      background: var(--secret-bg);
+      border: 1px solid var(--secret-bdr);
       border-radius: 6px;
       padding: 8px 12px;
-      color: #fafafa;
+      color: var(--text);
       word-break: break-all;
       text-align: center;
       margin: 12px 0;
       cursor: pointer;
     }
+
     .footer {
+      position: relative;
+      z-index: 1;
       text-align: center;
       font-size: 11px;
-      color: #27272a;
+      color: var(--footer);
       padding: 20px;
       text-transform: uppercase;
       letter-spacing: .08em;
     }
+
     @media (max-width: 480px) {
-      .card { max-width: 100%; }
-      h2 { font-size: 20px; }
+      .main { padding: 48px 20px 40px; }
+      h2 { font-size: 28px; }
     }
   </style>
 </head>
 <body>
-  <div class="topbar">
-    <div class="topbar-left">
-      <img src="/logo.png" alt="Midleman">
-      <span>Midleman</span>
-    </div>
-    <div class="topbar-right">
-      <a href="/health">Status</a>
-    </div>
-  </div>
+  <canvas id="bg"></canvas>
 
   <main class="main">
-    <div class="card">
-      <div class="brand"><img src="/logo.png" alt="Midleman"></div>
-
-      <!-- Step 1: Credentials -->
-      <div class="step active" id="step1">
-        <h2>Sign In</h2>
-        <div class="subtitle">
-          Authenticate to access <span class="profile-badge">{{PROFILE_NAME}}</span>
-        </div>
-        <div class="error" id="loginError"></div>
-        <div class="form-group">
-          <label>Username</label>
-          <input type="text" id="loginUser" placeholder="Username" autocomplete="username">
-        </div>
-        <div class="form-group">
-          <label>Password</label>
-          <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password">
-        </div>
-        <button class="btn-primary" id="loginBtn" onclick="doStep1()">Continue</button>
+    <div class="step active" id="step1">
+      <h2 id="h2step1"></h2>
+      <div class="welcome" id="welcomeMsg"></div>
+      <div class="error" id="loginError"></div>
+      <div class="form-group">
+        <label id="lblUser"></label>
+        <input type="text" id="loginUser" autocomplete="username">
       </div>
-
-      <!-- Step 2a: TOTP Verify (user already has TOTP set up) -->
-      <div class="step" id="step2verify">
-        <h2>Verification</h2>
-        <div class="subtitle">Enter the 6-digit code from your authenticator app.</div>
-        <div class="error" id="totpVerifyError"></div>
-        <div class="form-group">
-          <label>Authenticator Code</label>
-          <input type="text" id="totpVerifyCode" class="totp-input" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code">
-        </div>
-        <button class="btn-primary" id="totpVerifyBtn" onclick="doTotpVerify()">Sign In</button>
-        <button class="btn-back" onclick="backToStep1()">Back</button>
+      <div class="form-group">
+        <label id="lblPass"></label>
+        <input type="password" id="loginPass" autocomplete="current-password">
       </div>
+      <button class="btn-primary" id="loginBtn" onclick="doStep1()"></button>
+    </div>
 
-      <!-- Step 2b: TOTP Setup (first time, profile requires 2FA) -->
-      <div class="step" id="step2setup">
-        <h2>Set Up 2FA</h2>
-        <div class="setup-info">
-          This application requires two-factor authentication.
-          Scan the QR code with your authenticator app (Google Authenticator, Authy, etc.).
-        </div>
-        <div class="error" id="totpSetupError"></div>
-        <div style="text-align:center">
-          <div class="qr-wrap">
-            <img id="qrImage" src="" alt="QR Code">
-          </div>
-        </div>
-        <div class="secret-code" id="secretCode" onclick="copySecret()" title="Click to copy"></div>
-        <div class="form-group">
-          <label>Enter the 6-digit code to confirm</label>
-          <input type="text" id="totpSetupCode" class="totp-input" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code">
-        </div>
-        <button class="btn-primary" id="totpSetupBtn" onclick="doTotpSetup()">Verify & Sign In</button>
-        <button class="btn-back" onclick="backToStep1()">Back</button>
+    <div class="step" id="step2verify">
+      <h2 id="h2step2verify"></h2>
+      <div class="subtitle" id="subtitleVerify"></div>
+      <div class="error" id="totpVerifyError"></div>
+      <div class="form-group">
+        <label id="lblTotp"></label>
+        <input type="text" id="totpVerifyCode" class="totp-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code">
       </div>
+      <button class="btn-primary" id="totpVerifyBtn" onclick="doTotpVerify()"></button>
+      <button class="btn-back" onclick="backToStep1()"></button>
+    </div>
+
+    <div class="step" id="step2setup">
+      <h2 id="h2step2setup"></h2>
+      <div class="setup-info" id="subtitleSetup"></div>
+      <div class="error" id="totpSetupError"></div>
+      <div style="text-align:center">
+        <div class="qr-wrap"><img id="qrImage" src="" alt="QR Code"></div>
+      </div>
+      <div class="secret-code" id="secretCode" onclick="copySecret()" title="Click to copy"></div>
+      <div class="form-group">
+        <label id="lblTotpConfirm"></label>
+        <input type="text" id="totpSetupCode" class="totp-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code">
+      </div>
+      <button class="btn-primary" id="totpSetupBtn" onclick="doTotpSetup()"></button>
+      <button class="btn-back" onclick="backToStep1()"></button>
     </div>
   </main>
 
-  <footer class="footer">midleman</footer>
+  <footer class="footer">{{LOGIN_TITLE}}</footer>
 
   <script>
-    const PROFILE = '{{PROFILE_NAME}}';
-    let challengeToken = '';
-    let setupTotpSecret = '';
+    (function () {
+      const canvas = document.getElementById('bg');
+      const ctx = canvas.getContext('2d');
+      const NODE_COUNT = 38, CONNECT_DIST = 160, SPEED = 0.28;
+      let W, H, nodes;
+      const light = window.matchMedia('(prefers-color-scheme: light)');
 
-    // Enter key handlers
+      function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+      function makeNode() {
+        return { x: Math.random() * W, y: Math.random() * H,
+                 vx: (Math.random() - 0.5) * SPEED, vy: (Math.random() - 0.5) * SPEED,
+                 r: Math.random() * 1.5 + 1 };
+      }
+      function init() { resize(); nodes = Array.from({ length: NODE_COUNT }, makeNode); }
+      function draw() {
+        ctx.clearRect(0, 0, W, H);
+        const lineMax = light.matches ? 0.10 : 0.18;
+        const dotColor = light.matches ? 'rgba(59,91,219,0.18)' : 'rgba(99,125,255,0.35)';
+        for (let i = 0; i < nodes.length; i++) {
+          for (let j = i + 1; j < nodes.length; j++) {
+            const dx = nodes[i].x - nodes[j].x, dy = nodes[i].y - nodes[j].y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < CONNECT_DIST) {
+              ctx.strokeStyle = `rgba(59,91,219,${(1 - dist / CONNECT_DIST) * lineMax})`;
+              ctx.lineWidth = 0.8;
+              ctx.beginPath();
+              ctx.moveTo(nodes[i].x, nodes[i].y);
+              ctx.lineTo(nodes[j].x, nodes[j].y);
+              ctx.stroke();
+            }
+          }
+        }
+        ctx.fillStyle = dotColor;
+        for (const n of nodes) {
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      function tick() {
+        for (const n of nodes) {
+          n.x += n.vx; n.y += n.vy;
+          if (n.x < 0 || n.x > W) n.vx *= -1;
+          if (n.y < 0 || n.y > H) n.vy *= -1;
+        }
+        draw();
+        requestAnimationFrame(tick);
+      }
+      window.addEventListener('resize', resize);
+      init(); tick();
+    })();
+
+    const PROFILE = '{{PROFILE_NAME}}';
+    let challengeToken = '', setupTotpSecret = '';
+
+    const lang = navigator.language?.toLowerCase().startsWith('pt') ? 'pt' : 'en';
+    const t = {
+      en: {
+        signIn: 'Sign In', verification: 'Verification', setup2fa: 'Set Up 2FA',
+        welcome: 'Welcome back. Please enter your credentials to continue.',
+        userLabel: 'Username', passLabel: 'Password', totpLabel: 'Authenticator Code', totpConfirmLabel: 'Enter the 6-digit code to confirm',
+        userPh: 'Username', passPh: 'Password', totpPh: '000000',
+        continueBtn: 'Continue', signingIn: 'Signing in...', signInBtn: 'Sign In', verifying: 'Verifying...',
+        verifyBtn: 'Verify & Sign In', back: 'Back',
+        subtitleVerify: 'Enter the 6-digit code from your authenticator app.',
+        subtitleSetup: 'This application requires two-factor authentication. Scan the QR code with your authenticator app.',
+        errRequired: 'Username and password are required.',
+        errLogin: 'Login failed.', errConn: 'Connection error. Please try again.',
+        errTotp: 'Enter the 6-digit code.', errTotpFail: 'Verification failed.', errSetupFail: 'Setup failed.',
+        errSetupCode: 'Enter the 6-digit code from your authenticator.',
+      },
+      pt: {
+        signIn: 'Entrar', verification: 'Verificação', setup2fa: 'Configurar 2FA',
+        welcome: 'Bem-vindo. Introduza as suas credenciais para continuar.',
+        userLabel: 'Utilizador', passLabel: 'Palavra-passe', totpLabel: 'Código do Autenticador', totpConfirmLabel: 'Introduza o código de 6 dígitos para confirmar',
+        userPh: 'Utilizador', passPh: 'Palavra-passe', totpPh: '000000',
+        continueBtn: 'Continuar', signingIn: 'A entrar...', signInBtn: 'Entrar', verifying: 'A verificar...',
+        verifyBtn: 'Verificar e Entrar', back: 'Voltar',
+        subtitleVerify: 'Introduza o código de 6 dígitos da sua aplicação de autenticação.',
+        subtitleSetup: 'Esta aplicação requer autenticação de dois fatores. Leia o código QR com a sua aplicação de autenticação.',
+        errRequired: 'Utilizador e palavra-passe são obrigatórios.',
+        errLogin: 'Falha no início de sessão.', errConn: 'Erro de ligação. Tente novamente.',
+        errTotp: 'Introduza o código de 6 dígitos.', errTotpFail: 'Verificação falhada.', errSetupFail: 'Configuração falhada.',
+        errSetupCode: 'Introduza o código de 6 dígitos do seu autenticador.',
+      },
+    }[lang];
+
+    function applyLang() {
+      document.getElementById('h2step1').textContent = t.signIn;
+      document.getElementById('welcomeMsg').textContent = t.welcome;
+      document.getElementById('h2step2verify').textContent = t.verification;
+      document.getElementById('h2step2setup').textContent = t.setup2fa;
+      document.getElementById('lblUser').textContent = t.userLabel;
+      document.getElementById('lblPass').textContent = t.passLabel;
+      document.getElementById('lblTotp').textContent = t.totpLabel;
+      document.getElementById('lblTotpConfirm').textContent = t.totpConfirmLabel;
+      document.getElementById('loginUser').placeholder = t.userPh;
+      document.getElementById('loginPass').placeholder = t.passPh;
+      document.getElementById('totpVerifyCode').placeholder = t.totpPh;
+      document.getElementById('totpSetupCode').placeholder = t.totpPh;
+      document.getElementById('loginBtn').textContent = t.continueBtn;
+      document.getElementById('totpVerifyBtn').textContent = t.signInBtn;
+      document.getElementById('totpSetupBtn').textContent = t.verifyBtn;
+      document.querySelectorAll('.btn-back').forEach(b => b.textContent = t.back);
+      document.getElementById('subtitleVerify').textContent = t.subtitleVerify;
+      document.getElementById('subtitleSetup').textContent = t.subtitleSetup;
+    }
+    applyLang();
+
     document.getElementById('loginPass').addEventListener('keydown', e => { if (e.key === 'Enter') doStep1(); });
     document.getElementById('totpVerifyCode').addEventListener('keydown', e => { if (e.key === 'Enter') doTotpVerify(); });
     document.getElementById('totpSetupCode').addEventListener('keydown', e => { if (e.key === 'Enter') doTotpSetup(); });
 
-    function showStep(id) {
-      document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
-      document.getElementById(id).classList.add('active');
-    }
-    function showError(elId, msg) {
-      const el = document.getElementById(elId);
-      el.textContent = msg;
-      el.classList.add('visible');
-    }
-    function clearErrors() {
-      document.querySelectorAll('.error').forEach(e => { e.classList.remove('visible'); e.textContent = ''; });
-    }
-    function backToStep1() {
-      clearErrors();
-      challengeToken = '';
-      setupTotpSecret = '';
-      showStep('step1');
-    }
+    function showStep(id) { document.querySelectorAll('.step').forEach(s => s.classList.remove('active')); document.getElementById(id).classList.add('active'); }
+    function showError(elId, msg) { const el = document.getElementById(elId); el.textContent = msg; el.classList.add('visible'); }
+    function clearErrors() { document.querySelectorAll('.error').forEach(e => { e.classList.remove('visible'); e.textContent = ''; }); }
+    function backToStep1() { clearErrors(); challengeToken = ''; setupTotpSecret = ''; showStep('step1'); }
 
     async function doStep1() {
       const btn = document.getElementById('loginBtn');
       clearErrors();
-
       const username = document.getElementById('loginUser').value.trim();
       const password = document.getElementById('loginPass').value;
-      if (!username || !password) { showError('loginError', 'Username and password are required.'); return; }
-
-      btn.disabled = true;
-      btn.textContent = 'Signing in...';
-
-      let navigating = false;
+      if (!username || !password) { showError('loginError', t.errRequired); return; }
+      btn.disabled = true; btn.textContent = t.signingIn;
+      let nav = false;
       try {
-        const res = await fetch('/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password }),
-        });
+        const res = await fetch('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
         const data = await res.json();
-
-        if (!res.ok) { showError('loginError', data.error || 'Login failed.'); return; }
-
-        if (data.status === 'ok') {
-          navigating = true;
-          doRedirect();
-          return;
-        }
-
+        if (!res.ok) { showError('loginError', data.error || t.errLogin); return; }
+        if (data.status === 'ok') { nav = true; doRedirect(); return; }
         challengeToken = data.challengeToken;
-
         if (data.status === 'totp_required') {
-          showStep('step2verify');
-          document.getElementById('totpVerifyCode').value = '';
-          document.getElementById('totpVerifyCode').focus();
+          showStep('step2verify'); document.getElementById('totpVerifyCode').value = ''; document.getElementById('totpVerifyCode').focus();
         } else if (data.status === 'totp_setup') {
           setupTotpSecret = data.totpSecret;
           document.getElementById('qrImage').src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(data.otpauthUrl);
           document.getElementById('secretCode').textContent = data.totpSecret;
-          showStep('step2setup');
-          document.getElementById('totpSetupCode').value = '';
-          document.getElementById('totpSetupCode').focus();
+          showStep('step2setup'); document.getElementById('totpSetupCode').value = ''; document.getElementById('totpSetupCode').focus();
         }
-      } catch (err) {
-        showError('loginError', 'Connection error. Please try again.');
-      } finally {
-        if (!navigating) {
-          btn.disabled = false;
-          btn.textContent = 'Continue';
-        }
-      }
+      } catch { showError('loginError', t.errConn); }
+      finally { if (!nav) { btn.disabled = false; btn.textContent = t.continueBtn; } }
     }
 
     async function doTotpVerify() {
-      const btn = document.getElementById('totpVerifyBtn');
-      clearErrors();
-
+      const btn = document.getElementById('totpVerifyBtn'); clearErrors();
       const code = document.getElementById('totpVerifyCode').value.trim();
-      if (!code || code.length !== 6) { showError('totpVerifyError', 'Enter the 6-digit code.'); return; }
-
-      btn.disabled = true;
-      btn.textContent = 'Verifying...';
-
-      let navigating = false;
+      if (!code || code.length !== 6) { showError('totpVerifyError', t.errTotp); return; }
+      btn.disabled = true; btn.textContent = t.verifying;
+      let nav = false;
       try {
-        const res = await fetch('/auth/totp', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ challengeToken, totpCode: code }),
-        });
+        const res = await fetch('/auth/totp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ challengeToken, totpCode: code }) });
         const data = await res.json();
-        if (!res.ok) { showError('totpVerifyError', data.error || 'Verification failed.'); return; }
-        navigating = true;
-        doRedirect();
-      } catch (err) {
-        showError('totpVerifyError', 'Connection error. Please try again.');
-      } finally {
-        if (!navigating) {
-          btn.disabled = false;
-          btn.textContent = 'Sign In';
-        }
-      }
+        if (!res.ok) { showError('totpVerifyError', data.error || t.errTotpFail); return; }
+        nav = true; doRedirect();
+      } catch { showError('totpVerifyError', t.errConn); }
+      finally { if (!nav) { btn.disabled = false; btn.textContent = t.signInBtn; } }
     }
 
     async function doTotpSetup() {
-      const btn = document.getElementById('totpSetupBtn');
-      clearErrors();
-
+      const btn = document.getElementById('totpSetupBtn'); clearErrors();
       const code = document.getElementById('totpSetupCode').value.trim();
-      if (!code || code.length !== 6) { showError('totpSetupError', 'Enter the 6-digit code from your authenticator.'); return; }
-
-      btn.disabled = true;
-      btn.textContent = 'Verifying...';
-
-      let navigating = false;
+      if (!code || code.length !== 6) { showError('totpSetupError', t.errSetupCode); return; }
+      btn.disabled = true; btn.textContent = t.verifying;
+      let nav = false;
       try {
-        const res = await fetch('/auth/totp', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ challengeToken, totpCode: code, totpSecret: setupTotpSecret }),
-        });
+        const res = await fetch('/auth/totp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ challengeToken, totpCode: code, totpSecret: setupTotpSecret }) });
         const data = await res.json();
-        if (!res.ok) { showError('totpSetupError', data.error || 'Setup failed.'); return; }
-        navigating = true;
-        doRedirect();
-      } catch (err) {
-        showError('totpSetupError', 'Connection error. Please try again.');
-      } finally {
-        if (!navigating) {
-          btn.disabled = false;
-          btn.textContent = 'Verify & Sign In';
-        }
-      }
+        if (!res.ok) { showError('totpSetupError', data.error || t.errSetupFail); return; }
+        nav = true; doRedirect();
+      } catch { showError('totpSetupError', t.errConn); }
+      finally { if (!nav) { btn.disabled = false; btn.textContent = t.verifyBtn; } }
     }
 
     function doRedirect() {
-      // Show loading state on the active button before navigating
       const activeStep = document.querySelector('.step.active');
-      if (activeStep) {
-        const btn = activeStep.querySelector('.btn-primary');
-        if (btn) {
-          btn.disabled = true;
-          btn.innerHTML = '<span class="spinner"></span>';
-        }
-      }
-      const searchParams = new URLSearchParams(window.location.search);
-      const redirect = searchParams.get('redirect');
-      if (redirect) {
-        window.location.href = redirect;
-      } else if (window.location.pathname.endsWith('/auth/login')) {
-        window.location.href = '/';
-      } else {
-        window.location.reload();
-      }
+      if (activeStep) { const btn = activeStep.querySelector('.btn-primary'); if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; } }
+      const redirect = new URLSearchParams(window.location.search).get('redirect');
+      if (redirect) window.location.href = redirect;
+      else if (window.location.pathname.endsWith('/auth/login')) window.location.href = '/';
+      else window.location.reload();
     }
 
-    function copySecret() {
-      const text = document.getElementById('secretCode').textContent;
-      navigator.clipboard.writeText(text).catch(() => {});
-    }
+    function copySecret() { navigator.clipboard.writeText(document.getElementById('secretCode').textContent).catch(() => {}); }
   </script>
 </body>
 </html>

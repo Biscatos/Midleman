@@ -814,6 +814,9 @@ const server = Bun.serve({
                             require2fa: !!profile.require2fa,
                             isWebApp: !!profile.isWebApp,
                             disableLogs: !!profile.disableLogs,
+                            forwardPath: profile.forwardPath !== false,
+                            loginTitle: profile.loginTitle || '',
+                            loginLogo: profile.loginLogo || '',
                             blockedExtensions: profile.blockedExtensions ? Array.from(profile.blockedExtensions) : [],
                             allowedIps: profile.allowedIps || [],
                             port: getProxyServerPort(profile.name),
@@ -835,6 +838,9 @@ const server = Bun.serve({
                         disableLogs: !!p.disableLogs,
                         blockedExtensions: p.blockedExtensions ? Array.from(p.blockedExtensions) : [],
                         allowedIps: p.allowedIps || [],
+                        forwardPath: p.forwardPath !== false,
+                        loginTitle: p.loginTitle || '',
+                        loginLogo: p.loginLogo || '',
                         port: getProxyServerPort(p.name),
                         running: isProxyServerRunning(p.name),
                     }));
@@ -863,6 +869,9 @@ const server = Bun.serve({
                     if (typeof input.require2fa === 'boolean') profile.require2fa = input.require2fa;
                     if (typeof input.isWebApp === 'boolean') profile.isWebApp = input.isWebApp;
                     if (typeof input.disableLogs === 'boolean') profile.disableLogs = input.disableLogs;
+                    if (typeof input.forwardPath === 'boolean') profile.forwardPath = input.forwardPath;
+                    if (typeof input.loginTitle === 'string' && input.loginTitle) profile.loginTitle = input.loginTitle;
+                    if (typeof input.loginLogo === 'string' && input.loginLogo) profile.loginLogo = input.loginLogo;
                     if (input.blockedExtensions) {
                         profile.blockedExtensions = new Set(
                             (input.blockedExtensions as string[]).map(e => e.trim().toLowerCase().replace(/^\.?/, '.'))

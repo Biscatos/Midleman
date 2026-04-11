@@ -18,6 +18,16 @@ const servers = new Map<string, ProxyServerInstance>();
 let proxyLoginHtml = '';
 let logoBytes: Uint8Array | null = null;
 
+const SAFE_LOGO_RE = /^(https:\/\/|data:image\/(png|jpeg|gif|webp);base64,)[A-Za-z0-9+/=.\-_~:@!$&'()*+,;%?#[\]]+$/;
+function safeLogoUrl(raw: string | undefined, targetUrl?: string): string {
+    if (raw && SAFE_LOGO_RE.test(raw)) return raw;
+    // Auto-derive favicon from the proxied target's origin
+    if (targetUrl) {
+        try { return new URL(targetUrl).origin + '/favicon.ico'; } catch {}
+    }
+    return '/logo.png';
+}
+
 export function setProxyLoginTemplate(html: string): void {
     proxyLoginHtml = html;
 }
@@ -57,9 +67,13 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
             if (profile.authMode === 'login') {
                 // GET /auth/login — serve login page
                 if (url.pathname === '/auth/login' && req.method === 'GET') {
+                    const loginTitle = profile.loginTitle || 'Midleman';
+                    const loginLogoUrl = safeLogoUrl(profile.loginLogo, profile.targetUrl);
                     const html = proxyLoginHtml
                         .replace(/\{\{PROFILE_NAME\}\}/g, profile.name)
-                        .replace(/\{\{REQUIRE_2FA\}\}/g, profile.require2fa ? 'true' : 'false');
+                        .replace(/\{\{REQUIRE_2FA\}\}/g, profile.require2fa ? 'true' : 'false')
+                        .replace(/\{\{LOGIN_TITLE\}\}/g, loginTitle)
+                        .replace(/\{\{LOGIN_LOGO_URL\}\}/g, loginLogoUrl)
                     return new Response(html, {
                         status: 200,
                         headers: { 'Content-Type': 'text/html; charset=utf-8' },
@@ -173,9 +187,14 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
             }
 
             const renderLoginHtml = (profileName: string, require2fa: boolean) => {
+                const loginTitle = profile.loginTitle || 'Midleman';
+                const loginLogoUrl = safeLogoUrl(profile.loginLogo, profile.targetUrl);
                 return proxyLoginHtml
                     .replace(/\{\{PROFILE_NAME\}\}/g, profileName)
-                    .replace(/\{\{REQUIRE_2FA\}\}/g, require2fa ? 'true' : 'false');
+                    .replace(/\{\{REQUIRE_2FA\}\}/g, require2fa ? 'true' : 'false')
+                    .replace(/\{\{LOGIN_TITLE\}\}/g, loginTitle)
+                    .replace(/\{\{LOGIN_LOGO_URL\}\}/g, loginLogoUrl)
+                    .replace(/\{\{LOGIN_TITLE_SUFFIX\}\}/g, profile.loginTitle ? '' : ' — Midleman');
             };
 
             return handleDirectProxy(req, profile, startTime, renderLoginHtml);

@@ -360,6 +360,10 @@ function openProfileModal(profile = null) {
   document.getElementById('pIsWebApp').checked = profile ? !!profile.isWebApp : false;
   document.getElementById('pDisableLogs').checked = profile ? !!profile.disableLogs : false;
   document.getElementById('pForwardPath').checked = profile ? profile.forwardPath !== false : true;
+  document.getElementById('pLoginTitle').value = profile ? (profile.loginTitle || '') : '';
+  document.getElementById('pLoginLogo').value = profile ? (profile.loginLogo || '') : '';
+  document.getElementById('pLoginLogoFile').value = '';
+  updateLogoPreview();
   document.getElementById('pBlocked').value = profile?.blockedExtensions ? profile.blockedExtensions.join(', ') : '';
   IpTagInput.setValue('pAllowedIps', profile?.allowedIps || []);
   toggleProfileAuthMode();
@@ -370,8 +374,35 @@ function toggleProfileAuthMode() {
   document.getElementById('pAccessKeyGroup').style.display = mode === 'accessKey' ? '' : 'none';
   document.getElementById('pRequire2faGroup').style.display = mode === 'login' ? '' : 'none';
   document.getElementById('pIsWebAppGroup').style.display = mode === 'login' ? '' : 'none';
+  document.getElementById('pLoginTitleGroup').style.display = mode === 'login' ? '' : 'none';
+  document.getElementById('pLoginLogoGroup').style.display = mode === 'login' ? '' : 'none';
 }
 function closeProfileModal() { document.getElementById('profileModal').classList.remove('active'); editingProfile = null; }
+
+function handleLogoUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (!file.type.match(/^image\/(png|jpeg|gif|webp)$/)) return toast('Only PNG, JPEG, GIF or WebP allowed', 'error');
+  if (file.size > 100 * 1024) return toast('Logo must be under 100 KB', 'error');
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById('pLoginLogo').value = e.target.result;
+    updateLogoPreview();
+  };
+  reader.readAsDataURL(file);
+}
+function updateLogoPreview() {
+  const val = document.getElementById('pLoginLogo').value.trim();
+  const preview = document.getElementById('pLoginLogoPreview');
+  const img = document.getElementById('pLoginLogoImg');
+  if (val) { img.src = val; preview.style.display = 'flex'; preview.style.alignItems = 'center'; }
+  else { preview.style.display = 'none'; img.src = ''; }
+}
+function clearLogo() {
+  document.getElementById('pLoginLogo').value = '';
+  document.getElementById('pLoginLogoFile').value = '';
+  updateLogoPreview();
+}
 async function saveProfile() {
   const body = { name: document.getElementById('pName').value.trim(), targetUrl: document.getElementById('pTargetUrl').value.trim() };
   const v = (id) => document.getElementById(id).value.trim();
@@ -387,6 +418,10 @@ async function saveProfile() {
   }
   body.disableLogs = document.getElementById('pDisableLogs').checked;
   body.forwardPath = document.getElementById('pForwardPath').checked;
+  const loginTitle = document.getElementById('pLoginTitle').value.trim();
+  const loginLogo = document.getElementById('pLoginLogo').value.trim();
+  if (loginTitle) body.loginTitle = loginTitle;
+  if (loginLogo) body.loginLogo = loginLogo;
   const blocked = v('pBlocked'); if (blocked) body.blockedExtensions = blocked.split(',').map(s => s.trim()).filter(Boolean);
   const allowedIps = IpTagInput.getValue('pAllowedIps'); if (allowedIps.length) body.allowedIps = allowedIps;
   try {

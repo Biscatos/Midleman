@@ -20,6 +20,8 @@ export interface ProxyProfile {
   forwardPath?: boolean;  // Whether to append incoming path to target URL (defaults to true)
   passthrough?: boolean;  // If true, disable HTML rewriting and stream unconditionally
   authToken?: string;     // Simple token auth (X-Forward-Token or ?token=) for API connections
+  loginTitle?: string;    // Custom brand title shown on the proxy login page (login mode only)
+  loginLogo?: string;     // Custom logo URL shown on the proxy login page (login mode only)
 }
 
 
