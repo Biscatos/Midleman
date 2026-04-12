@@ -172,11 +172,12 @@
       addEventListener('resize', resize); init(); tick();
     })();
 
-    const TOKEN     = '{{TOKEN}}';
-    const EMAIL     = '{{EMAIL}}';
-    const INV_NAME  = '{{INVITED_NAME}}';
-    const NOTE      = '{{NOTE}}';
-    const IS_RETURNING = {{IS_RETURNING}};
+    const TOKEN          = '{{TOKEN}}';
+    const EMAIL          = '{{EMAIL}}';
+    const INV_NAME       = '{{INVITED_NAME}}';
+    const NOTE           = '{{NOTE}}';
+    const IS_RETURNING   = {{IS_RETURNING}};
+    const PROXY_LOGIN_URL = '{{PROXY_LOGIN_URL}}';
 
     // Render page state
     document.getElementById('emailDisplay').textContent = EMAIL;
@@ -220,6 +221,9 @@
       document.getElementById('returningUserForm').style.display='none';
       document.getElementById('regSuccessMsg').textContent=msg;
       document.getElementById('regSuccess').classList.add('visible');
+      if (PROXY_LOGIN_URL) {
+        setTimeout(() => { window.location.href = PROXY_LOGIN_URL; }, 1800);
+      }
     }
 
     async function doRegister() {

@@ -314,11 +314,14 @@ export async function handleProxyRequest(
         }
     }
 
-    // Build the target URL
+    // Build the target URL — normalize through URL constructor to strip default
+    // ports (http:80, https:443) which Bun's fetch handles inconsistently.
     const queryString = url.search;
-    const targetUrl = profile.forwardPath !== false
+    const rawTargetUrl = profile.forwardPath !== false
         ? profile.targetUrl + remainingPath + queryString
         : profile.targetUrl + queryString;
+    let targetUrl = rawTargetUrl;
+    try { targetUrl = new URL(rawTargetUrl).href; } catch {}
 
     // Build headers with upstream authentication
     const forwardHeaders = new Headers();
@@ -328,6 +331,14 @@ export async function handleProxyRequest(
             forwardHeaders.set(key, value);
         }
     });
+
+    // Set Host explicitly, preserving user-configured port (e.g. :80) so servers
+    // that match on the full host:port value work correctly.
+    try {
+        const t = new URL(profile.targetUrl);
+        const rawPort = profile.targetUrl.match(/^https?:\/\/[^/:]+:(\d+)/)?.[1];
+        forwardHeaders.set('host', rawPort ? `${t.hostname}:${rawPort}` : t.hostname);
+    } catch {}
 
     // Set pre-computed auth value (no string concatenation per request)
     if (profile.authHeader && profile.computedAuthValue) {
@@ -769,9 +780,13 @@ export async function handleDirectProxy(
     }
 
     // ── Build target URL (transparent: path goes directly to upstream) ──
-    const targetUrl = profile.forwardPath !== false
+    // Normalize through URL constructor so default ports (http:80, https:443) are
+    // stripped — Bun's fetch can behave inconsistently when they are left explicit.
+    const rawTargetUrl = profile.forwardPath !== false
         ? profile.targetUrl + url.pathname + url.search
         : profile.targetUrl + url.search;
+    let targetUrl = rawTargetUrl;
+    try { targetUrl = new URL(rawTargetUrl).href; } catch {}
 
     // ── Build headers ──
     const forwardHeaders = new Headers();
@@ -781,6 +796,15 @@ export async function handleDirectProxy(
             forwardHeaders.set(key, value);
         }
     });
+
+    // Set Host header explicitly from the original target URL, preserving any
+    // explicit port the user configured (e.g. front-uchat:80) so that servers
+    // which require the port in the Host header receive it correctly.
+    try {
+        const t = new URL(profile.targetUrl);
+        const rawPort = profile.targetUrl.match(/^https?:\/\/[^/:]+:(\d+)/)?.[1];
+        forwardHeaders.set('host', rawPort ? `${t.hostname}:${rawPort}` : t.hostname);
+    } catch {}
 
     if (profile.authHeader && computedAuthValue) {
         forwardHeaders.set(profile.authHeader, computedAuthValue);

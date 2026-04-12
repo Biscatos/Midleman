@@ -510,6 +510,7 @@ const server = Bun.serve({
                         .replace(/\{\{EMAIL\}\}/g, '')
                         .replace(/\{\{NOTE\}\}/g, '')
                         .replace(/\{\{IS_RETURNING\}\}/g, 'false')
+                        .replace(/\{\{PROXY_LOGIN_URL\}\}/g, '')
                         .replace(/\{\{INVALID_MSG\}\}/g, msg)
                         .replace(/\{\{INVALID_DISPLAY\}\}/g, 'block')
                         .replace(/\{\{FORM_DISPLAY\}\}/g, 'none');
@@ -520,6 +521,11 @@ const server = Bun.serve({
                 const existingUser = invite.email ? findProxyUserByEmailOrUsername(invite.email, '') : null;
                 const isReturning = !!existingUser;
 
+                // Build proxy login URL so the page can redirect after success
+                const proxyPort = getProxyServerPort(invite.profileName);
+                const reqHost = req.headers.get('host')?.split(':')[0] || 'localhost';
+                const proxyLoginUrl = proxyPort ? `http://${reqHost}:${proxyPort}/auth/login` : '';
+
                 const inviteHtml = readFileSync(resolve(import.meta.dir, 'views/invite.html'), 'utf-8')
                     .replace(/\{\{TOKEN\}\}/g, token)
                     .replace(/\{\{LOGIN_TITLE\}\}/g, esc(loginTitle))
@@ -528,6 +534,7 @@ const server = Bun.serve({
                     .replace(/\{\{EMAIL\}\}/g, esc(invite.email))
                     .replace(/\{\{NOTE\}\}/g, esc(invite.note))
                     .replace(/\{\{IS_RETURNING\}\}/g, isReturning ? 'true' : 'false')
+                    .replace(/\{\{PROXY_LOGIN_URL\}\}/g, proxyLoginUrl)
                     .replace(/\{\{INVALID_MSG\}\}/g, '')
                     .replace(/\{\{INVALID_DISPLAY\}\}/g, 'none')
                     .replace(/\{\{FORM_DISPLAY\}\}/g, 'block');
