@@ -60,13 +60,66 @@ export interface WebhookDistributor {
 /**
  * Application configuration interface
  */
+/**
+ * A single inbound listener within a TcpUdpProfile.
+ * Each listener runs on its own auto-assigned port.
+ */
+export interface TcpUdpListener {
+  transport: 'tcp' | 'udp' | 'tls';
+  port: number;  // 0 = auto-assigned by port manager, populated at startup
+}
+
+/**
+ * Generic TCP/UDP proxy profile.
+ *
+ * Supports multiple simultaneous inbound listeners (UDP, TCP, TLS) on
+ * auto-assigned ports, all forwarding to the same upstream via one shared
+ * connection.  Useful for SIP/VoIP where phones connect via UDP, gateways
+ * via TCP, and cloud carriers (e.g. Meta WhatsApp) via TLS — all reaching the
+ * same FusionPBX without reconfiguring it.
+ */
+export interface TcpUdpProfile {
+  name: string;                        // Unique identifier (e.g. "fusionpbx")
+  listeners: TcpUdpListener[];         // One or more inbound listeners (each gets its own port)
+  upstreamHost: string;                // Target host IP/hostname
+  upstreamPort: number;                // Target port
+  upstreamTransport: 'tcp' | 'udp' | 'tls'; // How to reach the upstream ('tls' = TCP+TLS)
+  allowSelfSignedUpstream?: boolean;   // Skip TLS cert verification for upstream (only when upstreamTransport='tls')
+
+  // -- TLS fields — shared across all TLS listeners in this profile --
+  tlsCert?: string;                    // Path to TLS certificate PEM
+  tlsKey?: string;                     // Path to TLS private key PEM
+  allowedIps?: string[];               // IP allowlist — empty = unrestricted
+  authToken?: string;                  // Optional token auth (TCP only, checked on first bytes)
+
+  // -- ACME / Let's Encrypt (auto-certificate for TLS listeners) --
+  acmeDomain?: string;                 // Domain for cert. Enables ACME when set.
+  acmeEmail?: string;                  // Let's Encrypt account email (required if acmeDomain set)
+  acmeDataDir?: string;                // Where to store account key + cert (default: DATA_DIR/acme/{name})
+  acmeStaging?: boolean;               // Use LE staging endpoint for testing (default: false)
+
+  // -- SIP routing --
+  // SIP Via/Record-Route rewriting is auto-activated when upstreamTransport='udp'.
+  // Override the public address put into Via headers only if auto-detection is wrong.
+  sipPublicHost?: string;              // Public hostname/IP for Via/Record-Route (default: PROXY_HOST env)
+
+  // -- RTP Media Relay --
+  // When enabled, the proxy rewrites SDP (c= and m=) in INVITE/200 OK so that
+  // all RTP audio flows through Midleman, allowing FusionPBX to stay on a private network.
+  rtpRelay?: boolean;                  // Enable RTP relay (default: false)
+  rtpPortStart?: number;               // Start of UDP port range for RTP (default: 50000)
+  rtpPortEnd?: number;                 // End of UDP port range for RTP (default: 51000)
+  rtpWorkers?: number;                 // Worker threads for RTP relay (0 = main thread, default: auto = CPU cores - 1)
+}
+
 export interface Config {
   port: number;
   targetUrl: string;
   authToken?: string; // Optional: if not set, authentication is disabled
   forwardPath: boolean; // If false, don't append path to target URL
-  proxyProfiles: ProxyProfile[]; // Configured proxy bypass profiles
+  proxyProfiles: ProxyProfile[]; // Configured HTTP proxy bypass profiles
   webhooks: WebhookDistributor[]; // Configured webhook distributors
+  tcpUdpProfiles: TcpUdpProfile[]; // Configured TCP/UDP proxy profiles
   otel: {
     enabled: boolean;
     endpoint: string;

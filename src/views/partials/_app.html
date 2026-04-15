@@ -363,7 +363,8 @@
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-sm" onclick="reloadProfiles()">Reload</button>
-          <button class="btn btn-primary btn-sm" onclick="openProfileModal()">+ New Proxy</button>
+          <button class="btn btn-sm" onclick="openSipModal()">+ TCP/UDP Proxy</button>
+          <button class="btn btn-primary btn-sm" onclick="openProfileModal()">+ HTTP Proxy</button>
         </div>
       </div>
       <div class="card" style="margin-bottom:16px">
@@ -389,6 +390,31 @@
           </div>
         </div>
       </div>
+      <!-- TCP/UDP Proxies section -->
+      <div id="tcpUdpSection" style="margin-bottom:16px;display:none">
+        <h3 style="font-size:13px;font-weight:600;color:var(--text2);margin:0 0 8px;text-transform:uppercase;letter-spacing:.05em">TCP / UDP Proxies</h3>
+        <div class="card">
+          <div class="card-body" style="padding:0;overflow-x:auto">
+            <table id="tcpUdpTable" style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead>
+                <tr style="background:var(--surface2);text-align:left">
+                  <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Status</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Listeners</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Upstream</th>
+                  <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">To PBX</th>
+                  <th style="padding:10px 12px"></th>
+                </tr>
+              </thead>
+              <tbody id="tcpUdpListBody">
+                <tr><td colspan="7" style="padding:24px;text-align:center;color:var(--text3)">No TCP/UDP proxies yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <h3 style="font-size:13px;font-weight:600;color:var(--text2);margin:16px 0 8px;text-transform:uppercase;letter-spacing:.05em">HTTP Proxies</h3>
+      </div>
+
       <div class="card">
         <div class="card-body" style="padding:0;overflow-x:auto">
           <table id="profileTable" style="width:100%;border-collapse:collapse;font-size:13px">
@@ -655,6 +681,164 @@
       </div>
     </div>
     <div id="dlqList" style="padding:16px;overflow-y:auto;flex:1"></div>
+  </div>
+</div>
+
+<!-- TCP/UDP Proxy Modal -->
+<div class="modal-overlay" id="sipModal">
+  <div class="modal" style="max-width:680px">
+    <div class="modal-header">
+      <h3 id="sipModalTitle">New TCP/UDP Proxy</h3>
+      <button class="close-btn" onclick="closeSipModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="sipModalError" style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);color:#fca5a5;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px"></div>
+
+      <div class="form-section">Identity</div>
+      <div class="form-grid">
+        <div class="form-group span-2">
+          <label>Profile Name *</label>
+          <input type="text" id="sipName" placeholder="e.g. meta-sip">
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px">Lowercase, hyphens/underscores only. Port is auto-assigned.</span>
+        </div>
+      </div>
+
+      <div class="form-section">Upstream (PBX / destination)</div>
+      <div class="form-grid">
+        <div class="form-group span-2"><label>Upstream Host *</label><input type="text" id="sipUpstreamHost" placeholder="192.168.1.100 or pbx.empresa.com"></div>
+        <div class="form-group"><label>Upstream Port *</label><input type="number" id="sipUpstreamPort" placeholder="5060" min="1" max="65535"></div>
+        <div class="form-group">
+          <label>Transport to upstream</label>
+          <select id="sipUpstreamTransport" onchange="toggleSipUpstreamTls()" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px">
+            <option value="udp">UDP — plain datagram (FusionPBX default)</option>
+            <option value="tcp">TCP — plain stream</option>
+            <option value="tls">TLS — encrypted stream (upstream uses SIPS)</option>
+          </select>
+        </div>
+        <div class="form-group" id="sipUpstreamTlsGroup" style="display:none">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="sipAllowSelfSignedUpstream" style="cursor:pointer;accent-color:var(--accent)">
+            <span>Skip upstream certificate verification</span>
+          </label>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Enable if the upstream uses a self-signed or private CA certificate (e.g. internal FusionPBX).</span>
+        </div>
+      </div>
+
+      <div class="form-section">Inbound Listeners <span style="color:var(--text3);font-weight:400;font-size:11px">— select one or more; each gets an auto-assigned port</span></div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="sipListenerUdp" onchange="toggleSipTlsSection()" style="cursor:pointer;accent-color:var(--accent)">
+            <span>UDP <span style="color:var(--text3);font-size:11px">— SIP phones, gateways</span></span>
+          </label>
+        </div>
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="sipListenerTcp" onchange="toggleSipTlsSection()" style="cursor:pointer;accent-color:var(--accent)">
+            <span>TCP <span style="color:var(--text3);font-size:11px">— plain stream</span></span>
+          </label>
+        </div>
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="sipListenerTls" onchange="toggleSipTlsSection()" style="cursor:pointer;accent-color:var(--accent)">
+            <span>TLS <span style="color:var(--text3);font-size:11px">— SIPS, Meta WhatsApp</span></span>
+          </label>
+        </div>
+      </div>
+
+      <div id="sipTlsSection" style="display:none">
+        <div class="form-section">TLS Certificate</div>
+        <div class="form-grid">
+          <div class="form-group span-2">
+            <label>Certificate Mode</label>
+            <select id="sipCertMode" onchange="toggleSipCertMode()" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px">
+              <option value="manual">Manual — provide cert/key file paths</option>
+              <option value="acme">Auto — Let's Encrypt (ACME HTTP-01)</option>
+            </select>
+          </div>
+          <div class="form-group" id="sipCertPathGroup"><label>TLS Cert Path *</label><input type="text" id="sipTlsCert" placeholder="/etc/ssl/certs/proxy.pem"></div>
+          <div class="form-group" id="sipKeyPathGroup"><label>TLS Key Path *</label><input type="text" id="sipTlsKey" placeholder="/etc/ssl/private/proxy.key"></div>
+          <div class="form-group span-2" id="sipAcmeDomainGroup" style="display:none">
+            <label>ACME Domain *</label>
+            <input type="text" id="sipAcmeDomain" placeholder="sip.empresa.com">
+            <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px">
+              This domain must: (1) resolve in public DNS to this server's IP, (2) have port 80 accessible for the ACME HTTP-01 challenge.
+              Use the same value for <strong>Public Host</strong> above so SIP Via headers match the TLS certificate.
+            </span>
+          </div>
+          <div class="form-group" id="sipAcmeEmailGroup" style="display:none"><label>Email *</label><input type="email" id="sipAcmeEmail" placeholder="admin@empresa.com"></div>
+          <div class="form-group" id="sipAcmeStagingGroup" style="display:none">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="sipAcmeStaging" style="cursor:pointer;accent-color:var(--accent)">
+              <span>Use Let's Encrypt staging (testing only)</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">RTP Media Relay</div>
+      <div class="form-grid">
+        <div class="form-group span-2">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="sipRtpRelay" onchange="toggleSipRtpRelay()" style="cursor:pointer;accent-color:var(--accent)">
+            <span>Enable RTP relay</span>
+          </label>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">
+            Rewrites SDP so all audio passes through Midleman. Required when FusionPBX has no public IP.
+          </span>
+        </div>
+        <div id="sipRtpRelayGroup" style="display:none">
+          <div class="form-grid" style="margin-top:12px">
+            <div class="form-group">
+              <label>RTP Port Start <span style="color:var(--text3);font-weight:400;font-size:11px">(default: 50000)</span></label>
+              <input type="number" id="sipRtpPortStart" placeholder="50000" min="1024" max="65534">
+            </div>
+            <div class="form-group">
+              <label>RTP Port End <span style="color:var(--text3);font-weight:400;font-size:11px">(default: 51000)</span></label>
+              <input type="number" id="sipRtpPortEnd" placeholder="51000" min="1025" max="65535">
+            </div>
+            <div class="form-group span-2">
+              <label>Worker Threads <span style="color:var(--text3);font-weight:400;font-size:11px">— parallel packet relay (default: auto = CPU cores − 1)</span></label>
+              <input type="number" id="sipRtpWorkers" placeholder="auto" min="0" max="32">
+              <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px">
+                Each worker handles its own port slice independently.
+                <strong>0</strong> = single thread (~250 calls).
+                <strong>4 workers + 4000-port range</strong> = ~1000 calls.
+                Leave empty for auto-detect.
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">Access Control</div>
+      <div class="form-grid">
+        <div class="form-group span-2">
+          <label>Allowed IPs <span style="color:var(--text3);font-weight:400;font-size:11px">— CIDR, wildcard or exact. Empty = allow all.</span></label>
+          <input type="text" id="sipAllowedIps" placeholder="203.0.113.0/24, 198.51.100.*">
+        </div>
+      </div>
+
+      <div style="margin-top:4px">
+        <button type="button" onclick="toggleSipAdvanced(this)"
+          style="background:none;border:none;color:var(--text3);font-size:12px;cursor:pointer;padding:4px 0;display:flex;align-items:center;gap:4px">
+          <span id="sipAdvancedArrow" style="font-size:10px">▶</span> Advanced
+        </button>
+        <div id="sipAdvancedSection" style="display:none;margin-top:8px">
+          <div class="form-grid">
+            <div class="form-group span-2">
+              <label>Public Host <span style="color:var(--text3);font-weight:400;font-size:11px">— override the address placed in SIP Via / Record-Route headers</span></label>
+              <input type="text" id="sipPublicHost" placeholder="sip.empresa.com or 203.0.113.10">
+              <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px">Only needed when this server's public IP cannot be auto-detected, or differs from the ACME domain. Leave empty to use the <code>PROXY_HOST</code> env var.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeSipModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSipProxy()">Save TCP/UDP Proxy</button>
+    </div>
   </div>
 </div>
 

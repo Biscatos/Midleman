@@ -1,4 +1,4 @@
-import type { ProxyProfile, WebhookDistributor } from './types';
+import type { ProxyProfile, WebhookDistributor, TcpUdpProfile } from './types';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname, resolve } from 'path';
 
@@ -34,6 +34,7 @@ const PROFILES_FILE = resolve(DATA_DIR, 'profiles.json');
 const TARGETS_FILE = resolve(DATA_DIR, 'targets.json');
 const WEBHOOKS_FILE = resolve(DATA_DIR, 'webhooks.json');
 const DLQ_FILE = resolve(DATA_DIR, 'dlq.json');
+const TCPUDP_FILE = resolve(DATA_DIR, 'tcpudp-profiles.json');
 
 /**
  * Ensure the data directory exists.
@@ -363,5 +364,76 @@ export function validateWebhookInput(input: unknown): string | null {
         }
     }
 
+    return null;
+}
+
+// ─── TCP/UDP Profile Persistence ─────────────────────────────────────────────
+
+export function loadPersistedTcpUdpProfiles(): TcpUdpProfile[] {
+    try {
+        if (!existsSync(TCPUDP_FILE)) return [];
+        const raw = readFileSync(TCPUDP_FILE, 'utf-8');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const stored: any[] = JSON.parse(raw);
+        return stored
+            .filter(p => p.name && p.upstreamHost)
+            .map(p => {
+                // Migrate old format: port + inboundTls → listeners array
+                if (!Array.isArray(p.listeners)) {
+                    const transport = p.inboundTls ? 'tls' : 'tcp';
+                    p.listeners = [{ transport, port: p.port ?? 0 }];
+                    delete p.port;
+                    delete p.inboundTls;
+                }
+                return p as TcpUdpProfile;
+            });
+    } catch (err) {
+        console.warn('⚠️  Could not load TCP/UDP profiles:', err instanceof Error ? err.message : err);
+        return [];
+    }
+}
+
+export function persistTcpUdpProfiles(profiles: TcpUdpProfile[]): void {
+    try {
+        ensureDataDir();
+        writeFileSync(TCPUDP_FILE, JSON.stringify(profiles, null, 2), 'utf-8');
+    } catch (err) {
+        console.warn('⚠️  Could not persist TCP/UDP profiles:', err instanceof Error ? err.message : err);
+    }
+}
+
+export function validateTcpUdpProfileInput(input: unknown): string | null {
+    if (!input || typeof input !== 'object') return 'Request body must be a JSON object';
+    const p = input as Record<string, unknown>;
+
+    if (!p.name || typeof p.name !== 'string') return '"name" is required (string)';
+    if (p.name.length > 64) return '"name" must be 64 characters or fewer';
+    if (!/^[a-z0-9_-]+$/.test(p.name)) return '"name" must only contain lowercase letters, numbers, hyphens and underscores';
+    if (!p.upstreamHost || typeof p.upstreamHost !== 'string') return '"upstreamHost" is required (string)';
+
+    // Validate listeners array
+    if (!Array.isArray(p.listeners) || p.listeners.length === 0)
+        return '"listeners" must be a non-empty array of { transport, port } objects';
+    const validTransports = new Set(['tcp', 'udp', 'tls']);
+    for (const l of p.listeners as unknown[]) {
+        if (!l || typeof l !== 'object') return 'Each listener must be an object';
+        const t = (l as Record<string, unknown>).transport as string;
+        if (!validTransports.has(t)) return `Listener transport "${t}" must be "tcp", "udp" or "tls"`;
+    }
+
+    // TLS cert required when there's a TLS listener and ACME is not configured
+    const hasTls = (p.listeners as { transport: string }[]).some(l => l.transport === 'tls');
+    if (hasTls && !p.acmeDomain) {
+        if (!p.tlsCert || typeof p.tlsCert !== 'string') return '"tlsCert" is required when a TLS listener is configured without acmeDomain';
+        if (!p.tlsKey || typeof p.tlsKey !== 'string') return '"tlsKey" is required when a TLS listener is configured without acmeDomain';
+    }
+    if (p.acmeDomain && !p.acmeEmail) return '"acmeEmail" is required when "acmeDomain" is set';
+    if (p.upstreamPort !== undefined && (typeof p.upstreamPort !== 'number' || p.upstreamPort < 1 || p.upstreamPort > 65535))
+        return '"upstreamPort" must be 1–65535';
+    if (p.upstreamTransport !== undefined &&
+        p.upstreamTransport !== 'udp' &&
+        p.upstreamTransport !== 'tcp' &&
+        p.upstreamTransport !== 'tls')
+        return '"upstreamTransport" must be "udp", "tcp" or "tls"';
     return null;
 }

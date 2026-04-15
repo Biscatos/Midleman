@@ -1,15 +1,18 @@
-import { loadConfig, reloadEnvFile, loadProxyProfiles } from './core/config';
+import { loadConfig, reloadEnvFile, loadProxyProfiles, loadTcpUdpProfiles } from './core/config';
 import { UnauthorizedError, type ProxyProfile } from './core/types';
 import { invalidateProfileCache } from './proxy/proxy';
 import {
     loadPersistedProfiles, persistProfiles, mergeProfiles, validateProfileInput,
-    loadPersistedWebhooks, persistWebhooks, validateWebhookInput
+    loadPersistedWebhooks, persistWebhooks, validateWebhookInput,
+    loadPersistedTcpUdpProfiles, persistTcpUdpProfiles, validateTcpUdpProfileInput,
 } from './core/store';
 import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry/telemetry';
 import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart } from './telemetry/request-log';
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort, isProxyServerRunning, setProxyLoginTemplate, setProxyLogo } from './servers/proxy-server';
-import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort, releaseProxyPort, releaseWebhookPort, getWebhookPort } from './servers/port-manager';
+import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort, assignTcpUdpListenerPort, releaseProxyPort, releaseWebhookPort, releaseTcpUdpListenerPorts, getWebhookPort } from './servers/port-manager';
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync } from './servers/webhook-server';
+import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
+import { challengeStore } from './sip/acme';
 import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken } from './auth/auth';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
@@ -31,6 +34,14 @@ config.proxyProfiles = mergeProfiles(config.proxyProfiles, persistedProfiles);
 
 // Load persisted webhooks
 config.webhooks = loadPersistedWebhooks();
+
+// Merge TCP/UDP profiles: env vars as base, persisted (UI-created) take precedence
+const persistedTcpUdpProfiles = loadPersistedTcpUdpProfiles();
+const tcpUdpEnvNames = new Set(persistedTcpUdpProfiles.map(p => p.name));
+config.tcpUdpProfiles = [
+    ...config.tcpUdpProfiles.filter(p => !tcpUdpEnvNames.has(p.name)),
+    ...persistedTcpUdpProfiles,
+];
 
 // Initialize OpenTelemetry
 initTelemetry(config.otel);
@@ -126,9 +137,15 @@ function checkAdminAuth(req: Request, url: URL): Response | null {
 
 // ─── Async startup: assign ports, then start per-profile and per-target servers ─
 
+// Build listener keys: "profileName:transport" for each listener across all profiles
+const tcpUdpListenerKeys = config.tcpUdpProfiles.flatMap(p =>
+    p.listeners.map(l => `${p.name}:${l.transport}`)
+);
+
 const portAssignments = await assignAllPorts(
     config.proxyProfiles.map(p => p.name),
     config.webhooks.map(w => w.name),
+    tcpUdpListenerKeys,
     config.port,
 );
 
@@ -153,6 +170,21 @@ for (const webhook of config.webhooks) {
     }
 }
 
+if (config.tcpUdpProfiles.length > 0) {
+    console.log(`🔌 TCP/UDP Proxies: ${config.tcpUdpProfiles.map(p => p.name).join(', ')}`);
+}
+for (const tcpUdpProfile of config.tcpUdpProfiles) {
+    // Fill in the assigned port for each listener
+    for (const listener of tcpUdpProfile.listeners) {
+        listener.port = portAssignments.tcpUdp[`${tcpUdpProfile.name}:${listener.transport}`] ?? listener.port;
+    }
+    try {
+        await startSipServer(tcpUdpProfile);
+    } catch (err) {
+        console.error(`❌ Failed to start TCP/UDP proxy "${tcpUdpProfile.name}":`, err instanceof Error ? err.message : err);
+    }
+}
+
 // ─── Main HTTP server ───────────────────────────────────────────────────────
 
 const server = Bun.serve({
@@ -161,6 +193,19 @@ const server = Bun.serve({
     maxRequestBodySize: 50 * 1024 * 1024, // 50MB
 
     async fetch(req: Request): Promise<Response> {
+        // ── ACME HTTP-01 challenge — must respond before any auth or shutdown check ──
+        const url0 = new URL(req.url);
+        if (url0.pathname.startsWith('/.well-known/acme-challenge/')) {
+            const token = url0.pathname.slice('/.well-known/acme-challenge/'.length);
+            const keyAuth = challengeStore.get(token);
+            if (keyAuth) {
+                return new Response(keyAuth, {
+                    headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' },
+                });
+            }
+            return new Response('Not Found', { status: 404 });
+        }
+
         if (isShuttingDown) {
             return jsonRes(503, { error: 'Service Unavailable', message: 'Server is shutting down' });
         }
@@ -633,6 +678,7 @@ const server = Bun.serve({
                     const newPorts = await assignAllPorts(
                         config.proxyProfiles.map(p => p.name),
                         config.webhooks.map(w => w.name),
+                        config.tcpUdpProfiles.map(p => p.name),
                         config.port,
                     );
 
@@ -1102,6 +1148,145 @@ const server = Bun.serve({
                     return jsonRes(200, { status: 'deleted' });
                 }
 
+                // ── TCP/UDP Proxy CRUD ───────────────────────────────────────────────────
+
+                if (url.pathname === '/admin/tcpudp' && req.method === 'GET') {
+                    const status = getSipServerStatus();
+                    const list = config.tcpUdpProfiles.map(p => {
+                        const s = status.find(s => s.name === p.name);
+                        return {
+                            name: p.name,
+                            listeners: p.listeners,
+                            upstreamHost: p.upstreamHost,
+                            upstreamPort: p.upstreamPort,
+                            upstreamTransport: p.upstreamTransport,
+                            tlsCert: p.tlsCert ?? '',
+                            tlsKey: p.tlsKey ?? '',
+                            acmeDomain: p.acmeDomain,
+                            acmeEmail: p.acmeEmail,
+                            acmeStaging: !!p.acmeStaging,
+                            allowedIps: p.allowedIps || [],
+                            authToken: p.authToken,
+                            sipPublicHost: p.sipPublicHost,
+                            allowSelfSignedUpstream: !!p.allowSelfSignedUpstream,
+                            rtpRelay: !!p.rtpRelay,
+                            rtpPortStart: p.rtpPortStart,
+                            rtpPortEnd: p.rtpPortEnd,
+                            rtpWorkers: p.rtpWorkers,
+                            running: !!s?.running,
+                        };
+                    });
+                    return jsonRes(200, { tcpUdpProxies: list });
+                }
+
+                if (url.pathname.startsWith('/admin/tcpudp/') && url.pathname.split('/').length === 4 && req.method === 'GET') {
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
+                    const p = config.tcpUdpProfiles.find(p => p.name === name);
+                    if (!p) return jsonRes(404, { error: `TCP/UDP profile "${name}" not found` });
+                    return jsonRes(200, { tcpUdpProxy: p, running: isSipServerRunning(name) });
+                }
+
+                if (url.pathname === '/admin/tcpudp' && req.method === 'POST') {
+                    let body: unknown;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
+
+                    const err = validateTcpUdpProfileInput(body);
+                    if (err) return jsonRes(400, { error: err });
+
+                    const input = body as Record<string, unknown>;
+                    const name = (input.name as string).toLowerCase();
+                    const isUpdate = config.tcpUdpProfiles.some(p => p.name === name);
+                    const existingProfile = config.tcpUdpProfiles.find(p => p.name === name);
+
+                    // Build listeners with auto-assigned ports
+                    const inListeners = (input.listeners as { transport: string }[]);
+                    const listeners: import('./core/types').TcpUdpListener[] = [];
+                    for (const l of inListeners) {
+                        const transport = l.transport as 'tcp' | 'udp' | 'tls';
+                        const key = `${name}:${transport}`;
+                        const existingPort = existingProfile?.listeners.find(x => x.transport === transport)?.port ?? 0;
+                        const port = existingPort > 0
+                            ? existingPort
+                            : await assignTcpUdpListenerPort(key, config.port, []);
+                        listeners.push({ transport, port });
+                    }
+
+                    // Release ports for removed listeners
+                    if (isUpdate && existingProfile) {
+                        for (const oldL of existingProfile.listeners) {
+                            if (!listeners.some(l => l.transport === oldL.transport)) {
+                                // Port no longer needed — will be freed by port manager on next assignAllPorts
+                                // (we don't actively release here to avoid port reuse race)
+                            }
+                        }
+                    }
+
+                    // Auto-fill ACME cert paths
+                    let tlsCert = (input.tlsCert as string | undefined) ?? '';
+                    let tlsKey = (input.tlsKey as string | undefined) ?? '';
+                    if (input.acmeDomain && !tlsCert) {
+                        const base = `${process.env.DATA_DIR ?? './data'}/acme/${name}`;
+                        tlsCert = `${base}/cert.pem`;
+                        tlsKey = `${base}/key.pem`;
+                    }
+
+                    const profile: import('./core/types').TcpUdpProfile = {
+                        name,
+                        listeners,
+                        upstreamHost: input.upstreamHost as string,
+                        upstreamPort: (input.upstreamPort as number) ?? 5060,
+                        upstreamTransport: ((input.upstreamTransport as string) ?? 'udp') as 'tcp' | 'udp',
+                        tlsCert: tlsCert || undefined,
+                        tlsKey: tlsKey || undefined,
+                        allowedIps: Array.isArray(input.allowedIps) ? input.allowedIps as string[] : undefined,
+                        authToken: input.authToken as string | undefined,
+                        acmeDomain: input.acmeDomain as string | undefined,
+                        acmeEmail: input.acmeEmail as string | undefined,
+                        acmeStaging: input.acmeStaging === true,
+                        sipPublicHost: input.sipPublicHost as string | undefined,
+                        allowSelfSignedUpstream: input.allowSelfSignedUpstream === true,
+                        rtpRelay: input.rtpRelay === true,
+                        rtpPortStart: input.rtpPortStart as number | undefined,
+                        rtpPortEnd: input.rtpPortEnd as number | undefined,
+                        rtpWorkers: input.rtpWorkers as number | undefined,
+                    };
+
+                    if (isUpdate) {
+                        config.tcpUdpProfiles = config.tcpUdpProfiles.map(p => p.name === name ? profile : p);
+                        if (isSipServerRunning(name)) await restartSipServer(name, profile);
+                    } else {
+                        config.tcpUdpProfiles.push(profile);
+                        try { await startSipServer(profile); } catch (e) {
+                            console.error(`❌ TCP/UDP "${name}" failed to start:`, e instanceof Error ? e.message : e);
+                        }
+                    }
+
+                    persistTcpUdpProfiles(config.tcpUdpProfiles);
+                    const ports = listeners.map(l => `${l.transport.toUpperCase()}:${l.port}`).join(', ');
+                    console.log(`✅ TCP/UDP "${name}" ${isUpdate ? 'updated' : 'created'} [${ports}]`);
+                    return jsonRes(200, { status: isUpdate ? 'updated' : 'created', name, listeners });
+                }
+
+                if (url.pathname.startsWith('/admin/tcpudp/') && req.method === 'DELETE') {
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
+                    const idx = config.tcpUdpProfiles.findIndex(p => p.name === name);
+                    if (idx === -1) return jsonRes(404, { error: `TCP/UDP profile "${name}" not found` });
+                    config.tcpUdpProfiles.splice(idx, 1);
+                    await stopSipServer(name);
+                    releaseTcpUdpListenerPorts(name);
+                    persistTcpUdpProfiles(config.tcpUdpProfiles);
+                    console.log(`🗑️  TCP/UDP "${name}" deleted`);
+                    return jsonRes(200, { status: 'deleted' });
+                }
+
+                if (url.pathname.startsWith('/admin/tcpudp/') && url.pathname.endsWith('/restart') && req.method === 'POST') {
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
+                    const p = config.tcpUdpProfiles.find(p => p.name === name);
+                    if (!p) return jsonRes(404, { error: `TCP/UDP profile "${name}" not found` });
+                    await restartSipServer(name, p);
+                    return jsonRes(200, { status: 'restarted', name });
+                }
+
                 // ── Profile ↔ User Association ──
 
                 // GET /admin/profiles/:name/users — list users assigned to a profile
@@ -1222,8 +1407,9 @@ const shutdown = async (signal: string) => {
     console.log(`\n🛑 ${signal} received — shutting down...`);
     isShuttingDown = true;
 
-    // Stop all proxy and target servers
+    // Stop all proxy, SIP and target servers
     await stopAllProxyServers();
+    await stopAllSipServers();
     await stopAllWebhooks();
 
     // Wait for main server requests

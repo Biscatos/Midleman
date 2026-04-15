@@ -1,4 +1,4 @@
-import type { Config, ProxyProfile } from './types';
+import type { Config, ProxyProfile, TcpUdpProfile, TcpUdpListener } from './types';
 import { ConfigError } from './types';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
@@ -110,6 +110,109 @@ export function loadProxyProfiles(): ProxyProfile[] {
 
 
 
+const VALID_TRANSPORTS = new Set(['tcp', 'udp', 'tls']);
+
+// Suffix → field name for TCPUDP_ env vars
+const TCPUDP_FIELD_SUFFIXES: [string, string][] = [
+    ['_UPSTREAM_HOST',      'upstreamHost'],
+    ['_UPSTREAM_PORT',      'upstreamPort'],
+    ['_UPSTREAM_TRANSPORT', 'upstreamTransport'],
+    ['_LISTENERS',          'listeners'],   // e.g. "udp,tls" → [{ transport:'udp',port:0 }, { transport:'tls',port:0 }]
+    ['_TLS_CERT',           'tlsCert'],
+    ['_TLS_KEY',            'tlsKey'],
+    ['_ALLOWED_IPS',        'allowedIps'],
+    ['_AUTH_TOKEN',         'authToken'],
+    ['_ACME_DOMAIN',        'acmeDomain'],
+    ['_ACME_EMAIL',         'acmeEmail'],
+    ['_ACME_DATA_DIR',      'acmeDataDir'],
+    ['_ACME_STAGING',              'acmeStaging'],
+    ['_SIP_PUBLIC_HOST',           'sipPublicHost'],
+    ['_ALLOW_SELF_SIGNED_UPSTREAM','allowSelfSignedUpstream'],
+    ['_RTP_RELAY',                 'rtpRelay'],
+    ['_RTP_PORT_START',            'rtpPortStart'],
+    ['_RTP_PORT_END',              'rtpPortEnd'],
+    ['_RTP_WORKERS',               'rtpWorkers'],
+];
+
+/**
+ * Scan environment variables for TCP/UDP proxy profiles.
+ * Pattern: TCPUDP_{NAME}_{FIELD}
+ *
+ * Example:
+ *   TCPUDP_META_UPSTREAM_HOST=192.168.1.100
+ *   TCPUDP_META_UPSTREAM_PORT=5060
+ *   TCPUDP_META_UPSTREAM_TRANSPORT=udp
+ *   TCPUDP_META_LISTENERS=udp,tls   (comma-separated: udp, tcp, tls)
+ *   TCPUDP_META_TLS_CERT=/etc/ssl/certs/sip.pem
+ *   TCPUDP_META_TLS_KEY=/etc/ssl/private/sip.key
+ */
+export function loadTcpUdpProfiles(): TcpUdpProfile[] {
+    const raw = new Map<string, Record<string, unknown>>();
+
+    for (const [key, value] of Object.entries(process.env)) {
+        if (!value || !key.startsWith('TCPUDP_')) continue;
+
+        for (const [suffix, field] of TCPUDP_FIELD_SUFFIXES) {
+            if (!key.endsWith(suffix)) continue;
+            const name = key.slice('TCPUDP_'.length, key.length - suffix.length).toLowerCase();
+            if (!name) continue;
+
+            if (!raw.has(name)) raw.set(name, { name });
+            const p = raw.get(name)!;
+
+            if (field === 'upstreamPort') {
+                p.upstreamPort = parseInt(value, 10);
+            } else if (field === 'acmeStaging' || field === 'allowSelfSignedUpstream' || field === 'rtpRelay') {
+                p[field] = value === 'true';
+            } else if (field === 'rtpPortStart' || field === 'rtpPortEnd' || field === 'rtpWorkers') {
+                p[field] = parseInt(value, 10);
+            } else if (field === 'allowedIps') {
+                p.allowedIps = value.split(',').map(s => s.trim()).filter(Boolean);
+            } else if (field === 'listeners') {
+                p.listeners = value.split(',')
+                    .map(s => s.trim().toLowerCase())
+                    .filter(t => VALID_TRANSPORTS.has(t))
+                    .map(transport => ({ transport, port: 0 }));
+            } else {
+                p[field] = value;
+            }
+            break;
+        }
+    }
+
+    const valid: TcpUdpProfile[] = [];
+
+    for (const [name, p] of raw) {
+        if (!p.upstreamHost) {
+            console.warn(`⚠️  TCP/UDP profile "${name}" is incomplete (needs UPSTREAM_HOST). Skipping.`);
+            continue;
+        }
+        valid.push({
+            name,
+            listeners: (p.listeners as TcpUdpListener[] | undefined) ?? [{ transport: 'tcp', port: 0 }],
+            upstreamHost: p.upstreamHost as string,
+            upstreamPort: (p.upstreamPort as number) ?? 5060,
+            upstreamTransport: (p.upstreamTransport as 'tcp' | 'udp') ?? 'udp',
+            tlsCert: p.tlsCert as string | undefined,
+            tlsKey: p.tlsKey as string | undefined,
+            allowedIps: p.allowedIps as string[] | undefined,
+            authToken: p.authToken as string | undefined,
+            acmeDomain: p.acmeDomain as string | undefined,
+            acmeEmail: p.acmeEmail as string | undefined,
+            acmeDataDir: p.acmeDataDir as string | undefined,
+            acmeStaging: p.acmeStaging as boolean | undefined,
+            sipPublicHost: p.sipPublicHost as string | undefined,
+            allowSelfSignedUpstream: p.allowSelfSignedUpstream as boolean | undefined,
+            rtpRelay: p.rtpRelay as boolean | undefined,
+            rtpPortStart: p.rtpPortStart as number | undefined,
+            rtpPortEnd: p.rtpPortEnd as number | undefined,
+            rtpWorkers: p.rtpWorkers as number | undefined,
+        });
+    }
+
+    return valid;
+}
+
 /**
  * Load and validate environment configuration
  */
@@ -152,6 +255,7 @@ export function loadConfig(): Config {
         forwardPath,
         proxyProfiles,
         webhooks: [], // Populated in index.ts from store
+        tcpUdpProfiles: loadTcpUdpProfiles(),
         otel,
         requestLog,
         auth,

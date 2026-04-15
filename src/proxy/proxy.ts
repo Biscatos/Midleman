@@ -437,9 +437,10 @@ export async function handleProxyRequest(
             error: fetchError instanceof Error ? fetchError.message : String(fetchError),
         });
 
+        const errMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
         return jsonResponse(502, {
             error: 'Bad Gateway',
-            message: fetchError instanceof Error ? fetchError.message : 'Failed to connect to upstream',
+            message: `Cannot reach ${targetUrl} — ${errMsg}`,
             profile: profileName,
         });
     }
@@ -889,9 +890,10 @@ export async function handleDirectProxy(
             error: fetchError instanceof Error ? fetchError.message : String(fetchError),
         });
 
+        const errMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
         return jsonResponse(502, {
             error: 'Bad Gateway',
-            message: fetchError instanceof Error ? fetchError.message : 'Failed to connect to upstream',
+            message: `Cannot reach ${targetUrl} — ${errMsg}`,
             profile: profileName,
         });
     }

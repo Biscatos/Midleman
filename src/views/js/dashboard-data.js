@@ -191,7 +191,7 @@ function showContextMenu(e, btn) {
 
 // ─── Data Fetch ──────────────────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData()]);
+  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData()]);
 }
 
 async function fetchHealth() {
@@ -1904,3 +1904,209 @@ function rdmSyntaxHL(str) {
 }
 
 function fmtBody(body) { if (!body) return '(empty)'; try { return JSON.stringify(JSON.parse(body), null, 2); } catch { return body; } }
+
+// ─── TCP/UDP Proxies (integrated in Proxies tab) ──────────────────────────────
+let _allTcpUdpProxies = [];
+let _editingSip = null;
+
+async function fetchSipProxies() {
+  try {
+    const res = await api('/admin/tcpudp'); if (!res.ok) return;
+    const d = await res.json(); _allTcpUdpProxies = d.tcpUdpProxies || [];
+    renderTcpUdpProxies(_allTcpUdpProxies);
+    const sec = document.getElementById('tcpUdpSection');
+    if (sec) sec.style.display = _allTcpUdpProxies.length ? '' : 'none';
+  } catch (e) { console.error('fetchSipProxies:', e); }
+}
+
+function renderTcpUdpProxies(list) {
+  const c = document.getElementById('tcpUdpListBody');
+  if (!c) return;
+  if (!list.length) { c.innerHTML = '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text3)">No TCP/UDP proxies yet.</td></tr>'; return; }
+  c.innerHTML = list.map(p => {
+    const dot = p.running
+      ? '<span class="status-dot online" style="display:inline-block;margin-right:5px"></span>Running'
+      : '<span class="status-dot offline" style="display:inline-block;margin-right:5px"></span>Stopped';
+    const listeners = (p.listeners || []).map(l => {
+      const colors = { tls: 'var(--accent)', udp: 'var(--blue)', tcp: 'var(--text2)' };
+      return `<span style="color:${colors[l.transport]||'var(--text2)'};font-size:11px;margin-right:4px;font-family:monospace">${l.transport.toUpperCase()}:${l.port}</span>`;
+    }).join('');
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:10px 12px;font-weight:600;font-family:monospace">${esc(p.name)}</td>
+      <td style="padding:10px 8px;font-size:12px">${dot}</td>
+      <td style="padding:10px 8px">${listeners}</td>
+      <td style="padding:10px 8px;font-family:monospace">${esc(p.upstreamHost)}:${p.upstreamPort}</td>
+      <td style="padding:10px 8px"><span style="background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:1px 6px;font-size:11px;text-transform:uppercase">${esc(p.upstreamTransport)}</span></td>
+      <td style="padding:10px 12px;text-align:right">
+        <button onclick="restartSipProxy('${esc(p.name)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px">Restart</button>
+        <button onclick="editSipProxy('${esc(p.name)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px">Edit</button>
+        <button onclick="deleteSipProxy('${esc(p.name)}')" style="background:none;border:1px solid rgba(239,68,68,0.4);border-radius:4px;padding:2px 8px;cursor:pointer;color:#fca5a5;font-size:11px">Delete</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function openSipModal(proxy) {
+  _editingSip = proxy || null;
+  document.getElementById('sipModalTitle').textContent = proxy ? 'Edit TCP/UDP Proxy' : 'New TCP/UDP Proxy';
+  document.getElementById('sipModalError').style.display = 'none';
+  document.getElementById('sipName').value = proxy ? proxy.name : '';
+  document.getElementById('sipName').disabled = !!proxy;
+  document.getElementById('sipUpstreamHost').value = (proxy && proxy.upstreamHost) || '';
+  document.getElementById('sipUpstreamPort').value = (proxy && proxy.upstreamPort) || 5060;
+  document.getElementById('sipUpstreamTransport').value = (proxy && proxy.upstreamTransport) || 'udp';
+  document.getElementById('sipAllowSelfSignedUpstream').checked = !!(proxy && proxy.allowSelfSignedUpstream);
+  const publicHost = (proxy && proxy.sipPublicHost) || '';
+  document.getElementById('sipPublicHost').value = publicHost;
+  // Open Advanced section automatically if it has a value
+  const advSection = document.getElementById('sipAdvancedSection');
+  const advArrow = document.getElementById('sipAdvancedArrow');
+  if (publicHost) {
+    advSection.style.display = '';
+    advArrow.textContent = '▼';
+  } else {
+    advSection.style.display = 'none';
+    advArrow.textContent = '▶';
+  }
+  toggleSipUpstreamTls();
+  document.getElementById('sipAllowedIps').value = (proxy && proxy.allowedIps || []).join(', ');
+  document.getElementById('sipRtpRelay').checked = !!(proxy && proxy.rtpRelay);
+  document.getElementById('sipRtpPortStart').value = (proxy && proxy.rtpPortStart) || '';
+  document.getElementById('sipRtpPortEnd').value = (proxy && proxy.rtpPortEnd) || '';
+  document.getElementById('sipRtpWorkers').value = (proxy && proxy.rtpWorkers !== undefined && proxy.rtpWorkers !== null) ? proxy.rtpWorkers : '';
+  toggleSipRtpRelay();
+  // Populate listener checkboxes
+  const listeners = (proxy && proxy.listeners) || [];
+  document.getElementById('sipListenerUdp').checked = listeners.some(l => l.transport === 'udp');
+  document.getElementById('sipListenerTcp').checked = listeners.some(l => l.transport === 'tcp');
+  document.getElementById('sipListenerTls').checked = listeners.some(l => l.transport === 'tls');
+  const isAcme = proxy && !!proxy.acmeDomain;
+  document.getElementById('sipCertMode').value = isAcme ? 'acme' : 'manual';
+  document.getElementById('sipTlsCert').value = (proxy && proxy.tlsCert) || '';
+  document.getElementById('sipTlsKey').value = (proxy && proxy.tlsKey) || '';
+  document.getElementById('sipAcmeDomain').value = (proxy && proxy.acmeDomain) || '';
+  document.getElementById('sipAcmeEmail').value = (proxy && proxy.acmeEmail) || '';
+  document.getElementById('sipAcmeStaging').checked = !!(proxy && proxy.acmeStaging);
+  toggleSipTlsSection();
+  toggleSipCertMode();
+  document.getElementById('sipModal').classList.add('active');
+  document.getElementById('sipName').focus();
+}
+
+function toggleSipTlsSection() {
+  const tls = document.getElementById('sipListenerTls').checked;
+  document.getElementById('sipTlsSection').style.display = tls ? '' : 'none';
+}
+
+function toggleSipUpstreamTls() {
+  const isTls = document.getElementById('sipUpstreamTransport').value === 'tls';
+  document.getElementById('sipUpstreamTlsGroup').style.display = isTls ? '' : 'none';
+}
+
+function toggleSipAdvanced(btn) {
+  const section = document.getElementById('sipAdvancedSection');
+  const arrow = document.getElementById('sipAdvancedArrow');
+  const open = section.style.display === 'none';
+  section.style.display = open ? '' : 'none';
+  arrow.textContent = open ? '▼' : '▶';
+}
+
+function toggleSipRtpRelay() {
+  const enabled = document.getElementById('sipRtpRelay').checked;
+  document.getElementById('sipRtpRelayGroup').style.display = enabled ? 'block' : 'none';
+}
+
+function toggleSipCertMode() {
+  const isAcme = document.getElementById('sipCertMode').value === 'acme';
+  document.getElementById('sipCertPathGroup').style.display = isAcme ? 'none' : '';
+  document.getElementById('sipKeyPathGroup').style.display = isAcme ? 'none' : '';
+  document.getElementById('sipAcmeDomainGroup').style.display = isAcme ? '' : 'none';
+  document.getElementById('sipAcmeEmailGroup').style.display = isAcme ? '' : 'none';
+  document.getElementById('sipAcmeStagingGroup').style.display = isAcme ? '' : 'none';
+}
+
+function closeSipModal() {
+  document.getElementById('sipModal').classList.remove('active');
+  _editingSip = null;
+}
+
+async function saveSipProxy() {
+  const errEl = document.getElementById('sipModalError');
+  errEl.style.display = 'none';
+
+  // Build listeners array from checkboxes
+  const listeners = [];
+  if (document.getElementById('sipListenerUdp').checked) listeners.push({ transport: 'udp', port: 0 });
+  if (document.getElementById('sipListenerTcp').checked) listeners.push({ transport: 'tcp', port: 0 });
+  if (document.getElementById('sipListenerTls').checked) listeners.push({ transport: 'tls', port: 0 });
+
+  if (listeners.length === 0) {
+    errEl.textContent = 'Select at least one listener (UDP, TCP, or TLS)';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const hasTls = listeners.some(l => l.transport === 'tls');
+  const isAcme = hasTls && document.getElementById('sipCertMode').value === 'acme';
+  const allowedIpsRaw = document.getElementById('sipAllowedIps').value;
+
+  const body = {
+    name: document.getElementById('sipName').value.trim().toLowerCase(),
+    listeners,
+    upstreamHost: document.getElementById('sipUpstreamHost').value.trim(),
+    upstreamPort: parseInt(document.getElementById('sipUpstreamPort').value) || 5060,
+    upstreamTransport: document.getElementById('sipUpstreamTransport').value,
+    allowSelfSignedUpstream: document.getElementById('sipAllowSelfSignedUpstream').checked,
+    sipPublicHost: document.getElementById('sipPublicHost').value.trim() || undefined,
+    rtpRelay: document.getElementById('sipRtpRelay').checked,
+    rtpPortStart: parseInt(document.getElementById('sipRtpPortStart').value) || undefined,
+    rtpPortEnd: parseInt(document.getElementById('sipRtpPortEnd').value) || undefined,
+    rtpWorkers: document.getElementById('sipRtpWorkers').value !== '' ? parseInt(document.getElementById('sipRtpWorkers').value) : undefined,
+    allowedIps: allowedIpsRaw ? allowedIpsRaw.split(',').map(s => s.trim()).filter(Boolean) : [],
+  };
+
+  if (hasTls) {
+    if (isAcme) {
+      body.acmeDomain = document.getElementById('sipAcmeDomain').value.trim();
+      body.acmeEmail = document.getElementById('sipAcmeEmail').value.trim();
+      body.acmeStaging = document.getElementById('sipAcmeStaging').checked;
+    } else {
+      body.tlsCert = document.getElementById('sipTlsCert').value.trim();
+      body.tlsKey = document.getElementById('sipTlsKey').value.trim();
+    }
+  }
+
+  try {
+    const res = await api('/admin/tcpudp', { method: 'POST', body: JSON.stringify(body) });
+    const d = await res.json();
+    if (!res.ok) { errEl.textContent = d.error || 'Error saving'; errEl.style.display = 'block'; return; }
+    const ports = (d.listeners || []).map(l => l.transport.toUpperCase() + ':' + l.port).join(', ');
+    toast('TCP/UDP proxy ' + (d.status || 'saved') + (ports ? ' [' + ports + ']' : ''));
+    closeSipModal();
+    await fetchSipProxies();
+  } catch (e) { errEl.textContent = 'Error: ' + e.message; errEl.style.display = 'block'; }
+}
+
+async function editSipProxy(name) {
+  try {
+    const res = await api('/admin/tcpudp/' + encodeURIComponent(name));
+    if (!res.ok) return toast('Not found', 'error');
+    openSipModal((await res.json()).tcpUdpProxy);
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteSipProxy(name) {
+  if (!confirm('Delete TCP/UDP proxy "' + name + '"? This stops the listener immediately.')) return;
+  try {
+    const res = await api('/admin/tcpudp/' + encodeURIComponent(name), { method: 'DELETE' });
+    if (res.ok) { toast('TCP/UDP proxy deleted'); await fetchSipProxies(); }
+    else { const d = await res.json(); toast(d.error || 'Delete failed', 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function restartSipProxy(name) {
+  try {
+    const res = await api('/admin/tcpudp/' + encodeURIComponent(name) + '/restart', { method: 'POST' });
+    if (res.ok) { toast('TCP/UDP proxy "' + name + '" restarted'); await fetchSipProxies(); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}

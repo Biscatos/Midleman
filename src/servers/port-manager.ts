@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 interface PortMap {
     proxies: Record<string, number>;
     webhooks: Record<string, number>;
+    tcpUdp: Record<string, number>;
 }
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -14,7 +15,7 @@ const DATA_DIR = process.env.DATA_DIR || resolve(process.cwd(), 'data');
 const PORTS_FILE = resolve(DATA_DIR, 'ports.json');
 export const PORT_RANGE_START = parseInt(process.env.PORT_RANGE_START || '4000', 10);
 
-let portMap: PortMap = { proxies: {}, webhooks: {} };
+let portMap: PortMap = { proxies: {}, webhooks: {}, tcpUdp: {} };
 
 // ─── Persistence ─────────────────────────────────────────────────────────────
 
@@ -22,8 +23,16 @@ export function loadPortAssignments(): void {
     try {
         portMap = JSON.parse(readFileSync(PORTS_FILE, 'utf-8'));
         if (!portMap.webhooks) portMap.webhooks = {};
+        if (!portMap.tcpUdp) portMap.tcpUdp = {};
+        // Migrate old format: keys without colon → e.g. "meta" → discard (will be re-assigned)
+        for (const key of Object.keys(portMap.tcpUdp)) {
+            if (!key.includes(':')) {
+                console.warn(`[port-manager] Migrating old tcpUdp port key "${key}" — will be reassigned`);
+                delete portMap.tcpUdp[key];
+            }
+        }
     } catch {
-        portMap = { proxies: {}, webhooks: {} };
+        portMap = { proxies: {}, webhooks: {}, tcpUdp: {} };
     }
 }
 
@@ -70,8 +79,9 @@ async function allocate(used: Set<number>, preferred?: number): Promise<number> 
 export async function assignAllPorts(
     proxyNames: string[],
     webhookNames: string[],
+    tcpUdpNames: string[],
     adminPort: number,
-): Promise<{ proxies: Record<string, number>; webhooks: Record<string, number> }> {
+): Promise<{ proxies: Record<string, number>; webhooks: Record<string, number>; tcpUdp: Record<string, number> }> {
     const used = new Set<number>([adminPort]);
 
     const proxies: Record<string, number> = {};
@@ -88,9 +98,16 @@ export async function assignAllPorts(
         used.add(port);
     }
 
-    portMap = { proxies, webhooks: webhookPorts };
+    const tcpUdpPorts: Record<string, number> = {};
+    for (const name of tcpUdpNames) {
+        const port = await allocate(used, portMap.tcpUdp[name]);
+        tcpUdpPorts[name] = port;
+        used.add(port);
+    }
+
+    portMap = { proxies, webhooks: webhookPorts, tcpUdp: tcpUdpPorts };
     save();
-    return { proxies, webhooks: webhookPorts };
+    return { proxies, webhooks: webhookPorts, tcpUdp: tcpUdpPorts };
 }
 
 /**
@@ -149,6 +166,46 @@ export function getProxyPort(name: string): number | undefined {
 
 export function getWebhookPort(name: string): number | undefined {
     return portMap.webhooks[name];
+}
+
+/**
+ * Assign a port for a single TCP/UDP listener.
+ * Key format: "${profileName}:${transport}" e.g. "meta:tls", "meta:udp".
+ */
+export async function assignTcpUdpListenerPort(listenerKey: string, adminPort: number, excludePorts: number[]): Promise<number> {
+    if (!portMap.tcpUdp) portMap.tcpUdp = {};
+    const otherPorts = Object.entries(portMap.tcpUdp).filter(([k]) => k !== listenerKey).map(([, v]) => v);
+    const proxies = Object.values(portMap.proxies);
+    const webhooks = Object.values(portMap.webhooks || {});
+    const used = new Set<number>([adminPort, ...excludePorts, ...proxies, ...webhooks, ...otherPorts]);
+    const port = await allocate(used, portMap.tcpUdp[listenerKey]);
+    portMap.tcpUdp[listenerKey] = port;
+    save();
+    return port;
+}
+
+/** Release all listener ports for a profile (removes all "profileName:*" keys). */
+export function releaseTcpUdpListenerPorts(profileName: string): void {
+    const prefix = `${profileName}:`;
+    for (const key of Object.keys(portMap.tcpUdp)) {
+        if (key.startsWith(prefix)) delete portMap.tcpUdp[key];
+    }
+    save();
+}
+
+export function getTcpUdpListenerPort(profileName: string, transport: string): number | undefined {
+    return portMap.tcpUdp?.[`${profileName}:${transport}`];
+}
+
+// Legacy aliases (kept for backwards compat, prefer the Listener variants)
+export async function assignTcpUdpPort(name: string, adminPort: number, excludePorts: number[]): Promise<number> {
+    return assignTcpUdpListenerPort(`${name}:tcp`, adminPort, excludePorts);
+}
+export function releaseTcpUdpPort(name: string): void {
+    releaseTcpUdpListenerPorts(name);
+}
+export function getTcpUdpPort(name: string): number | undefined {
+    return getTcpUdpListenerPort(name, 'tcp');
 }
 
 export function getAllAssignedPorts(): PortMap {
