@@ -1,6 +1,7 @@
 import type { ProxyProfile } from '../core/types';
 import { handleDirectProxy } from '../proxy/proxy';
 import { verifyProxyUserCredentials, signJwt, getJwtMaxAge, checkRateLimit, proxyUserHasProfile, createProxyLoginChallenge, consumeProxyLoginChallenge, peekProxyLoginChallenge, generateTotpSecret, verifyTotp, setupProxyUserTotp, userIdToUuid } from '../auth/auth';
+import { renderConsentMarkdown, escapeHtmlAttr } from '../core/consent';
 import QRCode from 'qrcode';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -76,11 +77,15 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                 if (url.pathname === '/auth/login' && req.method === 'GET') {
                     const loginTitle = profile.loginTitle || 'Midleman';
                     const loginLogoUrl = safeLogoUrl(profile.loginLogo, profile.targetUrl);
+                    const consentEnabled = !!profile.consentEnabled && !!((profile.consentTitle || '').trim() || (profile.consentBody || '').trim());
                     const html = proxyLoginHtml
                         .replace(/\{\{PROFILE_NAME\}\}/g, profile.name)
                         .replace(/\{\{REQUIRE_2FA\}\}/g, profile.require2fa ? 'true' : 'false')
                         .replace(/\{\{LOGIN_TITLE\}\}/g, loginTitle)
                         .replace(/\{\{LOGIN_LOGO_URL\}\}/g, loginLogoUrl)
+                        .replace(/\{\{CONSENT_ENABLED\}\}/g, consentEnabled ? '1' : '0')
+                        .replace(/\{\{CONSENT_TITLE\}\}/g, escapeHtmlAttr(profile.consentTitle || 'Termos de utilização'))
+                        .replace(/\{\{CONSENT_BODY\}\}/g, renderConsentMarkdown(profile.consentBody || ''));
                     return new Response(html, {
                         status: 200,
                         headers: { 'Content-Type': 'text/html; charset=utf-8', ...SECURITY_HEADERS },
@@ -199,12 +204,16 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
             const renderLoginHtml = (profileName: string, require2fa: boolean) => {
                 const loginTitle = profile.loginTitle || 'Midleman';
                 const loginLogoUrl = safeLogoUrl(profile.loginLogo, profile.targetUrl);
+                const consentEnabled = !!profile.consentEnabled && !!((profile.consentTitle || '').trim() || (profile.consentBody || '').trim());
                 return proxyLoginHtml
                     .replace(/\{\{PROFILE_NAME\}\}/g, profileName)
                     .replace(/\{\{REQUIRE_2FA\}\}/g, require2fa ? 'true' : 'false')
                     .replace(/\{\{LOGIN_TITLE\}\}/g, loginTitle)
                     .replace(/\{\{LOGIN_LOGO_URL\}\}/g, loginLogoUrl)
-                    .replace(/\{\{LOGIN_TITLE_SUFFIX\}\}/g, profile.loginTitle ? '' : ' — Midleman');
+                    .replace(/\{\{LOGIN_TITLE_SUFFIX\}\}/g, profile.loginTitle ? '' : ' — Midleman')
+                    .replace(/\{\{CONSENT_ENABLED\}\}/g, consentEnabled ? '1' : '0')
+                    .replace(/\{\{CONSENT_TITLE\}\}/g, escapeHtmlAttr(profile.consentTitle || 'Termos de utilização'))
+                    .replace(/\{\{CONSENT_BODY\}\}/g, renderConsentMarkdown(profile.consentBody || ''));
             };
 
             return handleDirectProxy(req, profile, startTime, renderLoginHtml);

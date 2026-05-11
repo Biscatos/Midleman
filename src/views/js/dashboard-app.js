@@ -1,5 +1,6 @@
 // ─── State ───────────────────────────────────────────────────────────────────
 const THEME_KEY = 'midleman_theme';
+const SIDEBAR_KEY = 'midleman_sidebar_collapsed';
 let editingProfile = null;
 let currentPage = 'overview';
 let lastReqLogId = 0;
@@ -22,10 +23,34 @@ function toggleTheme() {
   updateThemeIcon(next);
   if (typeof updateAceThemes === 'function') updateAceThemes();
 }
+const THEME_ICONS = {
+  dark: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>`,
+  light: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`
+};
+
 function updateThemeIcon(theme) {
-  document.getElementById('themeBtn').innerHTML = theme === 'dark' ? '&#9728;' : '&#9790;';
+  const btn = document.getElementById('themeBtn');
+  if (!btn) return;
+  const label = document.getElementById('themeBtnLabel');
+  // dark theme → show "Light" action (switch to light); light → show "Dark"
+  const next = theme === 'dark' ? 'light' : 'dark';
+  const nextLabel = theme === 'dark' ? 'Light' : 'Dark';
+  btn.querySelector('svg').outerHTML; // noop ref
+  btn.innerHTML = THEME_ICONS[next] + `<span id="themeBtnLabel">${nextLabel}</span>`;
 }
 initTheme();
+
+// ─── Sidebar collapse ─────────────────────────────────────────────────────────
+function initSidebar() {
+  if (localStorage.getItem(SIDEBAR_KEY) === 'true') {
+    document.body.classList.add('sidebar-collapsed');
+  }
+}
+function toggleSidebar() {
+  const collapsed = document.body.classList.toggle('sidebar-collapsed');
+  localStorage.setItem(SIDEBAR_KEY, String(collapsed));
+}
+initSidebar();
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 let appIntervals = [];
@@ -33,7 +58,16 @@ let appIntervals = [];
 async function startApp(username) {
   loggedInUser = username;
   document.getElementById('navUser').textContent = loggedInUser;
-  document.querySelector('.app').style.display = 'flex';
+  const avatar = document.getElementById('navUserAvatar');
+  if (avatar) avatar.textContent = (loggedInUser || '?').charAt(0).toUpperCase();
+  const topbarUser = document.getElementById('topbarUser');
+  if (topbarUser) topbarUser.textContent = loggedInUser;
+  const topbarAvatar = document.getElementById('topbarAvatar');
+  if (topbarAvatar) topbarAvatar.textContent = (loggedInUser || '?').charAt(0).toUpperCase();
+  document.querySelector('.app').style.display = 'grid';
+  
+  // Re-apply theme icon now that the topbar button is in the DOM
+  updateThemeIcon(document.documentElement.getAttribute('data-theme') || 'dark');
   
   // Hide auth panels if visible
   document.getElementById('authLogin').classList.remove('active');
@@ -191,6 +225,17 @@ async function doLogout() {
 }
 
 // ─── Navigation ──────────────────────────────────────────────────────────────
+const PAGE_TITLES = {
+  overview: 'Dashboard',
+  requests: 'Request Log',
+  profiles: 'Proxies',
+  webhooks: 'Webhooks',
+  proxyusers: 'Users',
+  oauthclients: 'OAuth Clients',
+  admins: 'Admins',
+  audit: 'Audit Log'
+};
+
 function navigate(page) {
   currentPage = page;
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -204,6 +249,10 @@ function navigate(page) {
   if (page === 'requests') { rlPage = 1; fetchRequestLogs(); }
   if (page === 'proxyusers') { fetchProxyUsers(); fetchInvites(); }
   if (page === 'oauthclients') { fetchOauthClients(); }
+  if (page === 'admins') { fetchAdmins(); }
+  if (page === 'audit') { fetchAuditLogs(true); }
+  const titleEl = document.getElementById('topbarPageTitle');
+  if (titleEl) titleEl.textContent = PAGE_TITLES[page] || page;
   closeNavMobile();
   closeNavMore();
 }
@@ -215,17 +264,9 @@ function closeNavMobile() {
   document.body.classList.remove('nav-open');
 }
 
-function toggleNavMore(e) {
-  e.stopPropagation();
-  document.getElementById('navMore')?.classList.toggle('open');
-}
-function closeNavMore() {
-  document.getElementById('navMore')?.classList.remove('open');
-}
-document.addEventListener('click', (e) => {
-  const more = document.getElementById('navMore');
-  if (more && more.classList.contains('open') && !more.contains(e.target)) closeNavMore();
-});
+// Kept as no-ops for backwards compat with older onclick handlers
+function toggleNavMore() {}
+function closeNavMore() {}
 
 // ─── Responsive tables ──────────────────────────────────────────────────────
 // On mobile, tables render as stacked cards. Each <td> needs a data-label

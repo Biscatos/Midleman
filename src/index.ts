@@ -13,9 +13,9 @@ import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken } from './auth/auth';
-import { initOauth, createOauthClient, listOauthClients, deleteOauthClient } from './auth/oauth';
-import { handleAuthorize, handleOauthLogin, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, logAudit, queryAuditLogs } from './auth/auth';
+import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClientConsent } from './auth/oauth';
+import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
 import { resolve } from 'path';
@@ -143,6 +143,21 @@ function checkAdminAuth(req: Request, url: URL): Response | null {
     });
 }
 
+/** Returns the currently authenticated admin (or null) — used for audit attribution. */
+function getAuthedAdmin(req: Request): import('./core/types').AuthUser | null {
+    const cookies = parseCookies(req);
+    const sessionId = cookies[config.auth.cookieName];
+    if (!sessionId) return null;
+    const session = validateSession(sessionId);
+    return session?.user || null;
+}
+
+/** Returns IP from common headers. */
+function reqClientIp(req: Request): string {
+    return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+        || req.headers.get('x-real-ip') || 'unknown';
+}
+
 // ─── Async startup: assign ports, then start per-profile and per-target servers ─
 
 // Build listener keys: "profileName:transport" for each listener across all profiles
@@ -229,6 +244,7 @@ const jwksServer = jwksPortRaw ? Bun.serve({
         // ── OAuth2 / OIDC endpoints ──
         if (path === '/oauth/authorize' && req.method === 'GET') return handleAuthorize(req, url);
         if (path === '/oauth/login' && req.method === 'POST') return handleOauthLogin(req);
+        if (path === '/oauth/totp' && req.method === 'POST') return handleOauthTotp(req);
         if (path === '/oauth/token' && req.method === 'POST') return handleToken(req);
         if (path === '/oauth/userinfo') return handleUserinfo(req);
         if (path === '/oauth/logout' && req.method === 'POST') return handleOauthLogout(req);
@@ -352,7 +368,7 @@ const server = Bun.serve({
 
             // Step 1: verify username + password, return challenge token
             if (url.pathname === '/auth/login/verify' && req.method === 'POST') {
-                const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+                const clientIp = reqClientIp(req);
                 if (!checkRateLimit(clientIp)) return jsonRes(429, { error: 'Too many attempts. Try again in 15 minutes.' });
                 let body: any;
                 try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
@@ -360,14 +376,24 @@ const server = Bun.serve({
                 const password = body.password || '';
                 if (!username || !password) return jsonRes(400, { error: 'Username and password required' });
                 const cred = await verifyCredentials(username, password);
-                if (!cred) return jsonRes(401, { error: 'Invalid username or password' });
-                const challengeToken = createLoginChallenge(cred.user.id, cred.user.username, cred.totpSecret);
+                if (!cred) {
+                    logAudit({ action: 'admin.login.failed', actorUsername: username, ip: clientIp, userAgent: req.headers.get('user-agent') });
+                    return jsonRes(401, { error: 'Invalid username or password' });
+                }
+                // First-time login for an admin without TOTP set up yet → enrol TOTP now
+                if (!cred.user.totpEnabled || !cred.totpSecret) {
+                    const totp = generateTotpSecret(cred.user.username);
+                    const qrDataUrl = await QRCode.toDataURL(totp.otpauthUrl, { width: 220, margin: 2 }).catch(() => null);
+                    const challengeToken = createLoginChallenge(cred.user.id, cred.user.username, totp.secret, true);
+                    return jsonRes(200, { status: 'totp_setup', challengeToken, totpSecret: totp.secret, qrDataUrl });
+                }
+                const challengeToken = createLoginChallenge(cred.user.id, cred.user.username, cred.totpSecret, false);
                 return jsonRes(200, { status: 'ok', challengeToken });
             }
 
             // Step 2: verify TOTP with challenge token, create session
             if (url.pathname === '/auth/login' && req.method === 'POST') {
-                const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+                const clientIp = reqClientIp(req);
                 let body: any;
                 try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
                 const challengeToken = (body.challengeToken || '').trim();
@@ -375,8 +401,16 @@ const server = Bun.serve({
                 if (!challengeToken || !totpCode) return jsonRes(400, { error: 'Challenge token and TOTP code required' });
                 const challenge = consumeLoginChallenge(challengeToken);
                 if (!challenge) return jsonRes(401, { error: 'Session expired. Please start login again.' });
-                if (!verifyTotp(challenge.totpSecret, totpCode)) return jsonRes(401, { error: 'Invalid authenticator code' });
+                if (!verifyTotp(challenge.totpSecret, totpCode)) {
+                    logAudit({ action: 'admin.login.failed', actorUserId: challenge.userId, actorUsername: challenge.username, details: { reason: 'bad_totp' }, ip: clientIp, userAgent: req.headers.get('user-agent') });
+                    return jsonRes(401, { error: 'Invalid authenticator code' });
+                }
+                // First-login flow: persist the freshly-set TOTP secret
+                if (challenge.needsSetup) {
+                    setAdminTotp(challenge.userId, challenge.totpSecret);
+                }
                 const sid = createSession(challenge.userId, clientIp, req.headers.get('user-agent') || '');
+                logAudit({ action: 'admin.login', actorUserId: challenge.userId, actorUsername: challenge.username, details: challenge.needsSetup ? { firstLogin: true } : undefined, ip: clientIp, userAgent: req.headers.get('user-agent') });
                 return new Response(JSON.stringify({ status: 'ok', username: challenge.username }), {
                     status: 200,
                     headers: {
@@ -387,9 +421,11 @@ const server = Bun.serve({
             }
 
             if (url.pathname === '/auth/logout' && req.method === 'POST') {
+                const me = getAuthedAdmin(req);
                 const cookies = parseCookies(req);
                 const sessionId = cookies[config.auth.cookieName];
                 if (sessionId) destroySession(sessionId);
+                if (me) logAudit({ action: 'admin.logout', actorUserId: me.id, actorUsername: me.username, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                 return new Response(JSON.stringify({ status: 'ok' }), {
                     status: 200,
                     headers: {
@@ -1022,6 +1058,9 @@ const server = Bun.serve({
                             loginTitle: profile.loginTitle || '',
                             loginLogo: profile.loginLogo || '',
                             allowSelfSignedTls: !!profile.allowSelfSignedTls,
+                            consentEnabled: !!profile.consentEnabled,
+                            consentTitle: profile.consentTitle || '',
+                            consentBody: profile.consentBody || '',
                             blockedExtensions: profile.blockedExtensions ? Array.from(profile.blockedExtensions) : [],
                             allowedIps: profile.allowedIps || [],
                             port: getProxyServerPort(profile.name),
@@ -1047,6 +1086,9 @@ const server = Bun.serve({
                         loginTitle: p.loginTitle || '',
                         loginLogo: p.loginLogo || '',
                         allowSelfSignedTls: !!p.allowSelfSignedTls,
+                        consentEnabled: !!p.consentEnabled,
+                        consentTitle: p.consentTitle || '',
+                        consentBody: p.consentBody || '',
                         port: getProxyServerPort(p.name),
                         running: isProxyServerRunning(p.name),
                     }));
@@ -1080,6 +1122,9 @@ const server = Bun.serve({
                     if (typeof input.loginLogo === 'string' && input.loginLogo) profile.loginLogo = input.loginLogo;
                     if (typeof input.allowSelfSignedTls === 'boolean') profile.allowSelfSignedTls = input.allowSelfSignedTls;
                     if (typeof input.supabaseMode === 'boolean') profile.supabaseMode = input.supabaseMode;
+                    if (typeof input.consentEnabled === 'boolean') profile.consentEnabled = input.consentEnabled;
+                    if (typeof input.consentTitle === 'string') profile.consentTitle = input.consentTitle;
+                    if (typeof input.consentBody === 'string') profile.consentBody = input.consentBody;
                     if (input.blockedExtensions) {
                         profile.blockedExtensions = new Set(
                             (input.blockedExtensions as string[]).map(e => e.trim().toLowerCase().replace(/^\.?/, '.'))
@@ -1095,6 +1140,7 @@ const server = Bun.serve({
                     invalidateProfileCache();
 
                     let proxyPort: number;
+                    const me = getAuthedAdmin(req);
                     if (idx >= 0) {
                         // Update: the server still owns its port — use it directly without probing.
                         // Probing would fail (port in use) and cause a spurious reassignment.
@@ -1105,12 +1151,14 @@ const server = Bun.serve({
                         }
                         await restartProxyServer(profile.name, profile, proxyPort);
                         console.log(`✅ Profile "${profile.name}" updated (port ${proxyPort})`);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'profile.update', targetType: 'profile', targetId: profile.name, details: { targetUrl: profile.targetUrl, authMode: profile.authMode }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                         return jsonRes(200, { status: 'updated', profile: profile.name, port: proxyPort });
                     } else {
                         const excludePorts = getProxyServerStatus().map(s => s.port).filter(Boolean);
                         proxyPort = await assignProxyPort(profile.name, config.port, excludePorts);
                         startProxyServer(profile, proxyPort);
                         console.log(`✅ Profile "${profile.name}" created (port ${proxyPort})`);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'profile.create', targetType: 'profile', targetId: profile.name, details: { targetUrl: profile.targetUrl, authMode: profile.authMode }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                         return jsonRes(200, { status: 'created', profile: profile.name, port: proxyPort });
                     }
                 }
@@ -1127,6 +1175,8 @@ const server = Bun.serve({
                     releaseProxyPort(name);
                     removeAllProfileAssociations(name);
                     console.log(`🗑️  Profile "${name}" deleted`);
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'profile.delete', targetType: 'profile', targetId: name, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                     return jsonRes(200, { status: 'deleted', profile: name });
                 }
 
@@ -1160,6 +1210,8 @@ const server = Bun.serve({
                             assignProxyUserToProfile(user.id, pn);
                         }
                         console.log(`✅ Proxy user "${username}" created`);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'proxy_user.create', targetType: 'proxy_user', targetId: user.id, details: { username, email, profiles }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                         return jsonRes(200, { status: 'created', user: { ...user, profiles } });
                     } catch (err: any) {
                         if (err.message?.includes('UNIQUE')) return jsonRes(409, { error: 'Username already exists' });
@@ -1201,10 +1253,80 @@ const server = Bun.serve({
                 // DELETE /admin/proxy-users/:id — delete a global proxy user
                 if (url.pathname.match(/^\/admin\/proxy-users\/\d+$/) && req.method === 'DELETE') {
                     const userId = parseInt(url.pathname.split('/').pop()!, 10);
+                    const target = getProxyUser(userId);
                     const deleted = deleteProxyUser(userId);
                     if (!deleted) return jsonRes(404, { error: 'User not found' });
                     console.log(`🗑️  Proxy user #${userId} deleted`);
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'proxy_user.delete', targetType: 'proxy_user', targetId: userId, details: { username: target?.username }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                     return jsonRes(200, { status: 'deleted' });
+                }
+
+                // ── Admins (additional admin users) ─────────────────────────────────────
+
+                if (url.pathname === '/admin/admins' && req.method === 'GET') {
+                    return jsonRes(200, { admins: listAdmins(), currentUserId: getAuthedAdmin(req)?.id ?? null });
+                }
+
+                if (url.pathname === '/admin/admins' && req.method === 'POST') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const username = (body.username || '').trim();
+                    const password = body.password || '';
+                    const fullName = (body.fullName || '').trim();
+                    const email = (body.email || '').trim().toLowerCase();
+                    if (!username || username.length < 2) return jsonRes(400, { error: 'Username must be at least 2 characters' });
+                    if (!password || password.length < 8) return jsonRes(400, { error: 'Password must be at least 8 characters' });
+                    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonRes(400, { error: 'Invalid email' });
+                    const me = getAuthedAdmin(req);
+                    try {
+                        const admin = await createAdditionalAdmin(username, password, fullName, email, me?.id ?? 0);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'admin.create', targetType: 'admin', targetId: admin.id, details: { username, email, fullName }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(201, { admin });
+                    } catch (err: any) {
+                        const msg = err?.message || String(err);
+                        if (msg.includes('UNIQUE') || msg.includes('unique')) return jsonRes(409, { error: 'Username already exists' });
+                        return jsonRes(400, { error: msg });
+                    }
+                }
+
+                if (url.pathname.match(/^\/admin\/admins\/\d+$/) && req.method === 'DELETE') {
+                    const id = parseInt(url.pathname.split('/').pop()!, 10);
+                    const me = getAuthedAdmin(req);
+                    if (me?.id === id) return jsonRes(400, { error: 'Cannot delete your own account' });
+                    const target = getAdmin(id);
+                    const result = deleteAdmin(id);
+                    if (!result.deleted) return jsonRes(400, { error: result.reason || 'Cannot delete' });
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'admin.delete', targetType: 'admin', targetId: id, details: { username: target?.username }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { status: 'deleted' });
+                }
+
+                if (url.pathname.match(/^\/admin\/admins\/\d+\/password$/) && req.method === 'PATCH') {
+                    const id = parseInt(url.pathname.split('/')[3], 10);
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const newPassword = body.password || '';
+                    if (newPassword.length < 8) return jsonRes(400, { error: 'Password must be at least 8 characters' });
+                    const me = getAuthedAdmin(req);
+                    const ok = await updateAdminPassword(id, newPassword);
+                    if (!ok) return jsonRes(404, { error: 'Admin not found' });
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'admin.password_reset', targetType: 'admin', targetId: id, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { status: 'updated' });
+                }
+
+                // ── Audit log ────────────────────────────────────────────────────────────
+
+                if (url.pathname === '/admin/audit' && req.method === 'GET') {
+                    const q = {
+                        actor: url.searchParams.get('actor') || undefined,
+                        action: url.searchParams.get('action') || undefined,
+                        targetType: url.searchParams.get('target_type') || undefined,
+                        from: url.searchParams.get('from') || undefined,
+                        to: url.searchParams.get('to') || undefined,
+                        limit: parseInt(url.searchParams.get('limit') || '50', 10),
+                        offset: parseInt(url.searchParams.get('offset') || '0', 10),
+                    };
+                    return jsonRes(200, queryAuditLogs(q));
                 }
 
                 // ── OAuth clients ────────────────────────────────────────────────────────
@@ -1228,6 +1350,8 @@ const server = Bun.serve({
                     try {
                         const { client, clientSecret } = await createOauthClient(name, redirectUris);
                         console.log(`🪪 OAuth client created: ${client.name} (${client.clientId})`);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'oauth_client.create', targetType: 'oauth_client', targetId: client.clientId, details: { name, redirectUris }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                         return jsonRes(201, {
                             client,
                             clientSecret,
@@ -1238,11 +1362,29 @@ const server = Bun.serve({
                     }
                 }
 
+                if (url.pathname.match(/^\/admin\/oauth-clients\/[^/]+\/consent$/) && req.method === 'PUT') {
+                    const clientId = decodeURIComponent(url.pathname.split('/')[3]);
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const enabled = !!body.enabled;
+                    const title = typeof body.title === 'string' ? body.title : '';
+                    const consentBody = typeof body.body === 'string' ? body.body : '';
+                    if (title.length > 200) return jsonRes(400, { error: 'title too long (max 200)' });
+                    if (consentBody.length > 20_000) return jsonRes(400, { error: 'body too long (max 20000)' });
+                    const ok = updateOauthClientConsent(clientId, enabled, title, consentBody);
+                    if (!ok) return jsonRes(404, { error: 'Client not found' });
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'oauth_client.consent.update', targetType: 'oauth_client', targetId: clientId, details: { enabled }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { status: 'ok' });
+                }
+
                 if (url.pathname.match(/^\/admin\/oauth-clients\/[^/]+$/) && req.method === 'DELETE') {
                     const clientId = decodeURIComponent(url.pathname.split('/').pop()!);
                     const deleted = deleteOauthClient(clientId);
                     if (!deleted) return jsonRes(404, { error: 'Client not found' });
                     console.log(`🗑️  OAuth client deleted: ${clientId}`);
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'oauth_client.delete', targetType: 'oauth_client', targetId: clientId, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                     return jsonRes(200, { status: 'deleted' });
                 }
 

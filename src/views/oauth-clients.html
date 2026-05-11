@@ -58,6 +58,16 @@
     .warn { color: var(--err-text); font-size: 11.5px; margin-top: 10px; }
     .hint { font-size: 11.5px; color: var(--text3); margin-top: 4px; }
     a { color: var(--btn); text-decoration: none; }
+    details.consent { margin-top: 10px; border-top: 1px solid var(--card-bdr); padding-top: 10px; }
+    details.consent summary { cursor: pointer; font-size: 12px; color: var(--text2); list-style: none; user-select: none; }
+    details.consent summary::-webkit-details-marker { display: none; }
+    details.consent summary::before { content: '▸ '; }
+    details.consent[open] summary::before { content: '▾ '; }
+    details.consent .body { padding-top: 10px; }
+    details.consent label.check { display: flex; align-items: center; gap: 8px; font-size: 12px; text-transform: none; letter-spacing: 0; color: var(--text); margin: 0 0 10px; cursor: pointer; }
+    details.consent input[type=text], details.consent textarea { font-family: inherit; font-size: 12.5px; }
+    details.consent textarea { min-height: 100px; font-family: inherit; }
+    details.consent button.save { padding: 7px 14px; font-size: 12px; margin-top: 10px; }
   </style>
 </head>
 <body>
@@ -110,16 +120,48 @@
       const { clients } = await r.json();
       if (!clients.length) { list.innerHTML = '<div class="empty">No clients registered yet.</div>'; return; }
       list.innerHTML = clients.map(c => `
-        <div class="row">
-          <div class="meta">
-            <div class="name">${escape(c.name)}</div>
-            <div class="id">${escape(c.clientId)}</div>
-            <div class="uris">${c.redirectUris.map(escape).join(' · ')}</div>
+        <div class="row" style="flex-direction:column;align-items:stretch">
+          <div style="display:flex;gap:12px;align-items:flex-start">
+            <div class="meta">
+              <div class="name">${escape(c.name)}</div>
+              <div class="id">${escape(c.clientId)}</div>
+              <div class="uris">${c.redirectUris.map(escape).join(' · ')}</div>
+            </div>
+            <button class="danger" data-del="${escape(c.clientId)}">Delete</button>
           </div>
-          <button class="danger" data-id="${escape(c.clientId)}">Delete</button>
+          <details class="consent">
+            <summary>Consent screen ${c.consentEnabled ? '· <span style="color:var(--ok-text)">enabled</span>' : '· disabled'}</summary>
+            <div class="body">
+              <label class="check">
+                <input type="checkbox" data-consent-enabled="${escape(c.clientId)}" ${c.consentEnabled ? 'checked' : ''}>
+                <span>Show consent modal before sign-in</span>
+              </label>
+              <label>Title</label>
+              <input type="text" data-consent-title="${escape(c.clientId)}" maxlength="200" value="${escape(c.consentTitle || '')}" placeholder="Terms of use">
+              <label>Body</label>
+              <textarea data-consent-body="${escape(c.clientId)}" maxlength="20000" placeholder="Supports **bold**, *italic*, [link](https://…), and - lists.">${escape(c.consentBody || '')}</textarea>
+              <p class="hint">Limited markdown: paragraphs, lists, bold/italic, and http(s) links.</p>
+              <button class="save" data-save="${escape(c.clientId)}">Save consent</button>
+            </div>
+          </details>
         </div>
       `).join('');
-      list.querySelectorAll('button.danger').forEach(b => b.addEventListener('click', () => del(b.dataset.id)));
+      list.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => del(b.dataset.del)));
+      list.querySelectorAll('[data-save]').forEach(b => b.addEventListener('click', () => saveConsent(b.dataset.save)));
+    }
+
+    async function saveConsent(id) {
+      const enabled = document.querySelector(`[data-consent-enabled="${id}"]`).checked;
+      const title = document.querySelector(`[data-consent-title="${id}"]`).value;
+      const body = document.querySelector(`[data-consent-body="${id}"]`).value;
+      const r = await fetch('/admin/oauth-clients/' + encodeURIComponent(id) + '/consent', {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled, title, body }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok) { alerts.innerHTML = '<div class="alert-ok">Consent saved.</div>'; refresh(); }
+      else showErr(data.error || 'Failed to save consent');
     }
 
     function escape(s) {

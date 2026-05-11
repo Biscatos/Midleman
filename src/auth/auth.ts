@@ -11,13 +11,34 @@ let sessionMaxAge = 86400;
 
 const CREATE_TABLES = `
 CREATE TABLE IF NOT EXISTS users (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    username    TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    password    TEXT NOT NULL,
-    totp_secret TEXT NOT NULL,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    username            TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password            TEXT NOT NULL,
+    totp_secret         TEXT NOT NULL DEFAULT '',
+    totp_enabled        INTEGER NOT NULL DEFAULT 0,
+    full_name           TEXT NOT NULL DEFAULT '',
+    email               TEXT NOT NULL DEFAULT '' COLLATE NOCASE,
+    created_by_user_id  INTEGER,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_user_id     INTEGER,
+    actor_username    TEXT NOT NULL DEFAULT '',
+    action            TEXT NOT NULL,
+    target_type       TEXT,
+    target_id         TEXT,
+    details           TEXT,
+    ip_address        TEXT,
+    user_agent        TEXT,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_logs(actor_user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
 
 CREATE TABLE IF NOT EXISTS sessions (
     id         TEXT PRIMARY KEY,
@@ -74,6 +95,18 @@ export function initAuth(dataDir: string, maxAge: number = 86400): void {
         db.exec('PRAGMA journal_mode = WAL');
         db.exec('PRAGMA synchronous = NORMAL');
         db.exec('PRAGMA foreign_keys = ON');
+
+        // Additive migration on `users` (legacy installs may lack newer cols)
+        try {
+            const info = db.prepare("PRAGMA table_info(users)").all() as any[];
+            if (info.length > 0) {
+                const cols = info.map((c: any) => c.name);
+                if (!cols.includes('full_name')) db.exec("ALTER TABLE users ADD COLUMN full_name TEXT NOT NULL DEFAULT ''");
+                if (!cols.includes('email')) db.exec("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''");
+                if (!cols.includes('totp_enabled')) db.exec("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 1");
+                if (!cols.includes('created_by_user_id')) db.exec("ALTER TABLE users ADD COLUMN created_by_user_id INTEGER");
+            }
+        } catch {}
 
         // Migrate old proxy_users table (had profile_name column, no totp fields)
         try {
@@ -150,14 +183,176 @@ export async function createUser(username: string, password: string, totpSecret:
 
 export async function verifyCredentials(username: string, password: string): Promise<{ user: AuthUser; totpSecret: string } | null> {
     if (!db) return null;
-    const row = db.prepare('SELECT id, username, password, totp_secret, created_at FROM users WHERE username = $u').get({ $u: username }) as any;
+    const row = db.prepare('SELECT id, username, password, totp_secret, totp_enabled, full_name, email, created_by_user_id, created_at FROM users WHERE username = $u').get({ $u: username }) as any;
     if (!row) return null;
     const valid = await Bun.password.verify(password, row.password);
     if (!valid) return null;
     return {
-        user: { id: row.id, username: row.username, createdAt: row.created_at },
+        user: {
+            id: row.id, username: row.username, createdAt: row.created_at,
+            fullName: row.full_name || '', email: row.email || '',
+            totpEnabled: !!row.totp_enabled, createdByUserId: row.created_by_user_id ?? null,
+        },
         totpSecret: row.totp_secret,
     };
+}
+
+// ─── Multi-admin management ──────────────────────────────────────────────────
+
+function rowToAuthUser(r: any): AuthUser {
+    return {
+        id: r.id,
+        username: r.username,
+        createdAt: r.created_at,
+        fullName: r.full_name || '',
+        email: r.email || '',
+        totpEnabled: !!r.totp_enabled,
+        createdByUserId: r.created_by_user_id ?? null,
+    };
+}
+
+export function listAdmins(): AuthUser[] {
+    if (!db) return [];
+    const rows = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_by_user_id, created_at FROM users ORDER BY created_at ASC').all() as any[];
+    return rows.map(rowToAuthUser);
+}
+
+export function getAdmin(id: number): AuthUser | null {
+    if (!db) return null;
+    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_by_user_id, created_at FROM users WHERE id = $id').get({ $id: id }) as any;
+    return row ? rowToAuthUser(row) : null;
+}
+
+export function countAdmins(): number {
+    if (!db) return 0;
+    const row = db.prepare('SELECT COUNT(*) as c FROM users').get() as any;
+    return row?.c || 0;
+}
+
+/** Create an additional admin. TOTP is not set yet — the new admin sets it up on first login. */
+export async function createAdditionalAdmin(
+    username: string, password: string, fullName: string, email: string, createdByUserId: number,
+): Promise<AuthUser> {
+    if (!db) throw new Error('Auth not initialized');
+    const hash = await Bun.password.hash(password, 'bcrypt');
+    db.prepare(`INSERT INTO users (username, password, totp_secret, totp_enabled, full_name, email, created_by_user_id)
+        VALUES ($u, $p, '', 0, $fn, $em, $cb)`)
+        .run({ $u: username, $p: hash, $fn: fullName.trim(), $em: email.trim().toLowerCase(), $cb: createdByUserId });
+    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_by_user_id, created_at FROM users WHERE username = $u').get({ $u: username }) as any;
+    return rowToAuthUser(row);
+}
+
+/** Delete an admin. Refuses to drop below 1 admin. Caller MUST prevent self-deletion. */
+export function deleteAdmin(id: number): { deleted: boolean; reason?: string } {
+    if (!db) return { deleted: false, reason: 'Auth not initialized' };
+    if (countAdmins() <= 1) return { deleted: false, reason: 'Cannot delete the last admin' };
+    const result = db.prepare('DELETE FROM users WHERE id = $id').run({ $id: id });
+    if (result.changes === 0) return { deleted: false, reason: 'Admin not found' };
+    return { deleted: true };
+}
+
+export async function updateAdminPassword(id: number, newPassword: string): Promise<boolean> {
+    if (!db) return false;
+    const hash = await Bun.password.hash(newPassword, 'bcrypt');
+    const result = db.prepare("UPDATE users SET password = $p, updated_at = datetime('now') WHERE id = $id")
+        .run({ $p: hash, $id: id });
+    return result.changes > 0;
+}
+
+/** Used during first login when the admin hasn't yet configured TOTP. */
+export function setAdminTotp(id: number, totpSecret: string): boolean {
+    if (!db) return false;
+    const result = db.prepare("UPDATE users SET totp_secret = $t, totp_enabled = 1, updated_at = datetime('now') WHERE id = $id")
+        .run({ $t: totpSecret, $id: id });
+    return result.changes > 0;
+}
+
+// ─── Audit log ──────────────────────────────────────────────────────────────
+
+export interface AuditEntry {
+    id: number;
+    actorUserId: number | null;
+    actorUsername: string;
+    action: string;
+    targetType: string | null;
+    targetId: string | null;
+    details: unknown;
+    ipAddress: string | null;
+    userAgent: string | null;
+    createdAt: string;
+}
+
+export interface LogAuditInput {
+    actorUserId?: number | null;
+    actorUsername?: string;
+    action: string;
+    targetType?: string;
+    targetId?: string | number;
+    details?: unknown;
+    ip?: string | null;
+    userAgent?: string | null;
+}
+
+/** Append an audit log entry. Swallows errors — never blocks the parent request. */
+export function logAudit(input: LogAuditInput): void {
+    if (!db) return;
+    try {
+        db.prepare(`INSERT INTO audit_logs
+            (actor_user_id, actor_username, action, target_type, target_id, details, ip_address, user_agent)
+            VALUES ($auid, $aun, $a, $tt, $tid, $d, $ip, $ua)`)
+            .run({
+                $auid: input.actorUserId ?? null,
+                $aun: input.actorUsername || '',
+                $a: input.action,
+                $tt: input.targetType || null,
+                $tid: input.targetId !== undefined ? String(input.targetId) : null,
+                $d: input.details !== undefined ? JSON.stringify(input.details) : null,
+                $ip: input.ip || null,
+                $ua: input.userAgent || null,
+            });
+    } catch (err) {
+        console.warn('audit log failed:', err instanceof Error ? err.message : err);
+    }
+}
+
+export interface AuditQuery {
+    actor?: string;
+    action?: string;
+    targetType?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+    offset?: number;
+}
+
+export function queryAuditLogs(q: AuditQuery): { logs: AuditEntry[]; total: number } {
+    if (!db) return { logs: [], total: 0 };
+    const where: string[] = [];
+    const params: Record<string, unknown> = {};
+    if (q.actor) { where.push('actor_username LIKE $actor COLLATE NOCASE'); params.$actor = `%${q.actor}%`; }
+    if (q.action) { where.push('action = $action'); params.$action = q.action; }
+    if (q.targetType) { where.push('target_type = $tt'); params.$tt = q.targetType; }
+    if (q.from) { where.push('created_at >= $from'); params.$from = q.from; }
+    if (q.to) { where.push('created_at <= $to'); params.$to = q.to; }
+    const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const limit = Math.min(Math.max(q.limit || 50, 1), 500);
+    const offset = Math.max(q.offset || 0, 0);
+
+    const total = (db.prepare(`SELECT COUNT(*) as c FROM audit_logs ${whereSql}`).get(params as any) as any)?.c || 0;
+    const rows = db.prepare(`SELECT * FROM audit_logs ${whereSql} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`).all(params as any) as any[];
+    const logs: AuditEntry[] = rows.map(r => ({
+        id: r.id,
+        actorUserId: r.actor_user_id ?? null,
+        actorUsername: r.actor_username || '',
+        action: r.action,
+        targetType: r.target_type ?? null,
+        targetId: r.target_id ?? null,
+        details: r.details ? (() => { try { return JSON.parse(r.details); } catch { return r.details; } })() : null,
+        ipAddress: r.ip_address ?? null,
+        userAgent: r.user_agent ?? null,
+        createdAt: r.created_at,
+    }));
+    return { logs, total };
 }
 
 // ─── TOTP (RFC 6238) ────────────────────────────────────────────────────────
@@ -262,26 +457,34 @@ function cleanExpiredSessions(): void {
 
 // ─── Login Challenge Tokens ──────────────────────────────────────────────────
 
-const loginChallenges = new Map<string, { userId: number; username: string; totpSecret: string; expiresAt: number }>();
+interface LoginChallengeEntry {
+    userId: number;
+    username: string;
+    totpSecret: string;
+    needsSetup: boolean;
+    expiresAt: number;
+}
+
+const loginChallenges = new Map<string, LoginChallengeEntry>();
 const CHALLENGE_TTL = 5 * 60 * 1000; // 5 minutes
 const MAX_CHALLENGES = 5_000;
 
-export function createLoginChallenge(userId: number, username: string, totpSecret: string): string {
+export function createLoginChallenge(userId: number, username: string, totpSecret: string, needsSetup = false): string {
     if (loginChallenges.size >= MAX_CHALLENGES) {
         const oldest = loginChallenges.keys().next().value;
         if (oldest) loginChallenges.delete(oldest);
     }
     const token = crypto.randomUUID();
-    loginChallenges.set(token, { userId, username, totpSecret, expiresAt: Date.now() + CHALLENGE_TTL });
+    loginChallenges.set(token, { userId, username, totpSecret, needsSetup, expiresAt: Date.now() + CHALLENGE_TTL });
     return token;
 }
 
-export function consumeLoginChallenge(token: string): { userId: number; username: string; totpSecret: string } | null {
+export function consumeLoginChallenge(token: string): { userId: number; username: string; totpSecret: string; needsSetup: boolean } | null {
     const entry = loginChallenges.get(token);
     if (!entry) return null;
     loginChallenges.delete(token);
     if (entry.expiresAt < Date.now()) return null;
-    return { userId: entry.userId, username: entry.username, totpSecret: entry.totpSecret };
+    return { userId: entry.userId, username: entry.username, totpSecret: entry.totpSecret, needsSetup: entry.needsSetup };
 }
 
 // Cleanup expired challenges

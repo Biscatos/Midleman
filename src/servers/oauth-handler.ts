@@ -12,12 +12,12 @@ import {
     getOauthClient, isRedirectUriAllowed, verifyClientSecret,
     issueAuthCode, consumeAuthCode, issueRefreshToken, rotateRefreshToken,
     createSsoSession, validateSsoSession, destroySsoSession, getSsoTtl,
-    type OauthClient,
 } from '../auth/oauth';
 import {
     verifyProxyUserCredentials, verifyTotp, getProxyUser, getJwtMaxAge,
-    signJwt, verifyJwt, userIdToUuid, getJwtIssuer,
+    signJwt, verifyJwt, userIdToUuid,
 } from '../auth/auth';
+import { renderConsentMarkdown, escapeHtmlAttr } from '../core/consent';
 
 const SSO_COOKIE = '__midleman_sso';
 const SUPPORTED_SCOPES = new Set(['openid', 'profile', 'email', 'offline_access']);
@@ -86,7 +86,6 @@ const AUTH_REQUEST_TTL = 10 * 60 * 1000; // 10 min
 function storeAuthRequest(req: AuthRequest): string {
     const id = crypto.randomUUID();
     pendingAuthRequests.set(id, { req, expiresAt: Date.now() + AUTH_REQUEST_TTL });
-    // Best-effort cap
     if (pendingAuthRequests.size > 5000) {
         const oldest = pendingAuthRequests.keys().next().value;
         if (oldest) pendingAuthRequests.delete(oldest);
@@ -108,6 +107,43 @@ setInterval(() => {
         if (v.expiresAt < now) pendingAuthRequests.delete(k);
     }
 }, 5 * 60 * 1000);
+
+// ─── Login challenges (between password step and TOTP step) ─────────────────
+
+interface LoginChallenge {
+    userId: number;
+    totpSecret: string;
+    authRequestId: string;
+    expiresAt: number;
+}
+
+const loginChallenges = new Map<string, LoginChallenge>();
+const LOGIN_CHALLENGE_TTL = 5 * 60 * 1000;
+
+function createOauthLoginChallenge(userId: number, totpSecret: string, authRequestId: string): string {
+    const token = crypto.randomUUID();
+    loginChallenges.set(token, { userId, totpSecret, authRequestId, expiresAt: Date.now() + LOGIN_CHALLENGE_TTL });
+    if (loginChallenges.size > 5000) {
+        const oldest = loginChallenges.keys().next().value;
+        if (oldest) loginChallenges.delete(oldest);
+    }
+    return token;
+}
+
+function consumeLoginChallenge(token: string): LoginChallenge | null {
+    const entry = loginChallenges.get(token);
+    if (!entry) return null;
+    loginChallenges.delete(token);
+    if (entry.expiresAt < Date.now()) return null;
+    return entry;
+}
+
+setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of loginChallenges) {
+        if (v.expiresAt < now) loginChallenges.delete(k);
+    }
+}, 60 * 1000);
 
 // ─── /oauth/authorize ───────────────────────────────────────────────────────
 
@@ -169,17 +205,35 @@ export async function handleAuthorize(req: Request, url: URL): Promise<Response>
 
     // 4. Render login form
     const authRequestId = storeAuthRequest(authRequest);
+    const consentEnabled = client.consentEnabled && (client.consentTitle.trim() || client.consentBody.trim());
     const html = loginTemplate
-        .replace(/\{\{CLIENT_NAME\}\}/g, escapeHtml(client.name))
-        .replace(/\{\{AUTH_REQUEST\}\}/g, authRequestId);
+        .replace(/\{\{AUTH_REQUEST\}\}/g, authRequestId)
+        .replace(/\{\{CONSENT_ENABLED\}\}/g, consentEnabled ? '1' : '0')
+        .replace(/\{\{CONSENT_TITLE\}\}/g, escapeHtmlAttr(client.consentTitle || 'Terms of use'))
+        .replace(/\{\{CONSENT_BODY\}\}/g, renderConsentMarkdown(client.consentBody));
     return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
 
-function escapeHtml(s: string): string {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
+// ─── /oauth/login (POST) — step 1: username + password ─────────────────────
 
-// ─── /oauth/login (POST) ────────────────────────────────────────────────────
+function buildSuccessResponse(authReq: AuthRequest, userId: number, req: Request): Response {
+    const ssoId = createSsoSession(userId, getClientIp(req), req.headers.get('user-agent') || '');
+    const code = issueAuthCode({
+        clientId: authReq.clientId, userId, redirectUri: authReq.redirectUri,
+        codeChallenge: authReq.codeChallenge, scope: authReq.scope, nonce: authReq.nonce || undefined,
+    });
+    const u = new URL(authReq.redirectUri);
+    u.searchParams.set('code', code);
+    if (authReq.state) u.searchParams.set('state', authReq.state);
+
+    return new Response(JSON.stringify({ status: 'ok', redirect: u.toString() }), {
+        status: 200,
+        headers: {
+            'Content-Type': 'application/json',
+            'Set-Cookie': `${SSO_COOKIE}=${ssoId}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${getSsoTtl()}`,
+        },
+    });
+}
 
 export async function handleOauthLogin(req: Request): Promise<Response> {
     if (req.method !== 'POST') return jsonError(405, 'method_not_allowed');
@@ -189,7 +243,6 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
     const authRequestId = (body.auth_request || '').trim();
     const username = (body.username || '').trim();
     const password = (body.password || '').trim();
-    const totpCode = (body.totp || '').trim();
 
     if (!authRequestId || !username || !password) {
         return jsonError(400, 'invalid_request', 'Missing required fields');
@@ -210,42 +263,52 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
         });
     }
 
-    // TOTP enforcement
-    if (cred.user.totpEnabled) {
-        if (!totpCode) {
-            const newId = storeAuthRequest(authReq);
-            return new Response(JSON.stringify({ status: 'totp_required', auth_request: newId }), {
-                status: 200,
-                headers: { 'Content-Type': 'application/json' },
-            });
-        }
-        if (!cred.totpSecret || !verifyTotp(cred.totpSecret, totpCode)) {
-            const newId = storeAuthRequest(authReq);
-            return new Response(JSON.stringify({ error: 'Invalid authenticator code', auth_request: newId }), {
-                status: 401,
-                headers: { 'Content-Type': 'application/json' },
-            });
-        }
+    if (cred.user.totpEnabled && cred.totpSecret) {
+        const newAuthRequestId = storeAuthRequest(authReq);
+        const challengeToken = createOauthLoginChallenge(cred.user.id, cred.totpSecret, newAuthRequestId);
+        return new Response(JSON.stringify({ status: 'totp_required', challengeToken }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+        });
     }
 
-    // Issue SSO session + auth code
-    const ssoId = createSsoSession(cred.user.id, getClientIp(req), req.headers.get('user-agent') || '');
-    const code = issueAuthCode({
-        clientId: authReq.clientId, userId: cred.user.id, redirectUri: authReq.redirectUri,
-        codeChallenge: authReq.codeChallenge, scope: authReq.scope, nonce: authReq.nonce || undefined,
-    });
+    return buildSuccessResponse(authReq, cred.user.id, req);
+}
 
-    const u = new URL(authReq.redirectUri);
-    u.searchParams.set('code', code);
-    if (authReq.state) u.searchParams.set('state', authReq.state);
+// ─── /oauth/totp (POST) — step 2: TOTP verification ────────────────────────
 
-    return new Response(JSON.stringify({ redirect: u.toString() }), {
-        status: 200,
-        headers: {
-            'Content-Type': 'application/json',
-            'Set-Cookie': `${SSO_COOKIE}=${ssoId}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${getSsoTtl()}`,
-        },
-    });
+export async function handleOauthTotp(req: Request): Promise<Response> {
+    if (req.method !== 'POST') return jsonError(405, 'method_not_allowed');
+    let body: any;
+    try { body = await req.json(); } catch { return jsonError(400, 'invalid_request', 'Invalid JSON body'); }
+
+    const challengeToken = (body.challengeToken || '').trim();
+    const totpCode = (body.totpCode || '').trim();
+    if (!challengeToken || !totpCode) {
+        return jsonError(400, 'invalid_request', 'Missing challengeToken or totpCode');
+    }
+
+    const challenge = consumeLoginChallenge(challengeToken);
+    if (!challenge) {
+        return jsonError(400, 'invalid_request', 'Login session expired. Restart the sign-in flow.');
+    }
+
+    const authReq = consumeAuthRequest(challenge.authRequestId);
+    if (!authReq) {
+        return jsonError(400, 'invalid_request', 'Login session expired. Restart the sign-in flow.');
+    }
+
+    if (!verifyTotp(challenge.totpSecret, totpCode)) {
+        // Re-issue challenge so user can retry the code
+        const newAuthRequestId = storeAuthRequest(authReq);
+        const newChallenge = createOauthLoginChallenge(challenge.userId, challenge.totpSecret, newAuthRequestId);
+        return new Response(JSON.stringify({ error: 'Invalid authenticator code', challengeToken: newChallenge }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+        });
+    }
+
+    return buildSuccessResponse(authReq, challenge.userId, req);
 }
 
 // ─── /oauth/token ───────────────────────────────────────────────────────────

@@ -191,7 +191,7 @@ function showContextMenu(e, btn) {
 
 // ─── Data Fetch ──────────────────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients()]);
+  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchAdmins()]);
 }
 
 async function fetchHealth() {
@@ -200,6 +200,8 @@ async function fetchHealth() {
     document.getElementById('navDot').className = 'status-dot online';
     document.getElementById('navStatus').textContent = 'Online';
     document.getElementById('navUptime').textContent = fmtUptime(d.uptime);
+    const td = document.getElementById('topbarDot'); if (td) td.className = 'status-dot online';
+    const ts = document.getElementById('topbarStatus'); if (ts) ts.textContent = 'Online';
     document.getElementById('ovStatus').textContent = 'Online';
     document.getElementById('ovStatus').style.color = 'var(--green)';
     document.getElementById('ovUptime').textContent = 'Uptime: ' + fmtUptime(d.uptime);
@@ -210,6 +212,8 @@ async function fetchHealth() {
     document.getElementById('navDot').className = 'status-dot offline';
     document.getElementById('navStatus').textContent = 'Offline';
     document.getElementById('navUptime').textContent = '';
+    const td = document.getElementById('topbarDot'); if (td) td.className = 'status-dot offline';
+    const ts = document.getElementById('topbarStatus'); if (ts) ts.textContent = 'Offline';
     document.getElementById('ovStatus').textContent = 'Offline';
     document.getElementById('ovStatus').style.color = 'var(--red)';
   }
@@ -364,6 +368,10 @@ function openProfileModal(profile = null) {
   document.getElementById('pLoginTitle').value = profile ? (profile.loginTitle || '') : '';
   document.getElementById('pLoginLogo').value = profile ? (profile.loginLogo || '') : '';
   document.getElementById('pLoginLogoFile').value = '';
+  document.getElementById('pConsentEnabled').checked = profile ? !!profile.consentEnabled : false;
+  document.getElementById('pConsentTitle').value = profile ? (profile.consentTitle || '') : '';
+  document.getElementById('pConsentBody').value = profile ? (profile.consentBody || '') : '';
+  toggleConsentFields();
   updateLogoPreview();
   document.getElementById('pBlocked').value = profile?.blockedExtensions ? profile.blockedExtensions.join(', ') : '';
   IpTagInput.setValue('pAllowedIps', profile?.allowedIps || []);
@@ -377,6 +385,11 @@ function toggleProfileAuthMode() {
   document.getElementById('pIsWebAppGroup').style.display = mode === 'login' ? '' : 'none';
   document.getElementById('pLoginTitleGroup').style.display = mode === 'login' ? '' : 'none';
   document.getElementById('pLoginLogoGroup').style.display = mode === 'login' ? '' : 'none';
+  document.getElementById('pConsentGroup').style.display = mode === 'login' ? '' : 'none';
+}
+function toggleConsentFields() {
+  const on = document.getElementById('pConsentEnabled').checked;
+  document.getElementById('pConsentFields').style.display = on ? '' : 'none';
 }
 function closeProfileModal() { document.getElementById('profileModal').classList.remove('active'); editingProfile = null; }
 
@@ -424,6 +437,11 @@ async function saveProfile() {
   const loginLogo = document.getElementById('pLoginLogo').value.trim();
   if (loginTitle) body.loginTitle = loginTitle;
   if (loginLogo) body.loginLogo = loginLogo;
+  if (authMode === 'login') {
+    body.consentEnabled = document.getElementById('pConsentEnabled').checked;
+    body.consentTitle = document.getElementById('pConsentTitle').value;
+    body.consentBody = document.getElementById('pConsentBody').value;
+  }
   const blocked = v('pBlocked'); if (blocked) body.blockedExtensions = blocked.split(',').map(s => s.trim()).filter(Boolean);
   const allowedIps = IpTagInput.getValue('pAllowedIps'); if (allowedIps.length) body.allowedIps = allowedIps;
   try {
@@ -2215,3 +2233,191 @@ async function deleteOauthClient(clientId, name) {
     fetchOauthClients();
   } catch (e) { toast('Erro: ' + e.message, 'error'); }
 }
+
+// ─── Admins ──────────────────────────────────────────────────────────────────
+let _currentUserId = null;
+
+async function fetchAdmins() {
+  try {
+    const res = await api('/admin/admins');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    _currentUserId = data.currentUserId;
+    renderAdmins(data.admins || []);
+    const badge = document.getElementById('navAdminBadge');
+    if (badge) badge.textContent = String((data.admins || []).length);
+  } catch (e) {
+    document.getElementById('adminListBody').innerHTML =
+      '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--err-text)">Erro: ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+function renderAdmins(admins) {
+  const tbody = document.getElementById('adminListBody');
+  if (!admins.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">Sem admins.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = admins.map(function(a) {
+    const isMe = a.id === _currentUserId;
+    const meTag = isMe ? ' <span style="color:var(--accent2);font-size:11px;font-weight:600">(voce)</span>' : '';
+    const nameCell = a.fullName
+      ? '<div style="font-weight:500">' + esc(a.fullName) + meTag + '</div><div style="font-size:11px;color:var(--text3);font-family:monospace">' + esc(a.username) + '</div>'
+      : '<div style="font-weight:500">' + esc(a.username) + meTag + '</div>';
+    const twoFa = a.totpEnabled
+      ? '<span style="color:var(--green)">Ativo</span>'
+      : '<span style="color:var(--err-text);font-size:11.5px">Pendente</span>';
+    const created = a.createdAt ? new Date(a.createdAt).toLocaleString() : '—';
+    const actions = isMe
+      ? '<span style="color:var(--text3);font-size:11.5px">—</span>'
+      : '<button class="btn btn-sm btn-ghost" onclick="resetAdminPassword(' + a.id + ',&quot;' + esc(a.username) + '&quot;)">Reset password</button> ' +
+        '<button class="btn btn-sm btn-ghost" onclick="deleteAdminUser(' + a.id + ',&quot;' + esc(a.username) + '&quot;)" style="color:var(--err-text)">Apagar</button>';
+    return '<tr style="border-top:1px solid var(--border)">' +
+      '<td style="padding:10px 12px">' + nameCell + '</td>' +
+      '<td style="padding:10px 8px;color:var(--text2)">' + esc(a.email || '—') + '</td>' +
+      '<td style="padding:10px 8px">' + twoFa + '</td>' +
+      '<td style="padding:10px 8px;color:var(--text3);font-size:11.5px">' + esc(created) + '</td>' +
+      '<td style="padding:10px 12px;text-align:right">' + actions + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+function openCreateAdminModal() {
+  document.getElementById('adminUsername').value = '';
+  document.getElementById('adminFullName').value = '';
+  document.getElementById('adminEmail').value = '';
+  document.getElementById('adminPassword').value = '';
+  document.getElementById('adminModal').style.display = 'flex';
+}
+function closeAdminModal() { document.getElementById('adminModal').style.display = 'none'; }
+
+async function submitNewAdmin() {
+  const username = document.getElementById('adminUsername').value.trim();
+  const fullName = document.getElementById('adminFullName').value.trim();
+  const email = document.getElementById('adminEmail').value.trim();
+  const password = document.getElementById('adminPassword').value;
+  if (!username || username.length < 2) return toast('Username muito curto', 'error');
+  if (!password || password.length < 8) return toast('Password minimo 8 chars', 'error');
+  try {
+    const res = await api('/admin/admins', { method: 'POST', body: JSON.stringify({ username, fullName, email, password }) });
+    const data = await res.json();
+    if (!res.ok) return toast(data.error || 'Falha ao criar', 'error');
+    toast('Admin "' + username + '" criado');
+    closeAdminModal();
+    fetchAdmins();
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+async function deleteAdminUser(id, username) {
+  if (!confirm('Apagar admin "' + username + '"?')) return;
+  try {
+    const res = await api('/admin/admins/' + id, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(function() { return {}; });
+      return toast(data.error || 'Falha ao apagar', 'error');
+    }
+    toast('Admin apagado'); fetchAdmins();
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+async function resetAdminPassword(id, username) {
+  const newPass = prompt('Nova password para "' + username + '" (min 8 chars):');
+  if (!newPass) return;
+  if (newPass.length < 8) return toast('Password minimo 8 chars', 'error');
+  try {
+    const res = await api('/admin/admins/' + id + '/password', { method: 'PATCH', body: JSON.stringify({ password: newPass }) });
+    const data = await res.json();
+    if (!res.ok) return toast(data.error || 'Falha', 'error');
+    toast('Password atualizada');
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+// ─── Audit Log ───────────────────────────────────────────────────────────────
+let _auditOffset = 0;
+const AUDIT_PAGE_SIZE = 50;
+
+async function fetchAuditLogs(resetOffset) {
+  if (resetOffset) _auditOffset = 0;
+  const params = new URLSearchParams();
+  const actor = document.getElementById('auditFilterActor') ? document.getElementById('auditFilterActor').value.trim() : '';
+  const action = document.getElementById('auditFilterAction') ? document.getElementById('auditFilterAction').value : '';
+  const from = document.getElementById('auditFilterFrom') ? document.getElementById('auditFilterFrom').value : '';
+  const to = document.getElementById('auditFilterTo') ? document.getElementById('auditFilterTo').value : '';
+  if (actor) params.set('actor', actor);
+  if (action) params.set('action', action);
+  if (from) params.set('from', from + 'T00:00:00');
+  if (to) params.set('to', to + 'T23:59:59');
+  params.set('limit', String(AUDIT_PAGE_SIZE));
+  params.set('offset', String(_auditOffset));
+  try {
+    const res = await api('/admin/audit?' + params.toString());
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    renderAuditLogs(data.logs || [], data.total || 0);
+  } catch (e) {
+    document.getElementById('auditListBody').innerHTML =
+      '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--err-text)">Erro: ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+function renderAuditLogs(logs, total) {
+  window._lastAuditLogs = logs;
+  const tbody = document.getElementById('auditListBody');
+  if (!logs.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Sem entradas.</td></tr>';
+  } else {
+    tbody.innerHTML = logs.map(function(l, idx) {
+      const when = new Date(l.createdAt).toLocaleString();
+      const actor = l.actorUsername || '<system>';
+      const target = (l.targetType || '') + (l.targetId ? ' #' + l.targetId : '');
+      const failed = l.action.endsWith('.failed') || l.action.indexOf('error') !== -1;
+      const actionStyle = failed ? 'color:var(--err-text);font-weight:500' : '';
+      return '<tr style="border-top:1px solid var(--border)">' +
+        '<td style="padding:10px 12px;color:var(--text2);font-size:11.5px;white-space:nowrap">' + esc(when) + '</td>' +
+        '<td style="padding:10px 8px;font-weight:500">' + esc(actor) + '</td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:11.5px;' + actionStyle + '">' + esc(l.action) + '</td>' +
+        '<td style="padding:10px 8px;color:var(--text2);font-size:11.5px">' + esc(target || '—') + '</td>' +
+        '<td style="padding:10px 8px;color:var(--text3);font-size:11.5px;font-family:monospace">' + esc(l.ipAddress || '—') + '</td>' +
+        '<td style="padding:10px 12px;text-align:right"><button class="btn btn-sm btn-ghost" onclick="showAuditDetail(' + idx + ')">Detalhes</button></td>' +
+        '</tr>';
+    }).join('');
+  }
+  const fromN = total === 0 ? 0 : _auditOffset + 1;
+  const toN = Math.min(_auditOffset + logs.length, total);
+  document.getElementById('auditTotal').textContent = fromN + '–' + toN + ' de ' + total;
+  document.getElementById('auditPrev').disabled = _auditOffset === 0;
+  document.getElementById('auditNext').disabled = _auditOffset + logs.length >= total;
+}
+
+function auditPrevPage() {
+  _auditOffset = Math.max(0, _auditOffset - AUDIT_PAGE_SIZE);
+  fetchAuditLogs(false);
+}
+function auditNextPage() {
+  _auditOffset += AUDIT_PAGE_SIZE;
+  fetchAuditLogs(false);
+}
+function resetAuditFilters() {
+  document.getElementById('auditFilterActor').value = '';
+  document.getElementById('auditFilterAction').value = '';
+  document.getElementById('auditFilterFrom').value = '';
+  document.getElementById('auditFilterTo').value = '';
+  fetchAuditLogs(true);
+}
+
+function showAuditDetail(idx) {
+  const l = (window._lastAuditLogs || [])[idx];
+  if (!l) return;
+  document.getElementById('auditDetailBody').innerHTML =
+    '<div style="font-size:12.5px;line-height:1.7">' +
+      '<div><span style="color:var(--text3)">When:</span> ' + esc(new Date(l.createdAt).toLocaleString()) + '</div>' +
+      '<div><span style="color:var(--text3)">Actor:</span> ' + esc(l.actorUsername || '<system>') + (l.actorUserId ? ' (#' + l.actorUserId + ')' : '') + '</div>' +
+      '<div><span style="color:var(--text3)">Action:</span> <code>' + esc(l.action) + '</code></div>' +
+      '<div><span style="color:var(--text3)">Target:</span> ' + esc(l.targetType || '—') + (l.targetId ? ' #' + esc(l.targetId) : '') + '</div>' +
+      '<div><span style="color:var(--text3)">IP:</span> <code>' + esc(l.ipAddress || '—') + '</code></div>' +
+      '<div><span style="color:var(--text3)">User-Agent:</span> <span style="font-size:11px">' + esc(l.userAgent || '—') + '</span></div>' +
+      (l.details ? '<div style="margin-top:10px"><span style="color:var(--text3)">Details:</span><pre style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px;margin-top:4px;font-size:11px;overflow-x:auto">' + esc(JSON.stringify(l.details, null, 2)) + '</pre></div>' : '') +
+    '</div>';
+  document.getElementById('auditDetailModal').style.display = 'flex';
+}
+function closeAuditDetail() { document.getElementById('auditDetailModal').style.display = 'none'; }

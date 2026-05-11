@@ -70,6 +70,11 @@ export function initOauth(): void {
         return;
     }
     db.exec(CREATE_TABLES);
+    // Idempotent column additions (safe to run on every boot).
+    const cols = (db.prepare("PRAGMA table_info(oauth_clients)").all() as any[]).map(r => r.name);
+    if (!cols.includes('consent_enabled')) db.exec("ALTER TABLE oauth_clients ADD COLUMN consent_enabled INTEGER NOT NULL DEFAULT 0");
+    if (!cols.includes('consent_title'))   db.exec("ALTER TABLE oauth_clients ADD COLUMN consent_title TEXT");
+    if (!cols.includes('consent_body'))    db.exec("ALTER TABLE oauth_clients ADD COLUMN consent_body TEXT");
     // Cleanup expired codes / refresh tokens / sessions once per hour.
     cleanupExpired();
     setInterval(cleanupExpired, 60 * 60 * 1000);
@@ -95,6 +100,9 @@ export interface OauthClient {
     name: string;
     redirectUris: string[];
     createdAt: string;
+    consentEnabled: boolean;
+    consentTitle: string;
+    consentBody: string;
 }
 
 function randomToken(byteLength: number): string {
@@ -125,9 +133,17 @@ export async function createOauthClient(name: string, redirectUris: string[]): P
     db.prepare('INSERT INTO oauth_clients (client_id, name, secret_hash, redirect_uris) VALUES ($id, $n, $h, $r)')
         .run({ $id: clientId, $n: name.trim(), $h: secretHash, $r: JSON.stringify(redirectUris) });
     return {
-        client: { clientId, name: name.trim(), redirectUris, createdAt: new Date().toISOString() },
+        client: { clientId, name: name.trim(), redirectUris, createdAt: new Date().toISOString(), consentEnabled: false, consentTitle: '', consentBody: '' },
         clientSecret,
     };
+}
+
+export function updateOauthClientConsent(clientId: string, enabled: boolean, title: string, body: string): boolean {
+    const db = getAuthDb();
+    if (!db) return false;
+    const result = db.prepare("UPDATE oauth_clients SET consent_enabled = $e, consent_title = $t, consent_body = $b, updated_at = datetime('now') WHERE client_id = $id")
+        .run({ $e: enabled ? 1 : 0, $t: title || null, $b: body || null, $id: clientId });
+    return result.changes > 0;
 }
 
 function rowToClient(r: any): OauthClient {
@@ -136,6 +152,9 @@ function rowToClient(r: any): OauthClient {
         name: r.name,
         redirectUris: JSON.parse(r.redirect_uris || '[]'),
         createdAt: r.created_at,
+        consentEnabled: !!r.consent_enabled,
+        consentTitle: r.consent_title || '',
+        consentBody: r.consent_body || '',
     };
 }
 

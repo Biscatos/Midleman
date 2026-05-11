@@ -27,6 +27,9 @@ interface StoredProfile {
     loginLogo?: string;
     allowSelfSignedTls?: boolean;
     supabaseMode?: boolean;
+    consentEnabled?: boolean;
+    consentTitle?: string;
+    consentBody?: string;
 }
 
 // Default path — override with DATA_DIR env var for Docker volumes
@@ -78,6 +81,9 @@ function toRuntime(stored: StoredProfile): ProxyProfile {
     if (stored.loginLogo !== undefined) profile.loginLogo = stored.loginLogo;
     if (stored.allowSelfSignedTls !== undefined) profile.allowSelfSignedTls = stored.allowSelfSignedTls;
     if (stored.supabaseMode !== undefined) profile.supabaseMode = stored.supabaseMode;
+    if (stored.consentEnabled !== undefined) profile.consentEnabled = stored.consentEnabled;
+    if (stored.consentTitle !== undefined) profile.consentTitle = stored.consentTitle;
+    if (stored.consentBody !== undefined) profile.consentBody = stored.consentBody;
 
     return profile;
 }
@@ -112,6 +118,9 @@ function toStored(profile: ProxyProfile): StoredProfile {
     if (profile.loginLogo !== undefined) stored.loginLogo = profile.loginLogo;
     if (profile.allowSelfSignedTls !== undefined) stored.allowSelfSignedTls = profile.allowSelfSignedTls;
     if (profile.supabaseMode !== undefined) stored.supabaseMode = profile.supabaseMode;
+    if (profile.consentEnabled !== undefined) stored.consentEnabled = profile.consentEnabled;
+    if (profile.consentTitle !== undefined) stored.consentTitle = profile.consentTitle;
+    if (profile.consentBody !== undefined) stored.consentBody = profile.consentBody;
 
     return stored;
 }
@@ -215,6 +224,11 @@ export function validateProfileInput(input: unknown): string | null {
     if (typeof p.loginTitle === 'string' && p.loginTitle.length > 64) return '"loginTitle" must be 64 characters or fewer';
     if (p.loginLogo !== undefined && typeof p.loginLogo !== 'string') return '"loginLogo" must be a string';
     if (typeof p.loginLogo === 'string' && p.loginLogo.length > 200_000) return '"loginLogo" exceeds maximum size (200KB)';
+    if (p.consentEnabled !== undefined && typeof p.consentEnabled !== 'boolean') return '"consentEnabled" must be a boolean';
+    if (p.consentTitle !== undefined && typeof p.consentTitle !== 'string') return '"consentTitle" must be a string';
+    if (typeof p.consentTitle === 'string' && p.consentTitle.length > 200) return '"consentTitle" must be 200 characters or fewer';
+    if (p.consentBody !== undefined && typeof p.consentBody !== 'string') return '"consentBody" must be a string';
+    if (typeof p.consentBody === 'string' && p.consentBody.length > 20_000) return '"consentBody" must be 20000 characters or fewer';
 
     // Validate URL
     try {

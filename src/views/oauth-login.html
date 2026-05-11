@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sign in to continue — Midleman</title>
+  <title>Sign in</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -13,7 +13,7 @@
       --btn: #0078d4; --btn-hover: #005ea6;
       --err-bg: rgba(220,38,38,0.08); --err-bdr: rgba(220,38,38,0.2); --err-text: #f87171;
       --card-bg: #0e1014; --card-bdr: #1f2128;
-      --client-bg: rgba(0,120,212,0.06); --client-bdr: rgba(0,120,212,0.2);
+      --back-bdr: #27272a; --back-hover: #18181b;
     }
     @media (prefers-color-scheme: light) {
       :root {
@@ -21,7 +21,7 @@
         --input-bg: rgba(0,0,0,0.04); --input-bdr: rgba(0,0,0,0.12); --input-text: #0f1015; --input-ph: #a1a1aa;
         --card-bg: #ffffff; --card-bdr: #e4e4e7;
         --err-bg: rgba(220,38,38,0.06); --err-bdr: rgba(220,38,38,0.2); --err-text: #dc2626;
-        --client-bg: rgba(0,120,212,0.05); --client-bdr: rgba(0,120,212,0.2);
+        --back-bdr: #d4d4d8; --back-hover: #ebebee;
       }
     }
     body {
@@ -36,114 +36,229 @@
     }
     h1 { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
     .sub { font-size: 13px; color: var(--text2); margin-bottom: 24px; }
-    .client {
-      background: var(--client-bg); border: 1px solid var(--client-bdr);
-      border-radius: 8px; padding: 10px 12px; margin-bottom: 20px;
-      font-size: 12.5px; color: var(--text2);
-    }
-    .client strong { color: var(--text); font-weight: 600; }
     label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 6px; margin-top: 14px; }
     input {
       width: 100%; padding: 10px 12px;
       background: var(--input-bg); border: 1px solid var(--input-bdr);
       border-radius: 6px; color: var(--input-text); font-size: 14px; outline: none;
       transition: border-color .15s;
+      font-family: inherit;
     }
     input:focus { border-color: var(--btn); }
     input::placeholder { color: var(--input-ph); }
-    button {
+    .totp-input { text-align: center; font-size: 22px; letter-spacing: 8px; font-weight: 700; }
+    button.primary {
       width: 100%; padding: 11px; margin-top: 20px;
       background: var(--btn); color: #fff; border: none; border-radius: 6px;
       font-size: 14px; font-weight: 500; cursor: pointer; transition: background .15s;
+      font-family: inherit;
     }
-    button:hover:not(:disabled) { background: var(--btn-hover); }
-    button:disabled { opacity: .5; cursor: not-allowed; }
+    button.primary:hover:not(:disabled) { background: var(--btn-hover); }
+    button.primary:disabled { opacity: .5; cursor: not-allowed; }
+    button.back {
+      width: 100%; padding: 9px; margin-top: 8px;
+      background: transparent; color: var(--text2); border: 1px solid var(--back-bdr);
+      border-radius: 6px; font-size: 13px; cursor: pointer; transition: background .15s;
+      font-family: inherit;
+    }
+    button.back:hover { background: var(--back-hover); }
     .err {
       margin-top: 14px; padding: 8px 12px;
       background: var(--err-bg); border: 1px solid var(--err-bdr); border-radius: 6px;
       color: var(--err-text); font-size: 12.5px;
     }
     .hidden { display: none; }
-    .foot { margin-top: 22px; text-align: center; font-size: 11px; color: var(--text2); }
+
+    .consent-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+      display: flex; align-items: center; justify-content: center; padding: 20px;
+      z-index: 1000;
+    }
+    .consent-box {
+      width: 100%; max-width: 520px; max-height: 85vh;
+      background: var(--card-bg); border: 1px solid var(--card-bdr); border-radius: 12px;
+      display: flex; flex-direction: column;
+    }
+    .consent-head { padding: 20px 24px 12px; border-bottom: 1px solid var(--card-bdr); }
+    .consent-head h2 { font-size: 16px; font-weight: 600; color: var(--text); }
+    .consent-body {
+      padding: 16px 24px; overflow-y: auto; flex: 1;
+      font-size: 13px; line-height: 1.6; color: var(--text);
+    }
+    .consent-body p { margin: 0 0 10px; }
+    .consent-body p:last-child { margin-bottom: 0; }
+    .consent-body ul { padding-left: 20px; margin: 0 0 10px; }
+    .consent-body li { margin: 4px 0; }
+    .consent-body a { color: var(--btn); text-decoration: underline; }
+    .consent-body strong { font-weight: 600; }
+    .consent-foot { padding: 14px 24px 18px; border-top: 1px solid var(--card-bdr); }
+    .consent-foot button {
+      width: 100%; padding: 11px;
+      background: var(--btn); color: #fff; border: none; border-radius: 6px;
+      font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit;
+    }
+    .consent-foot button:hover { background: var(--btn-hover); }
   </style>
 </head>
 <body>
+  <!-- Consent modal — only rendered if enabled -->
+  <div id="consentModal" class="consent-overlay hidden" data-enabled="{{CONSENT_ENABLED}}">
+    <div class="consent-box">
+      <div class="consent-head"><h2>{{CONSENT_TITLE}}</h2></div>
+      <div class="consent-body">{{CONSENT_BODY}}</div>
+      <div class="consent-foot"><button type="button" id="consentAccept">Accept and continue</button></div>
+    </div>
+  </div>
+
   <div class="card">
     <h1>Sign in</h1>
-    <p class="sub">Authorize <strong>{{CLIENT_NAME}}</strong> to access your Midleman account.</p>
+    <p class="sub">Enter your credentials to continue.</p>
 
-    <div class="client">
-      <strong>{{CLIENT_NAME}}</strong> wants to access:<br>
-      <span style="opacity:.7">• Your profile (username, email)</span>
-    </div>
-
-    <form id="form" method="POST" action="/oauth/login">
-      <input type="hidden" name="auth_request" value="{{AUTH_REQUEST}}">
+    <!-- Step 1: username + password -->
+    <div id="step1">
       <label for="username">Username or email</label>
-      <input id="username" name="username" type="text" autocomplete="username" required autofocus>
+      <input id="username" type="text" autocomplete="username" required autofocus>
 
       <label for="password">Password</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <input id="password" type="password" autocomplete="current-password" required>
 
-      <div id="totp-wrap" class="hidden">
-        <label for="totp">6-digit code from your authenticator</label>
-        <input id="totp" name="totp" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code">
-      </div>
+      <button id="loginBtn" class="primary" type="button">Sign in & authorize</button>
+      <div id="err1" class="err hidden"></div>
+    </div>
 
-      <button id="submit" type="submit">Sign in & authorize</button>
+    <!-- Step 2: TOTP -->
+    <div id="step2" class="hidden">
+      <label for="totp">6-digit code from your authenticator</label>
+      <input id="totp" type="text" class="totp-input" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code">
 
-      <div id="err" class="err hidden"></div>
-    </form>
+      <button id="totpBtn" class="primary" type="button">Verify & authorize</button>
+      <button id="backBtn" class="back" type="button">Back</button>
+      <div id="err2" class="err hidden"></div>
+    </div>
 
-    <p class="foot">Powered by Midleman</p>
   </div>
 
   <script>
-    const form = document.getElementById('form');
-    const err = document.getElementById('err');
-    const submit = document.getElementById('submit');
-    const totpWrap = document.getElementById('totp-wrap');
+    const AUTH_REQUEST = '{{AUTH_REQUEST}}';
+    let authRequest = AUTH_REQUEST;
+    let challengeToken = '';
 
-    function showError(msg) {
-      err.textContent = msg;
-      err.classList.remove('hidden');
+    const step1 = document.getElementById('step1');
+    const step2 = document.getElementById('step2');
+    const err1 = document.getElementById('err1');
+    const err2 = document.getElementById('err2');
+    const loginBtn = document.getElementById('loginBtn');
+    const totpBtn = document.getElementById('totpBtn');
+    const backBtn = document.getElementById('backBtn');
+    const usernameEl = document.getElementById('username');
+    const passwordEl = document.getElementById('password');
+    const totpEl = document.getElementById('totp');
+
+    function showErr(el, msg) { el.textContent = msg; el.classList.remove('hidden'); }
+    function hideErr(el) { el.classList.add('hidden'); el.textContent = ''; }
+
+    function showStep1() {
+      step2.classList.add('hidden');
+      step1.classList.remove('hidden');
+      hideErr(err2);
+      totpEl.value = '';
+      challengeToken = '';
+      usernameEl.focus();
+    }
+    function showStep2() {
+      step1.classList.add('hidden');
+      step2.classList.remove('hidden');
+      hideErr(err1);
+      totpEl.value = '';
+      totpEl.focus();
     }
 
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      err.classList.add('hidden');
-      submit.disabled = true;
-      submit.textContent = 'Signing in…';
+    async function doLogin() {
+      hideErr(err1);
+      const username = usernameEl.value.trim();
+      const password = passwordEl.value;
+      if (!username || !password) { showErr(err1, 'Username and password are required.'); return; }
 
-      const fd = new FormData(form);
-      const body = Object.fromEntries(fd.entries());
-
+      loginBtn.disabled = true; loginBtn.textContent = 'Signing in…';
       try {
         const res = await fetch('/oauth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify({ auth_request: authRequest, username, password }),
         });
         const data = await res.json().catch(() => ({}));
 
-        if (res.ok && data.redirect) {
+        if (data.auth_request) authRequest = data.auth_request;
+
+        if (res.ok && data.status === 'ok' && data.redirect) {
           window.location.href = data.redirect;
           return;
         }
-        if (data.status === 'totp_required') {
-          totpWrap.classList.remove('hidden');
-          document.getElementById('totp').focus();
-          submit.textContent = 'Verify & authorize';
-          submit.disabled = false;
+        if (res.ok && data.status === 'totp_required') {
+          challengeToken = data.challengeToken;
+          showStep2();
           return;
         }
-        showError(data.error || 'Login failed');
-      } catch (e) {
-        showError('Network error');
+        showErr(err1, data.error || data.error_description || 'Login failed');
+      } catch {
+        showErr(err1, 'Network error');
+      } finally {
+        loginBtn.disabled = false;
+        loginBtn.textContent = 'Sign in & authorize';
       }
-      submit.disabled = false;
-      submit.textContent = 'Sign in & authorize';
-    });
+    }
+
+    async function doTotp() {
+      hideErr(err2);
+      const code = totpEl.value.trim();
+      if (!code || code.length !== 6) { showErr(err2, 'Enter the 6-digit code.'); return; }
+
+      totpBtn.disabled = true; totpBtn.textContent = 'Verifying…';
+      try {
+        const res = await fetch('/oauth/totp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ challengeToken, totpCode: code }),
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && data.status === 'ok' && data.redirect) {
+          window.location.href = data.redirect;
+          return;
+        }
+        if (data.challengeToken) challengeToken = data.challengeToken;
+        showErr(err2, data.error || data.error_description || 'Verification failed');
+      } catch {
+        showErr(err2, 'Network error');
+      } finally {
+        totpBtn.disabled = false;
+        totpBtn.textContent = 'Verify & authorize';
+      }
+    }
+
+    loginBtn.addEventListener('click', doLogin);
+    totpBtn.addEventListener('click', doTotp);
+    backBtn.addEventListener('click', showStep1);
+    passwordEl.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+    usernameEl.addEventListener('keydown', e => { if (e.key === 'Enter') passwordEl.focus(); });
+    totpEl.addEventListener('keydown', e => { if (e.key === 'Enter') doTotp(); });
+
+    (function initConsent() {
+      const modal = document.getElementById('consentModal');
+      if (!modal) return;
+      if (modal.dataset.enabled !== '1') { modal.remove(); return; }
+      modal.classList.remove('hidden');
+      loginBtn.disabled = true;
+      usernameEl.disabled = true;
+      passwordEl.disabled = true;
+      document.getElementById('consentAccept').addEventListener('click', () => {
+        modal.remove();
+        loginBtn.disabled = false;
+        usernameEl.disabled = false;
+        passwordEl.disabled = false;
+        usernameEl.focus();
+      });
+    })();
   </script>
 </body>
 </html>
