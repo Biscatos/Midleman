@@ -197,14 +197,66 @@ function navigate(page) {
   document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
   const pageEl = document.getElementById('page' + page.charAt(0).toUpperCase() + page.slice(1));
   if (pageEl) pageEl.classList.add('active');
-  document.querySelectorAll('.nav-link[data-page]').forEach(n => {
+  document.querySelectorAll('[data-page]').forEach(n => {
     if (n.dataset.page === page) n.classList.add('active');
+    else n.classList.remove('active');
   });
   if (page === 'requests') { rlPage = 1; fetchRequestLogs(); }
   if (page === 'proxyusers') { fetchProxyUsers(); fetchInvites(); }
   if (page === 'oauthclients') { fetchOauthClients(); }
-
+  closeNavMobile();
+  closeNavMore();
 }
+
+function toggleNavMobile() {
+  document.body.classList.toggle('nav-open');
+}
+function closeNavMobile() {
+  document.body.classList.remove('nav-open');
+}
+
+function toggleNavMore(e) {
+  e.stopPropagation();
+  document.getElementById('navMore')?.classList.toggle('open');
+}
+function closeNavMore() {
+  document.getElementById('navMore')?.classList.remove('open');
+}
+document.addEventListener('click', (e) => {
+  const more = document.getElementById('navMore');
+  if (more && more.classList.contains('open') && !more.contains(e.target)) closeNavMore();
+});
+
+// ─── Responsive tables ──────────────────────────────────────────────────────
+// On mobile, tables render as stacked cards. Each <td> needs a data-label
+// matching its column header. We auto-inject those by observing tbody changes.
+function applyResponsiveLabels(table) {
+  if (!table) return;
+  const headers = Array.from(table.querySelectorAll('thead th')).map(th => (th.textContent || '').trim());
+  if (!headers.length) return;
+  table.querySelectorAll('tbody tr').forEach(tr => {
+    const tds = tr.querySelectorAll('td');
+    if (tds.length === 1 && tds[0].hasAttribute('colspan')) return; // empty/loading row
+    tds.forEach((td, i) => {
+      if (headers[i] && !td.hasAttribute('data-label')) {
+        td.setAttribute('data-label', headers[i]);
+      }
+    });
+  });
+}
+
+function initResponsiveTables() {
+  document.querySelectorAll('.card-body table').forEach(table => {
+    table.classList.add('responsive-table');
+    applyResponsiveLabels(table);
+    const tbody = table.querySelector('tbody');
+    if (!tbody) return;
+    new MutationObserver(() => applyResponsiveLabels(table)).observe(tbody, { childList: true, subtree: true });
+  });
+}
+document.addEventListener('DOMContentLoaded', initResponsiveTables);
+// also run after window load in case tables are injected later
+window.addEventListener('load', initResponsiveTables);
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 function hdrs() { return { 'Content-Type': 'application/json' }; }

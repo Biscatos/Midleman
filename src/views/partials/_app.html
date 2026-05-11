@@ -1,12 +1,20 @@
 <div class="app" style="display:none">
   <nav class="navbar">
     <div class="navbar-inner">
+      <button class="nav-toggle" id="navToggle" onclick="toggleNavMobile()" aria-label="Toggle menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="3" y1="6" x2="21" y2="6" />
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <line x1="3" y1="18" x2="21" y2="18" />
+        </svg>
+      </button>
+
       <a class="navbar-brand" href="/dashboard">
         <img src="/logo.png" alt="Midleman">
         <span class="navbar-brand-name"><span>Mid</span>leman</span>
       </a>
 
-      <div class="navbar-nav">
+      <div class="navbar-nav" id="navbarNav">
         <button class="nav-link active" data-page="overview" onclick="navigate('overview')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
             stroke-linejoin="round">
@@ -68,6 +76,23 @@
           OAuth Clients
           <span class="nav-badge" id="navOauthBadge">0</span>
         </button>
+
+        <!-- Overflow "More" — visible only at tablet width (768-1099px) -->
+        <div class="nav-more" id="navMore">
+          <button class="nav-link nav-more-btn" onclick="toggleNavMore(event)" aria-label="More">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="1.5"/>
+              <circle cx="19" cy="12" r="1.5"/>
+              <circle cx="5" cy="12" r="1.5"/>
+            </svg>
+            More
+          </button>
+          <div class="nav-more-menu" id="navMoreMenu">
+            <button class="nav-more-item" data-page="webhooks" onclick="navigate('webhooks')">Webhooks</button>
+            <button class="nav-more-item" data-page="proxyusers" onclick="navigate('proxyusers')">Users</button>
+            <button class="nav-more-item" data-page="oauthclients" onclick="navigate('oauthclients')">OAuth Clients</button>
+          </div>
+        </div>
       </div>
 
       <div class="navbar-right">
@@ -96,6 +121,7 @@
       </div>
     </div>
   </nav>
+  <div class="nav-backdrop" id="navBackdrop" onclick="closeNavMobile()"></div>
 
   <div class="content">
     <!-- ═══ OVERVIEW ═══ -->
