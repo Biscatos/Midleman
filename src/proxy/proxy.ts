@@ -99,7 +99,7 @@ function getProfileMap(profiles: ProxyProfile[]): Map<string, CachedProfile> {
  * Check if a request has a valid proxy user JWT cookie for the given profile.
  * Returns the username if valid, null otherwise.
  */
-function checkProxyLoginAuth(req: Request, profileName: string): string | null {
+function checkProxyLoginAuth(req: Request, profileName: string): { username: string; token: string } | null {
     const cookies = req.headers.get('cookie') || '';
     const m = cookies.match(new RegExp(`(?:^|;\\s*)__midleman_auth_${profileName}=([^;]+)`));
     if (!m) return null;
@@ -107,7 +107,9 @@ function checkProxyLoginAuth(req: Request, profileName: string): string | null {
     const payload = verifyJwt(token);
     if (!payload) return null;
     if (payload.profile !== profileName) return null;
-    return payload.username as string || null;
+    const username = (payload.username as string) || '';
+    if (!username) return null;
+    return { username, token };
 }
 
 /**
@@ -219,6 +221,7 @@ export async function handleProxyRequest(
 
     // ── Auth: login mode (JWT-based user authentication) ──
     const effectiveAuthMode = profile.authMode || (profile.accessKey ? 'accessKey' : 'none');
+    let loginJwtToken: string | null = null;
 
     if (effectiveAuthMode === 'login') {
         // /auth/* routes should not be forwarded to upstream
@@ -226,8 +229,8 @@ export async function handleProxyRequest(
             return jsonResponse(404, { error: 'Not Found' });
         }
 
-        const proxyUser = checkProxyLoginAuth(req, profileName);
-        if (!proxyUser) {
+        const proxyAuth = checkProxyLoginAuth(req, profileName);
+        if (!proxyAuth) {
             if (profile.isWebApp) {
                 const isSubResource = isAssetRequest(remainingPath, req.headers.get('accept'));
                 if (isSubResource) {
@@ -251,6 +254,7 @@ export async function handleProxyRequest(
                 message: 'Authentication required. Use POST /proxy/' + profileName + '/auth/login with username and password.',
             });
         }
+        loginJwtToken = proxyAuth.token;
     }
 
     // ── Auth: access key mode ──
@@ -343,6 +347,13 @@ export async function handleProxyRequest(
     // Set pre-computed auth value (no string concatenation per request)
     if (profile.authHeader && profile.computedAuthValue) {
         forwardHeaders.set(profile.authHeader, profile.computedAuthValue);
+    }
+
+    // Supabase mode: forward the user's Midleman JWT as Authorization: Bearer
+    // (the static apiKey above carries the Supabase anon key for project identification;
+    // this header carries the user identity for RLS).
+    if (profile.supabaseMode && loginJwtToken) {
+        forwardHeaders.set('Authorization', `Bearer ${loginJwtToken}`);
     }
 
     // Capture request body for logging before forwarding
@@ -688,6 +699,7 @@ export async function handleDirectProxy(
 
     // ── Auth: login mode (JWT-based user authentication) ──
     const effectiveAuthMode = profile.authMode || (profile.accessKey ? 'accessKey' : 'none');
+    let loginJwtToken: string | null = null;
 
     if (effectiveAuthMode === 'login') {
         // /auth/* routes are handled by proxy-server.ts — never forward to upstream
@@ -695,8 +707,8 @@ export async function handleDirectProxy(
             return jsonResponse(404, { error: 'Not Found' });
         }
 
-        const proxyUser = checkProxyLoginAuth(req, profileName);
-        if (!proxyUser) {
+        const proxyAuth = checkProxyLoginAuth(req, profileName);
+        if (!proxyAuth) {
             if (profile.isWebApp) {
                 const isSubResource = isAssetRequest(url.pathname, accept);
                 if (isSubResource) {
@@ -720,6 +732,7 @@ export async function handleDirectProxy(
                 message: 'Authentication required. Use POST /auth/login with username and password.',
             });
         }
+        loginJwtToken = proxyAuth.token;
     }
 
     // ── Access key validation ──
@@ -809,6 +822,12 @@ export async function handleDirectProxy(
 
     if (profile.authHeader && computedAuthValue) {
         forwardHeaders.set(profile.authHeader, computedAuthValue);
+    }
+
+    // Supabase mode: forward user's Midleman JWT as Authorization: Bearer
+    // (apikey above identifies the project; Authorization identifies the user for RLS).
+    if (profile.supabaseMode && loginJwtToken) {
+        forwardHeaders.set('Authorization', `Bearer ${loginJwtToken}`);
     }
 
     // ── Capture request body ──

@@ -1,6 +1,6 @@
 import type { ProxyProfile } from '../core/types';
 import { handleDirectProxy } from '../proxy/proxy';
-import { verifyProxyUserCredentials, signJwt, getJwtMaxAge, checkRateLimit, proxyUserHasProfile, createProxyLoginChallenge, consumeProxyLoginChallenge, peekProxyLoginChallenge, generateTotpSecret, verifyTotp, setupProxyUserTotp } from '../auth/auth';
+import { verifyProxyUserCredentials, signJwt, getJwtMaxAge, checkRateLimit, proxyUserHasProfile, createProxyLoginChallenge, consumeProxyLoginChallenge, peekProxyLoginChallenge, generateTotpSecret, verifyTotp, setupProxyUserTotp, userIdToUuid } from '../auth/auth';
 import QRCode from 'qrcode';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -115,7 +115,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
 
                     // If no TOTP required and user hasn't set up TOTP, issue JWT directly
                     if (!require2fa && !totpEnabled) {
-                        const token = signJwt({ sub: cred.user.id, username: cred.user.username, profile: profile.name });
+                        const token = signJwt({ sub: userIdToUuid(cred.user.id), username: cred.user.username, profile: profile.name, midleman_uid: cred.user.id });
                         const maxAge = getJwtMaxAge();
                         return new Response(JSON.stringify({ status: 'ok', username: cred.user.username }), {
                             status: 200,
@@ -173,7 +173,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                     }
 
                     // Issue JWT
-                    const token = signJwt({ sub: challenge.userId, username: challenge.username, profile: profile.name });
+                    const token = signJwt({ sub: userIdToUuid(challenge.userId), username: challenge.username, profile: profile.name, midleman_uid: challenge.userId });
                     const maxAge = getJwtMaxAge();
                     return new Response(JSON.stringify({ status: 'ok', username: challenge.username }), {
                         status: 200,

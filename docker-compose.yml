@@ -8,12 +8,16 @@ services:
     ports:
       - "${PORT:-3000}:3000"            # Admin dashboard (reserved)
       - "4000-4050:4000-4050"           # Auto-assigned proxy/target ports
+      - "${JWKS_PORT:-8443}:8443"       # Public OIDC discovery (jwks.json) — expose via Nginx
     environment:
       - PORT=3000
       - TARGET_URL=${TARGET_URL}
       - AUTH_TOKEN=${AUTH_TOKEN}
       - FORWARD_PATH=${FORWARD_PATH:-true}
       - DATA_DIR=/app/data
+      - JWT_ISSUER=${JWT_ISSUER}
+      - JWKS_PORT=8443
+      - SESSION_MAX_AGE=${SESSION_MAX_AGE:-86400}
       - OTEL_ENABLED=${OTEL_ENABLED:-true}
       - OTEL_ENDPOINT=http://otel-collector:4318
       - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-midleman}
@@ -33,35 +37,6 @@ services:
       retries: 3
       start_period: 5s
 
-
-  # ─── Development Mode (hot reload) ─────────────────────────────────────────
-  bun-forwarder-dev:
-    image: oven/bun:1
-    container_name: midleman-dev
-    working_dir: /app
-    volumes:
-      - ./src:/app/src
-      - ./package.json:/app/package.json
-      - ./tsconfig.json:/app/tsconfig.json
-      - midleman-data:/app/data
-      - ./.env:/app/.env:ro
-    ports:
-      - "3000:3000"
-      - "4000-4050:4000-4050"
-    environment:
-      - PORT=3000
-      - TARGET_URL=${TARGET_URL}
-      - AUTH_TOKEN=${AUTH_TOKEN}
-      - FORWARD_PATH=${FORWARD_PATH:-true}
-      - DATA_DIR=/app/data
-      - OTEL_ENABLED=${OTEL_ENABLED:-false}
-      - OTEL_ENDPOINT=${OTEL_ENDPOINT:-http://otel-collector:4318}
-      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-midleman}
-      - OTEL_METRICS_INTERVAL=${OTEL_METRICS_INTERVAL:-15000}
-      - PORT_RANGE_START=${PORT_RANGE_START:-4000}
-    command: bun run --watch src/index.ts
-    profiles:
-      - dev
 
 volumes:
   midleman-data:

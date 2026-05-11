@@ -13,7 +13,7 @@ import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken } from './auth/auth';
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken } from './auth/auth';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
 import { resolve } from 'path';
@@ -52,8 +52,8 @@ initRequestLog(config.requestLog);
 // Initialize auth
 initAuth(config.requestLog.dataDir, config.auth.sessionMaxAge);
 
-// Initialize JWT for proxy user authentication
-initJwt(process.env.JWT_SECRET, config.auth.sessionMaxAge);
+// Initialize JWT (RS256) for proxy user auth + Supabase third-party auth
+initJwt(config.requestLog.dataDir, process.env.JWT_ISSUER || '', config.auth.sessionMaxAge);
 
 // Load port assignments from disk
 loadPortAssignments();
@@ -183,6 +183,45 @@ for (const tcpUdpProfile of config.tcpUdpProfiles) {
     } catch (err) {
         console.error(`❌ Failed to start TCP/UDP proxy "${tcpUdpProfile.name}":`, err instanceof Error ? err.message : err);
     }
+}
+
+// ─── OIDC discovery server (public, dedicated port) ─────────────────────────
+// Exposes ONLY /.well-known/jwks.json and /.well-known/openid-configuration so
+// you can publish this single port via Nginx/DNS while keeping the rest of
+// Midleman private. Configured via JWKS_PORT env (skip if unset).
+
+const jwksPortRaw = process.env.JWKS_PORT;
+const jwksServer = jwksPortRaw ? Bun.serve({
+    port: parseInt(jwksPortRaw, 10),
+    idleTimeout: 0,
+    fetch(req: Request): Response {
+        const path = new URL(req.url).pathname;
+        if (path === '/.well-known/jwks.json') {
+            return new Response(JSON.stringify(getJwks()), {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Cache-Control': 'public, max-age=600',
+                    'Access-Control-Allow-Origin': '*',
+                },
+            });
+        }
+        if (path === '/.well-known/openid-configuration') {
+            return new Response(JSON.stringify(getOidcDiscovery()), {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Cache-Control': 'public, max-age=600',
+                    'Access-Control-Allow-Origin': '*',
+                },
+            });
+        }
+        return new Response('Not Found', { status: 404 });
+    },
+}) : null;
+
+if (jwksServer) {
+    console.log(`🔓 OIDC discovery server: http://localhost:${jwksServer.port}/.well-known/jwks.json`);
+} else {
+    console.log('ℹ️  JWKS_PORT not set — OIDC discovery server disabled (Supabase third-party auth requires it).');
 }
 
 // ─── Main HTTP server ───────────────────────────────────────────────────────
@@ -1021,6 +1060,7 @@ const server = Bun.serve({
                     if (typeof input.loginTitle === 'string' && input.loginTitle) profile.loginTitle = input.loginTitle;
                     if (typeof input.loginLogo === 'string' && input.loginLogo) profile.loginLogo = input.loginLogo;
                     if (typeof input.allowSelfSignedTls === 'boolean') profile.allowSelfSignedTls = input.allowSelfSignedTls;
+                    if (typeof input.supabaseMode === 'boolean') profile.supabaseMode = input.supabaseMode;
                     if (input.blockedExtensions) {
                         profile.blockedExtensions = new Set(
                             (input.blockedExtensions as string[]).map(e => e.trim().toLowerCase().replace(/^\.?/, '.'))
@@ -1430,6 +1470,7 @@ const shutdown = async (signal: string) => {
     shutdownAuth();
 
     server.stop();
+    jwksServer?.stop();
     console.log('👋 Server stopped.');
     process.exit(0);
 };

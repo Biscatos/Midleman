@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite';
-import { createHmac } from 'crypto';
+import { createHash, createHmac, createPrivateKey, createPublicKey, createSign, createVerify, generateKeyPairSync, type KeyObject } from 'crypto';
 import { resolve } from 'path';
-import { mkdirSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import type { AuthUser, ProxyUser } from '../core/types';
 
 // ─── Database ────────────────────────────────────────────────────────────────
@@ -508,25 +508,19 @@ setInterval(() => {
     }
 }, 60 * 1000);
 
-// ─── JWT (HS256) for Proxy User Auth ────────────────────────────────────────
+// ─── JWT (RS256) for Proxy User Auth + Supabase Third-Party Auth ─────────────
+// Asymmetric signing so external verifiers (Supabase) can validate via JWKS
+// without sharing the private key.
 
-let jwtSecret: string = '';
+let privateKey: KeyObject | null = null;
+let publicKey: KeyObject | null = null;
+let publicJwk: { kty: string; n: string; e: string; alg: string; use: string; kid: string } | null = null;
+let jwtIssuer: string = '';
 let jwtMaxAge: number = 86400; // 24h default
 
-export function initJwt(secret?: string, maxAge?: number): void {
-    if (!secret) {
-        console.warn('⚠️  JWT_SECRET not set — generating a random secret. All proxy sessions will be invalidated on restart. Set JWT_SECRET env var for persistence.');
-        jwtSecret = base32Encode(crypto.getRandomValues(new Uint8Array(32)));
-    } else {
-        jwtSecret = secret;
-    }
-    if (maxAge) jwtMaxAge = maxAge;
-}
-
-function base64UrlEncode(data: Uint8Array | string): string {
-    const str = typeof data === 'string' ? data : Buffer.from(data).toString('base64');
-    return (typeof data === 'string' ? Buffer.from(data).toString('base64') : str)
-        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+function base64UrlEncode(data: Uint8Array | Buffer | string): string {
+    const buf = typeof data === 'string' ? Buffer.from(data) : Buffer.from(data);
+    return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function base64UrlDecode(str: string): string {
@@ -534,27 +528,127 @@ function base64UrlDecode(str: string): string {
     return Buffer.from(padded.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8');
 }
 
+/** RFC 7638 JWK thumbprint — canonical JSON, SHA-256, base64url. */
+function computeKid(n: string, e: string): string {
+    const canonical = `{"e":"${e}","kty":"RSA","n":"${n}"}`;
+    return base64UrlEncode(createHash('sha256').update(canonical).digest());
+}
+
+/** Convert a public KeyObject (RSA) into a JWK for the JWKS endpoint. */
+function publicKeyToJwk(pub: KeyObject): typeof publicJwk {
+    const jwk = pub.export({ format: 'jwk' }) as { n: string; e: string; kty: string };
+    const kid = computeKid(jwk.n, jwk.e);
+    return { kty: 'RSA', n: jwk.n, e: jwk.e, alg: 'RS256', use: 'sig', kid };
+}
+
+/** Load existing RSA key from DATA_DIR/jwt-key.pem or generate a new one. */
+function loadOrCreateRsaKey(dataDir: string): { priv: KeyObject; pub: KeyObject } {
+    const keyPath = resolve(dataDir, 'jwt-key.pem');
+    mkdirSync(dataDir, { recursive: true });
+
+    if (existsSync(keyPath)) {
+        const pem = readFileSync(keyPath, 'utf-8');
+        const priv = createPrivateKey(pem);
+        const pub = createPublicKey(priv);
+        return { priv, pub };
+    }
+
+    console.log('🔑 Generating new RSA-2048 key pair for JWT signing → ' + keyPath);
+    const { privateKey: priv, publicKey: pub } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const pem = priv.export({ type: 'pkcs8', format: 'pem' }) as string;
+    writeFileSync(keyPath, pem, { mode: 0o600 });
+    return { priv, pub };
+}
+
+export function initJwt(dataDir: string, issuer: string, maxAge?: number): void {
+    if (!issuer) {
+        console.error('❌ JWT_ISSUER env var is required (e.g. https://midleman.example.com).');
+        console.error('   This is the public URL where /.well-known/jwks.json will be served.');
+        process.exit(1);
+    }
+    jwtIssuer = issuer.replace(/\/+$/, '');
+    if (maxAge) jwtMaxAge = maxAge;
+
+    const { priv, pub } = loadOrCreateRsaKey(dataDir);
+    privateKey = priv;
+    publicKey = pub;
+    publicJwk = publicKeyToJwk(pub);
+    console.log(`🔐 JWT: RS256, issuer=${jwtIssuer}, kid=${publicJwk!.kid}`);
+}
+
+// ─── UUID v5 (RFC 4122) — deterministic UUIDs for `sub` claim ───────────────
+
+/** Namespace UUID is itself a UUID v5 derived from a fixed seed + the issuer,
+ *  ensuring two Midleman deployments don't accidentally produce the same UUIDs. */
+let subNamespaceBytes: Buffer | null = null;
+
+function uuidV5Bytes(namespace: Buffer, name: string): Buffer {
+    const hash = createHash('sha1').update(namespace).update(name, 'utf-8').digest();
+    const bytes = Buffer.from(hash.subarray(0, 16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x50; // version 5
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 variant
+    return bytes;
+}
+
+function bytesToUuid(b: Buffer): string {
+    const h = b.toString('hex');
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
+
+/** Convert an internal user id to a deterministic UUID v5 scoped to this issuer. */
+export function userIdToUuid(userId: number | string): string {
+    if (!subNamespaceBytes) {
+        // Seed namespace = uuid v5 of "midleman-jwt-sub" under the standard DNS namespace,
+        // then further scoped by the issuer URL to isolate deployments.
+        const DNS_NS = Buffer.from('6ba7b8109dad11d180b400c04fd430c8', 'hex');
+        const seed = uuidV5Bytes(DNS_NS, 'midleman-jwt-sub');
+        subNamespaceBytes = uuidV5Bytes(seed, jwtIssuer);
+    }
+    return bytesToUuid(uuidV5Bytes(subNamespaceBytes, String(userId)));
+}
+
+// ─── Sign / Verify ──────────────────────────────────────────────────────────
+
 export function signJwt(payload: Record<string, unknown>): string {
-    const header = base64UrlEncode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-    const exp = Math.floor(Date.now() / 1000) + jwtMaxAge;
-    const body = base64UrlEncode(JSON.stringify({ ...payload, exp, iat: Math.floor(Date.now() / 1000) }));
-    const signature = base64UrlEncode(
-        createHmac('sha256', jwtSecret).update(`${header}.${body}`).digest()
-    );
+    if (!privateKey || !publicJwk) throw new Error('JWT not initialized — call initJwt() first');
+    const header = base64UrlEncode(JSON.stringify({ alg: 'RS256', typ: 'JWT', kid: publicJwk.kid }));
+    const iat = Math.floor(Date.now() / 1000);
+    const exp = iat + jwtMaxAge;
+    // Standard claims (iss/aud/role) injected by default; caller can override.
+    const body = base64UrlEncode(JSON.stringify({
+        iss: jwtIssuer,
+        aud: 'authenticated',
+        role: 'authenticated',
+        ...payload,
+        iat,
+        exp,
+    }));
+    const signer = createSign('RSA-SHA256');
+    signer.update(`${header}.${body}`);
+    const signature = base64UrlEncode(signer.sign(privateKey));
     return `${header}.${body}.${signature}`;
 }
 
 export function verifyJwt(token: string): Record<string, unknown> | null {
+    if (!publicKey) return null;
     try {
         const parts = token.split('.');
         if (parts.length !== 3) return null;
         const [header, body, signature] = parts;
-        const expectedSig = base64UrlEncode(
-            createHmac('sha256', jwtSecret).update(`${header}.${body}`).digest()
-        );
-        if (signature !== expectedSig) return null;
+
+        // Decode header to confirm alg — refuse anything other than RS256
+        // (prevents alg=none / alg=HS256 confusion attacks).
+        const headerJson = JSON.parse(base64UrlDecode(header));
+        if (headerJson.alg !== 'RS256') return null;
+
+        const verifier = createVerify('RSA-SHA256');
+        verifier.update(`${header}.${body}`);
+        const sigBuf = Buffer.from(signature.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - signature.length % 4) % 4), 'base64');
+        if (!verifier.verify(publicKey, sigBuf)) return null;
+
         const payload = JSON.parse(base64UrlDecode(body));
         if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+        if (payload.iss && payload.iss !== jwtIssuer) return null;
         return payload;
     } catch {
         return null;
@@ -563,6 +657,27 @@ export function verifyJwt(token: string): Record<string, unknown> | null {
 
 export function getJwtMaxAge(): number {
     return jwtMaxAge;
+}
+
+export function getJwtIssuer(): string {
+    return jwtIssuer;
+}
+
+/** Returns the JWKS document for /.well-known/jwks.json */
+export function getJwks(): { keys: object[] } {
+    if (!publicJwk) return { keys: [] };
+    return { keys: [publicJwk] };
+}
+
+/** Returns minimal OIDC discovery doc — enough for Supabase third-party auth. */
+export function getOidcDiscovery(): object {
+    return {
+        issuer: jwtIssuer,
+        jwks_uri: `${jwtIssuer}/.well-known/jwks.json`,
+        id_token_signing_alg_values_supported: ['RS256'],
+        response_types_supported: ['id_token'],
+        subject_types_supported: ['public'],
+    };
 }
 
 // ─── Cookie Helpers ──────────────────────────────────────────────────────────

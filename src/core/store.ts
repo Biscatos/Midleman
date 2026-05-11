@@ -26,6 +26,7 @@ interface StoredProfile {
     loginTitle?: string;
     loginLogo?: string;
     allowSelfSignedTls?: boolean;
+    supabaseMode?: boolean;
 }
 
 // Default path — override with DATA_DIR env var for Docker volumes
@@ -76,6 +77,7 @@ function toRuntime(stored: StoredProfile): ProxyProfile {
     if (stored.loginTitle !== undefined) profile.loginTitle = stored.loginTitle;
     if (stored.loginLogo !== undefined) profile.loginLogo = stored.loginLogo;
     if (stored.allowSelfSignedTls !== undefined) profile.allowSelfSignedTls = stored.allowSelfSignedTls;
+    if (stored.supabaseMode !== undefined) profile.supabaseMode = stored.supabaseMode;
 
     return profile;
 }
@@ -109,6 +111,7 @@ function toStored(profile: ProxyProfile): StoredProfile {
     if (profile.loginTitle !== undefined) stored.loginTitle = profile.loginTitle;
     if (profile.loginLogo !== undefined) stored.loginLogo = profile.loginLogo;
     if (profile.allowSelfSignedTls !== undefined) stored.allowSelfSignedTls = profile.allowSelfSignedTls;
+    if (profile.supabaseMode !== undefined) stored.supabaseMode = profile.supabaseMode;
 
     return stored;
 }

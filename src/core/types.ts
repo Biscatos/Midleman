@@ -23,6 +23,7 @@ export interface ProxyProfile {
   loginTitle?: string;    // Custom brand title shown on the proxy login page (login mode only)
   loginLogo?: string;     // Custom logo URL shown on the proxy login page (login mode only)
   allowSelfSignedTls?: boolean; // If true, skip TLS certificate validation for this upstream (for internal services)
+  supabaseMode?: boolean; // If true (with authMode='login'): keeps the static apiKey header (Supabase anon key) AND adds Authorization: Bearer <userJwt> from the login cookie, so Supabase RLS sees the authenticated user.
 }
 
 
