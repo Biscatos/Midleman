@@ -126,6 +126,11 @@ export function shutdownAuth(): void {
     if (db) { db.close(); db = null; }
 }
 
+/** Returns the shared SQLite handle (used by oauth.ts). Null until initAuth() runs. */
+export function getAuthDb(): Database | null {
+    return db;
+}
+
 // ─── User Management ─────────────────────────────────────────────────────────
 
 export function hasUsers(): boolean {
@@ -609,12 +614,17 @@ export function userIdToUuid(userId: number | string): string {
 
 // ─── Sign / Verify ──────────────────────────────────────────────────────────
 
-export function signJwt(payload: Record<string, unknown>): string {
+export interface SignJwtOptions {
+    ttlSeconds?: number; // override default TTL for this token
+}
+
+export function signJwt(payload: Record<string, unknown>, opts?: SignJwtOptions): string {
     if (!privateKey || !publicJwk) throw new Error('JWT not initialized — call initJwt() first');
     const header = base64UrlEncode(JSON.stringify({ alg: 'RS256', typ: 'JWT', kid: publicJwk.kid }));
     const iat = Math.floor(Date.now() / 1000);
-    const exp = iat + jwtMaxAge;
-    // Standard claims (iss/aud/role) injected by default; caller can override.
+    const ttl = opts?.ttlSeconds ?? jwtMaxAge;
+    const exp = iat + ttl;
+    // Defaults (iss/aud/role) — caller's payload overrides via spread order.
     const body = base64UrlEncode(JSON.stringify({
         iss: jwtIssuer,
         aud: 'authenticated',
@@ -669,14 +679,23 @@ export function getJwks(): { keys: object[] } {
     return { keys: [publicJwk] };
 }
 
-/** Returns minimal OIDC discovery doc — enough for Supabase third-party auth. */
+/** OIDC discovery doc — Supabase reads this to find the OAuth endpoints. */
 export function getOidcDiscovery(): object {
     return {
         issuer: jwtIssuer,
         jwks_uri: `${jwtIssuer}/.well-known/jwks.json`,
-        id_token_signing_alg_values_supported: ['RS256'],
-        response_types_supported: ['id_token'],
+        authorization_endpoint: `${jwtIssuer}/oauth/authorize`,
+        token_endpoint: `${jwtIssuer}/oauth/token`,
+        userinfo_endpoint: `${jwtIssuer}/oauth/userinfo`,
+        end_session_endpoint: `${jwtIssuer}/oauth/logout`,
+        scopes_supported: ['openid', 'profile', 'email', 'offline_access'],
+        response_types_supported: ['code'],
+        grant_types_supported: ['authorization_code', 'refresh_token'],
         subject_types_supported: ['public'],
+        id_token_signing_alg_values_supported: ['RS256'],
+        token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
+        code_challenge_methods_supported: ['S256'],
+        claims_supported: ['sub', 'iss', 'aud', 'exp', 'iat', 'preferred_username', 'email', 'name', 'midleman_uid'],
     };
 }
 

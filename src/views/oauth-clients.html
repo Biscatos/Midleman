@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OAuth Clients — Midleman</title>
+  <link rel="icon" href="/logo.png">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #080a0f; --text: #fafafa; --text2: #71717a; --text3: #52525b;
+      --card-bg: #0e1014; --card-bdr: #1f2128;
+      --input-bg: rgba(255,255,255,0.04); --input-bdr: rgba(255,255,255,0.09);
+      --btn: #0078d4; --btn-hover: #005ea6;
+      --danger: #dc2626; --danger-hover: #b91c1c;
+      --ok-bg: rgba(34,197,94,0.08); --ok-bdr: rgba(34,197,94,0.2); --ok-text: #4ade80;
+      --err-bg: rgba(220,38,38,0.08); --err-bdr: rgba(220,38,38,0.2); --err-text: #f87171;
+      --secret-bg: #18181b; --secret-bdr: #27272a;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg); color: var(--text);
+      padding: 40px 24px; min-height: 100vh;
+    }
+    .wrap { max-width: 920px; margin: 0 auto; }
+    h1 { font-size: 22px; margin-bottom: 4px; }
+    .sub { color: var(--text2); font-size: 13px; margin-bottom: 32px; }
+    .card {
+      background: var(--card-bg); border: 1px solid var(--card-bdr); border-radius: 10px;
+      padding: 20px; margin-bottom: 20px;
+    }
+    .card h2 { font-size: 14px; font-weight: 600; margin-bottom: 14px; }
+    label { display: block; font-size: 11.5px; color: var(--text2); margin: 12px 0 5px; text-transform: uppercase; letter-spacing: .05em; }
+    input, textarea {
+      width: 100%; padding: 9px 11px; background: var(--input-bg); border: 1px solid var(--input-bdr);
+      border-radius: 6px; color: var(--text); font-size: 13px; font-family: inherit; outline: none;
+    }
+    input:focus, textarea:focus { border-color: var(--btn); }
+    textarea { resize: vertical; min-height: 70px; font-family: 'SF Mono', ui-monospace, monospace; font-size: 12px; }
+    button {
+      padding: 9px 16px; background: var(--btn); color: #fff; border: none; border-radius: 6px;
+      font-size: 13px; font-weight: 500; cursor: pointer; margin-top: 14px;
+    }
+    button:hover { background: var(--btn-hover); }
+    button.danger { background: transparent; color: var(--err-text); border: 1px solid var(--err-bdr); padding: 4px 10px; font-size: 11.5px; margin: 0; }
+    button.danger:hover { background: var(--err-bg); }
+    .row { display: flex; gap: 12px; align-items: center; padding: 12px; border: 1px solid var(--card-bdr); border-radius: 8px; margin-bottom: 8px; font-size: 12.5px; }
+    .row .meta { flex: 1; min-width: 0; }
+    .row .name { font-weight: 500; margin-bottom: 3px; }
+    .row .id { color: var(--text2); font-family: 'SF Mono', ui-monospace, monospace; font-size: 11px; word-break: break-all; }
+    .row .uris { color: var(--text3); font-size: 11px; margin-top: 4px; }
+    .empty { color: var(--text2); font-size: 13px; padding: 30px 0; text-align: center; }
+    .alert-ok { background: var(--ok-bg); border: 1px solid var(--ok-bdr); color: var(--ok-text); padding: 10px 14px; border-radius: 6px; font-size: 12.5px; margin-bottom: 16px; }
+    .alert-err { background: var(--err-bg); border: 1px solid var(--err-bdr); color: var(--err-text); padding: 10px 14px; border-radius: 6px; font-size: 12.5px; margin-bottom: 16px; }
+    .secret-box { background: var(--secret-bg); border: 1px solid var(--secret-bdr); border-radius: 6px; padding: 12px; margin-top: 12px; font-family: 'SF Mono', ui-monospace, monospace; font-size: 11.5px; word-break: break-all; }
+    .secret-box .lbl { color: var(--text2); font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; font-family: inherit; }
+    .secret-box .val { color: var(--text); user-select: all; cursor: text; }
+    .warn { color: var(--err-text); font-size: 11.5px; margin-top: 10px; }
+    .hint { font-size: 11.5px; color: var(--text3); margin-top: 4px; }
+    a { color: var(--btn); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>OAuth Clients</h1>
+    <p class="sub">Applications that can sign users in through Midleman via OAuth2 / OIDC.</p>
+
+    <div id="alerts"></div>
+
+    <div class="card">
+      <h2>Register a new client</h2>
+      <form id="form">
+        <label for="name">Client name</label>
+        <input id="name" name="name" type="text" placeholder="e.g. Supabase — production" required>
+
+        <label for="uris">Redirect URIs (one per line)</label>
+        <textarea id="uris" name="uris" placeholder="https://xxxx.supabase.co/auth/v1/callback" required></textarea>
+        <p class="hint">Must be HTTPS (or http://localhost for dev). Exact match — no wildcards.</p>
+
+        <button type="submit">Create client</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Registered clients</h2>
+      <div id="list"><div class="empty">Loading…</div></div>
+    </div>
+  </div>
+
+  <script>
+    const alerts = document.getElementById('alerts');
+    const list = document.getElementById('list');
+    const form = document.getElementById('form');
+
+    function showOk(msg, secret) {
+      alerts.innerHTML = `<div class="alert-ok">${msg}${secret ? `
+        <div class="secret-box">
+          <div class="lbl">client_id</div><div class="val">${secret.id}</div>
+          <div class="lbl" style="margin-top:10px">client_secret</div><div class="val">${secret.secret}</div>
+          <div class="warn">⚠ Save this secret now — it cannot be retrieved again.</div>
+        </div>` : ''}</div>`;
+    }
+    function showErr(msg) {
+      alerts.innerHTML = `<div class="alert-err">${msg}</div>`;
+    }
+
+    async function refresh() {
+      const r = await fetch('/admin/oauth-clients', { credentials: 'include' });
+      if (!r.ok) { list.innerHTML = `<div class="empty">Failed to load clients (HTTP ${r.status})</div>`; return; }
+      const { clients } = await r.json();
+      if (!clients.length) { list.innerHTML = '<div class="empty">No clients registered yet.</div>'; return; }
+      list.innerHTML = clients.map(c => `
+        <div class="row">
+          <div class="meta">
+            <div class="name">${escape(c.name)}</div>
+            <div class="id">${escape(c.clientId)}</div>
+            <div class="uris">${c.redirectUris.map(escape).join(' · ')}</div>
+          </div>
+          <button class="danger" data-id="${escape(c.clientId)}">Delete</button>
+        </div>
+      `).join('');
+      list.querySelectorAll('button.danger').forEach(b => b.addEventListener('click', () => del(b.dataset.id)));
+    }
+
+    function escape(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+
+    async function del(id) {
+      if (!confirm(`Delete client ${id}? Existing tokens will be revoked.`)) return;
+      const r = await fetch('/admin/oauth-clients/' + encodeURIComponent(id), { method: 'DELETE', credentials: 'include' });
+      if (r.ok) { alerts.innerHTML = ''; refresh(); }
+      else showErr('Failed to delete');
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      alerts.innerHTML = '';
+      const name = document.getElementById('name').value.trim();
+      const redirectUris = document.getElementById('uris').value.split('\n').map(s => s.trim()).filter(Boolean);
+      const r = await fetch('/admin/oauth-clients', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, redirectUris }),
+      });
+      const data = await r.json();
+      if (!r.ok) { showErr(data.error || 'Failed to create client'); return; }
+      showOk(`Client <strong>${escape(data.client.name)}</strong> created.`,
+        { id: data.client.clientId, secret: data.clientSecret });
+      form.reset();
+      refresh();
+    });
+
+    refresh();
+  </script>
+</body>
+</html>

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign in to continue — Midleman</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #080a0f; --text: #fafafa; --text2: #71717a;
+      --input-bg: rgba(255,255,255,0.04); --input-bdr: rgba(255,255,255,0.09);
+      --input-text: #d4d4d8; --input-ph: #3f3f46;
+      --btn: #0078d4; --btn-hover: #005ea6;
+      --err-bg: rgba(220,38,38,0.08); --err-bdr: rgba(220,38,38,0.2); --err-text: #f87171;
+      --card-bg: #0e1014; --card-bdr: #1f2128;
+      --client-bg: rgba(0,120,212,0.06); --client-bdr: rgba(0,120,212,0.2);
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f4f5f7; --text: #0f1015; --text2: #52525b;
+        --input-bg: rgba(0,0,0,0.04); --input-bdr: rgba(0,0,0,0.12); --input-text: #0f1015; --input-ph: #a1a1aa;
+        --card-bg: #ffffff; --card-bdr: #e4e4e7;
+        --err-bg: rgba(220,38,38,0.06); --err-bdr: rgba(220,38,38,0.2); --err-text: #dc2626;
+        --client-bg: rgba(0,120,212,0.05); --client-bdr: rgba(0,120,212,0.2);
+      }
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg); color: var(--text);
+      min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
+    }
+    .card {
+      width: 100%; max-width: 380px;
+      background: var(--card-bg); border: 1px solid var(--card-bdr); border-radius: 12px;
+      padding: 32px 28px;
+    }
+    h1 { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+    .sub { font-size: 13px; color: var(--text2); margin-bottom: 24px; }
+    .client {
+      background: var(--client-bg); border: 1px solid var(--client-bdr);
+      border-radius: 8px; padding: 10px 12px; margin-bottom: 20px;
+      font-size: 12.5px; color: var(--text2);
+    }
+    .client strong { color: var(--text); font-weight: 600; }
+    label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 6px; margin-top: 14px; }
+    input {
+      width: 100%; padding: 10px 12px;
+      background: var(--input-bg); border: 1px solid var(--input-bdr);
+      border-radius: 6px; color: var(--input-text); font-size: 14px; outline: none;
+      transition: border-color .15s;
+    }
+    input:focus { border-color: var(--btn); }
+    input::placeholder { color: var(--input-ph); }
+    button {
+      width: 100%; padding: 11px; margin-top: 20px;
+      background: var(--btn); color: #fff; border: none; border-radius: 6px;
+      font-size: 14px; font-weight: 500; cursor: pointer; transition: background .15s;
+    }
+    button:hover:not(:disabled) { background: var(--btn-hover); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .err {
+      margin-top: 14px; padding: 8px 12px;
+      background: var(--err-bg); border: 1px solid var(--err-bdr); border-radius: 6px;
+      color: var(--err-text); font-size: 12.5px;
+    }
+    .hidden { display: none; }
+    .foot { margin-top: 22px; text-align: center; font-size: 11px; color: var(--text2); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Sign in</h1>
+    <p class="sub">Authorize <strong>{{CLIENT_NAME}}</strong> to access your Midleman account.</p>
+
+    <div class="client">
+      <strong>{{CLIENT_NAME}}</strong> wants to access:<br>
+      <span style="opacity:.7">• Your profile (username, email)</span>
+    </div>
+
+    <form id="form" method="POST" action="/oauth/login">
+      <input type="hidden" name="auth_request" value="{{AUTH_REQUEST}}">
+      <label for="username">Username or email</label>
+      <input id="username" name="username" type="text" autocomplete="username" required autofocus>
+
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+
+      <div id="totp-wrap" class="hidden">
+        <label for="totp">6-digit code from your authenticator</label>
+        <input id="totp" name="totp" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code">
+      </div>
+
+      <button id="submit" type="submit">Sign in & authorize</button>
+
+      <div id="err" class="err hidden"></div>
+    </form>
+
+    <p class="foot">Powered by Midleman</p>
+  </div>
+
+  <script>
+    const form = document.getElementById('form');
+    const err = document.getElementById('err');
+    const submit = document.getElementById('submit');
+    const totpWrap = document.getElementById('totp-wrap');
+
+    function showError(msg) {
+      err.textContent = msg;
+      err.classList.remove('hidden');
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.classList.add('hidden');
+      submit.disabled = true;
+      submit.textContent = 'Signing in…';
+
+      const fd = new FormData(form);
+      const body = Object.fromEntries(fd.entries());
+
+      try {
+        const res = await fetch('/oauth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && data.redirect) {
+          window.location.href = data.redirect;
+          return;
+        }
+        if (data.status === 'totp_required') {
+          totpWrap.classList.remove('hidden');
+          document.getElementById('totp').focus();
+          submit.textContent = 'Verify & authorize';
+          submit.disabled = false;
+          return;
+        }
+        showError(data.error || 'Login failed');
+      } catch (e) {
+        showError('Network error');
+      }
+      submit.disabled = false;
+      submit.textContent = 'Sign in & authorize';
+    });
+  </script>
+</body>
+</html>

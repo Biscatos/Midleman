@@ -14,6 +14,8 @@ import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook,
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
 import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken } from './auth/auth';
+import { initOauth, createOauthClient, listOauthClients, deleteOauthClient } from './auth/oauth';
+import { handleAuthorize, handleOauthLogin, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
 import { resolve } from 'path';
@@ -54,6 +56,12 @@ initAuth(config.requestLog.dataDir, config.auth.sessionMaxAge);
 
 // Initialize JWT (RS256) for proxy user auth + Supabase third-party auth
 initJwt(config.requestLog.dataDir, process.env.JWT_ISSUER || '', config.auth.sessionMaxAge);
+
+// Initialize OAuth2/OIDC storage + load login template
+initOauth();
+try {
+    setOauthLoginTemplate(readFileSync(resolve(import.meta.dir, 'views/oauth-login.html'), 'utf-8'));
+} catch { console.warn('⚠️  oauth-login.html not found in src/views/'); }
 
 // Load port assignments from disk
 loadPortAssignments();
@@ -194,8 +202,11 @@ const jwksPortRaw = process.env.JWKS_PORT;
 const jwksServer = jwksPortRaw ? Bun.serve({
     port: parseInt(jwksPortRaw, 10),
     idleTimeout: 0,
-    fetch(req: Request): Response {
-        const path = new URL(req.url).pathname;
+    async fetch(req: Request): Promise<Response> {
+        const url = new URL(req.url);
+        const path = url.pathname;
+
+        // ── OIDC discovery (public, cacheable) ──
         if (path === '/.well-known/jwks.json') {
             return new Response(JSON.stringify(getJwks()), {
                 headers: {
@@ -214,6 +225,14 @@ const jwksServer = jwksPortRaw ? Bun.serve({
                 },
             });
         }
+
+        // ── OAuth2 / OIDC endpoints ──
+        if (path === '/oauth/authorize' && req.method === 'GET') return handleAuthorize(req, url);
+        if (path === '/oauth/login' && req.method === 'POST') return handleOauthLogin(req);
+        if (path === '/oauth/token' && req.method === 'POST') return handleToken(req);
+        if (path === '/oauth/userinfo') return handleUserinfo(req);
+        if (path === '/oauth/logout' && req.method === 'POST') return handleOauthLogout(req);
+
         return new Response('Not Found', { status: 404 });
     },
 }) : null;
@@ -1185,6 +1204,45 @@ const server = Bun.serve({
                     const deleted = deleteProxyUser(userId);
                     if (!deleted) return jsonRes(404, { error: 'User not found' });
                     console.log(`🗑️  Proxy user #${userId} deleted`);
+                    return jsonRes(200, { status: 'deleted' });
+                }
+
+                // ── OAuth clients ────────────────────────────────────────────────────────
+
+                if (url.pathname === '/admin/oauth-clients/ui' && req.method === 'GET') {
+                    const html = readFileSync(resolve(import.meta.dir, 'views/oauth-clients.html'), 'utf-8');
+                    return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+                }
+
+                if (url.pathname === '/admin/oauth-clients' && req.method === 'GET') {
+                    return jsonRes(200, { clients: listOauthClients() });
+                }
+
+                if (url.pathname === '/admin/oauth-clients' && req.method === 'POST') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const name = (body.name || '').trim();
+                    const redirectUris = Array.isArray(body.redirectUris) ? body.redirectUris.map((s: string) => s.trim()).filter(Boolean) : [];
+                    if (!name) return jsonRes(400, { error: 'Client name required' });
+                    if (redirectUris.length === 0) return jsonRes(400, { error: 'At least one redirect_uri required' });
+                    try {
+                        const { client, clientSecret } = await createOauthClient(name, redirectUris);
+                        console.log(`🪪 OAuth client created: ${client.name} (${client.clientId})`);
+                        return jsonRes(201, {
+                            client,
+                            clientSecret,
+                            warning: 'Save the client_secret now. It cannot be retrieved later.',
+                        });
+                    } catch (err) {
+                        return jsonRes(400, { error: err instanceof Error ? err.message : String(err) });
+                    }
+                }
+
+                if (url.pathname.match(/^\/admin\/oauth-clients\/[^/]+$/) && req.method === 'DELETE') {
+                    const clientId = decodeURIComponent(url.pathname.split('/').pop()!);
+                    const deleted = deleteOauthClient(clientId);
+                    if (!deleted) return jsonRes(404, { error: 'Client not found' });
+                    console.log(`🗑️  OAuth client deleted: ${clientId}`);
                     return jsonRes(200, { status: 'deleted' });
                 }
 
