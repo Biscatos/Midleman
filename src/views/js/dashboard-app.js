@@ -202,6 +202,7 @@ function navigate(page) {
   });
   if (page === 'requests') { rlPage = 1; fetchRequestLogs(); }
   if (page === 'proxyusers') { fetchProxyUsers(); fetchInvites(); }
+  if (page === 'oauthclients') { fetchOauthClients(); }
 
 }
 

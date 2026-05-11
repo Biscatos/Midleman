@@ -58,6 +58,16 @@
           Users
           <span class="nav-badge" id="navProxyUserBadge">0</span>
         </button>
+
+        <button class="nav-link" data-page="oauthclients" onclick="navigate('oauthclients')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          OAuth Clients
+          <span class="nav-badge" id="navOauthBadge">0</span>
+        </button>
       </div>
 
       <div class="navbar-right">
@@ -514,7 +524,96 @@
       </div>
     </div>
 
+    <!-- ═══ OAUTH CLIENTS ═══ -->
+    <div class="page" id="pageOauthclients">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h2>OAuth Clients</h2>
+          <p>Aplicações externas (Supabase, etc.) que autenticam utilizadores via Midleman como provedor OAuth2/OIDC.</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" onclick="openCreateOauthClientModal()" style="display:inline-flex;align-items:center;gap:6px">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+            Novo client
+          </button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--surface2);text-align:left">
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Nome</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Client ID</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Redirect URIs</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Criado</th>
+                <th style="padding:10px 12px"></th>
+              </tr>
+            </thead>
+            <tbody id="oauthClientListBody">
+              <tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Endpoints OIDC</h3>
+        </div>
+        <div class="card-body">
+          <p style="font-size:12.5px;color:var(--text2);margin-bottom:10px">
+            Configura no Supabase como Custom OAuth provider usando estes URLs (substitui pelo teu domínio público — porta JWKS_PORT atrás do Nginx):
+          </p>
+          <div id="oauthEndpoints" style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:12px;line-height:1.8;color:var(--text2)">
+            <div><span style="color:var(--text3)">Discovery:</span> <span id="oeDiscovery">—</span></div>
+            <div><span style="color:var(--text3)">Authorization:</span> <span id="oeAuth">—</span></div>
+            <div><span style="color:var(--text3)">Token:</span> <span id="oeToken">—</span></div>
+            <div><span style="color:var(--text3)">Userinfo:</span> <span id="oeUserinfo">—</span></div>
+            <div><span style="color:var(--text3)">JWKS:</span> <span id="oeJwks">—</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ SETTINGS ═══ -->
+  </div>
+</div>
+
+<!-- OAuth Client Modal -->
+<div id="oauthClientModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+  <div style="max-width:560px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+    <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <h3 style="margin:0;font-size:15px" id="oauthClientModalTitle">Novo OAuth Client</h3>
+      <button class="btn-icon" onclick="closeOauthClientModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">&times;</button>
+    </div>
+    <div style="padding:22px" id="oauthClientModalBody">
+      <div id="oauthClientForm">
+        <div class="form-group" style="margin-bottom:14px">
+          <label class="form-label">Nome</label>
+          <input type="text" id="oauthClientName" class="form-input" placeholder="Supabase — produção">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Redirect URIs (uma por linha)</label>
+          <textarea id="oauthClientUris" class="form-input" rows="3" placeholder="https://xxxx.supabase.co/auth/v1/callback" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px;resize:vertical"></textarea>
+          <p style="font-size:11.5px;color:var(--text3);margin-top:6px">HTTPS obrigatório (exceto http://localhost para dev). Match exato — sem wildcards.</p>
+        </div>
+      </div>
+      <div id="oauthClientSecret" style="display:none">
+        <div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);color:#4ade80;padding:10px 14px;border-radius:6px;font-size:12.5px;margin-bottom:14px">
+          Client criado. <strong>Guarda o secret agora</strong> — não voltará a ser mostrado.
+        </div>
+        <label class="form-label" style="margin-top:0">client_id</label>
+        <div class="copy-box" id="newClientId" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;user-select:all;word-break:break-all;margin-bottom:12px"></div>
+        <label class="form-label">client_secret</label>
+        <div class="copy-box" id="newClientSecret" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;user-select:all;word-break:break-all"></div>
+      </div>
+    </div>
+    <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn btn-ghost btn-sm" onclick="closeOauthClientModal()" id="oauthClientCancelBtn">Cancelar</button>
+      <button class="btn btn-primary btn-sm" onclick="submitOauthClient()" id="oauthClientSubmitBtn">Criar</button>
+    </div>
   </div>
 </div>
 

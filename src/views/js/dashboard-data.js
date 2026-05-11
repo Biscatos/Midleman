@@ -191,7 +191,7 @@ function showContextMenu(e, btn) {
 
 // ─── Data Fetch ──────────────────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData()]);
+  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients()]);
 }
 
 async function fetchHealth() {
@@ -2109,4 +2109,109 @@ async function restartSipProxy(name) {
     const res = await api('/admin/tcpudp/' + encodeURIComponent(name) + '/restart', { method: 'POST' });
     if (res.ok) { toast('TCP/UDP proxy "' + name + '" restarted'); await fetchSipProxies(); }
   } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+// ─── OAuth Clients ───────────────────────────────────────────────────────────
+async function fetchOauthClients() {
+  try {
+    const res = await api('/admin/oauth-clients');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const { clients } = await res.json();
+    renderOauthClients(clients || []);
+    const badge = document.getElementById('navOauthBadge');
+    if (badge) badge.textContent = String(clients.length);
+  } catch (e) {
+    document.getElementById('oauthClientListBody').innerHTML =
+      '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--err-text)">Erro: ' + esc(e.message) + '</td></tr>';
+  }
+  renderOauthEndpoints();
+}
+
+function renderOauthEndpoints() {
+  const origin = window.location.protocol + '//' + window.location.hostname;
+  const note = ' <span style="color:var(--text3)">(substitui pelo issuer público)</span>';
+  const set = (id, path) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = esc(origin + ':JWKS_PORT' + path) + note;
+  };
+  set('oeDiscovery', '/.well-known/openid-configuration');
+  set('oeAuth',      '/oauth/authorize');
+  set('oeToken',     '/oauth/token');
+  set('oeUserinfo',  '/oauth/userinfo');
+  set('oeJwks',      '/.well-known/jwks.json');
+}
+
+function renderOauthClients(clients) {
+  const tbody = document.getElementById('oauthClientListBody');
+  if (!clients.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">Sem clients registados.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = clients.map(c => {
+    const uris = (c.redirectUris || []).map(esc).join('<br>');
+    const created = c.createdAt ? new Date(c.createdAt).toLocaleString() : '—';
+    return '<tr style="border-top:1px solid var(--border)">' +
+      '<td style="padding:10px 12px;font-weight:500">' + esc(c.name) + '</td>' +
+      '<td style="padding:10px 8px;font-family:\'SF Mono\',ui-monospace,monospace;font-size:11.5px;color:var(--text2);word-break:break-all;max-width:200px">' + esc(c.clientId) + '</td>' +
+      '<td style="padding:10px 8px;font-family:\'SF Mono\',ui-monospace,monospace;font-size:11px;color:var(--text2)">' + uris + '</td>' +
+      '<td style="padding:10px 8px;color:var(--text3);font-size:11.5px">' + esc(created) + '</td>' +
+      '<td style="padding:10px 12px;text-align:right"><button class="btn btn-sm btn-ghost" onclick="deleteOauthClient(\'' + esc(c.clientId) + '\',\'' + esc(c.name) + '\')" style="color:var(--err-text)">Apagar</button></td>' +
+      '</tr>';
+  }).join('');
+}
+
+function openCreateOauthClientModal() {
+  document.getElementById('oauthClientName').value = '';
+  document.getElementById('oauthClientUris').value = '';
+  document.getElementById('oauthClientForm').style.display = '';
+  document.getElementById('oauthClientSecret').style.display = 'none';
+  document.getElementById('oauthClientSubmitBtn').textContent = 'Criar';
+  document.getElementById('oauthClientSubmitBtn').onclick = submitOauthClient;
+  document.getElementById('oauthClientCancelBtn').textContent = 'Cancelar';
+  document.getElementById('oauthClientModalTitle').textContent = 'Novo OAuth Client';
+  document.getElementById('oauthClientModal').style.display = 'flex';
+}
+
+function closeOauthClientModal() {
+  document.getElementById('oauthClientModal').style.display = 'none';
+}
+
+async function submitOauthClient() {
+  const name = document.getElementById('oauthClientName').value.trim();
+  const redirectUris = document.getElementById('oauthClientUris').value
+    .split('\n').map(s => s.trim()).filter(Boolean);
+  if (!name) return toast('Nome obrigatório', 'error');
+  if (!redirectUris.length) return toast('Pelo menos uma redirect URI', 'error');
+  try {
+    const res = await api('/admin/oauth-clients', {
+      method: 'POST',
+      body: JSON.stringify({ name, redirectUris }),
+    });
+    const data = await res.json();
+    if (!res.ok) return toast(data.error || 'Falha ao criar', 'error');
+
+    document.getElementById('newClientId').textContent = data.client.clientId;
+    document.getElementById('newClientSecret').textContent = data.clientSecret;
+    document.getElementById('oauthClientForm').style.display = 'none';
+    document.getElementById('oauthClientSecret').style.display = '';
+    document.getElementById('oauthClientSubmitBtn').textContent = 'Concluído';
+    document.getElementById('oauthClientSubmitBtn').onclick = closeOauthClientModal;
+    document.getElementById('oauthClientCancelBtn').style.display = 'none';
+    document.getElementById('oauthClientModalTitle').textContent = 'Client criado';
+    toast('OAuth client criado');
+    fetchOauthClients();
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+async function deleteOauthClient(clientId, name) {
+  if (!confirm('Apagar client "' + name + '"? Todos os tokens emitidos serão revogados.')) return;
+  try {
+    const res = await api('/admin/oauth-clients/' + encodeURIComponent(clientId), { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return toast(data.error || 'Falha ao apagar', 'error');
+    }
+    toast('Client apagado');
+    fetchOauthClients();
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
 }
