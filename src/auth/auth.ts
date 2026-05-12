@@ -291,6 +291,13 @@ export async function updateAdminPassword(id: number, newPassword: string): Prom
     return result.changes > 0;
 }
 
+/** Returns the stored TOTP secret for an admin (empty string if none). */
+export function getAdminTotpSecret(id: number): string {
+    if (!db) return '';
+    const row = db.prepare('SELECT totp_secret FROM users WHERE id = $id').get({ $id: id }) as any;
+    return row?.totp_secret || '';
+}
+
 /** Used during first login when the admin hasn't yet configured TOTP. */
 export function setAdminTotp(id: number, totpSecret: string): boolean {
     if (!db) return false;
