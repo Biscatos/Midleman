@@ -168,6 +168,7 @@ export interface ProxyUser {
   authSource?: 'local' | 'ldap';
   ldapConfigId?: number | null;
   ldapDn?: string | null;
+  ldapOrphan?: boolean;
 }
 
 /**

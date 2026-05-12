@@ -131,6 +131,9 @@ export function initAuth(dataDir: string, maxAge: number = 86400): void {
                 if (!cols.includes('auth_source')) db.exec("ALTER TABLE proxy_users ADD COLUMN auth_source TEXT NOT NULL DEFAULT 'local'");
                 if (!cols.includes('ldap_config_id')) db.exec("ALTER TABLE proxy_users ADD COLUMN ldap_config_id INTEGER");
                 if (!cols.includes('ldap_dn')) db.exec("ALTER TABLE proxy_users ADD COLUMN ldap_dn TEXT");
+                if (!cols.includes('ldap_groups_last_seen')) db.exec("ALTER TABLE proxy_users ADD COLUMN ldap_groups_last_seen TEXT NOT NULL DEFAULT '[]'");
+                if (!cols.includes('ldap_last_sync_at')) db.exec("ALTER TABLE proxy_users ADD COLUMN ldap_last_sync_at TEXT");
+                if (!cols.includes('ldap_orphan')) db.exec("ALTER TABLE proxy_users ADD COLUMN ldap_orphan INTEGER NOT NULL DEFAULT 0");
             }
         } catch {}
 
@@ -625,6 +628,7 @@ function rowToProxyUser(r: any): ProxyUser {
         authSource: (r.auth_source || 'local') as 'local' | 'ldap',
         ldapConfigId: r.ldap_config_id ?? null,
         ldapDn: r.ldap_dn ?? null,
+        ldapOrphan: !!r.ldap_orphan,
     };
 }
 
@@ -633,19 +637,19 @@ export async function createProxyUser(username: string, password: string, fullNa
     const hash = await Bun.password.hash(password, 'bcrypt');
     db.prepare('INSERT INTO proxy_users (username, full_name, email, password) VALUES ($u, $fn, $em, $p)')
         .run({ $u: username, $fn: fullName.trim(), $em: email.trim().toLowerCase(), $p: hash });
-    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
+    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
     return rowToProxyUser(row);
 }
 
 export function listAllProxyUsers(): ProxyUser[] {
     if (!db) return [];
-    const rows = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at FROM proxy_users ORDER BY username').all() as any[];
+    const rows = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users ORDER BY username').all() as any[];
     return rows.map(rowToProxyUser);
 }
 
 export function getProxyUser(id: number): ProxyUser | null {
     if (!db) return null;
-    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
+    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
     return row ? rowToProxyUser(row) : null;
 }
 
@@ -669,11 +673,11 @@ export async function updateProxyUserPassword(id: number, newPassword: string): 
 export function findProxyUserByEmailOrUsername(email: string, username: string): ProxyUser | null {
     if (!db) return null;
     if (email) {
-        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at FROM proxy_users WHERE email = $e AND email != \'\'').get({ $e: email.toLowerCase() }) as any;
+        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE email = $e AND email != \'\'').get({ $e: email.toLowerCase() }) as any;
         if (row) return rowToProxyUser(row);
     }
     if (username) {
-        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
+        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
         if (row) return rowToProxyUser(row);
     }
     return null;
@@ -690,9 +694,9 @@ export function updateProxyUserInfo(id: number, fullName: string, email: string)
 export async function verifyProxyUserCredentials(login: string, password: string): Promise<{ user: ProxyUser; totpSecret: string | null } | null> {
     if (!db) return null;
     // Try username first, then email
-    let row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at FROM proxy_users WHERE username = $u').get({ $u: login }) as any;
+    let row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE username = $u').get({ $u: login }) as any;
     if (!row && login.includes('@')) {
-        row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at FROM proxy_users WHERE email = $e').get({ $e: login.toLowerCase() }) as any;
+        row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE email = $e').get({ $e: login.toLowerCase() }) as any;
     }
     if (!row) return null;
     // Shadow accounts have no usable local password.
@@ -766,6 +770,7 @@ export interface LdapProxyProvisionInput {
     username: string;
     fullName: string;
     email: string;
+    groups?: string[];  // Cached set of group DNs from the directory; persisted for later allow-list checks.
 }
 
 export function findLdapShadowProxyUser(ldapConfigId: number, ldapDn: string): ProxyUser | null {
@@ -778,20 +783,83 @@ export function findLdapShadowProxyUser(ldapConfigId: number, ldapDn: string): P
 
 export function upsertLdapShadowProxyUser(input: LdapProxyProvisionInput): ProxyUser | null {
     if (!db) return null;
+    const groupsJson = JSON.stringify(Array.isArray(input.groups) ? input.groups : []);
     const existing = findLdapShadowProxyUser(input.ldapConfigId, input.ldapDn);
     if (existing) {
-        db.prepare(`UPDATE proxy_users SET full_name = $fn, email = $em, updated_at = datetime('now') WHERE id = $id`)
-            .run({ $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(), $id: existing.id });
+        db.prepare(`UPDATE proxy_users
+            SET full_name = $fn, email = $em,
+                ldap_groups_last_seen = $g, ldap_last_sync_at = datetime('now'),
+                ldap_orphan = 0, updated_at = datetime('now')
+            WHERE id = $id`)
+            .run({
+                $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(),
+                $g: groupsJson, $id: existing.id,
+            });
         return getProxyUser(existing.id);
     }
     const collision = db.prepare(`SELECT id FROM proxy_users WHERE username = $u`).get({ $u: input.username }) as any;
     if (collision) return null;
-    db.prepare(`INSERT INTO proxy_users (username, full_name, email, password, totp_secret, totp_enabled, auth_source, ldap_config_id, ldap_dn)
-        VALUES ($u, $fn, $em, '', NULL, 0, 'ldap', $cid, $dn)`)
-        .run({ $u: input.username, $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(), $cid: input.ldapConfigId, $dn: input.ldapDn });
+    db.prepare(`INSERT INTO proxy_users
+        (username, full_name, email, password, totp_secret, totp_enabled,
+         auth_source, ldap_config_id, ldap_dn, ldap_groups_last_seen, ldap_last_sync_at)
+        VALUES ($u, $fn, $em, '', NULL, 0, 'ldap', $cid, $dn, $g, datetime('now'))`)
+        .run({
+            $u: input.username, $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(),
+            $cid: input.ldapConfigId, $dn: input.ldapDn, $g: groupsJson,
+        });
     const row = db.prepare(`SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at
         FROM proxy_users WHERE username = $u`).get({ $u: input.username }) as any;
     return row ? rowToProxyUser(row) : null;
+}
+
+/** Returns the cached LDAP group DNs for a shadow user (empty array otherwise). */
+export function getProxyUserLdapGroups(userId: number): string[] {
+    if (!db) return [];
+    const row = db.prepare('SELECT ldap_groups_last_seen FROM proxy_users WHERE id = $id').get({ $id: userId }) as any;
+    if (!row) return [];
+    try { return JSON.parse(row.ldap_groups_last_seen || '[]'); } catch { return []; }
+}
+
+/** Iterate shadow LDAP proxy users for sync. */
+export interface LdapShadowProxySummary {
+    id: number;
+    username: string;
+    ldapConfigId: number;
+    ldapDn: string;
+    groupsLastSeen: string[];
+    isOrphan: boolean;
+}
+
+export function listLdapShadowProxyUsers(ldapConfigId?: number): LdapShadowProxySummary[] {
+    if (!db) return [];
+    const rows = ldapConfigId !== undefined
+        ? db.prepare(`SELECT id, username, ldap_config_id, ldap_dn, ldap_groups_last_seen, ldap_orphan
+            FROM proxy_users WHERE auth_source = 'ldap' AND ldap_config_id = $cid`).all({ $cid: ldapConfigId }) as any[]
+        : db.prepare(`SELECT id, username, ldap_config_id, ldap_dn, ldap_groups_last_seen, ldap_orphan
+            FROM proxy_users WHERE auth_source = 'ldap'`).all() as any[];
+    return rows.map(r => ({
+        id: r.id,
+        username: r.username,
+        ldapConfigId: r.ldap_config_id,
+        ldapDn: r.ldap_dn,
+        groupsLastSeen: (() => { try { return JSON.parse(r.ldap_groups_last_seen || '[]'); } catch { return []; } })(),
+        isOrphan: !!r.ldap_orphan,
+    }));
+}
+
+/** Update a shadow user's groups cache + sync timestamp. */
+export function updateShadowProxyGroups(userId: number, groups: string[]): void {
+    if (!db) return;
+    db.prepare(`UPDATE proxy_users SET ldap_groups_last_seen = $g, ldap_last_sync_at = datetime('now') WHERE id = $id`)
+        .run({ $g: JSON.stringify(groups), $id: userId });
+}
+
+/** Mark a shadow user as orphan (no longer present in the directory). Revoking
+ *  sessions / tokens is the caller's responsibility. */
+export function markShadowProxyOrphan(userId: number, orphan: boolean): void {
+    if (!db) return;
+    db.prepare(`UPDATE proxy_users SET ldap_orphan = $o, ldap_last_sync_at = datetime('now') WHERE id = $id`)
+        .run({ $o: orphan ? 1 : 0, $id: userId });
 }
 
 export function setupProxyUserTotp(userId: number, totpSecret: string): boolean {

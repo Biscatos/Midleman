@@ -167,9 +167,18 @@ export function initLdap(dataDir: string): void {
     } catch {}
     const count = (db.prepare('SELECT COUNT(*) as c FROM ldap_configs WHERE enabled = 1').get() as any)?.c || 0;
     console.log(`🪪 LDAP: ${count} enabled directory(ies)`);
+    // Periodic sync: every hour reconcile shadow proxy users with the directory
+    // (group membership changes → revoke access; user removed from AD → mark orphan).
+    if (syncTimer) clearInterval(syncTimer);
+    syncTimer = setInterval(() => { runLdapSync().catch(err => console.warn('LDAP sync failed:', err)); }, 60 * 60 * 1000);
+    // Kick once after a short delay (don't block boot).
+    setTimeout(() => { runLdapSync().catch(() => {}); }, 30 * 1000);
 }
 
+let syncTimer: ReturnType<typeof setInterval> | null = null;
+
 export function shutdownLdap(): void {
+    if (syncTimer) { clearInterval(syncTimer); syncTimer = null; }
     for (const client of clientPool.values()) {
         client.unbind().catch(() => {});
     }
@@ -751,6 +760,177 @@ export async function tryLdapLogin(
     if (sawInvalidCreds) return { ok: false, reason: 'invalid_credentials' };
     if (lastServerError) return { ok: false, reason: 'server_error', detail: lastServerError };
     return { ok: false, reason: 'invalid_credentials' }; // all "user_not_found"
+}
+
+// ─── Periodic sync of shadow proxy users ────────────────────────────────────
+// For each LDAP config: bind admin once, then iterate this directory's shadow
+// users. Refresh groups cache, revoke OAuth access lost since last login, and
+// mark users removed from the directory as orphans.
+
+export interface LdapSyncReport {
+    startedAt: string;
+    durationMs: number;
+    configs: Array<{
+        configId: number;
+        configName: string;
+        users: number;
+        groupsUpdated: number;
+        revokedClients: number;
+        orphans: number;
+        errors: string[];
+    }>;
+}
+
+let lastSyncReport: LdapSyncReport | null = null;
+export function getLastLdapSyncReport(): LdapSyncReport | null { return lastSyncReport; }
+
+export async function runLdapSync(): Promise<LdapSyncReport> {
+    const started = Date.now();
+    // Lazy import to break any potential init-order cycle.
+    const auth = await import('./auth');
+    const oauth = await import('./oauth');
+
+    const report: LdapSyncReport = {
+        startedAt: new Date(started).toISOString(),
+        durationMs: 0,
+        configs: [],
+    };
+
+    const configs = listLdapConfigs().filter(c => c.enabled);
+    for (const cfg of configs) {
+        const acc = { configId: cfg.id, configName: cfg.name, users: 0, groupsUpdated: 0, revokedClients: 0, orphans: 0, errors: [] as string[] };
+        report.configs.push(acc);
+
+        const shadowUsers = auth.listLdapShadowProxyUsers(cfg.id);
+        if (shadowUsers.length === 0) continue;
+
+        /** Build a brand-new bound client (discards any pooled one).
+         *  Used both for initial bind and when an op fails mid-sync due to
+         *  socket expiry / "operations on connection" errors. */
+        const buildBoundClient = async (): Promise<Client> => {
+            const existing = clientPool.get(cfg.id);
+            if (existing) {
+                clientPool.delete(cfg.id);
+                existing.unbind().catch(() => {});
+            }
+            const c = await getClient(cfg);
+            if (cfg.bindDn) {
+                await c.bind(cfg.bindDn, getBindPassword(cfg.id));
+            }
+            return c;
+        };
+
+        let adminClient: Client;
+        try {
+            adminClient = await buildBoundClient();
+        } catch (err) {
+            acc.errors.push('admin bind failed: ' + (err instanceof Error ? err.message : String(err)));
+            continue;
+        }
+
+        // Map of clients that rely on this directory's groups; reused per user.
+        const dependentClients = oauth.listClientsRelyingOnLdapConfig(cfg.id);
+
+        // Heuristic: messages that suggest a stale connection/bind, vs. true
+        // "user is gone" responses. We retry the former, treat the latter as orphan.
+        const looksLikeNoSuchObject = (msg: string) => /no such object|NoSuchObject|0x20\b|\bcode 32\b/i.test(msg);
+        const looksLikeConnIssue = (msg: string) =>
+            /successful bind must be completed|ECONNRESET|EPIPE|socket|disconnect|not connected|unwilling to perform|operations error/i.test(msg);
+
+        for (const user of shadowUsers) {
+            acc.users++;
+            // Search by exact DN (base scope). Retry once on connection issues
+            // by rebuilding the bound client — covers silent socket expiry.
+            let entry: any = null;
+            let attempt = 0;
+            let lastErr = '';
+            while (attempt < 2) {
+                try {
+                    const res = await adminClient.search(user.ldapDn, {
+                        scope: 'base',
+                        filter: '(objectClass=*)',
+                        attributes: [cfg.groupAttr],
+                        sizeLimit: 1,
+                    });
+                    entry = res.searchEntries[0];
+                    break;
+                } catch (err) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    lastErr = msg;
+                    if (looksLikeNoSuchObject(msg)) {
+                        if (!user.isOrphan) {
+                            auth.markShadowProxyOrphan(user.id, true);
+                            oauth.revokeAllUserRefreshTokens(user.id); // also kills SSO sessions
+                            acc.orphans++;
+                            auth.logAudit({
+                                action: 'ldap.user.orphaned',
+                                actorUserId: user.id,
+                                actorUsername: user.username,
+                                details: { directory: cfg.name, dn: user.ldapDn, reason: 'not_found_in_directory' },
+                            });
+                        }
+                        entry = null;
+                        break;
+                    }
+                    if (attempt === 0 && looksLikeConnIssue(msg)) {
+                        try {
+                            adminClient = await buildBoundClient();
+                            attempt++;
+                            continue;
+                        } catch (rebindErr) {
+                            acc.errors.push('rebind failed: ' + (rebindErr instanceof Error ? rebindErr.message : String(rebindErr)));
+                            break;
+                        }
+                    }
+                    acc.errors.push(`${user.username}: ${msg}`);
+                    break;
+                }
+            }
+            if (!entry) {
+                // Either orphan handling already happened, or a hard error was recorded.
+                void lastErr;
+                continue;
+            }
+            const raw = entry[cfg.groupAttr];
+            const freshGroups: string[] = Array.isArray(raw) ? raw.map(String) : (raw ? [String(raw)] : []);
+
+            // Clear orphan flag if it was set and the user came back.
+            if (user.isOrphan) {
+                auth.markShadowProxyOrphan(user.id, false);
+            }
+
+            // Persist groups if they changed (cheap string compare on serialized form).
+            const prevJson = JSON.stringify(user.groupsLastSeen);
+            const nextJson = JSON.stringify(freshGroups);
+            if (prevJson !== nextJson) {
+                auth.updateShadowProxyGroups(user.id, freshGroups);
+                acc.groupsUpdated++;
+            }
+
+            // Revoke refresh tokens for clients this user no longer matches.
+            const revokedNow: string[] = [];
+            for (const clientId of dependentClients) {
+                if (!oauth.userGroupsMatchClient(clientId, cfg.id, freshGroups)) {
+                    // Skip if there were no live tokens — keep noise low (we can't easily check without another query)
+                    oauth.revokeUserRefreshTokensForClient(user.id, clientId);
+                    revokedNow.push(clientId);
+                }
+            }
+            if (revokedNow.length > 0) {
+                acc.revokedClients += revokedNow.length;
+                auth.logAudit({
+                    action: 'ldap.access.revoked',
+                    actorUserId: user.id,
+                    actorUsername: user.username,
+                    details: { directory: cfg.name, dn: user.ldapDn, revokedClients: revokedNow, reason: 'periodic_sync' },
+                });
+            }
+        }
+    }
+
+    report.durationMs = Date.now() - started;
+    lastSyncReport = report;
+    return report;
 }
 
 // Avoid an unused-import warning when dataDirCached is reserved for future

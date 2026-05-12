@@ -13,13 +13,27 @@ import {
     issueAuthCode, consumeAuthCode, issueRefreshToken, rotateRefreshToken,
     createSsoSession, validateSsoSession, destroySsoSession, destroyAllUserSsoSessions, getSsoTtl,
     revokeAllUserRefreshTokens, isUserAllowedForClient,
+    listClientsRelyingOnLdapConfig, userGroupsMatchClient, revokeUserRefreshTokensForClient,
 } from '../auth/oauth';
 import {
     verifyProxyUserCredentials, verifyTotp, getProxyUser, getJwtMaxAge,
     signJwt, verifyJwt, userIdToUuid,
-    upsertLdapShadowProxyUser, assignProxyUserToProfile,
+    upsertLdapShadowProxyUser, assignProxyUserToProfile, findLdapShadowProxyUser, logAudit,
 } from '../auth/auth';
 import { tryLdapLogin } from '../auth/ldap';
+
+/** Revoke OAuth refresh tokens for any client this user no longer has access to. */
+function reconcileLdapAllowList(userId: number, ldapConfigId: number, freshGroups: string[]): { revokedClients: string[] } {
+    const clients = listClientsRelyingOnLdapConfig(ldapConfigId);
+    const revokedClients: string[] = [];
+    for (const clientId of clients) {
+        if (!userGroupsMatchClient(clientId, ldapConfigId, freshGroups)) {
+            revokeUserRefreshTokensForClient(userId, clientId);
+            revokedClients.push(clientId);
+        }
+    }
+    return { revokedClients };
+}
 import { renderConsentMarkdown, escapeHtmlAttr } from '../core/consent';
 
 const SSO_COOKIE = '__midleman_sso';
@@ -277,12 +291,16 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
     if (!cred) {
         const ldap = await tryLdapLogin('proxy', username, password);
         if (ldap.ok) {
+            // Detect group changes between previous login and now, so we can
+            // revoke access that was lost.
+            const before = findLdapShadowProxyUser(ldap.auth.configId, ldap.auth.dn);
             const shadow = upsertLdapShadowProxyUser({
                 ldapConfigId: ldap.auth.configId,
                 ldapDn: ldap.auth.dn,
                 username: ldap.auth.username,
                 fullName: ldap.auth.fullName,
                 email: ldap.auth.email,
+                groups: ldap.auth.groups,
             });
             if (!shadow) {
                 const newId = storeAuthRequest(authReq);
@@ -290,6 +308,19 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
                     status: 409,
                     headers: { 'Content-Type': 'application/json' },
                 });
+            }
+            // Reconcile OAuth allow-list: if this user lost any group that
+            // previously granted access, revoke its refresh tokens for those clients.
+            if (before) {
+                const { revokedClients } = reconcileLdapAllowList(shadow.id, ldap.auth.configId, ldap.auth.groups);
+                if (revokedClients.length > 0) {
+                    logAudit({
+                        action: 'ldap.access.revoked',
+                        actorUserId: shadow.id,
+                        actorUsername: shadow.username,
+                        details: { directory: ldap.auth.configName, dn: ldap.auth.dn, revokedClients, reason: 'group_change_on_login' },
+                    });
+                }
             }
             // Auto-assign default profile if directory has one configured.
             if (ldap.grantedProfile) {

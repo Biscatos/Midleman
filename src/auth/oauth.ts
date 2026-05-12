@@ -68,6 +68,18 @@ CREATE TABLE IF NOT EXISTS oauth_client_users (
     user_id    INTEGER NOT NULL REFERENCES proxy_users(id) ON DELETE CASCADE,
     PRIMARY KEY (client_id, user_id)
 );
+
+CREATE TABLE IF NOT EXISTS oauth_client_ldap_groups (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id       TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+    ldap_config_id  INTEGER NOT NULL,
+    group_match     TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (client_id, ldap_config_id, group_match COLLATE NOCASE)
+);
+
+CREATE INDEX IF NOT EXISTS idx_oclg_client ON oauth_client_ldap_groups(client_id);
+CREATE INDEX IF NOT EXISTS idx_oclg_config ON oauth_client_ldap_groups(ldap_config_id);
 `;
 
 export function initOauth(): void {
@@ -405,17 +417,68 @@ export function revokeAllUserRefreshTokens(userId: number): void {
 
 // ─── Client allow-list ──────────────────────────────────────────────────────
 // When allowListEnabled=true for a client, only users explicitly added to
-// oauth_client_users may obtain tokens for that client.
+// oauth_client_users OR matching an oauth_client_ldap_groups rule may obtain
+// tokens for that client. The two sources are additive.
 
-/** Returns true if the user may use this client (allow-list disabled OR user is in the list). */
+/** Extract the CN (first RDN value) from a DN, lowercased. Returns '' if not a DN. */
+function cnOf(dn: string): string {
+    const m = dn.match(/^\s*cn\s*=\s*((?:[^,\\]|\\.)+)/i);
+    if (!m) return '';
+    return m[1].replace(/\\(.)/g, '$1').trim().toLowerCase();
+}
+
+/** Match a user's group DNs against configured group-match entries
+ *  (CN short form or full DN). Returns the matched user-group DN, or '' if none. */
+function matchUserGroupsAgainstRules(userGroups: string[], rules: string[]): string {
+    if (!rules.length || !userGroups.length) return '';
+    const wantDn = new Set<string>();
+    const wantCn = new Set<string>();
+    for (const raw of rules) {
+        const v = raw.trim();
+        if (!v) continue;
+        if (/^cn\s*=/i.test(v) && v.includes(',')) {
+            wantDn.add(v.toLowerCase());
+        } else {
+            wantCn.add(v.replace(/^cn\s*=\s*/i, '').toLowerCase());
+        }
+    }
+    for (const g of userGroups) {
+        const dn = String(g);
+        if (wantDn.has(dn.toLowerCase())) return dn;
+        const cn = cnOf(dn);
+        if (cn && wantCn.has(cn)) return dn;
+    }
+    return '';
+}
+
+/** Returns true if the user may use this client. Checks (in order):
+ *    1. allow-list disabled → allow all
+ *    2. user in manual oauth_client_users
+ *    3. user is a LDAP shadow account whose cached groups match a rule
+ */
 export function isUserAllowedForClient(userId: number, clientId: string): boolean {
     const db = getAuthDb();
     if (!db) return false;
     const client = db.prepare('SELECT allow_list_enabled FROM oauth_clients WHERE client_id = $id').get({ $id: clientId }) as any;
     if (!client) return false;
     if (!client.allow_list_enabled) return true;
-    const row = db.prepare('SELECT 1 FROM oauth_client_users WHERE client_id = $cid AND user_id = $uid').get({ $cid: clientId, $uid: userId });
-    return !!row;
+
+    // Manual list
+    const manual = db.prepare('SELECT 1 FROM oauth_client_users WHERE client_id = $cid AND user_id = $uid').get({ $cid: clientId, $uid: userId });
+    if (manual) return true;
+
+    // LDAP group rules — only applicable to shadow accounts (otherwise we have no groups to match)
+    const user = db.prepare('SELECT auth_source, ldap_config_id, ldap_groups_last_seen FROM proxy_users WHERE id = $uid').get({ $uid: userId }) as any;
+    if (!user || user.auth_source !== 'ldap' || user.ldap_orphan) return false;
+
+    const rules = db.prepare(
+        'SELECT group_match FROM oauth_client_ldap_groups WHERE client_id = $cid AND ldap_config_id = $lcid'
+    ).all({ $cid: clientId, $lcid: user.ldap_config_id }) as any[];
+    if (rules.length === 0) return false;
+
+    let groups: string[] = [];
+    try { groups = JSON.parse(user.ldap_groups_last_seen || '[]'); } catch {}
+    return !!matchUserGroupsAgainstRules(groups, rules.map(r => r.group_match));
 }
 
 /** Enable or disable the allow-list for a client. */
@@ -466,4 +529,114 @@ export function listUsersForOauthClient(clientId: string): ProxyUser[] {
         totpEnabled: !!r.totp_enabled,
         createdAt: r.created_at,
     }));
+}
+
+// ─── Client allow-list: LDAP group rules ────────────────────────────────────
+
+export interface OauthClientLdapGroup {
+    id: number;
+    clientId: string;
+    ldapConfigId: number;
+    groupMatch: string;
+    createdAt: string;
+}
+
+function rowToClientLdapGroup(r: any): OauthClientLdapGroup {
+    return {
+        id: r.id,
+        clientId: r.client_id,
+        ldapConfigId: r.ldap_config_id,
+        groupMatch: r.group_match,
+        createdAt: r.created_at,
+    };
+}
+
+export function listLdapGroupsForOauthClient(clientId: string): OauthClientLdapGroup[] {
+    const db = getAuthDb();
+    if (!db) return [];
+    const rows = db.prepare('SELECT * FROM oauth_client_ldap_groups WHERE client_id = $cid ORDER BY ldap_config_id, group_match').all({ $cid: clientId }) as any[];
+    return rows.map(rowToClientLdapGroup);
+}
+
+export function addLdapGroupToOauthClient(clientId: string, ldapConfigId: number, groupMatch: string): OauthClientLdapGroup | null {
+    const db = getAuthDb();
+    if (!db) return null;
+    const match = (groupMatch || '').trim();
+    if (!match) return null;
+    try {
+        db.prepare('INSERT OR IGNORE INTO oauth_client_ldap_groups (client_id, ldap_config_id, group_match) VALUES ($cid, $lcid, $gm)')
+            .run({ $cid: clientId, $lcid: ldapConfigId, $gm: match });
+    } catch { return null; }
+    const row = db.prepare('SELECT * FROM oauth_client_ldap_groups WHERE client_id = $cid AND ldap_config_id = $lcid AND group_match = $gm COLLATE NOCASE')
+        .get({ $cid: clientId, $lcid: ldapConfigId, $gm: match }) as any;
+    return row ? rowToClientLdapGroup(row) : null;
+}
+
+export function removeLdapGroupFromOauthClient(clientId: string, ruleId: number): boolean {
+    const db = getAuthDb();
+    if (!db) return false;
+    const result = db.prepare('DELETE FROM oauth_client_ldap_groups WHERE id = $id AND client_id = $cid').run({ $id: ruleId, $cid: clientId });
+    return result.changes > 0;
+}
+
+/** All clients that have at least one rule for this directory.
+ *  Used by the periodic sync to know which clients each shadow user could lose. */
+export function listClientsRelyingOnLdapConfig(ldapConfigId: number): string[] {
+    const db = getAuthDb();
+    if (!db) return [];
+    const rows = db.prepare('SELECT DISTINCT client_id FROM oauth_client_ldap_groups WHERE ldap_config_id = $lcid').all({ $lcid: ldapConfigId }) as any[];
+    return rows.map(r => r.client_id);
+}
+
+/** Group-match strings configured for (client_id, ldap_config_id). */
+export function getClientLdapGroupMatches(clientId: string, ldapConfigId: number): string[] {
+    const db = getAuthDb();
+    if (!db) return [];
+    const rows = db.prepare('SELECT group_match FROM oauth_client_ldap_groups WHERE client_id = $cid AND ldap_config_id = $lcid').all({ $cid: clientId, $lcid: ldapConfigId }) as any[];
+    return rows.map(r => r.group_match);
+}
+
+/** Pure version of the group-match check (exported for the sync job). */
+export function userGroupsMatchClient(clientId: string, ldapConfigId: number, userGroups: string[]): boolean {
+    const rules = getClientLdapGroupMatches(clientId, ldapConfigId);
+    if (rules.length === 0) return false;
+    return !!matchUserGroupsAgainstRules(userGroups, rules);
+}
+
+/** Revoke all active refresh tokens issued to a specific (user, client) pair.
+ *  Used by the sync job when a user loses access to a particular client only. */
+export function revokeUserRefreshTokensForClient(userId: number, clientId: string): void {
+    const db = getAuthDb();
+    if (!db || !userId || !clientId) return;
+    db.prepare("UPDATE oauth_refresh_tokens SET revoked_at = datetime('now') WHERE user_id = $uid AND client_id = $cid AND revoked_at IS NULL")
+        .run({ $uid: userId, $cid: clientId });
+}
+
+/** All shadow proxy user IDs for a directory. Used to recompute access after
+ *  a group rule is removed. */
+export function listShadowProxyUserIdsForLdapConfig(ldapConfigId: number): number[] {
+    const db = getAuthDb();
+    if (!db) return [];
+    const rows = db.prepare("SELECT id FROM proxy_users WHERE auth_source = 'ldap' AND ldap_config_id = $cid").all({ $cid: ldapConfigId }) as any[];
+    return rows.map(r => r.id);
+}
+
+/** After mutating allow-list rules, revoke refresh tokens for any shadow user
+ *  who no longer has access. Returns the user ids that lost access (used for audit). */
+export function reconcileShadowAccessAfterRuleChange(clientId: string, ldapConfigId: number): number[] {
+    const userIds = listShadowProxyUserIdsForLdapConfig(ldapConfigId);
+    const lost: number[] = [];
+    for (const uid of userIds) {
+        if (!isUserAllowedForClient(uid, clientId)) {
+            // Only count users who actually had live tokens — keeps audit noise down.
+            const db = getAuthDb();
+            if (!db) continue;
+            const live = db.prepare("SELECT COUNT(*) AS c FROM oauth_refresh_tokens WHERE user_id = $uid AND client_id = $cid AND revoked_at IS NULL").get({ $uid: uid, $cid: clientId }) as any;
+            if ((live?.c || 0) > 0) {
+                revokeUserRefreshTokensForClient(uid, clientId);
+                lost.push(uid);
+            }
+        }
+    }
+    return lost;
 }

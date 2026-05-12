@@ -14,8 +14,8 @@ import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook,
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
 import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin } from './auth/auth';
-import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClientConsent, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient } from './auth/oauth';
-import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin } from './auth/ldap';
+import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClientConsent, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
+import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin, runLdapSync, getLastLdapSyncReport } from './auth/ldap';
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
@@ -1555,9 +1555,64 @@ const server = Bun.serve({
                     if (!userId || isNaN(userId)) return jsonRes(400, { error: 'Invalid userId' });
                     const ok = removeUserFromOauthClient(clientId, userId);
                     if (!ok) return jsonRes(404, { error: 'User not in allow-list' });
+                    // If the user is now off the allow-list (and no LDAP rule grants them
+                    // access), kill their live refresh tokens for this client right away.
+                    let tokensRevoked = false;
+                    if (!isUserAllowedForClient(userId, clientId)) {
+                        revokeUserRefreshTokensForClient(userId, clientId);
+                        tokensRevoked = true;
+                    }
                     const me = getAuthedAdmin(req);
-                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'oauth_client.user.remove', targetType: 'oauth_client', targetId: clientId, details: { userId }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
-                    return jsonRes(200, { status: 'ok' });
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'oauth_client.user.remove', targetType: 'oauth_client', targetId: clientId, details: { userId, tokensRevoked }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { status: 'ok', tokensRevoked });
+                }
+
+                // ── OAuth client ↔ LDAP group rules ─────────────────────────────────────
+
+                if (url.pathname.match(/^\/admin\/oauth-clients\/[^/]+\/ldap-groups$/) && req.method === 'GET') {
+                    const clientId = decodeURIComponent(url.pathname.split('/')[3]);
+                    const client = getOauthClient(clientId);
+                    if (!client) return jsonRes(404, { error: 'Client not found' });
+                    const groups = listLdapGroupsForOauthClient(clientId);
+                    const directories = listLdapConfigs().map(c => ({ id: c.id, name: c.name }));
+                    return jsonRes(200, { groups, directories });
+                }
+
+                if (url.pathname.match(/^\/admin\/oauth-clients\/[^/]+\/ldap-groups$/) && req.method === 'POST') {
+                    const clientId = decodeURIComponent(url.pathname.split('/')[3]);
+                    const client = getOauthClient(clientId);
+                    if (!client) return jsonRes(404, { error: 'Client not found' });
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const ldapConfigId = Number(body.ldapConfigId);
+                    const groupMatch = typeof body.groupMatch === 'string' ? body.groupMatch.trim() : '';
+                    if (!ldapConfigId || isNaN(ldapConfigId)) return jsonRes(400, { error: 'ldapConfigId required' });
+                    if (!groupMatch) return jsonRes(400, { error: 'groupMatch required (CN short form or full DN)' });
+                    if (!getLdapConfig(ldapConfigId)) return jsonRes(400, { error: 'Unknown ldapConfigId' });
+                    const rule = addLdapGroupToOauthClient(clientId, ldapConfigId, groupMatch);
+                    if (!rule) return jsonRes(409, { error: 'Rule already exists or could not be created' });
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'oauth_client.ldap_group.add', targetType: 'oauth_client', targetId: clientId, details: { ldapConfigId, groupMatch }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(201, { rule });
+                }
+
+                if (url.pathname.match(/^\/admin\/oauth-clients\/[^/]+\/ldap-groups\/\d+$/) && req.method === 'DELETE') {
+                    const parts = url.pathname.split('/');
+                    const clientId = decodeURIComponent(parts[3]);
+                    const ruleId = Number(parts[5]);
+                    if (!ruleId || isNaN(ruleId)) return jsonRes(400, { error: 'Invalid rule id' });
+                    // Capture which directory this rule belonged to before deletion, so we can
+                    // recompute access for that directory's shadow users.
+                    const ruleBefore = listLdapGroupsForOauthClient(clientId).find(r => r.id === ruleId);
+                    const ok = removeLdapGroupFromOauthClient(clientId, ruleId);
+                    if (!ok) return jsonRes(404, { error: 'Rule not found' });
+                    let revokedUserIds: number[] = [];
+                    if (ruleBefore) {
+                        revokedUserIds = reconcileShadowAccessAfterRuleChange(clientId, ruleBefore.ldapConfigId);
+                    }
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'oauth_client.ldap_group.remove', targetType: 'oauth_client', targetId: clientId, details: { ruleId, ldapConfigId: ruleBefore?.ldapConfigId, groupMatch: ruleBefore?.groupMatch, revokedUserIds }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { status: 'ok', revokedUserIds });
                 }
 
                 // ── LDAP directories ─────────────────────────────────────────────────────
@@ -1623,6 +1678,19 @@ const server = Bun.serve({
                     const me = getAuthedAdmin(req);
                     logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'ldap.config.test', targetType: 'ldap_config', targetId: id, details: { ok: outcome.ok, hasSample: !!sampleLogin, durationMs: outcome.durationMs }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                     return jsonRes(200, outcome as unknown as Record<string, unknown>);
+                }
+
+                if (url.pathname === '/admin/ldap/sync' && req.method === 'GET') {
+                    const report = getLastLdapSyncReport();
+                    return jsonRes(200, { report });
+                }
+
+                if (url.pathname === '/admin/ldap/sync' && req.method === 'POST') {
+                    // Fire-and-await — small directories finish fast; large ones may take a while.
+                    const report = await runLdapSync();
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'ldap.sync.forced', details: { durationMs: report.durationMs, configs: report.configs.length }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { report } as unknown as Record<string, unknown>);
                 }
 
                 // ── TCP/UDP Proxy CRUD ───────────────────────────────────────────────────

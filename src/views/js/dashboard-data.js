@@ -2264,6 +2264,7 @@ async function openOauthClientUsersModal(clientId, clientName) {
         (data.users || []).map(u => '<option value="' + u.id + '">' + esc(u.username) + (u.email ? ' — ' + esc(u.email) : '') + '</option>').join('');
     }
   } catch {}
+  await refreshOauthClientLdapGroups();
 }
 
 function closeOauthClientUsersModal() {
@@ -2335,6 +2336,66 @@ async function removeUserFromOauthClientUI(userId, username) {
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Falha', 'error'); }
     toast('Utilizador removido');
     await refreshOauthClientUsers();
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+// ─── OAuth client: LDAP group rules ────────────────────────────────────────
+
+let _oclgDirectories = [];
+
+async function refreshOauthClientLdapGroups() {
+  if (!_ocuClientId) return;
+  try {
+    const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/ldap-groups');
+    if (!res.ok) return;
+    const data = await res.json();
+    _oclgDirectories = data.directories || [];
+    const sel = document.getElementById('oclgConfigSelect');
+    if (sel) {
+      sel.innerHTML = '<option value="">Directory…</option>' +
+        _oclgDirectories.map(d => '<option value="' + d.id + '">' + esc(d.name) + '</option>').join('');
+    }
+    const tbody = document.getElementById('oclgListBody');
+    const rules = data.groups || [];
+    if (!rules.length) {
+      tbody.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">Sem regras de grupo configuradas.</td></tr>';
+      return;
+    }
+    const dirName = id => (_oclgDirectories.find(d => d.id === id) || {}).name || ('#' + id);
+    tbody.innerHTML = rules.map(r => '<tr style="border-top:1px solid var(--border)">' +
+      '<td style="padding:8px 12px;font-weight:500">' + esc(dirName(r.ldapConfigId)) + '</td>' +
+      '<td style="padding:8px;color:var(--text2);font-family:\'SF Mono\',ui-monospace,monospace;font-size:11.5px;word-break:break-all">' + esc(r.groupMatch) + '</td>' +
+      '<td style="padding:8px 12px;text-align:right"><button class="btn btn-sm btn-ghost" onclick="removeLdapGroupFromClientUI(' + r.id + ')" style="color:var(--err-text)">Remover</button></td>' +
+      '</tr>').join('');
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+async function addLdapGroupToClientUI() {
+  if (!_ocuClientId) return;
+  const ldapConfigId = Number(document.getElementById('oclgConfigSelect').value);
+  const groupMatch = document.getElementById('oclgGroupInput').value.trim();
+  if (!ldapConfigId) return toast('Seleciona um directory', 'error');
+  if (!groupMatch) return toast('Indica o CN ou DN do grupo', 'error');
+  try {
+    const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/ldap-groups', {
+      method: 'POST',
+      body: JSON.stringify({ ldapConfigId, groupMatch }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Falha', 'error'); }
+    document.getElementById('oclgGroupInput').value = '';
+    toast('Regra adicionada');
+    await refreshOauthClientLdapGroups();
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+async function removeLdapGroupFromClientUI(ruleId) {
+  if (!_ocuClientId) return;
+  if (!confirm('Remover esta regra de grupo? Utilizadores que dependiam dela perderão acesso no próximo login (ou na próxima sincronização).')) return;
+  try {
+    const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/ldap-groups/' + encodeURIComponent(ruleId), { method: 'DELETE' });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Falha', 'error'); }
+    toast('Regra removida');
+    await refreshOauthClientLdapGroups();
   } catch (e) { toast('Erro: ' + e.message, 'error'); }
 }
 
@@ -2775,6 +2836,57 @@ async function deleteLdapConfig(id, name) {
     toast('Directory apagado');
     fetchLdapConfigs();
   } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+async function forceLdapSync() {
+  const btn = document.getElementById('ldapSyncBtn');
+  const out = document.getElementById('ldapSyncReport');
+  const origText = btn ? btn.textContent : 'Sync agora';
+  if (btn) { btn.disabled = true; btn.textContent = 'A sincronizar…'; }
+  if (out) {
+    out.style.display = 'block';
+    out.innerHTML = 'A correr sincronização contra todos os directories ativos…';
+  }
+  try {
+    const res = await api('/admin/ldap/sync', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (out) out.innerHTML = '<span style="color:var(--err-text)">Falhou: ' + esc(data.error || 'erro desconhecido') + '</span>';
+      return;
+    }
+    const report = data.report || {};
+    const cfgs = report.configs || [];
+    if (cfgs.length === 0) {
+      out.innerHTML = '<strong>Sync concluído</strong> em ' + (report.durationMs || 0) + 'ms — nenhum directory ativo.';
+    } else {
+      const rows = cfgs.map(c => {
+        const errBits = (c.errors && c.errors.length)
+          ? ' · <span style="color:var(--err-text)">' + c.errors.length + ' erro(s)</span>'
+          : '';
+        return '<div style="padding:4px 0;border-top:1px solid var(--border);display:flex;justify-content:space-between;gap:12px">' +
+          '<span><strong>' + esc(c.configName) + '</strong></span>' +
+          '<span style="color:var(--text3)">' +
+            c.users + ' user(s) · ' +
+            c.groupsUpdated + ' atualizados · ' +
+            c.revokedClients + ' tokens revogados · ' +
+            c.orphans + ' órfãos' +
+            errBits +
+          '</span>' +
+          '</div>';
+      }).join('');
+      out.innerHTML =
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">' +
+          '<strong>Sync concluído</strong>' +
+          '<span style="color:var(--text3);font-size:11.5px">' + (report.durationMs || 0) + 'ms</span>' +
+        '</div>' + rows;
+    }
+    // Refresh table because orphan/sync status may have changed
+    fetchLdapConfigs();
+  } catch (e) {
+    if (out) out.innerHTML = '<span style="color:var(--err-text)">Erro: ' + esc(e.message) + '</span>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = origText; }
+  }
 }
 
 function _ldapSetTestState(tr, state) {

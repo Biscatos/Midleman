@@ -121,6 +121,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                                 username: ldap.auth.username,
                                 fullName: ldap.auth.fullName,
                                 email: ldap.auth.email,
+                                groups: ldap.auth.groups,
                             });
                             if (!shadow) {
                                 return jsonRes(409, { error: 'A local user already uses this username.' });
