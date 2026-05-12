@@ -331,7 +331,7 @@ export function rotateRefreshToken(presentedToken: string, clientId: string): Ro
 // Cookie set on JWKS_PORT host that says "this browser is logged in as user X".
 // Lets /oauth/authorize skip the login form on repeat consent flows.
 
-const SSO_TTL_SECONDS = 24 * 60 * 60; // 24h
+const SSO_TTL_SECONDS = parseInt(process.env.SSO_SESSION_TTL || '', 10) || (2 * 60 * 60); // 2h default, override via SSO_SESSION_TTL env
 
 export function createSsoSession(userId: number, ip: string, userAgent: string): string {
     const db = getAuthDb();
@@ -372,14 +372,23 @@ export function destroySsoSession(sessionId: string): void {
     db.prepare('DELETE FROM oauth_sso_sessions WHERE id = $id').run({ $id: sessionId });
 }
 
+/** Destroy ALL SSO sessions for a user (call on any logout). */
+export function destroyAllUserSsoSessions(userId: number): void {
+    const db = getAuthDb();
+    if (!db || !userId) return;
+    db.prepare('DELETE FROM oauth_sso_sessions WHERE user_id = $uid').run({ $uid: userId });
+}
+
 export function getSsoTtl(): number {
     return SSO_TTL_SECONDS;
 }
 
-/** Revoke all active refresh tokens for a user across all clients. */
+/** Revoke all active refresh tokens for a user across all clients.
+ *  Also destroys all SSO sessions so the next /oauth/authorize prompts for credentials. */
 export function revokeAllUserRefreshTokens(userId: number): void {
     const db = getAuthDb();
     if (!db || !userId) return;
     db.prepare("UPDATE oauth_refresh_tokens SET revoked_at = datetime('now') WHERE user_id = $uid AND revoked_at IS NULL")
         .run({ $uid: userId });
+    destroyAllUserSsoSessions(userId);
 }

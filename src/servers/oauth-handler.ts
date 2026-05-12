@@ -11,7 +11,7 @@
 import {
     getOauthClient, isRedirectUriAllowed, verifyClientSecret,
     issueAuthCode, consumeAuthCode, issueRefreshToken, rotateRefreshToken,
-    createSsoSession, validateSsoSession, destroySsoSession, getSsoTtl,
+    createSsoSession, validateSsoSession, destroySsoSession, destroyAllUserSsoSessions, getSsoTtl,
     revokeAllUserRefreshTokens,
 } from '../auth/oauth';
 import {
@@ -519,13 +519,18 @@ export function handleOauthLogout(req: Request, url: URL): Response {
     const ssoId = cookies[SSO_COOKIE];
     if (ssoId) destroySsoSession(ssoId);
 
-    // If we have a valid id_token_hint, revoke all refresh tokens for that user.
+    // If we have a valid id_token_hint, revoke all refresh tokens AND all SSO sessions for that user.
     if (idTokenHint) {
         const payload = verifyJwt(idTokenHint);
         const userId = payload?.midleman_uid as number | undefined;
         if (userId) {
-            revokeAllUserRefreshTokens(userId);
+            revokeAllUserRefreshTokens(userId); // also calls destroyAllUserSsoSessions internally
         }
+    } else if (ssoId) {
+        // No id_token_hint but we have a cookie — destroy all SSO sessions for that user too.
+        // (revokeAllUserRefreshTokens already covers this when hint is present)
+        const sso = validateSsoSession(ssoId);
+        if (sso) destroyAllUserSsoSessions(sso.userId);
     }
 
     const clearCookie = `${SSO_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
