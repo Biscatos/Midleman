@@ -2172,8 +2172,9 @@ function renderOauthClients(clients) {
     const accessBadge = c.allowListEnabled
       ? '<span style="display:inline-block;background:rgba(234,179,8,.15);color:#ca8a04;border:1px solid rgba(234,179,8,.3);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">Restrito</span>'
       : '<span style="display:inline-block;background:rgba(34,197,94,.1);color:var(--green);border:1px solid rgba(34,197,94,.25);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">Aberto</span>';
-    const cid = JSON.stringify(c.clientId);
-    const cname = JSON.stringify(c.name);
+    // Encode args so that JSON's double quotes don't terminate the onclick="" attribute.
+    const cid = JSON.stringify(c.clientId).replace(/"/g, '&quot;');
+    const cname = JSON.stringify(c.name).replace(/"/g, '&quot;');
     return '<tr style="border-top:1px solid var(--border)">' +
       '<td style="padding:10px 12px;font-weight:500">' + esc(c.name) + '</td>' +
       '<td style="padding:10px 8px;font-family:\'SF Mono\',ui-monospace,monospace;font-size:11.5px;color:var(--text2);word-break:break-all;max-width:200px">' + esc(c.clientId) + '</td>' +
@@ -2252,7 +2253,7 @@ async function openOauthClientUsersModal(clientId, clientName) {
   _ocuClientId = clientId;
   _ocuClientName = clientName;
   document.getElementById('oauthClientUsersTitle').textContent = 'Acesso — ' + clientName;
-  document.getElementById('oauthClientUsersModal').style.display = 'flex';
+  document.getElementById('oauthClientUsersModal').classList.add('active');
   await refreshOauthClientUsers();
   // Populate user dropdown
   try {
@@ -2268,7 +2269,7 @@ async function openOauthClientUsersModal(clientId, clientName) {
 }
 
 function closeOauthClientUsersModal() {
-  document.getElementById('oauthClientUsersModal').style.display = 'none';
+  document.getElementById('oauthClientUsersModal').classList.remove('active');
   _ocuClientId = null;
   _ocuClientName = null;
 }
