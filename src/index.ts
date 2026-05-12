@@ -387,8 +387,22 @@ const server = Bun.serve({
                     const ldap = await tryLdapLogin('admin', username, password);
                     if (ldap.ok) {
                         if (ldap.role !== 'admin') {
-                            logAudit({ action: 'admin.login.failed', actorUsername: username, details: { reason: 'ldap_no_admin_group', dn: ldap.auth.dn, directory: ldap.auth.configName }, ip: clientIp, userAgent: req.headers.get('user-agent') });
-                            return jsonRes(403, { error: 'LDAP user is not in an admin group for this directory.' });
+                            logAudit({
+                                action: 'admin.login.failed',
+                                actorUsername: username,
+                                details: {
+                                    reason: 'ldap_no_admin_group',
+                                    dn: ldap.auth.dn,
+                                    directory: ldap.auth.configName,
+                                    userGroups: ldap.auth.groups,
+                                },
+                                ip: clientIp, userAgent: req.headers.get('user-agent'),
+                            });
+                            return jsonRes(403, {
+                                error: 'LDAP user is not in an admin group for this directory.',
+                                hint: 'Check Audit Log for the exact group DNs returned by the directory — copy them into the directory\'s "Grupos de admin" list.',
+                                userGroups: ldap.auth.groups,
+                            });
                         }
                         const shadow = upsertLdapShadowAdmin({
                             ldapConfigId: ldap.auth.configId,
