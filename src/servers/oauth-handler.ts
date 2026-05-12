@@ -12,12 +12,14 @@ import {
     getOauthClient, isRedirectUriAllowed, verifyClientSecret,
     issueAuthCode, consumeAuthCode, issueRefreshToken, rotateRefreshToken,
     createSsoSession, validateSsoSession, destroySsoSession, destroyAllUserSsoSessions, getSsoTtl,
-    revokeAllUserRefreshTokens,
+    revokeAllUserRefreshTokens, isUserAllowedForClient,
 } from '../auth/oauth';
 import {
     verifyProxyUserCredentials, verifyTotp, getProxyUser, getJwtMaxAge,
     signJwt, verifyJwt, userIdToUuid,
+    upsertLdapShadowProxyUser, assignProxyUserToProfile,
 } from '../auth/auth';
+import { tryLdapLogin } from '../auth/ldap';
 import { renderConsentMarkdown, escapeHtmlAttr } from '../core/consent';
 
 const SSO_COOKIE = '__midleman_sso';
@@ -196,14 +198,20 @@ export async function handleAuthorize(req: Request, url: URL): Promise<Response>
     if (ssoId && prompt !== 'login') {
         const sso = validateSsoSession(ssoId);
         if (sso) {
-            const code = issueAuthCode({
-                clientId, userId: sso.userId, redirectUri,
-                codeChallenge, scope: finalScope, nonce: nonce || undefined,
-            });
-            const u = new URL(redirectUri);
-            u.searchParams.set('code', code);
-            if (state) u.searchParams.set('state', state);
-            return new Response(null, { status: 302, headers: { 'Location': u.toString() } });
+            if (!isUserAllowedForClient(sso.userId, clientId)) {
+                // User is logged in but not permitted for this client — clear their SSO session and
+                // fall through to show the login form with an error.
+                destroySsoSession(ssoId);
+            } else {
+                const code = issueAuthCode({
+                    clientId, userId: sso.userId, redirectUri,
+                    codeChallenge, scope: finalScope, nonce: nonce || undefined,
+                });
+                const u = new URL(redirectUri);
+                u.searchParams.set('code', code);
+                if (state) u.searchParams.set('state', state);
+                return new Response(null, { status: 302, headers: { 'Location': u.toString() } });
+            }
         }
     }
 
@@ -262,12 +270,62 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
         return jsonError(400, 'invalid_request', 'Login session expired. Restart the sign-in flow.');
     }
 
-    const cred = await verifyProxyUserCredentials(username, password);
+    // 1) Local-first
+    let cred = await verifyProxyUserCredentials(username, password);
+
+    // 2) Fallback to LDAP if no local match
+    if (!cred) {
+        const ldap = await tryLdapLogin('proxy', username, password);
+        if (ldap.ok) {
+            const shadow = upsertLdapShadowProxyUser({
+                ldapConfigId: ldap.auth.configId,
+                ldapDn: ldap.auth.dn,
+                username: ldap.auth.username,
+                fullName: ldap.auth.fullName,
+                email: ldap.auth.email,
+            });
+            if (!shadow) {
+                const newId = storeAuthRequest(authReq);
+                return new Response(JSON.stringify({ error: 'A local user already uses this username.', auth_request: newId }), {
+                    status: 409,
+                    headers: { 'Content-Type': 'application/json' },
+                });
+            }
+            // Auto-assign default profile if directory has one configured.
+            if (ldap.grantedProfile) {
+                assignProxyUserToProfile(shadow.id, ldap.grantedProfile);
+            }
+            // TOTP for shadow accounts: the local secret is empty on first login,
+            // so the standard branch below ("not totpEnabled or no totpSecret")
+            // emits the token directly. Policy = 'required' is enforced by the
+            // user-management UI prompting setup post-login. Policy = 'disabled'
+            // is implicitly satisfied (no local secret to use). 'optional' = same.
+            cred = { user: shadow, totpSecret: null };
+        } else if (ldap.reason === 'server_error') {
+            const newId = storeAuthRequest(authReq);
+            // End-user facing — keep generic but mention the cause class.
+            return new Response(JSON.stringify({ error: 'Directory configuration error. Ask an admin to check the LDAP directory.', auth_request: newId }), {
+                status: 502,
+                headers: { 'Content-Type': 'application/json' },
+            });
+        }
+        // invalid_credentials | no_directory → generic 401 below
+    }
+
     if (!cred) {
         // Re-store the auth request so user can retry without restarting
         const newId = storeAuthRequest(authReq);
         return new Response(JSON.stringify({ error: 'Invalid username or password', auth_request: newId }), {
             status: 401,
+            headers: { 'Content-Type': 'application/json' },
+        });
+    }
+
+    // Check allow-list before issuing anything.
+    if (!isUserAllowedForClient(cred.user.id, authReq.clientId)) {
+        const newId = storeAuthRequest(authReq);
+        return new Response(JSON.stringify({ error: 'access_denied', error_description: 'Não tem acesso a esta aplicação.', auth_request: newId }), {
+            status: 403,
             headers: { 'Content-Type': 'application/json' },
         });
     }

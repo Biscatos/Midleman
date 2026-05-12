@@ -13,8 +13,9 @@ import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, logAudit, queryAuditLogs } from './auth/auth';
-import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClientConsent } from './auth/oauth';
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin } from './auth/auth';
+import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClientConsent, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient } from './auth/oauth';
+import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin } from './auth/ldap';
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
@@ -56,6 +57,9 @@ initAuth(config.requestLog.dataDir, config.auth.sessionMaxAge);
 
 // Initialize JWT (RS256) for proxy user auth + Supabase third-party auth
 initJwt(config.requestLog.dataDir, process.env.JWT_ISSUER || '', config.auth.sessionMaxAge);
+
+// Initialize LDAP directories (depends on initJwt for bind-password encryption key)
+initLdap(config.requestLog.dataDir);
 
 // Initialize OAuth2/OIDC storage + load login template
 initOauth();
@@ -375,12 +379,44 @@ const server = Bun.serve({
                 const username = (body.username || '').trim();
                 const password = body.password || '';
                 if (!username || !password) return jsonRes(400, { error: 'Username and password required' });
-                const cred = await verifyCredentials(username, password);
+                // 1) Local-first: try the local user table (also rejects shadow LDAP rows).
+                let cred = await verifyCredentials(username, password);
+
+                // 2) Fallback to LDAP if no local match and any admin-scoped directory exists.
+                if (!cred) {
+                    const ldap = await tryLdapLogin('admin', username, password);
+                    if (ldap.ok) {
+                        if (ldap.role !== 'admin') {
+                            logAudit({ action: 'admin.login.failed', actorUsername: username, details: { reason: 'ldap_no_admin_group', dn: ldap.auth.dn, directory: ldap.auth.configName }, ip: clientIp, userAgent: req.headers.get('user-agent') });
+                            return jsonRes(403, { error: 'LDAP user is not in an admin group for this directory.' });
+                        }
+                        const shadow = upsertLdapShadowAdmin({
+                            ldapConfigId: ldap.auth.configId,
+                            ldapDn: ldap.auth.dn,
+                            username: ldap.auth.username,
+                            fullName: ldap.auth.fullName,
+                            email: ldap.auth.email,
+                        });
+                        if (!shadow) {
+                            logAudit({ action: 'admin.login.failed', actorUsername: username, details: { reason: 'ldap_username_collision', dn: ldap.auth.dn }, ip: clientIp, userAgent: req.headers.get('user-agent') });
+                            return jsonRes(409, { error: 'A local admin already uses this username. Ask an admin to rename or remove it.' });
+                        }
+                        logAudit({ action: 'ldap.login.success', actorUserId: shadow.id, actorUsername: shadow.username, details: { directory: ldap.auth.configName, role: 'admin', dn: ldap.auth.dn, matchedGroup: ldap.matchedAdminGroup }, ip: clientIp, userAgent: req.headers.get('user-agent') });
+                        cred = { user: shadow, totpSecret: '' };
+                    } else if (ldap.reason === 'server_error') {
+                        logAudit({ action: 'admin.login.failed', actorUsername: username, details: { reason: 'ldap_server_error', detail: ldap.detail }, ip: clientIp, userAgent: req.headers.get('user-agent') });
+                        // Surface the LDAP-side reason (admin-only audience here, so it's fine).
+                        return jsonRes(502, { error: 'LDAP error: ' + (ldap.detail || 'unknown'), hint: 'Check the directory config in Dashboard → LDAP and run "Testar ligação".' });
+                    }
+                    // invalid_credentials | no_directory → fall through to generic failure below
+                }
+
                 if (!cred) {
                     logAudit({ action: 'admin.login.failed', actorUsername: username, ip: clientIp, userAgent: req.headers.get('user-agent') });
                     return jsonRes(401, { error: 'Invalid username or password' });
                 }
-                // First-time login for an admin without TOTP set up yet → enrol TOTP now
+                // First-time login for an admin without TOTP set up yet → enrol TOTP now.
+                // Admins via LDAP always go through this path on their first login (totpEnabled=false).
                 if (!cred.user.totpEnabled || !cred.totpSecret) {
                     const totp = generateTotpSecret(cred.user.username);
                     const qrDataUrl = await QRCode.toDataURL(totp.otpauthUrl, { width: 220, margin: 2 }).catch(() => null);
@@ -625,6 +661,49 @@ const server = Bun.serve({
                     status: 200,
                     headers: { 'Content-Type': 'text/html; charset=utf-8' },
                 });
+            }
+
+            // ===== Public Admin Invite Pages =====
+            if (url.pathname.match(/^\/admin-invite\/[^/]+$/) && req.method === 'GET') {
+                const token = url.pathname.split('/')[2];
+                const invite = getAdminInvite(token);
+                const escH = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                const pageHtml = readFileSync(resolve(import.meta.dir, 'views/admin-invite.html'), 'utf-8');
+                if (!invite || invite.usedAt || new Date(invite.expiresAt) < new Date()) {
+                    const msg = !invite ? 'Link de convite não encontrado.' : invite.usedAt ? 'Este convite já foi utilizado.' : 'Este convite expirou.';
+                    return new Response(
+                        pageHtml.replace(/\{\{TOKEN\}\}/g, '').replace(/\{\{FULL_NAME\}\}/g, '').replace(/\{\{EMAIL\}\}/g, '').replace(/\{\{NOTE\}\}/g, '').replace(/\{\{INVALID_MSG\}\}/g, escH(msg)).replace(/\{\{INVALID_DISPLAY\}\}/g, 'block').replace(/\{\{FORM_DISPLAY\}\}/g, 'none'),
+                        { status: 410, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+                    );
+                }
+                return new Response(
+                    pageHtml.replace(/\{\{TOKEN\}\}/g, escH(token)).replace(/\{\{FULL_NAME\}\}/g, escH(invite.fullName)).replace(/\{\{EMAIL\}\}/g, escH(invite.email)).replace(/\{\{NOTE\}\}/g, escH(invite.note)).replace(/\{\{INVALID_MSG\}\}/g, '').replace(/\{\{INVALID_DISPLAY\}\}/g, 'none').replace(/\{\{FORM_DISPLAY\}\}/g, 'block'),
+                    { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+                );
+            }
+
+            if (url.pathname.match(/^\/admin-invite\/[^/]+\/register$/) && req.method === 'POST') {
+                const token = url.pathname.split('/')[2];
+                const invite = getAdminInvite(token);
+                if (!invite || invite.usedAt || new Date(invite.expiresAt) < new Date()) {
+                    return jsonRes(410, { error: 'Convite inválido, expirado ou já utilizado.' });
+                }
+                let body: any;
+                try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                const username = (body.username || '').trim().toLowerCase().replace(/[^a-z0-9._\-]/g, '');
+                const password = body.password || '';
+                if (!username || username.length < 2) return jsonRes(400, { error: 'Username deve ter pelo menos 2 caracteres.' });
+                if (!password || password.length < 8) return jsonRes(400, { error: 'A password deve ter pelo menos 8 caracteres.' });
+                try {
+                    const admin = await createAdditionalAdmin(username, password, invite.fullName, invite.email, 0);
+                    consumeAdminInvite(token, admin.id);
+                    logAudit({ actorUsername: username, action: 'admin.create.via_invite', targetType: 'admin', targetId: admin.id, details: { email: invite.email }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { status: 'created', username: admin.username });
+                } catch (err: any) {
+                    const msg = err?.message || String(err);
+                    if (msg.includes('UNIQUE') || msg.includes('unique')) return jsonRes(409, { error: 'Já existe uma conta com este username.' });
+                    return jsonRes(500, { error: msg });
+                }
             }
 
             // ===== Public Invite Pages =====
@@ -1314,6 +1393,36 @@ const server = Bun.serve({
                     return jsonRes(200, { status: 'updated' });
                 }
 
+                // ── Admin invites ────────────────────────────────────────────────────────
+
+                if (url.pathname === '/admin/admins/invite' && req.method === 'POST') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const email = (body.email || '').trim().toLowerCase();
+                    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonRes(400, { error: 'Email inválido' });
+                    const fullName = (body.fullName || '').trim().slice(0, 100);
+                    const note = (body.note || '').trim().slice(0, 200);
+                    const expiresInHours = Math.min(Math.max(parseInt(body.expiresInHours) || 48, 1), 720);
+                    const me = getAuthedAdmin(req);
+                    const invite = createAdminInvite(email, fullName, note, expiresInHours, me?.id);
+                    const reqHost = req.headers.get('host') || `localhost:${config.port}`;
+                    const protocol = req.headers.get('x-forwarded-proto') || 'http';
+                    const inviteUrl = `${protocol}://${reqHost}/admin-invite/${invite.token}`;
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'admin.invite.create', targetType: 'admin', details: { email, fullName, expiresInHours }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { invite, inviteUrl });
+                }
+
+                if (url.pathname === '/admin/admins/invites' && req.method === 'GET') {
+                    return jsonRes(200, { invites: listAdminInvites() });
+                }
+
+                if (url.pathname.match(/^\/admin\/admins\/invite\/[^/]+$/) && req.method === 'DELETE') {
+                    const token = url.pathname.split('/').pop()!;
+                    const ok = revokeAdminInvite(token);
+                    if (!ok) return jsonRes(404, { error: 'Convite não encontrado ou já usado' });
+                    return jsonRes(200, { status: 'revoked' });
+                }
+
                 // ── Audit log ────────────────────────────────────────────────────────────
 
                 if (url.pathname === '/admin/audit' && req.method === 'GET') {
@@ -1386,6 +1495,117 @@ const server = Bun.serve({
                     const me = getAuthedAdmin(req);
                     logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'oauth_client.delete', targetType: 'oauth_client', targetId: clientId, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                     return jsonRes(200, { status: 'deleted' });
+                }
+
+                // ── OAuth client allow-list management ───────────────────────────────────
+
+                if (url.pathname.match(/^\/admin\/oauth-clients\/[^/]+\/allow-list$/) && req.method === 'PUT') {
+                    const clientId = decodeURIComponent(url.pathname.split('/')[3]);
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const ok = setOauthClientAllowList(clientId, !!body.enabled);
+                    if (!ok) return jsonRes(404, { error: 'Client not found' });
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'oauth_client.allow_list.update', targetType: 'oauth_client', targetId: clientId, details: { enabled: !!body.enabled }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { status: 'ok' });
+                }
+
+                if (url.pathname.match(/^\/admin\/oauth-clients\/[^/]+\/users$/) && req.method === 'GET') {
+                    const clientId = decodeURIComponent(url.pathname.split('/')[3]);
+                    const client = getOauthClient(clientId);
+                    if (!client) return jsonRes(404, { error: 'Client not found' });
+                    const users = listUsersForOauthClient(clientId);
+                    return jsonRes(200, { allowListEnabled: client.allowListEnabled, users });
+                }
+
+                if (url.pathname.match(/^\/admin\/oauth-clients\/[^/]+\/users$/) && req.method === 'POST') {
+                    const clientId = decodeURIComponent(url.pathname.split('/')[3]);
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const userId = Number(body.userId);
+                    if (!userId || isNaN(userId)) return jsonRes(400, { error: 'userId required' });
+                    const ok = addUserToOauthClient(clientId, userId);
+                    if (!ok) return jsonRes(404, { error: 'Client not found or user not found' });
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'oauth_client.user.add', targetType: 'oauth_client', targetId: clientId, details: { userId }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { status: 'ok' });
+                }
+
+                if (url.pathname.match(/^\/admin\/oauth-clients\/[^/]+\/users\/[^/]+$/) && req.method === 'DELETE') {
+                    const parts = url.pathname.split('/');
+                    const clientId = decodeURIComponent(parts[3]);
+                    const userId = Number(decodeURIComponent(parts[5]));
+                    if (!userId || isNaN(userId)) return jsonRes(400, { error: 'Invalid userId' });
+                    const ok = removeUserFromOauthClient(clientId, userId);
+                    if (!ok) return jsonRes(404, { error: 'User not in allow-list' });
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'oauth_client.user.remove', targetType: 'oauth_client', targetId: clientId, details: { userId }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { status: 'ok' });
+                }
+
+                // ── LDAP directories ─────────────────────────────────────────────────────
+
+                if (url.pathname === '/admin/ldap/configs' && req.method === 'GET') {
+                    return jsonRes(200, { configs: listLdapConfigs() });
+                }
+
+                if (url.pathname === '/admin/ldap/configs' && req.method === 'POST') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    try {
+                        const cfg = createLdapConfig(body);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'ldap.config.create', targetType: 'ldap_config', targetId: cfg.id, details: { name: cfg.name, url: cfg.url, scope: cfg.scope }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(201, { config: cfg });
+                    } catch (err) {
+                        return jsonRes(400, { error: err instanceof Error ? err.message : String(err) });
+                    }
+                }
+
+                if (url.pathname.match(/^\/admin\/ldap\/configs\/\d+$/) && req.method === 'GET') {
+                    const id = Number(url.pathname.split('/').pop());
+                    const cfg = getLdapConfig(id);
+                    if (!cfg) return jsonRes(404, { error: 'Config not found' });
+                    return jsonRes(200, { config: cfg });
+                }
+
+                if (url.pathname.match(/^\/admin\/ldap\/configs\/\d+$/) && req.method === 'PUT') {
+                    const id = Number(url.pathname.split('/').pop());
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    try {
+                        const cfg = updateLdapConfig(id, body);
+                        if (!cfg) return jsonRes(404, { error: 'Config not found' });
+                        const me = getAuthedAdmin(req);
+                        const changedKeys = Object.keys(body).filter(k => k !== 'bindPassword');
+                        const passwordChanged = 'bindPassword' in body;
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'ldap.config.update', targetType: 'ldap_config', targetId: id, details: { changed: changedKeys, passwordChanged }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { config: cfg });
+                    } catch (err) {
+                        return jsonRes(400, { error: err instanceof Error ? err.message : String(err) });
+                    }
+                }
+
+                if (url.pathname.match(/^\/admin\/ldap\/configs\/\d+$/) && req.method === 'DELETE') {
+                    const id = Number(url.pathname.split('/').pop());
+                    const deleted = deleteLdapConfig(id);
+                    if (!deleted) return jsonRes(404, { error: 'Config not found' });
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'ldap.config.delete', targetType: 'ldap_config', targetId: id, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { status: 'deleted' });
+                }
+
+                if (url.pathname.match(/^\/admin\/ldap\/configs\/\d+\/test$/) && req.method === 'POST') {
+                    const id = Number(url.pathname.split('/')[4]);
+                    const cfg = getLdapConfig(id);
+                    if (!cfg) return jsonRes(404, { error: 'Config not found' });
+                    let body: any = {};
+                    try { body = await req.json(); } catch { /* body optional */ }
+                    const sampleLogin = typeof body?.sampleLogin === 'string' ? body.sampleLogin.trim() : undefined;
+                    const outcome = await testLdapConfig(cfg, sampleLogin || undefined);
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'ldap.config.test', targetType: 'ldap_config', targetId: id, details: { ok: outcome.ok, hasSample: !!sampleLogin, durationMs: outcome.durationMs }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, outcome as unknown as Record<string, unknown>);
                 }
 
                 // ── TCP/UDP Proxy CRUD ───────────────────────────────────────────────────
@@ -1667,6 +1887,7 @@ const shutdown = async (signal: string) => {
     flushDlqSync(); // persist any pending DLQ changes before exit
     await shutdownTelemetry();
     shutdownRequestLog();
+    shutdownLdap();
     shutdownAuth();
 
     server.stop();

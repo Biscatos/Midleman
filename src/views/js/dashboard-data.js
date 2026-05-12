@@ -191,7 +191,7 @@ function showContextMenu(e, btn) {
 
 // ─── Data Fetch ──────────────────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchAdmins()]);
+  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchAdmins(), fetchLdapConfigs()]);
 }
 
 async function fetchHealth() {
@@ -509,9 +509,10 @@ function renderProxyUsers(users) {
       ? '<span style="color:var(--green)">Ativo</span>'
       : '<span style="color:var(--text3)">Off</span>';
     const profiles = (u.profiles || []).map(p => `<span style="background:var(--surface2);padding:1px 6px;border-radius:3px;font-size:11px;font-family:monospace">${esc(p)}</span>`).join(' ');
+    const ldapTag = u.authSource === 'ldap' ? ' <span class="badge-ldap" title="Conta sincronizada de LDAP">LDAP</span>' : '';
     const nameCell = u.fullName
-      ? `<div style="font-weight:600;color:var(--text)">${esc(u.fullName)}</div><div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`
-      : `<div style="font-weight:600;color:var(--text)">${esc(u.username)}</div>`;
+      ? `<div style="font-weight:600;color:var(--text)">${esc(u.fullName)}${ldapTag}</div><div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`
+      : `<div style="font-weight:600;color:var(--text)">${esc(u.username)}${ldapTag}</div>`;
     const emailCell = u.email
       ? `<div style="font-size:12px;color:var(--text2)">${esc(u.email)}</div><div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`
       : `<div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`;
@@ -2162,18 +2163,27 @@ function renderOauthEndpoints() {
 function renderOauthClients(clients) {
   const tbody = document.getElementById('oauthClientListBody');
   if (!clients.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">Sem clients registados.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Sem clients registados.</td></tr>';
     return;
   }
   tbody.innerHTML = clients.map(c => {
     const uris = (c.redirectUris || []).map(esc).join('<br>');
     const created = c.createdAt ? new Date(c.createdAt).toLocaleString() : '—';
+    const accessBadge = c.allowListEnabled
+      ? '<span style="display:inline-block;background:rgba(234,179,8,.15);color:#ca8a04;border:1px solid rgba(234,179,8,.3);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">Restrito</span>'
+      : '<span style="display:inline-block;background:rgba(34,197,94,.1);color:var(--green);border:1px solid rgba(34,197,94,.25);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">Aberto</span>';
+    const cid = JSON.stringify(c.clientId);
+    const cname = JSON.stringify(c.name);
     return '<tr style="border-top:1px solid var(--border)">' +
       '<td style="padding:10px 12px;font-weight:500">' + esc(c.name) + '</td>' +
       '<td style="padding:10px 8px;font-family:\'SF Mono\',ui-monospace,monospace;font-size:11.5px;color:var(--text2);word-break:break-all;max-width:200px">' + esc(c.clientId) + '</td>' +
       '<td style="padding:10px 8px;font-family:\'SF Mono\',ui-monospace,monospace;font-size:11px;color:var(--text2)">' + uris + '</td>' +
       '<td style="padding:10px 8px;color:var(--text3);font-size:11.5px">' + esc(created) + '</td>' +
-      '<td style="padding:10px 12px;text-align:right"><button class="btn btn-sm btn-ghost" onclick="deleteOauthClient(\'' + esc(c.clientId) + '\',\'' + esc(c.name) + '\')" style="color:var(--err-text)">Apagar</button></td>' +
+      '<td style="padding:10px 8px">' + accessBadge + '</td>' +
+      '<td style="padding:10px 12px;text-align:right;white-space:nowrap">' +
+        '<button class="btn btn-sm" onclick="openOauthClientUsersModal(' + cid + ',' + cname + ')" style="margin-right:4px">Utilizadores</button>' +
+        '<button class="btn btn-sm btn-ghost" onclick="deleteOauthClient(' + cid + ',' + cname + ')" style="color:var(--err-text)">Apagar</button>' +
+      '</td>' +
       '</tr>';
   }).join('');
 }
@@ -2234,6 +2244,100 @@ async function deleteOauthClient(clientId, name) {
   } catch (e) { toast('Erro: ' + e.message, 'error'); }
 }
 
+// ─── OAuth Client Allow-list modal ──────────────────────────────────────────────────────
+let _ocuClientId = null;
+let _ocuClientName = null;
+
+async function openOauthClientUsersModal(clientId, clientName) {
+  _ocuClientId = clientId;
+  _ocuClientName = clientName;
+  document.getElementById('oauthClientUsersTitle').textContent = 'Acesso — ' + clientName;
+  document.getElementById('oauthClientUsersModal').style.display = 'flex';
+  await refreshOauthClientUsers();
+  // Populate user dropdown
+  try {
+    const res = await api('/admin/proxy-users');
+    if (res.ok) {
+      const data = await res.json();
+      const sel = document.getElementById('ocuAddSelect');
+      sel.innerHTML = '<option value="">Selecionar utilizador...</option>' +
+        (data.users || []).map(u => '<option value="' + u.id + '">' + esc(u.username) + (u.email ? ' — ' + esc(u.email) : '') + '</option>').join('');
+    }
+  } catch {}
+}
+
+function closeOauthClientUsersModal() {
+  document.getElementById('oauthClientUsersModal').style.display = 'none';
+  _ocuClientId = null;
+  _ocuClientName = null;
+}
+
+async function refreshOauthClientUsers() {
+  if (!_ocuClientId) return;
+  try {
+    const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/users');
+    if (!res.ok) return;
+    const data = await res.json();
+    const enabled = !!data.allowListEnabled;
+    document.getElementById('oauthAllowListToggle').checked = enabled;
+    document.getElementById('oauthAllowListSection').style.display = enabled ? '' : 'none';
+    document.getElementById('oauthAllowListOpen').style.display = enabled ? 'none' : '';
+    const tbody = document.getElementById('ocuListBody');
+    const users = data.users || [];
+    if (!users.length) {
+      tbody.innerHTML = '<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--text3)">Nenhum utilizador na lista.</td></tr>';
+    } else {
+      tbody.innerHTML = users.map(u => '<tr style="border-top:1px solid var(--border)">' +
+        '<td style="padding:8px 12px;font-weight:500">' + esc(u.username) + '</td>' +
+        '<td style="padding:8px;color:var(--text2);font-size:12px">' + esc(u.email || '—') + '</td>' +
+        '<td style="padding:8px 12px;text-align:right"><button class="btn btn-sm btn-ghost" onclick="removeUserFromOauthClientUI(' + u.id + ',\'' + esc(u.username) + '\')" style="color:var(--err-text)">Remover</button></td>' +
+        '</tr>').join('');
+    }
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+async function toggleOauthAllowList(enabled) {
+  if (!_ocuClientId) return;
+  try {
+    const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/allow-list', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Falha', 'error'); }
+    toast(enabled ? 'Allow-list ativada' : 'Allow-list desativada');
+    await refreshOauthClientUsers();
+    fetchOauthClients(); // refresh badge in table
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+async function addUserToOauthClientUI() {
+  if (!_ocuClientId) return;
+  const sel = document.getElementById('ocuAddSelect');
+  const userId = sel.value;
+  if (!userId) return toast('Seleciona um utilizador', 'error');
+  try {
+    const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/users', {
+      method: 'POST',
+      body: JSON.stringify({ userId: Number(userId) }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Falha', 'error'); }
+    sel.value = '';
+    toast('Utilizador adicionado');
+    await refreshOauthClientUsers();
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+async function removeUserFromOauthClientUI(userId, username) {
+  if (!_ocuClientId) return;
+  if (!confirm('Remover "' + username + '" do acesso a este client?')) return;
+  try {
+    const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/users/' + encodeURIComponent(userId), { method: 'DELETE' });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Falha', 'error'); }
+    toast('Utilizador removido');
+    await refreshOauthClientUsers();
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
 // ─── Admins ──────────────────────────────────────────────────────────────────
 let _currentUserId = null;
 
@@ -2260,17 +2364,22 @@ function renderAdmins(admins) {
   }
   tbody.innerHTML = admins.map(function(a) {
     const isMe = a.id === _currentUserId;
+    const isLdap = a.authSource === 'ldap';
     const meTag = isMe ? ' <span style="color:var(--accent2);font-size:11px;font-weight:600">(voce)</span>' : '';
+    const ldapTag = isLdap ? ' <span class="badge-ldap" title="Conta sincronizada de LDAP">LDAP</span>' : '';
     const nameCell = a.fullName
-      ? '<div style="font-weight:500">' + esc(a.fullName) + meTag + '</div><div style="font-size:11px;color:var(--text3);font-family:monospace">' + esc(a.username) + '</div>'
-      : '<div style="font-weight:500">' + esc(a.username) + meTag + '</div>';
+      ? '<div style="font-weight:500">' + esc(a.fullName) + meTag + ldapTag + '</div><div style="font-size:11px;color:var(--text3);font-family:monospace">' + esc(a.username) + '</div>'
+      : '<div style="font-weight:500">' + esc(a.username) + meTag + ldapTag + '</div>';
     const twoFa = a.totpEnabled
       ? '<span style="color:var(--green)">Ativo</span>'
       : '<span style="color:var(--err-text);font-size:11.5px">Pendente</span>';
     const created = a.createdAt ? new Date(a.createdAt).toLocaleString() : '—';
+    const resetBtn = isLdap
+      ? ''
+      : '<button class="btn btn-sm btn-ghost" onclick="resetAdminPassword(' + a.id + ',&quot;' + esc(a.username) + '&quot;)">Reset password</button> ';
     const actions = isMe
       ? '<span style="color:var(--text3);font-size:11.5px">—</span>'
-      : '<button class="btn btn-sm btn-ghost" onclick="resetAdminPassword(' + a.id + ',&quot;' + esc(a.username) + '&quot;)">Reset password</button> ' +
+      : resetBtn +
         '<button class="btn btn-sm btn-ghost" onclick="deleteAdminUser(' + a.id + ',&quot;' + esc(a.username) + '&quot;)" style="color:var(--err-text)">Apagar</button>';
     return '<tr style="border-top:1px solid var(--border)">' +
       '<td style="padding:10px 12px">' + nameCell + '</td>' +
@@ -2330,6 +2439,55 @@ async function resetAdminPassword(id, username) {
     if (!res.ok) return toast(data.error || 'Falha', 'error');
     toast('Password atualizada');
   } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+// ─── Admin Invites ────────────────────────────────────────────────────────────
+function openAdminInviteModal() {
+  document.getElementById('adminInviteEmail').value = '';
+  document.getElementById('adminInviteFullName').value = '';
+  document.getElementById('adminInviteNote').value = '';
+  document.getElementById('adminInviteExpires').value = '168';
+  document.getElementById('adminInviteError').style.display = 'none';
+  document.getElementById('adminInviteFormWrap').style.display = '';
+  document.getElementById('adminInviteResult').style.display = 'none';
+  document.getElementById('adminInviteModal').style.display = 'flex';
+}
+
+function closeAdminInviteModal() {
+  document.getElementById('adminInviteModal').style.display = 'none';
+}
+
+async function submitAdminInvite() {
+  const errEl = document.getElementById('adminInviteError');
+  errEl.style.display = 'none';
+  const email = document.getElementById('adminInviteEmail').value.trim();
+  const fullName = document.getElementById('adminInviteFullName').value.trim();
+  const note = document.getElementById('adminInviteNote').value.trim();
+  const expiresInHours = parseInt(document.getElementById('adminInviteExpires').value, 10);
+  try {
+    const res = await api('/admin/admins/invite', {
+      method: 'POST',
+      body: JSON.stringify({ email, fullName, note, expiresInHours }),
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || 'Erro ao gerar convite.'; errEl.style.display = 'block'; return; }
+    document.getElementById('adminInviteFormWrap').style.display = 'none';
+    document.getElementById('adminInviteUrl').value = data.inviteUrl || '';
+    document.getElementById('adminInviteResult').style.display = '';
+  } catch (e) {
+    errEl.textContent = 'Erro de rede: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+function copyAdminInviteUrl() {
+  const inp = document.getElementById('adminInviteUrl');
+  inp.select();
+  document.execCommand('copy');
+  const btn = document.getElementById('adminInviteCopyBtn');
+  const orig = btn.textContent;
+  btn.textContent = 'Copiado!';
+  setTimeout(() => { btn.textContent = orig; }, 1500);
 }
 
 // ─── Audit Log ───────────────────────────────────────────────────────────────
@@ -2421,3 +2579,266 @@ function showAuditDetail(idx) {
   document.getElementById('auditDetailModal').style.display = 'flex';
 }
 function closeAuditDetail() { document.getElementById('auditDetailModal').style.display = 'none'; }
+
+// ─── LDAP directories ──────────────────────────────────────────────────────
+let _ldapConfigs = [];
+
+async function fetchLdapConfigs() {
+  try {
+    const res = await api('/admin/ldap/configs');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const { configs } = await res.json();
+    _ldapConfigs = configs || [];
+    renderLdapConfigs(_ldapConfigs);
+    const badge = document.getElementById('navLdapBadge');
+    if (badge) badge.textContent = String(_ldapConfigs.filter(c => c.enabled).length);
+  } catch (e) {
+    document.getElementById('ldapListBody').innerHTML =
+      '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--err-text)">Erro: ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+function renderLdapConfigs(configs) {
+  const tbody = document.getElementById('ldapListBody');
+  if (!configs.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">Sem directories configurados. Clica em <strong>Novo directory</strong> para adicionar.</td></tr>';
+    return;
+  }
+  const scopeBadge = s => {
+    const map = {
+      admin:  ['Admins',     'rgba(59,130,246,.15)', '#2563eb', 'rgba(59,130,246,.3)'],
+      proxy:  ['Proxy',      'rgba(168,85,247,.15)', '#9333ea', 'rgba(168,85,247,.3)'],
+      both:   ['Ambos',      'rgba(34,197,94,.1)',   'var(--green)', 'rgba(34,197,94,.25)'],
+    };
+    const [label, bg, fg, br] = map[s] || map.both;
+    return '<span style="display:inline-block;background:' + bg + ';color:' + fg + ';border:1px solid ' + br + ';border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">' + label + '</span>';
+  };
+  const totpBadge = p => {
+    const map = {
+      required: ['Required',  '#dc2626'],
+      optional: ['Optional',  'var(--text2)'],
+      disabled: ['Disabled',  'var(--text3)'],
+    };
+    const [label, color] = map[p] || map.optional;
+    return '<span style="font-size:11px;color:' + color + ';font-weight:600">' + label + '</span>';
+  };
+  const stateBadge = enabled => enabled
+    ? '<span style="display:inline-block;background:rgba(34,197,94,.1);color:var(--green);border:1px solid rgba(34,197,94,.25);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">Ativo</span>'
+    : '<span style="display:inline-block;background:rgba(148,163,184,.15);color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">Inativo</span>';
+
+  tbody.innerHTML = configs.map(c =>
+    '<tr style="border-top:1px solid var(--border)">' +
+      '<td style="padding:10px 12px;font-weight:500">' + esc(c.name) + '</td>' +
+      '<td style="padding:10px 8px;font-family:\'SF Mono\',ui-monospace,monospace;font-size:11.5px;color:var(--text2);word-break:break-all;max-width:240px">' + esc(c.url) + '</td>' +
+      '<td style="padding:10px 8px;font-family:\'SF Mono\',ui-monospace,monospace;font-size:11.5px;color:var(--text2);word-break:break-all;max-width:240px">' + esc(c.baseDn) + '</td>' +
+      '<td style="padding:10px 8px">' + scopeBadge(c.scope) + '</td>' +
+      '<td style="padding:10px 8px">' + totpBadge(c.totpPolicy) + '</td>' +
+      '<td style="padding:10px 8px">' + stateBadge(c.enabled) + '</td>' +
+      '<td style="padding:10px 12px;text-align:right;white-space:nowrap">' +
+        '<button class="btn btn-sm" onclick="openEditLdapModal(' + c.id + ')" style="margin-right:4px">Editar</button>' +
+        '<button class="btn btn-sm btn-ghost" onclick="deleteLdapConfig(' + c.id + ',' + JSON.stringify(c.name) + ')" style="color:var(--err-text)">Apagar</button>' +
+      '</td>' +
+    '</tr>'
+  ).join('');
+}
+
+function _ldapResetForm() {
+  document.getElementById('ldapEditId').value = '';
+  document.getElementById('ldapName').value = '';
+  document.getElementById('ldapUrl').value = '';
+  document.getElementById('ldapBaseDn').value = '';
+  document.getElementById('ldapBindDn').value = '';
+  document.getElementById('ldapBindPassword').value = '';
+  document.getElementById('ldapBindPassword').placeholder = '(opcional)';
+  document.getElementById('ldapUserFilter').value = '';
+  document.getElementById('ldapUsernameAttr').value = '';
+  document.getElementById('ldapEmailAttr').value = '';
+  document.getElementById('ldapFullnameAttr').value = '';
+  document.getElementById('ldapGroupAttr').value = '';
+  document.getElementById('ldapScope').value = 'both';
+  document.getElementById('ldapTotpPolicy').value = 'optional';
+  document.getElementById('ldapTimeoutMs').value = '5000';
+  document.getElementById('ldapStartTls').checked = false;
+  document.getElementById('ldapTlsVerify').checked = true;
+  document.getElementById('ldapEnabled').checked = true;
+  document.getElementById('ldapAdminGroups').value = '';
+  document.getElementById('ldapDefaultProfile').value = '';
+  document.getElementById('ldapTestLogin').value = '';
+  const tr = document.getElementById('ldapTestResult');
+  tr.style.display = 'none';
+  tr.className = 'ldap-test-result';
+  tr.innerHTML = '';
+}
+
+function openCreateLdapModal() {
+  _ldapResetForm();
+  document.getElementById('ldapModalTitle').textContent = 'Novo directory LDAP';
+  document.getElementById('ldapSubmitBtn').textContent = 'Criar';
+  document.getElementById('ldapModal').classList.add('active');
+}
+
+function openEditLdapModal(id) {
+  const c = _ldapConfigs.find(x => x.id === id);
+  if (!c) return toast('Config não encontrada', 'error');
+  _ldapResetForm();
+  document.getElementById('ldapEditId').value = String(c.id);
+  document.getElementById('ldapName').value = c.name;
+  document.getElementById('ldapUrl').value = c.url;
+  document.getElementById('ldapBaseDn').value = c.baseDn;
+  document.getElementById('ldapBindDn').value = c.bindDn || '';
+  document.getElementById('ldapBindPassword').value = '';
+  document.getElementById('ldapBindPassword').placeholder = '(deixar vazio para manter)';
+  document.getElementById('ldapUserFilter').value = c.userFilter;
+  document.getElementById('ldapUsernameAttr').value = c.usernameAttr;
+  document.getElementById('ldapEmailAttr').value = c.emailAttr;
+  document.getElementById('ldapFullnameAttr').value = c.fullnameAttr;
+  document.getElementById('ldapGroupAttr').value = c.groupAttr;
+  document.getElementById('ldapScope').value = c.scope;
+  document.getElementById('ldapTotpPolicy').value = c.totpPolicy;
+  document.getElementById('ldapTimeoutMs').value = String(c.timeoutMs);
+  document.getElementById('ldapStartTls').checked = !!c.startTls;
+  document.getElementById('ldapTlsVerify').checked = !!c.tlsVerify;
+  document.getElementById('ldapEnabled').checked = !!c.enabled;
+  document.getElementById('ldapAdminGroups').value = (c.adminGroups || []).join('\n');
+  document.getElementById('ldapDefaultProfile').value = c.defaultProfile || '';
+  document.getElementById('ldapModalTitle').textContent = 'Editar directory: ' + c.name;
+  document.getElementById('ldapSubmitBtn').textContent = 'Guardar';
+  document.getElementById('ldapModal').classList.add('active');
+}
+
+function closeLdapModal() {
+  document.getElementById('ldapModal').classList.remove('active');
+}
+
+function _ldapCollectPayload(isEdit) {
+  const name = document.getElementById('ldapName').value.trim();
+  const url = document.getElementById('ldapUrl').value.trim();
+  const baseDn = document.getElementById('ldapBaseDn').value.trim();
+  if (!name) { toast('Nome obrigatório', 'error'); return null; }
+  if (!url)  { toast('URL obrigatório (ldap:// ou ldaps://)', 'error'); return null; }
+  if (!baseDn) { toast('Base DN obrigatório', 'error'); return null; }
+
+  const payload = {
+    name, url, baseDn,
+    bindDn: document.getElementById('ldapBindDn').value.trim(),
+    userFilter: document.getElementById('ldapUserFilter').value.trim() || undefined,
+    usernameAttr: document.getElementById('ldapUsernameAttr').value.trim() || undefined,
+    emailAttr: document.getElementById('ldapEmailAttr').value.trim() || undefined,
+    fullnameAttr: document.getElementById('ldapFullnameAttr').value.trim() || undefined,
+    groupAttr: document.getElementById('ldapGroupAttr').value.trim() || undefined,
+    scope: document.getElementById('ldapScope').value,
+    totpPolicy: document.getElementById('ldapTotpPolicy').value,
+    timeoutMs: parseInt(document.getElementById('ldapTimeoutMs').value, 10) || 5000,
+    startTls: document.getElementById('ldapStartTls').checked,
+    tlsVerify: document.getElementById('ldapTlsVerify').checked,
+    enabled: document.getElementById('ldapEnabled').checked,
+    adminGroups: document.getElementById('ldapAdminGroups').value
+      .split('\n').map(s => s.trim()).filter(Boolean),
+    defaultProfile: document.getElementById('ldapDefaultProfile').value.trim(),
+  };
+  // Only send bindPassword if the user typed one (avoids overwriting on edit)
+  const pw = document.getElementById('ldapBindPassword').value;
+  if (pw) payload.bindPassword = pw;
+  else if (!isEdit) payload.bindPassword = ''; // explicit empty for create (anonymous bind)
+  // Strip undefined so backend defaults apply on create
+  Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
+  return payload;
+}
+
+async function submitLdap() {
+  const editId = document.getElementById('ldapEditId').value;
+  const isEdit = !!editId;
+  const payload = _ldapCollectPayload(isEdit);
+  if (!payload) return;
+  try {
+    const path = isEdit ? '/admin/ldap/configs/' + encodeURIComponent(editId) : '/admin/ldap/configs';
+    const res = await api(path, {
+      method: isEdit ? 'PUT' : 'POST',
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return toast(data.error || 'Falha', 'error');
+    toast(isEdit ? 'Directory atualizado' : 'Directory criado');
+    closeLdapModal();
+    fetchLdapConfigs();
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+async function deleteLdapConfig(id, name) {
+  if (!confirm('Apagar directory "' + name + '"?\n\nUtilizadores LDAP já provisionados ficam sem origem — não conseguirão fazer login até voltares a configurar.')) return;
+  try {
+    const res = await api('/admin/ldap/configs/' + encodeURIComponent(id), { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return toast(data.error || 'Falha ao apagar', 'error');
+    }
+    toast('Directory apagado');
+    fetchLdapConfigs();
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+function _ldapSetTestState(tr, state) {
+  tr.classList.remove('is-ok', 'is-fail');
+  if (state === 'ok') tr.classList.add('is-ok');
+  else if (state === 'fail') tr.classList.add('is-fail');
+}
+
+async function testLdap() {
+  const editId = document.getElementById('ldapEditId').value;
+  const sampleLogin = document.getElementById('ldapTestLogin').value.trim();
+  const tr = document.getElementById('ldapTestResult');
+  const btn = document.getElementById('ldapTestBtn');
+  tr.style.display = 'block';
+  _ldapSetTestState(tr, '');
+  tr.innerHTML = '<div class="ldap-test-title">A testar…</div>';
+  btn.disabled = true;
+
+  try {
+    if (!editId) {
+      _ldapSetTestState(tr, 'fail');
+      tr.innerHTML = '<div class="ldap-test-title">Guarda primeiro</div>' +
+        '<div style="color:var(--text2)">Clica em <strong>Criar</strong> e depois reabre o directory para testar a ligação.</div>';
+      return;
+    }
+    const res = await api('/admin/ldap/configs/' + encodeURIComponent(editId) + '/test', {
+      method: 'POST',
+      body: JSON.stringify(sampleLogin ? { sampleLogin } : {}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      _ldapSetTestState(tr, 'fail');
+      tr.innerHTML = '<div class="ldap-test-title">✗ Erro HTTP ' + res.status + '</div>' +
+        '<div style="color:var(--text2)">' + esc(data.error || '') + '</div>';
+      return;
+    }
+    const stepsHtml = (data.steps || []).map(s =>
+      '<div class="ldap-test-step ' + (s.ok ? 'ok' : 'fail') + '">' +
+        '<span class="step-icon">' + (s.ok ? '✓' : '✗') + '</span>' +
+        '<span><span class="step-name">' + esc(s.step) + '</span>' +
+        (s.detail ? '<span class="step-detail">' + esc(s.detail) + '</span>' : '') +
+        '</span>' +
+      '</div>'
+    ).join('');
+    let sampleHtml = '';
+    if (data.sample) {
+      const rows = [];
+      rows.push('<div><span class="sk">dn:</span>' + esc(data.sample.dn) + '</div>');
+      for (const [k, v] of Object.entries(data.sample.attrs || {})) {
+        const val = Array.isArray(v) ? v.join(', ') : String(v);
+        rows.push('<div><span class="sk">' + esc(k) + ':</span>' + esc(val) + '</div>');
+      }
+      sampleHtml = '<div class="ldap-test-sample">' + rows.join('') + '</div>';
+    }
+    _ldapSetTestState(tr, data.ok ? 'ok' : 'fail');
+    tr.innerHTML =
+      '<div class="ldap-test-title">' + (data.ok ? '✓ Sucesso' : '✗ Falhou') +
+      ' <span style="color:var(--text3);font-weight:500;margin-left:6px">' + (data.durationMs || 0) + 'ms</span></div>' +
+      stepsHtml + sampleHtml;
+  } catch (e) {
+    _ldapSetTestState(tr, 'fail');
+    tr.innerHTML = '<div class="ldap-test-title">✗ Erro</div><div style="color:var(--text2)">' + esc(e.message) + '</div>';
+  } finally {
+    btn.disabled = false;
+  }
+}
+

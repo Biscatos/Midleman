@@ -150,6 +150,9 @@ export interface AuthUser {
   email?: string;
   totpEnabled?: boolean;
   createdByUserId?: number | null;
+  authSource?: 'local' | 'ldap';
+  ldapConfigId?: number | null;
+  ldapDn?: string | null;
 }
 
 /**
@@ -162,6 +165,9 @@ export interface ProxyUser {
   email: string;
   totpEnabled: boolean;
   createdAt: string;
+  authSource?: 'local' | 'ldap';
+  ldapConfigId?: number | null;
+  ldapDn?: string | null;
 }
 
 /**

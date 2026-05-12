@@ -31,6 +31,7 @@
     "@opentelemetry/sdk-trace-base": "^2.6.0",
     "@opentelemetry/semantic-conventions": "^1.40.0",
     "acme-client": "^5.4.0",
+    "ldapts": "^7.3.0",
     "qrcode": "^1.5.4"
   }
 }

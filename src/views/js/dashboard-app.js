@@ -233,6 +233,7 @@ const PAGE_TITLES = {
   proxyusers: 'Users',
   oauthclients: 'OAuth Clients',
   admins: 'Admins',
+  ldap: 'LDAP',
   audit: 'Audit Log'
 };
 
@@ -250,6 +251,7 @@ function navigate(page) {
   if (page === 'proxyusers') { fetchProxyUsers(); fetchInvites(); }
   if (page === 'oauthclients') { fetchOauthClients(); }
   if (page === 'admins') { fetchAdmins(); }
+  if (page === 'ldap') { fetchLdapConfigs(); }
   if (page === 'audit') { fetchAuditLogs(true); }
   const titleEl = document.getElementById('topbarPageTitle');
   if (titleEl) titleEl.textContent = PAGE_TITLES[page] || page;

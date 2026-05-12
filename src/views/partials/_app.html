@@ -72,6 +72,13 @@
         <span class="sidebar-link-label">Admins</span>
         <span class="sidebar-badge" id="navAdminBadge">0</span>
       </button>
+      <button class="sidebar-link" data-page="ldap" data-tooltip="LDAP" onclick="navigate('ldap')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/>
+        </svg>
+        <span class="sidebar-link-label">LDAP</span>
+        <span class="sidebar-badge" id="navLdapBadge">0</span>
+      </button>
       <button class="sidebar-link" data-page="audit" data-tooltip="Audit Log" onclick="navigate('audit')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
@@ -587,6 +594,7 @@
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Client ID</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Redirect URIs</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Criado</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Acesso</th>
                 <th style="padding:10px 12px"></th>
               </tr>
             </thead>
@@ -624,6 +632,10 @@
           <p>Utilizadores com acesso ao dashboard. Cada admin pode criar e remover outros admins.</p>
         </div>
         <div style="display:flex;gap:8px">
+          <button class="btn btn-sm" onclick="openAdminInviteModal()" style="display:inline-flex;align-items:center;gap:6px">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            Convidar
+          </button>
           <button class="btn btn-primary btn-sm" onclick="openCreateAdminModal()" style="display:inline-flex;align-items:center;gap:6px">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
             Novo admin
@@ -647,6 +659,55 @@
               <tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">A carregar...</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ LDAP ═══ -->
+    <div class="page" id="pageLdap">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h2>LDAP / Active Directory</h2>
+          <p>Directories externos para autenticar admins e/ou utilizadores de profiles. Suporta múltiplos servidores em paralelo.</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" onclick="openCreateLdapModal()" style="display:inline-flex;align-items:center;gap:6px">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+            Novo directory
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--surface2);text-align:left">
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Nome</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">URL</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Base DN</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Scope</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">2FA</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Estado</th>
+                <th style="padding:10px 12px"></th>
+              </tr>
+            </thead>
+            <tbody id="ldapListBody">
+              <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-header"><h3>Notas</h3></div>
+        <div class="card-body">
+          <ul style="font-size:12.5px;color:var(--text2);line-height:1.7;padding-left:18px;margin:0">
+            <li><strong>Scope</strong>: <em>admin</em> → apenas login do dashboard; <em>proxy</em> → apenas profiles; <em>both</em> → ambos.</li>
+            <li><strong>2FA</strong>: <em>required</em> obriga TOTP no primeiro login; <em>optional</em> permite saltar; <em>disabled</em> ignora. Admins via LDAP exigem sempre TOTP.</li>
+            <li>A password do bind admin é cifrada em AES-256-GCM com chave derivada da chave RSA do JWT.</li>
+            <li>O filtro deve conter <code style="background:var(--surface2);padding:1px 6px;border-radius:4px">{login}</code>. Default cobre <code>uid</code>, <code>mail</code> e <code>sAMAccountName</code>.</li>
+          </ul>
         </div>
       </div>
     </div>
@@ -732,34 +793,92 @@
 </div><!-- /.app -->
 
 <!-- Admin create modal -->
-<div id="adminModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
-  <div style="max-width:480px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
-    <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-      <h3 style="margin:0;font-size:15px" id="adminModalTitle">Novo administrador</h3>
-      <button onclick="closeAdminModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">&times;</button>
+<div class="modal-overlay" id="adminModal">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header">
+      <h3 id="adminModalTitle">Novo administrador</h3>
+      <button class="close-btn" onclick="closeAdminModal()">&times;</button>
     </div>
-    <div style="padding:22px" id="adminModalBody">
-      <div style="margin-bottom:12px">
-        <label class="form-label">Username</label>
-        <input type="text" id="adminUsername" class="form-input" placeholder="joao">
+    <form onsubmit="event.preventDefault(); submitNewAdmin()">
+      <div class="modal-body">
+        <div class="form-grid" style="gap:12px">
+          <div class="form-group span-2">
+            <label>Username *</label>
+            <input type="text" id="adminUsername" placeholder="joao" autocomplete="off">
+          </div>
+          <div class="form-group span-2">
+            <label>Nome completo</label>
+            <input type="text" id="adminFullName" placeholder="João Silva" autocomplete="off">
+          </div>
+          <div class="form-group span-2">
+            <label>Email</label>
+            <input type="email" id="adminEmail" placeholder="joao@example.com" autocomplete="off">
+          </div>
+          <div class="form-group span-2">
+            <label>Password inicial *</label>
+            <input type="password" id="adminPassword" placeholder="Mínimo 8 caracteres" autocomplete="new-password">
+            <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">O novo admin pode alterar a password a qualquer momento.</span>
+          </div>
+        </div>
       </div>
-      <div style="margin-bottom:12px">
-        <label class="form-label">Nome completo</label>
-        <input type="text" id="adminFullName" class="form-input" placeholder="João Silva">
+      <div class="modal-footer">
+        <button type="button" class="btn" onclick="closeAdminModal()">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Criar</button>
       </div>
-      <div style="margin-bottom:12px">
-        <label class="form-label">Email</label>
-        <input type="email" id="adminEmail" class="form-input" placeholder="joao@example.com">
+    </form>
+  </div>
+</div>
+
+<!-- Admin invite modal -->
+<div class="modal-overlay" id="adminInviteModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <h3>Convidar administrador</h3>
+      <button class="close-btn" onclick="closeAdminInviteModal()">&times;</button>
+    </div>
+    <div id="adminInviteFormWrap">
+      <div class="modal-body">
+        <div class="form-grid" style="gap:12px">
+          <div class="form-group span-2">
+            <label>Email</label>
+            <input type="email" id="adminInviteEmail" placeholder="joao@example.com (opcional)" autocomplete="off">
+          </div>
+          <div class="form-group span-2">
+            <label>Nome completo</label>
+            <input type="text" id="adminInviteFullName" placeholder="João Silva (opcional)" autocomplete="off">
+          </div>
+          <div class="form-group span-2">
+            <label>Nota</label>
+            <input type="text" id="adminInviteNote" placeholder="Ex: para substituir o João... (opcional)" autocomplete="off">
+          </div>
+          <div class="form-group span-2">
+            <label>Expiração</label>
+            <select id="adminInviteExpires" style="width:100%;height:40px;padding:0 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;font-family:inherit;outline:none;cursor:pointer">
+              <option value="24">24 horas</option>
+              <option value="48">48 horas</option>
+              <option value="168" selected>7 dias</option>
+              <option value="720">30 dias</option>
+            </select>
+          </div>
+        </div>
+        <div id="adminInviteError" style="display:none;margin-top:12px;padding:10px 12px;border-radius:6px;background:var(--err-bg,rgba(220,38,38,.08));border:1px solid var(--err-bdr,rgba(220,38,38,.15));color:var(--err-text,#dc2626);font-size:13px"></div>
       </div>
-      <div>
-        <label class="form-label">Password inicial</label>
-        <input type="password" id="adminPassword" class="form-input" placeholder="Mínimo 8 caracteres">
-        <p style="font-size:11.5px;color:var(--text3);margin-top:6px">O novo admin define o 2FA (TOTP) no primeiro login.</p>
+      <div class="modal-footer">
+        <button type="button" class="btn" onclick="closeAdminInviteModal()">Cancelar</button>
+        <button type="button" class="btn btn-primary" onclick="submitAdminInvite()">Gerar link</button>
       </div>
     </div>
-    <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
-      <button class="btn btn-ghost btn-sm" onclick="closeAdminModal()">Cancelar</button>
-      <button class="btn btn-primary btn-sm" onclick="submitNewAdmin()">Criar</button>
+    <div id="adminInviteResult" style="display:none">
+      <div class="modal-body">
+        <p style="font-size:13px;color:var(--text2);margin-bottom:14px">Link de convite gerado. Partilhe-o com o utilizador — é válido para uso único.</p>
+        <div style="display:flex;align-items:stretch;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+          <input type="text" id="adminInviteUrl" readonly style="flex:1;padding:10px 12px;font-size:12px;border:none;background:var(--surface2);color:var(--text);font-family:monospace;outline:none">
+          <button onclick="copyAdminInviteUrl()" style="padding:0 14px;border:none;border-left:1px solid var(--border);background:var(--surface2);color:var(--text2);cursor:pointer;font-size:12px;white-space:nowrap;font-family:inherit" id="adminInviteCopyBtn">Copiar</button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" onclick="closeAdminInviteModal()">Fechar</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1297,6 +1416,52 @@
   </div>
 </div>
 
+<!-- OAuth Client Allow-list Modal -->
+<div class="modal-overlay" id="oauthClientUsersModal">
+  <div class="modal" style="max-width:540px">
+    <div class="modal-header">
+      <h3 id="oauthClientUsersTitle">Acesso ao client</h3><button class="close-btn"
+        onclick="closeOauthClientUsersModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <!-- Toggle allow-list -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm);border:1px solid var(--border)">
+        <label style="flex:1;font-size:13px;font-weight:500;color:var(--text)">Restringir acesso (allow-list)</label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text2)">
+          <input type="checkbox" id="oauthAllowListToggle" onchange="toggleOauthAllowList(this.checked)" style="accent-color:var(--primary)">
+          Ativado
+        </label>
+      </div>
+      <!-- Add user row (only visible when allow-list enabled) -->
+      <div id="oauthAllowListSection" style="display:none">
+        <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center">
+          <select id="ocuAddSelect"
+            style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
+            <option value="">Selecionar utilizador...</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="addUserToOauthClientUI()" style="white-space:nowrap">Adicionar</button>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:var(--surface2);text-align:left">
+              <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Utilizador</th>
+              <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Email</th>
+              <th style="padding:8px 12px"></th>
+            </tr>
+          </thead>
+          <tbody id="ocuListBody">
+            <tr><td colspan="3" style="padding:20px;text-align:center;color:var(--text3)">Nenhum utilizador na lista.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="oauthAllowListOpen" style="display:none;padding:8px 0;font-size:13px;color:var(--text3)">
+        Allow-list desativada — todos os utilizadores registados têm acesso a este client.
+      </div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeOauthClientUsersModal()">Fechar</button></div>
+  </div>
+</div>
+
 <!-- Manage Profile Users Modal (assign/remove users from a profile) -->
 <div class="modal-overlay" id="profileUsersModal">
   <div class="modal" style="max-width:520px">
@@ -1431,6 +1596,144 @@
     <div class="modal-footer" id="inviteGenFooter">
       <button class="btn" onclick="closeCreateInviteModal()">Fechar</button>
       <button class="btn btn-primary" onclick="generateInvite()" id="inviteGenBtn">Gerar Link</button>
+    </div>
+  </div>
+</div>
+
+<!-- LDAP Config Modal -->
+<div class="modal-overlay" id="ldapModal">
+  <div class="modal" style="max-width:720px">
+    <div class="modal-header">
+      <h3 id="ldapModalTitle">Novo directory LDAP</h3>
+      <button class="close-btn" onclick="closeLdapModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="ldapEditId" value="">
+
+      <!-- Section: Connection -->
+      <div class="ldap-section">
+        <div class="ldap-section-title">Ligação</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="ldapName">Nome <span class="req">*</span></label>
+            <input type="text" id="ldapName" placeholder="corp-ad" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label for="ldapUrl">URL <span class="req">*</span></label>
+            <input type="text" id="ldapUrl" placeholder="ldaps://ad.example.com:636" autocomplete="off">
+          </div>
+          <div class="form-group span-2">
+            <label for="ldapBaseDn">Base DN <span class="req">*</span></label>
+            <input type="text" id="ldapBaseDn" placeholder="DC=example,DC=com" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label for="ldapBindDn">Bind DN</label>
+            <input type="text" id="ldapBindDn" placeholder="CN=svc-midleman,OU=…" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label for="ldapBindPassword">Bind password</label>
+            <input type="password" id="ldapBindPassword" placeholder="(opcional)" autocomplete="new-password">
+          </div>
+        </div>
+        <div class="ldap-checks">
+          <label class="ldap-check">
+            <input type="checkbox" id="ldapStartTls">
+            <span>StartTLS <span class="ldap-hint">(só para ldap://)</span></span>
+          </label>
+          <label class="ldap-check">
+            <input type="checkbox" id="ldapTlsVerify" checked>
+            <span>Validar certificado TLS</span>
+          </label>
+          <label class="ldap-check">
+            <input type="checkbox" id="ldapEnabled" checked>
+            <span>Directory ativo</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Section: User mapping -->
+      <div class="ldap-section">
+        <div class="ldap-section-title">Mapeamento de utilizadores</div>
+        <div class="form-grid">
+          <div class="form-group span-2">
+            <label for="ldapUserFilter">Filtro de pesquisa</label>
+            <input type="text" id="ldapUserFilter" placeholder="(|(uid={login})(mail={login})(sAMAccountName={login}))" autocomplete="off" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12.5px">
+            <span class="ldap-hint">Deve conter <code>{login}</code>. Default cobre OpenLDAP e AD.</span>
+          </div>
+          <div class="form-group">
+            <label for="ldapUsernameAttr">Username attr</label>
+            <input type="text" id="ldapUsernameAttr" placeholder="uid">
+          </div>
+          <div class="form-group">
+            <label for="ldapEmailAttr">Email attr</label>
+            <input type="text" id="ldapEmailAttr" placeholder="mail">
+          </div>
+          <div class="form-group">
+            <label for="ldapFullnameAttr">Fullname attr</label>
+            <input type="text" id="ldapFullnameAttr" placeholder="cn">
+          </div>
+          <div class="form-group">
+            <label for="ldapGroupAttr">Group attr</label>
+            <input type="text" id="ldapGroupAttr" placeholder="memberOf">
+          </div>
+        </div>
+      </div>
+
+      <!-- Section: Policy -->
+      <div class="ldap-section">
+        <div class="ldap-section-title">Política</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="ldapScope">Scope</label>
+            <select id="ldapScope">
+              <option value="both">Ambos (admin + proxy)</option>
+              <option value="admin">Apenas admins</option>
+              <option value="proxy">Apenas proxy users</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="ldapTotpPolicy">2FA</label>
+            <select id="ldapTotpPolicy">
+              <option value="optional">Opcional</option>
+              <option value="required">Obrigatória</option>
+              <option value="disabled">Desativada</option>
+            </select>
+          </div>
+          <div class="form-group span-2">
+            <label for="ldapTimeoutMs">Timeout (ms)</label>
+            <input type="number" id="ldapTimeoutMs" min="500" max="60000" step="500" value="5000">
+          </div>
+        </div>
+      </div>
+
+      <!-- Section: Authorization mapping -->
+      <div class="ldap-section">
+        <div class="ldap-section-title">Autorização</div>
+        <div class="form-grid">
+          <div class="form-group span-2">
+            <label for="ldapAdminGroups">Grupos de admin (um DN por linha)</label>
+            <textarea id="ldapAdminGroups" rows="3" placeholder="CN=midleman-admins,OU=Groups,DC=example,DC=com" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12.5px;resize:vertical"></textarea>
+            <span class="ldap-hint">Quando o login admin tem scope <code>admin</code> ou <code>both</code>, o user só entra como admin se um destes DNs aparecer em <code>memberOf</code> (ou no atributo configurado em <em>Group attr</em>). Vazio = nenhum admin LDAP.</span>
+          </div>
+          <div class="form-group span-2">
+            <label for="ldapDefaultProfile">Profile default para proxy users</label>
+            <input type="text" id="ldapDefaultProfile" placeholder="ex: acme" autocomplete="off">
+            <span class="ldap-hint">Atribuído automaticamente no primeiro login a users que cheguem por este directory. Vazio = shadow account sem acesso até ser associada manualmente.</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="ldapTestResult" class="ldap-test-result" style="display:none"></div>
+    </div>
+    <div class="modal-footer ldap-modal-footer">
+      <div class="ldap-test-row">
+        <input type="text" id="ldapTestLogin" placeholder="Login para testar (opcional)" autocomplete="off">
+        <button class="btn" onclick="testLdap()" id="ldapTestBtn">Testar ligação</button>
+      </div>
+      <div class="ldap-footer-actions">
+        <button class="btn" onclick="closeLdapModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="submitLdap()" id="ldapSubmitBtn">Criar</button>
+      </div>
     </div>
   </div>
 </div>

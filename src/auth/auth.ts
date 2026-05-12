@@ -84,6 +84,18 @@ CREATE TABLE IF NOT EXISTS invite_tokens (
     used_by      TEXT,
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS admin_invites (
+    token       TEXT PRIMARY KEY,
+    email       TEXT NOT NULL DEFAULT '',
+    full_name   TEXT NOT NULL DEFAULT '',
+    note        TEXT NOT NULL DEFAULT '',
+    created_by  INTEGER,
+    expires_at  TEXT NOT NULL,
+    used_at     TEXT,
+    used_by_id  INTEGER,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 export function initAuth(dataDir: string, maxAge: number = 86400): void {
@@ -105,6 +117,20 @@ export function initAuth(dataDir: string, maxAge: number = 86400): void {
                 if (!cols.includes('email')) db.exec("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''");
                 if (!cols.includes('totp_enabled')) db.exec("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 1");
                 if (!cols.includes('created_by_user_id')) db.exec("ALTER TABLE users ADD COLUMN created_by_user_id INTEGER");
+                if (!cols.includes('auth_source')) db.exec("ALTER TABLE users ADD COLUMN auth_source TEXT NOT NULL DEFAULT 'local'");
+                if (!cols.includes('ldap_config_id')) db.exec("ALTER TABLE users ADD COLUMN ldap_config_id INTEGER");
+                if (!cols.includes('ldap_dn')) db.exec("ALTER TABLE users ADD COLUMN ldap_dn TEXT");
+            }
+        } catch {}
+
+        // Additive migration on `proxy_users` for LDAP shadow accounts
+        try {
+            const info = db.prepare("PRAGMA table_info(proxy_users)").all() as any[];
+            if (info.length > 0) {
+                const cols = info.map((c: any) => c.name);
+                if (!cols.includes('auth_source')) db.exec("ALTER TABLE proxy_users ADD COLUMN auth_source TEXT NOT NULL DEFAULT 'local'");
+                if (!cols.includes('ldap_config_id')) db.exec("ALTER TABLE proxy_users ADD COLUMN ldap_config_id INTEGER");
+                if (!cols.includes('ldap_dn')) db.exec("ALTER TABLE proxy_users ADD COLUMN ldap_dn TEXT");
             }
         } catch {}
 
@@ -183,16 +209,15 @@ export async function createUser(username: string, password: string, totpSecret:
 
 export async function verifyCredentials(username: string, password: string): Promise<{ user: AuthUser; totpSecret: string } | null> {
     if (!db) return null;
-    const row = db.prepare('SELECT id, username, password, totp_secret, totp_enabled, full_name, email, created_by_user_id, created_at FROM users WHERE username = $u').get({ $u: username }) as any;
+    const row = db.prepare('SELECT id, username, password, totp_secret, totp_enabled, full_name, email, created_by_user_id, auth_source, ldap_config_id, ldap_dn, created_at FROM users WHERE username = $u').get({ $u: username }) as any;
     if (!row) return null;
+    // Shadow accounts (auth_source='ldap') have no usable local password; the
+    // LDAP path validates the password by binding to the directory directly.
+    if (row.auth_source === 'ldap') return null;
     const valid = await Bun.password.verify(password, row.password);
     if (!valid) return null;
     return {
-        user: {
-            id: row.id, username: row.username, createdAt: row.created_at,
-            fullName: row.full_name || '', email: row.email || '',
-            totpEnabled: !!row.totp_enabled, createdByUserId: row.created_by_user_id ?? null,
-        },
+        user: rowToAuthUser(row),
         totpSecret: row.totp_secret,
     };
 }
@@ -208,18 +233,21 @@ function rowToAuthUser(r: any): AuthUser {
         email: r.email || '',
         totpEnabled: !!r.totp_enabled,
         createdByUserId: r.created_by_user_id ?? null,
+        authSource: (r.auth_source || 'local') as 'local' | 'ldap',
+        ldapConfigId: r.ldap_config_id ?? null,
+        ldapDn: r.ldap_dn ?? null,
     };
 }
 
 export function listAdmins(): AuthUser[] {
     if (!db) return [];
-    const rows = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_by_user_id, created_at FROM users ORDER BY created_at ASC').all() as any[];
+    const rows = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_by_user_id, auth_source, ldap_config_id, ldap_dn, created_at FROM users ORDER BY created_at ASC').all() as any[];
     return rows.map(rowToAuthUser);
 }
 
 export function getAdmin(id: number): AuthUser | null {
     if (!db) return null;
-    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_by_user_id, created_at FROM users WHERE id = $id').get({ $id: id }) as any;
+    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_by_user_id, auth_source, ldap_config_id, ldap_dn, created_at FROM users WHERE id = $id').get({ $id: id }) as any;
     return row ? rowToAuthUser(row) : null;
 }
 
@@ -238,7 +266,7 @@ export async function createAdditionalAdmin(
     db.prepare(`INSERT INTO users (username, password, totp_secret, totp_enabled, full_name, email, created_by_user_id)
         VALUES ($u, $p, '', 0, $fn, $em, $cb)`)
         .run({ $u: username, $p: hash, $fn: fullName.trim(), $em: email.trim().toLowerCase(), $cb: createdByUserId });
-    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_by_user_id, created_at FROM users WHERE username = $u').get({ $u: username }) as any;
+    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_by_user_id, auth_source, ldap_config_id, ldap_dn, created_at FROM users WHERE username = $u').get({ $u: username }) as any;
     return rowToAuthUser(row);
 }
 
@@ -253,6 +281,10 @@ export function deleteAdmin(id: number): { deleted: boolean; reason?: string } {
 
 export async function updateAdminPassword(id: number, newPassword: string): Promise<boolean> {
     if (!db) return false;
+    // Refuse to set a local password on a shadow (LDAP) account — the password
+    // lives in the directory.
+    const row = db.prepare("SELECT auth_source FROM users WHERE id = $id").get({ $id: id }) as any;
+    if (row?.auth_source === 'ldap') return false;
     const hash = await Bun.password.hash(newPassword, 'bcrypt');
     const result = db.prepare("UPDATE users SET password = $p, updated_at = datetime('now') WHERE id = $id")
         .run({ $p: hash, $id: id });
@@ -265,6 +297,54 @@ export function setAdminTotp(id: number, totpSecret: string): boolean {
     const result = db.prepare("UPDATE users SET totp_secret = $t, totp_enabled = 1, updated_at = datetime('now') WHERE id = $id")
         .run({ $t: totpSecret, $id: id });
     return result.changes > 0;
+}
+
+// ─── LDAP shadow admins ─────────────────────────────────────────────────────
+
+export interface LdapAdminProvisionInput {
+    ldapConfigId: number;
+    ldapDn: string;
+    username: string;
+    fullName: string;
+    email: string;
+}
+
+/** Find a shadow admin by (ldap_config_id, ldap_dn). */
+export function findLdapShadowAdmin(ldapConfigId: number, ldapDn: string): AuthUser | null {
+    if (!db) return null;
+    const row = db.prepare(`SELECT id, username, full_name, email, totp_enabled, created_by_user_id, auth_source, ldap_config_id, ldap_dn, created_at
+        FROM users WHERE auth_source = 'ldap' AND ldap_config_id = $cid AND ldap_dn = $dn`)
+        .get({ $cid: ldapConfigId, $dn: ldapDn }) as any;
+    return row ? rowToAuthUser(row) : null;
+}
+
+/** Create or refresh a shadow admin and return it. Username conflicts with local users abort with null. */
+export function upsertLdapShadowAdmin(input: LdapAdminProvisionInput): AuthUser | null {
+    if (!db) return null;
+    const existing = findLdapShadowAdmin(input.ldapConfigId, input.ldapDn);
+    if (existing) {
+        // Sync attrs in case they changed in the directory.
+        db.prepare(`UPDATE users SET full_name = $fn, email = $em, updated_at = datetime('now') WHERE id = $id`)
+            .run({ $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(), $id: existing.id });
+        return getAdmin(existing.id);
+    }
+    // Username collision with a local admin → abort (local wins).
+    const collision = db.prepare(`SELECT id, auth_source FROM users WHERE username = $u`).get({ $u: input.username }) as any;
+    if (collision) return null;
+    db.prepare(`INSERT INTO users (username, password, totp_secret, totp_enabled, full_name, email, auth_source, ldap_config_id, ldap_dn)
+        VALUES ($u, '', '', 0, $fn, $em, 'ldap', $cid, $dn)`)
+        .run({ $u: input.username, $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(), $cid: input.ldapConfigId, $dn: input.ldapDn });
+    const row = db.prepare(`SELECT id, username, full_name, email, totp_enabled, created_by_user_id, auth_source, ldap_config_id, ldap_dn, created_at
+        FROM users WHERE username = $u`).get({ $u: input.username }) as any;
+    return row ? rowToAuthUser(row) : null;
+}
+
+/** Returns true if any local (non-LDAP) admin exists. Used to warn before
+ *  provisioning the first LDAP admin (avoid lockout if AD goes down). */
+export function hasLocalAdmins(): boolean {
+    if (!db) return false;
+    const row = db.prepare("SELECT COUNT(*) as c FROM users WHERE auth_source = 'local' OR auth_source IS NULL").get() as any;
+    return (row?.c || 0) > 0;
 }
 
 // ─── Audit log ──────────────────────────────────────────────────────────────
@@ -528,7 +608,17 @@ setInterval(() => {
 // ─── Global Proxy User Management ──────────────────────────────────────────
 
 function rowToProxyUser(r: any): ProxyUser {
-    return { id: r.id, username: r.username, fullName: r.full_name || '', email: r.email || '', totpEnabled: !!r.totp_enabled, createdAt: r.created_at };
+    return {
+        id: r.id,
+        username: r.username,
+        fullName: r.full_name || '',
+        email: r.email || '',
+        totpEnabled: !!r.totp_enabled,
+        createdAt: r.created_at,
+        authSource: (r.auth_source || 'local') as 'local' | 'ldap',
+        ldapConfigId: r.ldap_config_id ?? null,
+        ldapDn: r.ldap_dn ?? null,
+    };
 }
 
 export async function createProxyUser(username: string, password: string, fullName = '', email = ''): Promise<ProxyUser> {
@@ -536,19 +626,19 @@ export async function createProxyUser(username: string, password: string, fullNa
     const hash = await Bun.password.hash(password, 'bcrypt');
     db.prepare('INSERT INTO proxy_users (username, full_name, email, password) VALUES ($u, $fn, $em, $p)')
         .run({ $u: username, $fn: fullName.trim(), $em: email.trim().toLowerCase(), $p: hash });
-    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
+    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
     return rowToProxyUser(row);
 }
 
 export function listAllProxyUsers(): ProxyUser[] {
     if (!db) return [];
-    const rows = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_at FROM proxy_users ORDER BY username').all() as any[];
+    const rows = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at FROM proxy_users ORDER BY username').all() as any[];
     return rows.map(rowToProxyUser);
 }
 
 export function getProxyUser(id: number): ProxyUser | null {
     if (!db) return null;
-    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_at FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
+    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
     return row ? rowToProxyUser(row) : null;
 }
 
@@ -560,6 +650,8 @@ export function deleteProxyUser(id: number): boolean {
 
 export async function updateProxyUserPassword(id: number, newPassword: string): Promise<boolean> {
     if (!db) return false;
+    const row = db.prepare("SELECT auth_source FROM proxy_users WHERE id = $id").get({ $id: id }) as any;
+    if (row?.auth_source === 'ldap') return false;
     const hash = await Bun.password.hash(newPassword, 'bcrypt');
     const result = db.prepare("UPDATE proxy_users SET password = $p, updated_at = datetime('now') WHERE id = $id")
         .run({ $p: hash, $id: id });
@@ -570,11 +662,11 @@ export async function updateProxyUserPassword(id: number, newPassword: string): 
 export function findProxyUserByEmailOrUsername(email: string, username: string): ProxyUser | null {
     if (!db) return null;
     if (email) {
-        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_at FROM proxy_users WHERE email = $e AND email != \'\'').get({ $e: email.toLowerCase() }) as any;
+        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at FROM proxy_users WHERE email = $e AND email != \'\'').get({ $e: email.toLowerCase() }) as any;
         if (row) return rowToProxyUser(row);
     }
     if (username) {
-        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
+        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
         if (row) return rowToProxyUser(row);
     }
     return null;
@@ -591,11 +683,13 @@ export function updateProxyUserInfo(id: number, fullName: string, email: string)
 export async function verifyProxyUserCredentials(login: string, password: string): Promise<{ user: ProxyUser; totpSecret: string | null } | null> {
     if (!db) return null;
     // Try username first, then email
-    let row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, created_at FROM proxy_users WHERE username = $u').get({ $u: login }) as any;
+    let row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at FROM proxy_users WHERE username = $u').get({ $u: login }) as any;
     if (!row && login.includes('@')) {
-        row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, created_at FROM proxy_users WHERE email = $e').get({ $e: login.toLowerCase() }) as any;
+        row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at FROM proxy_users WHERE email = $e').get({ $e: login.toLowerCase() }) as any;
     }
     if (!row) return null;
+    // Shadow accounts have no usable local password.
+    if (row.auth_source === 'ldap') return null;
     const valid = await Bun.password.verify(password, row.password);
     if (!valid) return null;
     return {
@@ -656,6 +750,42 @@ export function removeAllProfileAssociations(profileName: string): number {
 }
 
 // ─── Proxy User TOTP Setup ─────────────────────────────────────────────────
+
+// ─── LDAP shadow proxy users ────────────────────────────────────────────────
+
+export interface LdapProxyProvisionInput {
+    ldapConfigId: number;
+    ldapDn: string;
+    username: string;
+    fullName: string;
+    email: string;
+}
+
+export function findLdapShadowProxyUser(ldapConfigId: number, ldapDn: string): ProxyUser | null {
+    if (!db) return null;
+    const row = db.prepare(`SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at
+        FROM proxy_users WHERE auth_source = 'ldap' AND ldap_config_id = $cid AND ldap_dn = $dn`)
+        .get({ $cid: ldapConfigId, $dn: ldapDn }) as any;
+    return row ? rowToProxyUser(row) : null;
+}
+
+export function upsertLdapShadowProxyUser(input: LdapProxyProvisionInput): ProxyUser | null {
+    if (!db) return null;
+    const existing = findLdapShadowProxyUser(input.ldapConfigId, input.ldapDn);
+    if (existing) {
+        db.prepare(`UPDATE proxy_users SET full_name = $fn, email = $em, updated_at = datetime('now') WHERE id = $id`)
+            .run({ $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(), $id: existing.id });
+        return getProxyUser(existing.id);
+    }
+    const collision = db.prepare(`SELECT id FROM proxy_users WHERE username = $u`).get({ $u: input.username }) as any;
+    if (collision) return null;
+    db.prepare(`INSERT INTO proxy_users (username, full_name, email, password, totp_secret, totp_enabled, auth_source, ldap_config_id, ldap_dn)
+        VALUES ($u, $fn, $em, '', NULL, 0, 'ldap', $cid, $dn)`)
+        .run({ $u: input.username, $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(), $cid: input.ldapConfigId, $dn: input.ldapDn });
+    const row = db.prepare(`SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at
+        FROM proxy_users WHERE username = $u`).get({ $u: input.username }) as any;
+    return row ? rowToProxyUser(row) : null;
+}
 
 export function setupProxyUserTotp(userId: number, totpSecret: string): boolean {
     if (!db) return false;
@@ -984,5 +1114,70 @@ export function useInviteToken(token: string, username: string): boolean {
 export function revokeInviteToken(token: string): boolean {
     if (!db) return false;
     const result = db.prepare('DELETE FROM invite_tokens WHERE token = $t').run({ $t: token });
+    return result.changes > 0;
+}
+
+// ─── Admin Invite Tokens ──────────────────────────────────────────────────────
+
+export interface AdminInvite {
+    token: string;
+    email: string;
+    fullName: string;
+    note: string;
+    createdBy: number | null;
+    expiresAt: string;
+    usedAt: string | null;
+    usedById: number | null;
+    createdAt: string;
+}
+
+function rowToAdminInvite(r: any): AdminInvite {
+    return {
+        token: r.token,
+        email: r.email || '',
+        fullName: r.full_name || '',
+        note: r.note || '',
+        createdBy: r.created_by ?? null,
+        expiresAt: r.expires_at,
+        usedAt: r.used_at || null,
+        usedById: r.used_by_id ?? null,
+        createdAt: r.created_at,
+    };
+}
+
+export function createAdminInvite(email: string, fullName: string, note: string, expiresInHours: number, createdBy?: number): AdminInvite {
+    if (!db) throw new Error('Auth not initialized');
+    const token = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + expiresInHours * 3_600_000).toISOString();
+    db.prepare('INSERT INTO admin_invites (token, email, full_name, note, created_by, expires_at) VALUES ($t, $em, $fn, $no, $cb, $ex)')
+        .run({ $t: token, $em: email.trim().toLowerCase(), $fn: fullName.trim(), $no: note.trim(), $cb: createdBy ?? null, $ex: expiresAt });
+    return { token, email: email.trim().toLowerCase(), fullName: fullName.trim(), note: note.trim(), createdBy: createdBy ?? null, expiresAt, usedAt: null, usedById: null, createdAt: new Date().toISOString() };
+}
+
+export function getAdminInvite(token: string): AdminInvite | null {
+    if (!db || !token) return null;
+    const row = db.prepare('SELECT * FROM admin_invites WHERE token = $t').get({ $t: token }) as any;
+    return row ? rowToAdminInvite(row) : null;
+}
+
+export function listAdminInvites(): AdminInvite[] {
+    if (!db) return [];
+    const rows = db.prepare('SELECT * FROM admin_invites ORDER BY created_at DESC').all() as any[];
+    return rows.map(rowToAdminInvite);
+}
+
+/** Mark token as used. Returns false if expired, already used, or not found. */
+export function consumeAdminInvite(token: string, usedById: number): boolean {
+    if (!db) return false;
+    const now = new Date().toISOString();
+    const result = db.prepare(
+        'UPDATE admin_invites SET used_at = $ua, used_by_id = $uid WHERE token = $t AND used_at IS NULL AND expires_at > $now'
+    ).run({ $ua: now, $uid: usedById, $t: token, $now: now });
+    return result.changes > 0;
+}
+
+export function revokeAdminInvite(token: string): boolean {
+    if (!db) return false;
+    const result = db.prepare('DELETE FROM admin_invites WHERE token = $t AND used_at IS NULL').run({ $t: token });
     return result.changes > 0;
 }

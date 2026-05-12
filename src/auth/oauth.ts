@@ -10,6 +10,7 @@
 
 import { createHash } from 'crypto';
 import { getAuthDb } from './auth';
+import type { ProxyUser } from '../core/types';
 
 // ─── Schema ─────────────────────────────────────────────────────────────────
 
@@ -61,6 +62,12 @@ CREATE TABLE IF NOT EXISTS oauth_sso_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_oauth_sso_expires ON oauth_sso_sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS oauth_client_users (
+    client_id  TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES proxy_users(id) ON DELETE CASCADE,
+    PRIMARY KEY (client_id, user_id)
+);
 `;
 
 export function initOauth(): void {
@@ -72,9 +79,10 @@ export function initOauth(): void {
     db.exec(CREATE_TABLES);
     // Idempotent column additions (safe to run on every boot).
     const cols = (db.prepare("PRAGMA table_info(oauth_clients)").all() as any[]).map(r => r.name);
-    if (!cols.includes('consent_enabled')) db.exec("ALTER TABLE oauth_clients ADD COLUMN consent_enabled INTEGER NOT NULL DEFAULT 0");
-    if (!cols.includes('consent_title'))   db.exec("ALTER TABLE oauth_clients ADD COLUMN consent_title TEXT");
-    if (!cols.includes('consent_body'))    db.exec("ALTER TABLE oauth_clients ADD COLUMN consent_body TEXT");
+    if (!cols.includes('consent_enabled'))     db.exec("ALTER TABLE oauth_clients ADD COLUMN consent_enabled INTEGER NOT NULL DEFAULT 0");
+    if (!cols.includes('consent_title'))         db.exec("ALTER TABLE oauth_clients ADD COLUMN consent_title TEXT");
+    if (!cols.includes('consent_body'))          db.exec("ALTER TABLE oauth_clients ADD COLUMN consent_body TEXT");
+    if (!cols.includes('allow_list_enabled'))    db.exec("ALTER TABLE oauth_clients ADD COLUMN allow_list_enabled INTEGER NOT NULL DEFAULT 0");
     // Cleanup expired codes / refresh tokens / sessions once per hour.
     cleanupExpired();
     setInterval(cleanupExpired, 60 * 60 * 1000);
@@ -103,6 +111,7 @@ export interface OauthClient {
     consentEnabled: boolean;
     consentTitle: string;
     consentBody: string;
+    allowListEnabled: boolean;
 }
 
 function randomToken(byteLength: number): string {
@@ -155,6 +164,7 @@ function rowToClient(r: any): OauthClient {
         consentEnabled: !!r.consent_enabled,
         consentTitle: r.consent_title || '',
         consentBody: r.consent_body || '',
+        allowListEnabled: !!r.allow_list_enabled,
     };
 }
 
@@ -391,4 +401,69 @@ export function revokeAllUserRefreshTokens(userId: number): void {
     db.prepare("UPDATE oauth_refresh_tokens SET revoked_at = datetime('now') WHERE user_id = $uid AND revoked_at IS NULL")
         .run({ $uid: userId });
     destroyAllUserSsoSessions(userId);
+}
+
+// ─── Client allow-list ──────────────────────────────────────────────────────
+// When allowListEnabled=true for a client, only users explicitly added to
+// oauth_client_users may obtain tokens for that client.
+
+/** Returns true if the user may use this client (allow-list disabled OR user is in the list). */
+export function isUserAllowedForClient(userId: number, clientId: string): boolean {
+    const db = getAuthDb();
+    if (!db) return false;
+    const client = db.prepare('SELECT allow_list_enabled FROM oauth_clients WHERE client_id = $id').get({ $id: clientId }) as any;
+    if (!client) return false;
+    if (!client.allow_list_enabled) return true;
+    const row = db.prepare('SELECT 1 FROM oauth_client_users WHERE client_id = $cid AND user_id = $uid').get({ $cid: clientId, $uid: userId });
+    return !!row;
+}
+
+/** Enable or disable the allow-list for a client. */
+export function setOauthClientAllowList(clientId: string, enabled: boolean): boolean {
+    const db = getAuthDb();
+    if (!db) return false;
+    const result = db.prepare("UPDATE oauth_clients SET allow_list_enabled = $e, updated_at = datetime('now') WHERE client_id = $id")
+        .run({ $e: enabled ? 1 : 0, $id: clientId });
+    return result.changes > 0;
+}
+
+/** Add a user to a client's allow-list (no-op if already present). */
+export function addUserToOauthClient(clientId: string, userId: number): boolean {
+    const db = getAuthDb();
+    if (!db) return false;
+    try {
+        db.prepare('INSERT OR IGNORE INTO oauth_client_users (client_id, user_id) VALUES ($cid, $uid)').run({ $cid: clientId, $uid: userId });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/** Remove a user from a client's allow-list. */
+export function removeUserFromOauthClient(clientId: string, userId: number): boolean {
+    const db = getAuthDb();
+    if (!db) return false;
+    const result = db.prepare('DELETE FROM oauth_client_users WHERE client_id = $cid AND user_id = $uid').run({ $cid: clientId, $uid: userId });
+    return result.changes > 0;
+}
+
+/** List all users currently in a client's allow-list. */
+export function listUsersForOauthClient(clientId: string): ProxyUser[] {
+    const db = getAuthDb();
+    if (!db) return [];
+    const rows = db.prepare(`
+        SELECT u.id, u.username, u.full_name, u.email, u.totp_enabled, u.created_at
+        FROM oauth_client_users cu
+        JOIN proxy_users u ON cu.user_id = u.id
+        WHERE cu.client_id = $cid
+        ORDER BY u.username ASC
+    `).all({ $cid: clientId }) as any[];
+    return rows.map(r => ({
+        id: r.id,
+        username: r.username,
+        fullName: r.full_name || '',
+        email: r.email || '',
+        totpEnabled: !!r.totp_enabled,
+        createdAt: r.created_at,
+    }));
 }

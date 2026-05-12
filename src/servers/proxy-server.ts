@@ -1,6 +1,7 @@
 import type { ProxyProfile } from '../core/types';
 import { handleDirectProxy } from '../proxy/proxy';
-import { verifyProxyUserCredentials, signJwt, getJwtMaxAge, checkRateLimit, proxyUserHasProfile, createProxyLoginChallenge, consumeProxyLoginChallenge, peekProxyLoginChallenge, generateTotpSecret, verifyTotp, setupProxyUserTotp, userIdToUuid } from '../auth/auth';
+import { verifyProxyUserCredentials, signJwt, getJwtMaxAge, checkRateLimit, proxyUserHasProfile, createProxyLoginChallenge, consumeProxyLoginChallenge, peekProxyLoginChallenge, generateTotpSecret, verifyTotp, setupProxyUserTotp, userIdToUuid, upsertLdapShadowProxyUser, assignProxyUserToProfile } from '../auth/auth';
+import { tryLdapLogin } from '../auth/ldap';
 import { renderConsentMarkdown, escapeHtmlAttr } from '../core/consent';
 import QRCode from 'qrcode';
 
@@ -107,7 +108,33 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                         return jsonRes(429, { error: 'Too many attempts. Try again in 15 minutes.' });
                     }
 
-                    const cred = await verifyProxyUserCredentials(username, password);
+                    // 1) Local-first
+                    let cred = await verifyProxyUserCredentials(username, password);
+
+                    // 2) Fallback to LDAP
+                    if (!cred) {
+                        const ldap = await tryLdapLogin('proxy', username, password);
+                        if (ldap.ok) {
+                            const shadow = upsertLdapShadowProxyUser({
+                                ldapConfigId: ldap.auth.configId,
+                                ldapDn: ldap.auth.dn,
+                                username: ldap.auth.username,
+                                fullName: ldap.auth.fullName,
+                                email: ldap.auth.email,
+                            });
+                            if (!shadow) {
+                                return jsonRes(409, { error: 'A local user already uses this username.' });
+                            }
+                            // Auto-attach to directory's default profile (may differ from current profile).
+                            if (ldap.grantedProfile) {
+                                assignProxyUserToProfile(shadow.id, ldap.grantedProfile);
+                            }
+                            cred = { user: shadow, totpSecret: null };
+                        } else if (ldap.reason === 'server_error') {
+                            return jsonRes(502, { error: 'Directory configuration error. Ask an admin to check the LDAP directory.' });
+                        }
+                    }
+
                     if (!cred) return jsonRes(401, { error: 'Invalid username or password' });
 
                     // Check if user has access to this profile
