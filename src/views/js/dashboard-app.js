@@ -188,12 +188,45 @@ async function doLoginStep1() {
     if (!res.ok) { showAuthError('loginError', data.error || 'Login failed'); document.getElementById('loginBtn1').disabled = false; document.getElementById('loginBtn1').textContent = 'Continue'; return; }
     loginChallengeToken = data.challengeToken;
     document.getElementById('loginStep1').classList.remove('active');
-    document.getElementById('loginStep2').classList.add('active');
-    document.getElementById('loginTotp').value = '';
-    document.getElementById('loginTotp').focus();
+    if (data.status === 'totp_setup') {
+      // First-time login: show the QR + secret + confirmation field
+      document.getElementById('loginSetupQr').src = data.qrDataUrl || '';
+      document.getElementById('loginSetupSecret').textContent = data.totpSecret || '';
+      document.getElementById('loginStep2Setup').classList.add('active');
+      document.getElementById('loginSetupCode').value = '';
+      document.getElementById('loginSetupCode').focus();
+    } else {
+      document.getElementById('loginStep2').classList.add('active');
+      document.getElementById('loginTotp').value = '';
+      document.getElementById('loginTotp').focus();
+    }
   } catch (e) { showAuthError('loginError', 'Error: ' + e.message); }
   document.getElementById('loginBtn1').disabled = false;
   document.getElementById('loginBtn1').textContent = 'Continue';
+}
+
+async function doLoginStep2Setup() {
+  hideAuthError('loginSetupError');
+  const code = document.getElementById('loginSetupCode').value.trim();
+  if (!code || code.length !== 6) return showAuthError('loginSetupError', 'Enter the 6-digit code from your authenticator.');
+  if (!loginChallengeToken) return showAuthError('loginSetupError', 'Session expired. Go back and try again.');
+  const btn = document.getElementById('loginBtnSetup');
+  btn.disabled = true; btn.textContent = 'Verifying...';
+  try {
+    const res = await fetch('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ challengeToken: loginChallengeToken, totpCode: code }) });
+    const data = await res.json();
+    if (!res.ok) { showAuthError('loginSetupError', data.error || 'Invalid code'); btn.disabled = false; btn.textContent = 'Confirm & Sign In'; return; }
+    startApp(data.username);
+  } catch (e) { showAuthError('loginSetupError', 'Error: ' + e.message); btn.disabled = false; btn.textContent = 'Confirm & Sign In'; }
+}
+
+function copyLoginSetupSecret() {
+  const el = document.getElementById('loginSetupSecret');
+  if (!el) return;
+  navigator.clipboard.writeText(el.textContent || '').catch(() => {});
+  const orig = el.style.background;
+  el.style.background = 'rgba(34,197,94,0.15)';
+  setTimeout(() => { el.style.background = orig; }, 400);
 }
 
 async function doLoginStep2() {
@@ -214,7 +247,9 @@ async function doLoginStep2() {
 function loginBackToStep1() {
   loginChallengeToken = null;
   hideAuthError('loginTotpError');
+  hideAuthError('loginSetupError');
   document.getElementById('loginStep2').classList.remove('active');
+  document.getElementById('loginStep2Setup').classList.remove('active');
   document.getElementById('loginStep1').classList.add('active');
   document.getElementById('loginUser').focus();
 }

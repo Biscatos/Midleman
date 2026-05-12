@@ -1588,6 +1588,39 @@ body.sidebar-collapsed .sidebar-link:hover[data-tooltip]::after { opacity: 1; }
   display: block;
 }
 
+.totp-setup-qr-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 16px 0 12px;
+}
+.totp-setup-qr-wrap img {
+  width: 180px;
+  height: 180px;
+  background: #fff;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.totp-setup-secret {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  text-align: center;
+  font-family: 'SF Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  letter-spacing: 1px;
+  word-break: break-all;
+  color: var(--text2);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: all;
+  transition: background var(--transition);
+}
+.totp-setup-secret:hover {
+  background: var(--surface3);
+}
+
 .auth-footer {
   max-width: 420px;
   margin: 40px auto;

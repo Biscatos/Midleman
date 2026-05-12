@@ -668,11 +668,47 @@ export type LdapLoginOutcome =
     | LdapLoginDecision
     | { ok: false; reason: 'invalid_credentials' | 'no_directory' | 'server_error'; detail?: string };
 
-function matchAdminGroup(groups: string[], adminGroups: string[]): string {
-    if (!adminGroups.length || !groups.length) return '';
-    const lower = new Set(adminGroups.map(g => g.toLowerCase()));
-    for (const g of groups) {
-        if (lower.has(String(g).toLowerCase())) return g;
+/** Extract the CN (first RDN value) from a DN, lowercased. Returns '' if not a DN. */
+function cnOf(dn: string): string {
+    // First RDN: everything before the first unescaped comma.
+    // CN can contain escaped commas (`\,`) — handle that.
+    const m = dn.match(/^\s*cn\s*=\s*((?:[^,\\]|\\.)+)/i);
+    if (!m) return '';
+    return m[1].replace(/\\(.)/g, '$1').trim().toLowerCase();
+}
+
+/**
+ * Match the user's groups against the configured admin groups.
+ * Each configured entry may be either:
+ *   - a full DN (matched case-insensitively against the entire group DN)
+ *   - just a CN value (e.g. "DSI-DESENVOLVIMENTO-INOVACAO") — matched against
+ *     the CN of any of the user's groups
+ *
+ * Returns the matching user-group DN, or '' if no match.
+ */
+function matchAdminGroup(userGroups: string[], adminGroups: string[]): string {
+    if (!adminGroups.length || !userGroups.length) return '';
+
+    // Pre-split configured entries into two buckets for O(1) lookup.
+    const wantDn = new Set<string>();
+    const wantCn = new Set<string>();
+    for (const raw of adminGroups) {
+        const v = raw.trim();
+        if (!v) continue;
+        if (/^cn\s*=/i.test(v) && v.includes(',')) {
+            wantDn.add(v.toLowerCase());
+        } else {
+            // bare value — treat as CN. If user wrote "CN=foo" without commas, strip the prefix.
+            const bare = v.replace(/^cn\s*=\s*/i, '').toLowerCase();
+            wantCn.add(bare);
+        }
+    }
+
+    for (const g of userGroups) {
+        const dn = String(g);
+        if (wantDn.has(dn.toLowerCase())) return dn;
+        const cn = cnOf(dn);
+        if (cn && wantCn.has(cn)) return dn;
     }
     return '';
 }

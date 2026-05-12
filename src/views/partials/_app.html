@@ -1711,9 +1711,9 @@
         <div class="ldap-section-title">Autorização</div>
         <div class="form-grid">
           <div class="form-group span-2">
-            <label for="ldapAdminGroups">Grupos de admin (um DN por linha)</label>
-            <textarea id="ldapAdminGroups" rows="3" placeholder="CN=midleman-admins,OU=Groups,DC=example,DC=com" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12.5px;resize:vertical"></textarea>
-            <span class="ldap-hint">Quando o login admin tem scope <code>admin</code> ou <code>both</code>, o user só entra como admin se um destes DNs aparecer em <code>memberOf</code> (ou no atributo configurado em <em>Group attr</em>). Vazio = nenhum admin LDAP.</span>
+            <label for="ldapAdminGroups">Grupos de admin (um por linha)</label>
+            <textarea id="ldapAdminGroups" rows="3" placeholder="DSI-DESENVOLVIMENTO-INOVACAO&#10;ou&#10;CN=midleman-admins,OU=Groups,DC=example,DC=com" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12.5px;resize:vertical"></textarea>
+            <span class="ldap-hint">Aceita o <strong>nome curto</strong> do grupo (CN) ou o <strong>DN completo</strong>. Ex.: <code>DSI-DESENVOLVIMENTO-INOVACAO</code> ou <code>CN=...,OU=...,DC=...</code>. O user só entra como admin se um destes aparecer em <code>memberOf</code>. Vazio = nenhum admin LDAP.</span>
           </div>
           <div class="form-group span-2">
             <label for="ldapDefaultProfile">Profile default para proxy users</label>

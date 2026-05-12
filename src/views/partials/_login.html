@@ -39,6 +39,24 @@
               style="width:100%;justify-content:center;margin-top:8px;font-size:13px;color:#71717a;border:1px solid #27272a;background:transparent;cursor:pointer;border-radius:8px;height:40px;display:inline-flex;align-items:center">Back</button>
           </form>
         </div>
+        <!-- Step 2b: TOTP setup (first-time) -->
+        <div id="loginStep2Setup" class="auth-step">
+          <h2>Set up 2FA</h2>
+          <div class="subtitle">Scan the QR code with Google Authenticator, Microsoft Authenticator, Authy or 1Password — then enter the 6-digit code to confirm.</div>
+          <div class="auth-error" id="loginSetupError"></div>
+          <div class="totp-setup-qr-wrap">
+            <img id="loginSetupQr" src="" alt="TOTP QR Code">
+          </div>
+          <div class="totp-setup-secret" id="loginSetupSecret" onclick="copyLoginSetupSecret()" title="Click to copy the secret"></div>
+          <form onsubmit="event.preventDefault(); doLoginStep2Setup();" style="display: contents;">
+            <div class="form-group"><label>Confirmation code</label><input type="text" id="loginSetupCode" placeholder="000000"
+                maxlength="6" inputmode="numeric" autocomplete="one-time-code"
+                style="text-align:center;font-size:24px;letter-spacing:8px;font-weight:700"></div>
+            <button type="submit" class="btn btn-primary" id="loginBtnSetup">Confirm &amp; Sign In</button>
+            <button type="button" class="btn" onclick="loginBackToStep1()"
+              style="width:100%;justify-content:center;margin-top:8px;font-size:13px;color:#71717a;border:1px solid #27272a;background:transparent;cursor:pointer;border-radius:8px;height:40px;display:inline-flex;align-items:center">Back</button>
+          </form>
+        </div>
       </div>
     </main>
     <footer class="auth-footer">midleman</footer>
