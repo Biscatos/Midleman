@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sign in</title>
+  <title>Sign in — Entrar</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -68,6 +68,16 @@
       color: var(--err-text); font-size: 12.5px;
     }
     .hidden { display: none; }
+    .expired-icon { font-size: 36px; margin-bottom: 14px; }
+    .expired-title { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
+    .expired-msg { font-size: 13px; color: var(--text2); line-height: 1.6; margin-bottom: 20px; }
+    button.retry {
+      width: 100%; padding: 11px;
+      background: var(--btn); color: #fff; border: none; border-radius: 6px;
+      font-size: 14px; font-weight: 500; cursor: pointer; transition: background .15s;
+      font-family: inherit;
+    }
+    button.retry:hover { background: var(--btn-hover); }
 
     .consent-overlay {
       position: fixed; inset: 0; background: rgba(0,0,0,0.65);
@@ -111,15 +121,23 @@
   </div>
 
   <div class="card">
-    <h1>Sign in</h1>
-    <p class="sub">Enter your credentials to continue.</p>
+    <h1 id="heading">Sign in</h1>
+    <p class="sub" id="subText">Enter your credentials to continue.</p>
+
+    <!-- Session expired / generic fatal error panel -->
+    <div id="stepExpired" class="hidden">
+      <div class="expired-icon">⏱️</div>
+      <div class="expired-title" id="expiredTitle">Session expired</div>
+      <div class="expired-msg" id="expiredMsg">Your sign-in session has expired. Please close this tab and start the sign-in process again from the application.</div>
+      <button class="retry" id="btnClose" type="button" onclick="window.close()">Close tab</button>
+    </div>
 
     <!-- Step 1: username + password -->
     <div id="step1">
-      <label for="username">Username or email</label>
+      <label id="labelUser" for="username">Username or email</label>
       <input id="username" type="text" autocomplete="username" required autofocus>
 
-      <label for="password">Password</label>
+      <label id="labelPw" for="password">Password</label>
       <input id="password" type="password" autocomplete="current-password" required>
 
       <button id="loginBtn" class="primary" type="button">Sign in & authorize</button>
@@ -128,7 +146,7 @@
 
     <!-- Step 2: TOTP -->
     <div id="step2" class="hidden">
-      <label for="totp">6-digit code from your authenticator</label>
+      <label id="labelTotp" for="totp">6-digit code from your authenticator</label>
       <input id="totp" type="text" class="totp-input" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code">
 
       <button id="totpBtn" class="primary" type="button">Verify & authorize</button>
@@ -143,8 +161,87 @@
     let authRequest = AUTH_REQUEST;
     let challengeToken = '';
 
+    // ── i18n ──────────────────────────────────────────────────────────────────
+    const STRINGS = {
+      en: {
+        pageTitle:       'Sign in',
+        heading:         'Sign in',
+        sub:             'Enter your credentials to continue.',
+        labelUser:       'Username or email',
+        labelPassword:   'Password',
+        labelTotp:       '6-digit code from your authenticator',
+        btnLogin:        'Sign in & authorize',
+        btnLoggingIn:    'Signing in\u2026',
+        btnVerify:       'Verify & authorize',
+        btnVerifying:    'Verifying\u2026',
+        btnBack:         'Back',
+        btnClose:        'Close tab',
+        consentAccept:   'Accept and continue',
+        errRequired:     'Username and password are required.',
+        errTotpLen:      'Enter the 6-digit code.',
+        errNetwork:      'Network error. Please try again.',
+        errLogin:        'Login failed.',
+        errVerify:       'Verification failed.',
+        expiredTitle:    'Session expired',
+        expiredMsg:      'Your sign-in session has expired. Please close this tab and start the sign-in process again from the application.',
+      },
+      pt: {
+        pageTitle:       'Entrar',
+        heading:         'Entrar',
+        sub:             'Introduza as suas credenciais para continuar.',
+        labelUser:       'Nome de utilizador ou email',
+        labelPassword:   'Palavra-passe',
+        labelTotp:       'Código de 6 dígitos da sua aplicação autenticadora',
+        btnLogin:        'Entrar e autorizar',
+        btnLoggingIn:    'A entrar\u2026',
+        btnVerify:       'Verificar e autorizar',
+        btnVerifying:    'A verificar\u2026',
+        btnBack:         'Voltar',
+        btnClose:        'Fechar separador',
+        consentAccept:   'Aceitar e continuar',
+        errRequired:     'Nome de utilizador e palavra-passe são obrigatórios.',
+        errTotpLen:      'Introduza o código de 6 dígitos.',
+        errNetwork:      'Erro de rede. Tente novamente.',
+        errLogin:        'Falha no início de sessão.',
+        errVerify:       'Falha na verificação.',
+        expiredTitle:    'Sessão expirada',
+        expiredMsg:      'A sua sessão de início de sessão expirou. Feche este separador e inicie o processo de início de sessão novamente na aplicação.',
+      },
+    };
+
+    function detectLang() {
+      const langs = navigator.languages || [navigator.language || 'en'];
+      for (const l of langs) {
+        if (l.toLowerCase().startsWith('pt')) return 'pt';
+      }
+      return 'en';
+    }
+
+    const T = STRINGS[detectLang()];
+
+    function applyStrings() {
+      document.documentElement.lang = detectLang();
+      document.title = T.pageTitle;
+      document.getElementById('heading').textContent   = T.heading;
+      document.getElementById('subText').textContent   = T.sub;
+      document.getElementById('labelUser').textContent = T.labelUser;
+      document.getElementById('labelPw').textContent   = T.labelPassword;
+      document.getElementById('labelTotp').textContent = T.labelTotp;
+      loginBtn.textContent  = T.btnLogin;
+      totpBtn.textContent   = T.btnVerify;
+      backBtn.textContent   = T.btnBack;
+      document.getElementById('expiredTitle').textContent = T.expiredTitle;
+      document.getElementById('expiredMsg').textContent   = T.expiredMsg;
+      document.getElementById('btnClose').textContent     = T.btnClose;
+      const ca = document.getElementById('consentAccept');
+      if (ca) ca.textContent = T.consentAccept;
+    }
+
+    // ── DOM refs ──────────────────────────────────────────────────────────────
+
     const step1 = document.getElementById('step1');
     const step2 = document.getElementById('step2');
+    const stepExpired = document.getElementById('stepExpired');
     const err1 = document.getElementById('err1');
     const err2 = document.getElementById('err2');
     const loginBtn = document.getElementById('loginBtn');
@@ -154,11 +251,27 @@
     const passwordEl = document.getElementById('password');
     const totpEl = document.getElementById('totp');
 
+    applyStrings();
+
     function showErr(el, msg) { el.textContent = msg; el.classList.remove('hidden'); }
     function hideErr(el) { el.classList.add('hidden'); el.textContent = ''; }
 
+    function showExpired(title, msg) {
+      step1.classList.add('hidden');
+      step2.classList.add('hidden');
+      stepExpired.classList.remove('hidden');
+      if (title) document.getElementById('expiredTitle').textContent = title;
+      if (msg)   document.getElementById('expiredMsg').textContent = msg;
+    }
+
+    function isSessionExpiredError(data) {
+      const msg = (data.error_description || data.error || '').toLowerCase();
+      return msg.includes('expired') || msg.includes('session') || msg.includes('restart');
+    }
+
     function showStep1() {
       step2.classList.add('hidden');
+      stepExpired.classList.add('hidden');
       step1.classList.remove('hidden');
       hideErr(err2);
       totpEl.value = '';
@@ -177,9 +290,9 @@
       hideErr(err1);
       const username = usernameEl.value.trim();
       const password = passwordEl.value;
-      if (!username || !password) { showErr(err1, 'Username and password are required.'); return; }
+      if (!username || !password) { showErr(err1, T.errRequired); return; }
 
-      loginBtn.disabled = true; loginBtn.textContent = 'Signing in…';
+      loginBtn.disabled = true; loginBtn.textContent = T.btnLoggingIn;
       try {
         const res = await fetch('/oauth/login', {
           method: 'POST',
@@ -199,21 +312,25 @@
           showStep2();
           return;
         }
-        showErr(err1, data.error || data.error_description || 'Login failed');
+        if (isSessionExpiredError(data)) {
+          showExpired(T.expiredTitle, T.expiredMsg);
+          return;
+        }
+        showErr(err1, data.error || data.error_description || T.errLogin);
       } catch {
-        showErr(err1, 'Network error');
+        showErr(err1, T.errNetwork);
       } finally {
         loginBtn.disabled = false;
-        loginBtn.textContent = 'Sign in & authorize';
+        loginBtn.textContent = T.btnLogin;
       }
     }
 
     async function doTotp() {
       hideErr(err2);
       const code = totpEl.value.trim();
-      if (!code || code.length !== 6) { showErr(err2, 'Enter the 6-digit code.'); return; }
+      if (!code || code.length !== 6) { showErr(err2, T.errTotpLen); return; }
 
-      totpBtn.disabled = true; totpBtn.textContent = 'Verifying…';
+      totpBtn.disabled = true; totpBtn.textContent = T.btnVerifying;
       try {
         const res = await fetch('/oauth/totp', {
           method: 'POST',
@@ -227,12 +344,16 @@
           return;
         }
         if (data.challengeToken) challengeToken = data.challengeToken;
-        showErr(err2, data.error || data.error_description || 'Verification failed');
+        if (isSessionExpiredError(data)) {
+          showExpired(T.expiredTitle, T.expiredMsg);
+          return;
+        }
+        showErr(err2, data.error || data.error_description || T.errVerify);
       } catch {
-        showErr(err2, 'Network error');
+        showErr(err2, T.errNetwork);
       } finally {
         totpBtn.disabled = false;
-        totpBtn.textContent = 'Verify & authorize';
+        totpBtn.textContent = T.btnVerify;
       }
     }
 

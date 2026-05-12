@@ -428,8 +428,13 @@ async function issueTokenResponse(
         midleman_uid: user.id,
         preferred_username: user.username,
     };
-    if (scope.includes('email') && user.email) claims.email = user.email;
-    if (scope.includes('profile') && user.fullName) claims.name = user.fullName;
+    if (scope.includes('email')) {
+        claims.email = user.email || '';
+        claims.email_verified = !!(user.email);
+    }
+    if (scope.includes('profile')) {
+        claims.name = user.fullName || user.username;
+    }
     if (nonce) claims.nonce = nonce;
 
     const idToken = signJwt(claims, { ttlSeconds: accessTtl });
@@ -482,8 +487,9 @@ export async function handleUserinfo(req: Request): Promise<Response> {
     return new Response(JSON.stringify({
         sub: userIdToUuid(user.id),
         preferred_username: user.username,
-        email: user.email || undefined,
-        name: user.fullName || undefined,
+        email: user.email || '',
+        email_verified: !!(user.email),
+        name: user.fullName || user.username,
         midleman_uid: user.id,
     }), {
         status: 200,
