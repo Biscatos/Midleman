@@ -375,3 +375,11 @@ export function destroySsoSession(sessionId: string): void {
 export function getSsoTtl(): number {
     return SSO_TTL_SECONDS;
 }
+
+/** Revoke all active refresh tokens for a user across all clients. */
+export function revokeAllUserRefreshTokens(userId: number): void {
+    const db = getAuthDb();
+    if (!db || !userId) return;
+    db.prepare("UPDATE oauth_refresh_tokens SET revoked_at = datetime('now') WHERE user_id = $uid AND revoked_at IS NULL")
+        .run({ $uid: userId });
+}

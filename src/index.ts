@@ -247,7 +247,7 @@ const jwksServer = jwksPortRaw ? Bun.serve({
         if (path === '/oauth/totp' && req.method === 'POST') return handleOauthTotp(req);
         if (path === '/oauth/token' && req.method === 'POST') return handleToken(req);
         if (path === '/oauth/userinfo') return handleUserinfo(req);
-        if (path === '/oauth/logout' && req.method === 'POST') return handleOauthLogout(req);
+        if (path === '/oauth/logout') return handleOauthLogout(req, url);
 
         return new Response('Not Found', { status: 404 });
     },

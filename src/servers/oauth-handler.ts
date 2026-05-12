@@ -12,6 +12,7 @@ import {
     getOauthClient, isRedirectUriAllowed, verifyClientSecret,
     issueAuthCode, consumeAuthCode, issueRefreshToken, rotateRefreshToken,
     createSsoSession, validateSsoSession, destroySsoSession, getSsoTtl,
+    revokeAllUserRefreshTokens,
 } from '../auth/oauth';
 import {
     verifyProxyUserCredentials, verifyTotp, getProxyUser, getJwtMaxAge,
@@ -157,6 +158,9 @@ export async function handleAuthorize(req: Request, url: URL): Promise<Response>
     const codeChallenge = params.get('code_challenge') || '';
     const codeChallengeMethod = params.get('code_challenge_method') || '';
     const nonce = params.get('nonce');
+    // OIDC prompt parameter: 'login' forces re-authentication even with a valid SSO session.
+    // 'none' requires silent auth (no UI) — return login_required if no session exists.
+    const prompt = params.get('prompt');
 
     // 1. Client must exist — render error (DO NOT redirect to attacker-controlled URI)
     const client = getOauthClient(clientId);
@@ -186,10 +190,10 @@ export async function handleAuthorize(req: Request, url: URL): Promise<Response>
 
     const authRequest: AuthRequest = { clientId, redirectUri, state, scope: finalScope, codeChallenge, nonce };
 
-    // 3. Check SSO cookie — if logged in, skip login form
+    // 3. Check SSO cookie — if logged in, skip login form (unless prompt=login forces re-auth)
     const cookies = parseCookies(req);
     const ssoId = cookies[SSO_COOKIE];
-    if (ssoId) {
+    if (ssoId && prompt !== 'login') {
         const sso = validateSsoSession(ssoId);
         if (sso) {
             const code = issueAuthCode({
@@ -201,6 +205,11 @@ export async function handleAuthorize(req: Request, url: URL): Promise<Response>
             if (state) u.searchParams.set('state', state);
             return new Response(null, { status: 302, headers: { 'Location': u.toString() } });
         }
+    }
+
+    // prompt=none requires silent auth — if no valid session, return error immediately (no UI).
+    if (prompt === 'none') {
+        return redirectError(redirectUri, state, 'login_required', 'No active session and prompt=none was requested');
     }
 
     // 4. Render login form
@@ -482,17 +491,75 @@ export async function handleUserinfo(req: Request): Promise<Response> {
     });
 }
 
-// ─── /oauth/logout ──────────────────────────────────────────────────────────
+// ─── /oauth/logout (OIDC RP-Initiated Logout) ───────────────────────────────
+// Supports both GET and POST per OIDC Session Management spec.
+// Parameters (query string for GET, query string or body for POST):
+//   id_token_hint         — previously issued id_token (used to identify user/client)
+//   post_logout_redirect_uri — where to redirect after logout (must match a registered redirect_uri)
+//   state                 — opaque value echoed back in the redirect
 
-export function handleOauthLogout(req: Request): Response {
+export function handleOauthLogout(req: Request, url: URL): Response {
+    if (req.method !== 'GET' && req.method !== 'POST') {
+        return jsonError(405, 'method_not_allowed');
+    }
+
+    const params = url.searchParams;
+    const idTokenHint = params.get('id_token_hint');
+    const postLogoutRedirectUri = params.get('post_logout_redirect_uri');
+    const state = params.get('state');
+
+    // Destroy the SSO session cookie.
     const cookies = parseCookies(req);
     const ssoId = cookies[SSO_COOKIE];
     if (ssoId) destroySsoSession(ssoId);
+
+    // If we have a valid id_token_hint, revoke all refresh tokens for that user.
+    if (idTokenHint) {
+        const payload = verifyJwt(idTokenHint);
+        const userId = payload?.midleman_uid as number | undefined;
+        if (userId) {
+            revokeAllUserRefreshTokens(userId);
+        }
+    }
+
+    const clearCookie = `${SSO_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+
+    // If post_logout_redirect_uri is requested, validate it against the client's
+    // registered redirect_uris (prevents open-redirect attacks), then redirect.
+    if (postLogoutRedirectUri) {
+        let redirectAllowed = false;
+        if (idTokenHint) {
+            const payload = verifyJwt(idTokenHint);
+            const clientId = payload?.aud as string | undefined;
+            if (clientId) {
+                const client = getOauthClient(clientId);
+                if (client) {
+                    redirectAllowed = isRedirectUriAllowed(client, postLogoutRedirectUri);
+                }
+            }
+        }
+
+        if (redirectAllowed) {
+            const redirectTo = new URL(postLogoutRedirectUri);
+            if (state) redirectTo.searchParams.set('state', state);
+            return new Response(null, {
+                status: 302,
+                headers: {
+                    'Location': redirectTo.toString(),
+                    'Set-Cookie': clearCookie,
+                    'Cache-Control': 'no-store',
+                },
+            });
+        }
+        // post_logout_redirect_uri not validated — still log out, but don't redirect.
+    }
+
     return new Response(JSON.stringify({ status: 'ok' }), {
         status: 200,
         headers: {
             'Content-Type': 'application/json',
-            'Set-Cookie': `${SSO_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`,
+            'Set-Cookie': clearCookie,
+            'Cache-Control': 'no-store',
         },
     });
 }
