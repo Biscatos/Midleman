@@ -191,7 +191,7 @@ function showContextMenu(e, btn) {
 
 // ─── Data Fetch ──────────────────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchAdmins(), fetchLdapConfigs()]);
+  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchAdmins(), fetchLdapConfigs(), fetchLdapAdoptions()]);
 }
 
 async function fetchHealth() {
@@ -2728,6 +2728,7 @@ function _ldapResetForm() {
   document.getElementById('ldapEnabled').checked = true;
   document.getElementById('ldapAdminGroups').value = '';
   document.getElementById('ldapDefaultProfile').value = '';
+  document.getElementById('ldapAutoAdoptLocal').checked = false;
   document.getElementById('ldapTestLogin').value = '';
   const tr = document.getElementById('ldapTestResult');
   tr.style.display = 'none';
@@ -2766,6 +2767,7 @@ function openEditLdapModal(id) {
   document.getElementById('ldapEnabled').checked = !!c.enabled;
   document.getElementById('ldapAdminGroups').value = (c.adminGroups || []).join('\n');
   document.getElementById('ldapDefaultProfile').value = c.defaultProfile || '';
+  document.getElementById('ldapAutoAdoptLocal').checked = !!c.autoAdoptLocal;
   document.getElementById('ldapModalTitle').textContent = 'Editar directory: ' + c.name;
   document.getElementById('ldapSubmitBtn').textContent = 'Guardar';
   document.getElementById('ldapModal').classList.add('active');
@@ -2800,6 +2802,7 @@ function _ldapCollectPayload(isEdit) {
     adminGroups: document.getElementById('ldapAdminGroups').value
       .split('\n').map(s => s.trim()).filter(Boolean),
     defaultProfile: document.getElementById('ldapDefaultProfile').value.trim(),
+    autoAdoptLocal: document.getElementById('ldapAutoAdoptLocal').checked,
   };
   // Only send bindPassword if the user typed one (avoids overwriting on edit)
   const pw = document.getElementById('ldapBindPassword').value;
@@ -2956,5 +2959,95 @@ async function testLdap() {
   } finally {
     btn.disabled = false;
   }
+}
+
+// ─── LDAP adoption conflicts ───────────────────────────────────────────────
+let _ldapcFilter = 'pending';
+
+async function fetchLdapAdoptions() {
+  try {
+    const url = _ldapcFilter ? '/admin/ldap/adoptions?state=' + encodeURIComponent(_ldapcFilter) : '/admin/ldap/adoptions';
+    const res = await api(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    renderLdapAdoptions(data.events || []);
+    const badge = document.getElementById('navLdapConflictsBadge');
+    if (badge) {
+      const pending = Number(data.pending || 0);
+      if (pending > 0) { badge.textContent = String(pending); badge.style.display = ''; }
+      else { badge.style.display = 'none'; }
+    }
+  } catch (e) {
+    document.getElementById('ldapcListBody').innerHTML =
+      '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--err-text)">Erro: ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+function filterLdapAdoptions(state) {
+  _ldapcFilter = state;
+  ['ldapcBtnPending','ldapcBtnConfirmed','ldapcBtnReverted','ldapcBtnAll'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.classList.remove('btn-primary');
+  });
+  const active = state === 'pending' ? 'ldapcBtnPending'
+    : state === 'confirmed' ? 'ldapcBtnConfirmed'
+    : state === 'reverted' ? 'ldapcBtnReverted'
+    : 'ldapcBtnAll';
+  const ae = document.getElementById(active);
+  if (ae) ae.classList.add('btn-primary');
+  fetchLdapAdoptions();
+}
+
+function renderLdapAdoptions(events) {
+  const tbody = document.getElementById('ldapcListBody');
+  if (!events.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Sem registos.</td></tr>';
+    return;
+  }
+  const stateBadge = s => {
+    const map = {
+      pending:   ['Pendente',  'rgba(234,179,8,.15)',  '#ca8a04'],
+      confirmed: ['Confirmada','rgba(34,197,94,.1)',   'var(--green)'],
+      reverted:  ['Revertida', 'rgba(148,163,184,.15)','var(--text3)'],
+    };
+    const [label, bg, fg] = map[s] || map.pending;
+    return '<span style="display:inline-block;background:' + bg + ';color:' + fg + ';border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">' + label + '</span>';
+  };
+  tbody.innerHTML = events.map(e => {
+    const when = e.createdAt ? new Date(e.createdAt).toLocaleString() : '—';
+    const actions = e.state === 'pending'
+      ? '<button class="btn btn-sm btn-primary" onclick="confirmLdapAdoption(' + e.id + ')">Confirmar</button> ' +
+        '<button class="btn btn-sm btn-ghost" onclick="revertLdapAdoption(' + e.id + ')" style="color:var(--err-text)">Reverter</button>'
+      : '<span style="color:var(--text3);font-size:11.5px">—</span>';
+    return '<tr style="border-top:1px solid var(--border)">' +
+      '<td style="padding:10px 12px;color:var(--text3);font-size:11.5px">' + esc(when) + '</td>' +
+      '<td style="padding:10px 8px"><div style="font-weight:500">' + esc(e.previousUsername || '—') + '</div>' +
+         '<div style="font-size:11.5px;color:var(--text3)">' + esc(e.previousEmail || '—') + '</div></td>' +
+      '<td style="padding:10px 8px;color:var(--text2);font-size:12px">' + esc(e.matchedOn) + ': <code>' + esc(e.matchedValue) + '</code></td>' +
+      '<td style="padding:10px 8px;font-family:\'SF Mono\',ui-monospace,monospace;font-size:11.5px;color:var(--text2);word-break:break-all;max-width:280px">' + esc(e.ldapDn) + '</td>' +
+      '<td style="padding:10px 8px">' + stateBadge(e.state) + '</td>' +
+      '<td style="padding:10px 12px;text-align:right;white-space:nowrap">' + actions + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+async function confirmLdapAdoption(id) {
+  if (!confirm('Confirmar esta adopção? A conta local fica permanentemente substituída pela identidade LDAP.')) return;
+  try {
+    const res = await api('/admin/ldap/adoptions/' + encodeURIComponent(id) + '/confirm', { method: 'POST' });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Falha', 'error'); }
+    toast('Adopção confirmada');
+    fetchLdapAdoptions();
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+async function revertLdapAdoption(id) {
+  if (!confirm('Reverter? A conta local volta ao estado anterior (username, email e password hash originais). A identidade LDAP terá de ser registada manualmente noutro user — sessões e tokens ficam revogados.')) return;
+  try {
+    const res = await api('/admin/ldap/adoptions/' + encodeURIComponent(id) + '/revert', { method: 'POST' });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Falha', 'error'); }
+    toast('Adopção revertida');
+    fetchLdapAdoptions();
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
 }
 

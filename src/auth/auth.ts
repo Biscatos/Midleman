@@ -9,7 +9,16 @@ import type { AuthUser, ProxyUser } from '../core/types';
 let db: Database | null = null;
 let sessionMaxAge = 86400;
 
+// Tables created on a fresh install. The `users` table is intentionally
+// included so that boot succeeds on legacy databases that still have it —
+// the unification migration drops it afterwards. New installs never see
+// `users` populated; admins are rows in `proxy_users` with roles='admin,proxy'.
 const CREATE_TABLES = `
+CREATE TABLE IF NOT EXISTS meta (
+    key    TEXT PRIMARY KEY,
+    value  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS users (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     username            TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -42,7 +51,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
 
 CREATE TABLE IF NOT EXISTS sessions (
     id         TEXT PRIMARY KEY,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES proxy_users(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     expires_at TEXT NOT NULL,
     ip_address TEXT,
@@ -60,6 +69,8 @@ CREATE TABLE IF NOT EXISTS proxy_users (
     password     TEXT NOT NULL,
     totp_secret  TEXT,
     totp_enabled INTEGER NOT NULL DEFAULT 0,
+    roles        TEXT NOT NULL DEFAULT 'proxy',
+    created_by_user_id INTEGER,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -96,6 +107,25 @@ CREATE TABLE IF NOT EXISTS admin_invites (
     used_by_id  INTEGER,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS ldap_adoption_events (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    proxy_user_id          INTEGER NOT NULL REFERENCES proxy_users(id) ON DELETE CASCADE,
+    ldap_config_id         INTEGER NOT NULL,
+    ldap_dn                TEXT NOT NULL,
+    matched_on             TEXT NOT NULL,
+    matched_value          TEXT NOT NULL,
+    previous_auth_source   TEXT NOT NULL,
+    previous_password_hash TEXT,
+    previous_username      TEXT,
+    previous_email         TEXT,
+    state                  TEXT NOT NULL DEFAULT 'pending',
+    created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at            TEXT,
+    resolved_by            INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_ldap_adoption_state ON ldap_adoption_events(state);
 `;
 
 export function initAuth(dataDir: string, maxAge: number = 86400): void {
@@ -108,79 +138,335 @@ export function initAuth(dataDir: string, maxAge: number = 86400): void {
         db.exec('PRAGMA synchronous = NORMAL');
         db.exec('PRAGMA foreign_keys = ON');
 
-        // Additive migration on `users` (legacy installs may lack newer cols)
-        try {
-            const info = db.prepare("PRAGMA table_info(users)").all() as any[];
-            if (info.length > 0) {
-                const cols = info.map((c: any) => c.name);
-                if (!cols.includes('full_name')) db.exec("ALTER TABLE users ADD COLUMN full_name TEXT NOT NULL DEFAULT ''");
-                if (!cols.includes('email')) db.exec("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''");
-                if (!cols.includes('totp_enabled')) db.exec("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 1");
-                if (!cols.includes('created_by_user_id')) db.exec("ALTER TABLE users ADD COLUMN created_by_user_id INTEGER");
-                if (!cols.includes('auth_source')) db.exec("ALTER TABLE users ADD COLUMN auth_source TEXT NOT NULL DEFAULT 'local'");
-                if (!cols.includes('ldap_config_id')) db.exec("ALTER TABLE users ADD COLUMN ldap_config_id INTEGER");
-                if (!cols.includes('ldap_dn')) db.exec("ALTER TABLE users ADD COLUMN ldap_dn TEXT");
-            }
-        } catch {}
-
-        // Additive migration on `proxy_users` for LDAP shadow accounts
-        try {
-            const info = db.prepare("PRAGMA table_info(proxy_users)").all() as any[];
-            if (info.length > 0) {
-                const cols = info.map((c: any) => c.name);
-                if (!cols.includes('auth_source')) db.exec("ALTER TABLE proxy_users ADD COLUMN auth_source TEXT NOT NULL DEFAULT 'local'");
-                if (!cols.includes('ldap_config_id')) db.exec("ALTER TABLE proxy_users ADD COLUMN ldap_config_id INTEGER");
-                if (!cols.includes('ldap_dn')) db.exec("ALTER TABLE proxy_users ADD COLUMN ldap_dn TEXT");
-                if (!cols.includes('ldap_groups_last_seen')) db.exec("ALTER TABLE proxy_users ADD COLUMN ldap_groups_last_seen TEXT NOT NULL DEFAULT '[]'");
-                if (!cols.includes('ldap_last_sync_at')) db.exec("ALTER TABLE proxy_users ADD COLUMN ldap_last_sync_at TEXT");
-                if (!cols.includes('ldap_orphan')) db.exec("ALTER TABLE proxy_users ADD COLUMN ldap_orphan INTEGER NOT NULL DEFAULT 0");
-            }
-        } catch {}
-
-        // Migrate old proxy_users table (had profile_name column, no totp fields)
-        try {
-            const info = db.prepare("PRAGMA table_info(proxy_users)").all() as any[];
-            const cols = info.map((c: any) => c.name);
-            if (cols.includes('profile_name') && !cols.includes('totp_secret')) {
-                console.log('🔄 Migrating proxy_users table to new schema...');
-                db.exec('DROP TABLE IF EXISTS proxy_users');
-            } else {
-                // Add full_name and email columns if missing (additive migration)
-                if (!cols.includes('full_name')) {
-                    db.exec("ALTER TABLE proxy_users ADD COLUMN full_name TEXT NOT NULL DEFAULT ''");
-                    console.log('🔄 Migrated proxy_users: added full_name column');
-                }
-                if (!cols.includes('email')) {
-                    db.exec("ALTER TABLE proxy_users ADD COLUMN email TEXT NOT NULL DEFAULT ''");
-                    console.log('🔄 Migrated proxy_users: added email column');
-                }
-            }
-        } catch {}
-
-        // Migrate invite_tokens: add email/invited_name if missing
-        try {
-            const info = db.prepare("PRAGMA table_info(invite_tokens)").all() as any[];
-            if (info.length > 0) {
-                const cols = info.map((c: any) => c.name);
-                if (!cols.includes('email')) {
-                    db.exec("ALTER TABLE invite_tokens ADD COLUMN email TEXT NOT NULL DEFAULT ''");
-                    console.log('🔄 Migrated invite_tokens: added email column');
-                }
-                if (!cols.includes('invited_name')) {
-                    db.exec("ALTER TABLE invite_tokens ADD COLUMN invited_name TEXT NOT NULL DEFAULT ''");
-                    console.log('🔄 Migrated invite_tokens: added invited_name column');
-                }
-            }
-        } catch {}
+        // The unification migration needs to inspect & rewrite tables BEFORE
+        // we create the new schema (CREATE_TABLES) — otherwise CREATE TABLE IF
+        // NOT EXISTS would silently skip recreating `sessions` with the new FK.
+        runLegacyAdditiveMigrations(db);
+        runUsersUnificationMigration(db, dbPath);
 
         db.exec(CREATE_TABLES);
+
+        // After CREATE_TABLES, make sure additive columns we may have rolled out
+        // on previous releases exist on proxy_users (idempotent).
+        ensureProxyUsersColumns(db);
+
         cleanExpiredSessions();
         setInterval(cleanExpiredSessions, 60 * 60 * 1000);
-        const userCount = (db.prepare('SELECT COUNT(*) as c FROM users').get() as any)?.c || 0;
-        console.log(`🔐 Auth: ${userCount} user(s) registered`);
+        const adminCount = (db.prepare("SELECT COUNT(*) AS c FROM proxy_users WHERE roles LIKE '%admin%'").get() as any)?.c || 0;
+        const proxyCount = (db.prepare("SELECT COUNT(*) AS c FROM proxy_users").get() as any)?.c || 0;
+        console.log(`🔐 Auth: ${proxyCount} user(s) total, ${adminCount} with admin role`);
     } catch (err) {
         console.error('❌ Failed to initialize auth database:', err);
         db = null;
+    }
+}
+
+/** Idempotent additive column migrations that pre-date the unification. We
+ *  still run these because legacy databases may have `users` or `proxy_users`
+ *  rows without the newer columns. */
+function runLegacyAdditiveMigrations(d: Database): void {
+    try {
+        const info = d.prepare("PRAGMA table_info(users)").all() as any[];
+        if (info.length > 0) {
+            const cols = info.map((c: any) => c.name);
+            if (!cols.includes('full_name')) d.exec("ALTER TABLE users ADD COLUMN full_name TEXT NOT NULL DEFAULT ''");
+            if (!cols.includes('email')) d.exec("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''");
+            if (!cols.includes('totp_enabled')) d.exec("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 1");
+            if (!cols.includes('created_by_user_id')) d.exec("ALTER TABLE users ADD COLUMN created_by_user_id INTEGER");
+            if (!cols.includes('auth_source')) d.exec("ALTER TABLE users ADD COLUMN auth_source TEXT NOT NULL DEFAULT 'local'");
+            if (!cols.includes('ldap_config_id')) d.exec("ALTER TABLE users ADD COLUMN ldap_config_id INTEGER");
+            if (!cols.includes('ldap_dn')) d.exec("ALTER TABLE users ADD COLUMN ldap_dn TEXT");
+        }
+    } catch {}
+
+    try {
+        const info = d.prepare("PRAGMA table_info(proxy_users)").all() as any[];
+        const cols = info.map((c: any) => c.name);
+        if (info.length > 0) {
+            if (cols.includes('profile_name') && !cols.includes('totp_secret')) {
+                console.log('🔄 Migrating proxy_users table to new schema...');
+                d.exec('DROP TABLE IF EXISTS proxy_users');
+            } else {
+                if (!cols.includes('full_name')) d.exec("ALTER TABLE proxy_users ADD COLUMN full_name TEXT NOT NULL DEFAULT ''");
+                if (!cols.includes('email')) d.exec("ALTER TABLE proxy_users ADD COLUMN email TEXT NOT NULL DEFAULT ''");
+                if (!cols.includes('auth_source')) d.exec("ALTER TABLE proxy_users ADD COLUMN auth_source TEXT NOT NULL DEFAULT 'local'");
+                if (!cols.includes('ldap_config_id')) d.exec("ALTER TABLE proxy_users ADD COLUMN ldap_config_id INTEGER");
+                if (!cols.includes('ldap_dn')) d.exec("ALTER TABLE proxy_users ADD COLUMN ldap_dn TEXT");
+                if (!cols.includes('ldap_groups_last_seen')) d.exec("ALTER TABLE proxy_users ADD COLUMN ldap_groups_last_seen TEXT NOT NULL DEFAULT '[]'");
+                if (!cols.includes('ldap_last_sync_at')) d.exec("ALTER TABLE proxy_users ADD COLUMN ldap_last_sync_at TEXT");
+                if (!cols.includes('ldap_orphan')) d.exec("ALTER TABLE proxy_users ADD COLUMN ldap_orphan INTEGER NOT NULL DEFAULT 0");
+            }
+        }
+    } catch {}
+
+    try {
+        const info = d.prepare("PRAGMA table_info(invite_tokens)").all() as any[];
+        if (info.length > 0) {
+            const cols = info.map((c: any) => c.name);
+            if (!cols.includes('email')) d.exec("ALTER TABLE invite_tokens ADD COLUMN email TEXT NOT NULL DEFAULT ''");
+            if (!cols.includes('invited_name')) d.exec("ALTER TABLE invite_tokens ADD COLUMN invited_name TEXT NOT NULL DEFAULT ''");
+        }
+    } catch {}
+}
+
+/** Ensures proxy_users has the newer columns (roles, created_by_user_id) on
+ *  databases that may have been upgraded to a pre-unification version where
+ *  proxy_users already existed but without these. */
+function ensureProxyUsersColumns(d: Database): void {
+    try {
+        const cols = (d.prepare("PRAGMA table_info(proxy_users)").all() as any[]).map((c: any) => c.name);
+        if (!cols.includes('roles')) d.exec("ALTER TABLE proxy_users ADD COLUMN roles TEXT NOT NULL DEFAULT 'proxy'");
+        if (!cols.includes('created_by_user_id')) d.exec("ALTER TABLE proxy_users ADD COLUMN created_by_user_id INTEGER");
+    } catch {}
+}
+
+// ─── Users ⇆ proxy_users unification migration ──────────────────────────────
+// Runs once. Collapses admin rows from `users` into `proxy_users` with
+// `roles='admin,proxy'`, preserving OAuth token IDs by re-using the existing
+// admin-shadow row when one exists. Then drops `users`.
+
+function runUsersUnificationMigration(d: Database, dbPath: string): void {
+    // Idempotency: meta marker.
+    let metaExists = false;
+    try {
+        const r = d.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='meta'").get();
+        metaExists = !!r;
+    } catch { metaExists = false; }
+    if (metaExists) {
+        const done = d.prepare("SELECT value FROM meta WHERE key = 'users_unified_at'").get() as any;
+        if (done) return;
+    }
+
+    // If `users` doesn't exist, this is a fresh install — nothing to migrate.
+    const usersTable = d.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").get();
+    if (!usersTable) {
+        // Just mark migration done for future boots (after CREATE_TABLES creates meta).
+        // We can't INSERT into meta here yet because it doesn't exist; do it at the end.
+        // Use a temporary sentinel: rely on the post-CREATE_TABLES marker step below.
+        finaliseUnification(d, /*adminsCopied*/ 0, /*adoptionsQueued*/ 0, /*backup*/ '');
+        return;
+    }
+
+    // Check if there are any admins to migrate. If `users` exists but is empty,
+    // we still want to drop it and mark the migration done.
+    let adminRows: any[] = [];
+    try {
+        adminRows = d.prepare("SELECT * FROM users").all() as any[];
+    } catch {
+        adminRows = [];
+    }
+
+    // Backup before destructive changes.
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = dbPath + '.pre-unification-' + ts;
+    try {
+        // Use SQLite's built-in backup via VACUUM INTO — atomic, no external deps.
+        d.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
+        console.log(`💾 Backup pre-unification: ${backupPath}`);
+    } catch (err) {
+        console.error('❌ Could not create pre-unification backup:', err);
+        throw err;
+    }
+
+    console.log(`🔄 Unifying users → proxy_users (${adminRows.length} admin row(s))`);
+
+    // Run the whole rewrite in a transaction. Foreign keys OFF so we can
+    // rebuild `sessions` without referential errors during the swap.
+    d.exec('PRAGMA foreign_keys = OFF');
+
+    let adminsCopied = 0;
+    let adoptionsQueued = 0;
+
+    try {
+        d.exec('BEGIN');
+
+        // Make sure proxy_users has the new columns BEFORE we start writing to them.
+        const pu = (d.prepare("PRAGMA table_info(proxy_users)").all() as any[]).map((c: any) => c.name);
+        if (!pu.includes('roles')) d.exec("ALTER TABLE proxy_users ADD COLUMN roles TEXT NOT NULL DEFAULT 'proxy'");
+        if (!pu.includes('created_by_user_id')) d.exec("ALTER TABLE proxy_users ADD COLUMN created_by_user_id INTEGER");
+        // Ensure ldap_adoption_events exists for any deferred collision queue.
+        d.exec(`CREATE TABLE IF NOT EXISTS ldap_adoption_events (
+            id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+            proxy_user_id          INTEGER,
+            ldap_config_id         INTEGER NOT NULL,
+            ldap_dn                TEXT NOT NULL,
+            matched_on             TEXT NOT NULL,
+            matched_value          TEXT NOT NULL,
+            previous_auth_source   TEXT NOT NULL,
+            previous_password_hash TEXT,
+            previous_username      TEXT,
+            previous_email         TEXT,
+            state                  TEXT NOT NULL DEFAULT 'pending',
+            created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+            resolved_at            TEXT,
+            resolved_by            INTEGER
+        )`);
+
+        // Build remap: Map<oldAdminId, newProxyId>
+        const idMap = new Map<number, number>();
+
+        for (const admin of adminRows) {
+            const oldId: number = admin.id;
+            // Look for an existing admin-shadow row that we should collapse with.
+            const shadow = d.prepare(
+                "SELECT * FROM proxy_users WHERE auth_source = 'admin_shadow' AND ldap_dn = $ref"
+            ).get({ $ref: 'admin:' + oldId }) as any;
+
+            if (shadow) {
+                // Collapse: shadow row becomes the canonical admin row.
+                d.prepare(`UPDATE proxy_users SET
+                    password = $pw,
+                    totp_secret = $ts,
+                    totp_enabled = $te,
+                    full_name = CASE WHEN COALESCE(full_name,'') = '' THEN $fn ELSE full_name END,
+                    email = CASE WHEN COALESCE(email,'') = '' THEN $em ELSE email END,
+                    auth_source = $as,
+                    ldap_config_id = $lci,
+                    ldap_dn = $ld,
+                    roles = 'admin,proxy',
+                    created_by_user_id = $cb,
+                    updated_at = datetime('now')
+                    WHERE id = $id`).run({
+                    $pw: admin.password || '',
+                    $ts: admin.totp_secret || '',
+                    $te: admin.totp_enabled ? 1 : 0,
+                    $fn: admin.full_name || '',
+                    $em: (admin.email || '').toLowerCase(),
+                    $as: admin.auth_source || 'local',
+                    $lci: admin.ldap_config_id ?? null,
+                    $ld: admin.ldap_dn ?? null,
+                    $cb: admin.created_by_user_id ?? null,
+                    $id: shadow.id,
+                });
+                idMap.set(oldId, shadow.id);
+                adminsCopied++;
+                continue;
+            }
+
+            // No shadow → create a fresh proxy_users row for this admin.
+            // Username/email collision handling: if the username already exists
+            // in proxy_users (and it's not an admin shadow we just collapsed),
+            // queue an adoption event with a suffixed username so the admin
+            // can resolve later instead of crashing the boot.
+            const usernameTaken = d.prepare("SELECT id FROM proxy_users WHERE username = $u").get({ $u: admin.username }) as any;
+            let targetUsername: string = admin.username;
+            let queuedReason: string | null = null;
+            if (usernameTaken) {
+                targetUsername = admin.username + '_admin_' + oldId;
+                queuedReason = 'username_collision_on_migration';
+            }
+
+            const result = d.prepare(`INSERT INTO proxy_users
+                (username, full_name, email, password, totp_secret, totp_enabled,
+                 auth_source, ldap_config_id, ldap_dn, ldap_groups_last_seen,
+                 roles, created_by_user_id, created_at)
+                VALUES ($u, $fn, $em, $pw, $ts, $te, $as, $lci, $ld, '[]',
+                        'admin,proxy', $cb, $createdAt)`).run({
+                $u: targetUsername,
+                $fn: admin.full_name || '',
+                $em: (admin.email || '').toLowerCase(),
+                $pw: admin.password || '',
+                $ts: admin.totp_secret || '',
+                $te: admin.totp_enabled ? 1 : 0,
+                $as: admin.auth_source || 'local',
+                $lci: admin.ldap_config_id ?? null,
+                $ld: admin.ldap_dn ?? null,
+                $cb: admin.created_by_user_id ?? null,
+                $createdAt: admin.created_at,
+            });
+            const newId = Number(result.lastInsertRowid);
+            idMap.set(oldId, newId);
+            adminsCopied++;
+
+            if (queuedReason) {
+                d.prepare(`INSERT INTO ldap_adoption_events
+                    (proxy_user_id, ldap_config_id, ldap_dn, matched_on, matched_value,
+                     previous_auth_source, previous_username, previous_email, state)
+                    VALUES ($pid, 0, '', 'username_migration', $u, $as, $oldu, $em, 'pending')`).run({
+                    $pid: newId,
+                    $u: admin.username,
+                    $as: admin.auth_source || 'local',
+                    $oldu: admin.username,
+                    $em: (admin.email || '').toLowerCase(),
+                });
+                adoptionsQueued++;
+            }
+        }
+
+        // Remap dependent tables.
+        if (idMap.size > 0) {
+            const entries = Array.from(idMap.entries());
+
+            // 1) sessions: recreate with new FK (REFERENCES proxy_users) + remap user_id.
+            //    Use a CASE WHEN ... THEN ... mapping so it's one statement.
+            const caseClauses = entries.map(([oldId, newId]) => `WHEN ${oldId} THEN ${newId}`).join(' ');
+            const inList = entries.map(([oldId]) => oldId).join(',');
+
+            // Drop the old sessions table and recreate with FK to proxy_users.
+            const sessionsExists = d.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'").get();
+            if (sessionsExists) {
+                d.exec(`CREATE TABLE sessions_new (
+                    id         TEXT PRIMARY KEY,
+                    user_id    INTEGER NOT NULL REFERENCES proxy_users(id) ON DELETE CASCADE,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    expires_at TEXT NOT NULL,
+                    ip_address TEXT,
+                    user_agent TEXT
+                )`);
+                d.exec(`INSERT INTO sessions_new (id, user_id, created_at, expires_at, ip_address, user_agent)
+                    SELECT id,
+                           CASE user_id ${caseClauses} ELSE user_id END,
+                           created_at, expires_at, ip_address, user_agent
+                    FROM sessions
+                    WHERE user_id IN (${inList}) OR user_id IN (SELECT id FROM proxy_users)`);
+                d.exec('DROP TABLE sessions');
+                d.exec('ALTER TABLE sessions_new RENAME TO sessions');
+                d.exec('CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)');
+                d.exec('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)');
+            }
+
+            // 2) audit_logs.actor_user_id
+            d.exec(`UPDATE audit_logs SET actor_user_id = CASE actor_user_id ${caseClauses} ELSE actor_user_id END WHERE actor_user_id IN (${inList})`);
+
+            // 3) admin_invites.created_by and used_by_id
+            try {
+                d.exec(`UPDATE admin_invites SET created_by = CASE created_by ${caseClauses} ELSE created_by END WHERE created_by IN (${inList})`);
+                d.exec(`UPDATE admin_invites SET used_by_id = CASE used_by_id ${caseClauses} ELSE used_by_id END WHERE used_by_id IN (${inList})`);
+            } catch {}
+
+            // 4) proxy_users.created_by_user_id (self-referential to former admin ids)
+            d.exec(`UPDATE proxy_users SET created_by_user_id = CASE created_by_user_id ${caseClauses} ELSE created_by_user_id END WHERE created_by_user_id IN (${inList})`);
+        }
+
+        // Drop the legacy users table.
+        d.exec('DROP TABLE IF EXISTS users');
+
+        // Marker (meta table may not exist yet — create if needed).
+        d.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+        d.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('users_unified_at', datetime('now'))").run();
+
+        d.exec('COMMIT');
+    } catch (err) {
+        try { d.exec('ROLLBACK'); } catch {}
+        d.exec('PRAGMA foreign_keys = ON');
+        console.error('❌ Unification migration failed:', err);
+        console.error(`   Restore from backup: ${backupPath}`);
+        throw err;
+    }
+
+    d.exec('PRAGMA foreign_keys = ON');
+
+    finaliseUnification(d, adminsCopied, adoptionsQueued, backupPath);
+}
+
+function finaliseUnification(d: Database, adminsCopied: number, adoptionsQueued: number, backupPath: string): void {
+    try {
+        d.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+        d.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('users_unified_at', datetime('now'))").run();
+    } catch {}
+    if (adminsCopied > 0) {
+        console.log(`✅ Unification done: ${adminsCopied} admin(s) migrated to proxy_users (${adoptionsQueued} need manual review).`);
+        if (backupPath) console.log(`   Backup kept at: ${backupPath}`);
     }
 }
 
@@ -195,27 +481,36 @@ export function getAuthDb(): Database | null {
 
 // ─── User Management ─────────────────────────────────────────────────────────
 
+/** Returns true if at least one admin exists. Used to gate setup mode in /admin/* routes. */
 export function hasUsers(): boolean {
     if (!db) return false;
-    const row = db.prepare('SELECT COUNT(*) as c FROM users').get() as any;
+    const row = db.prepare("SELECT COUNT(*) as c FROM proxy_users WHERE roles LIKE '%admin%'").get() as any;
     return (row?.c || 0) > 0;
 }
 
+/** Setup mode: create the very first admin. TOTP is already configured here
+ *  (the setup wizard generated and verified it). */
 export async function createUser(username: string, password: string, totpSecret: string): Promise<AuthUser> {
     if (!db) throw new Error('Auth not initialized');
     const hash = await Bun.password.hash(password, 'bcrypt');
-    const stmt = db.prepare('INSERT INTO users (username, password, totp_secret) VALUES ($u, $p, $t)');
+    const stmt = db.prepare(`INSERT INTO proxy_users
+        (username, password, totp_secret, totp_enabled, roles)
+        VALUES ($u, $p, $t, 1, 'admin,proxy')`);
     stmt.run({ $u: username, $p: hash, $t: totpSecret });
-    const row = db.prepare('SELECT id, username, created_at FROM users WHERE username = $u').get({ $u: username }) as any;
+    const row = db.prepare('SELECT id, username, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
     return { id: row.id, username: row.username, createdAt: row.created_at };
 }
 
+/** Verify dashboard-admin credentials (username + password).
+ *  After unification, admins are rows in `proxy_users` with `roles` containing
+ *  'admin'. LDAP-sourced rows have no usable local password — those are
+ *  verified by the LDAP bind path instead. */
 export async function verifyCredentials(username: string, password: string): Promise<{ user: AuthUser; totpSecret: string } | null> {
     if (!db) return null;
-    const row = db.prepare('SELECT id, username, password, totp_secret, totp_enabled, full_name, email, created_by_user_id, auth_source, ldap_config_id, ldap_dn, created_at FROM users WHERE username = $u').get({ $u: username }) as any;
+    const row = db.prepare(`SELECT id, username, password, totp_secret, totp_enabled, full_name, email,
+            created_by_user_id, auth_source, ldap_config_id, ldap_dn, roles, created_at
+        FROM proxy_users WHERE username = $u AND roles LIKE '%admin%'`).get({ $u: username }) as any;
     if (!row) return null;
-    // Shadow accounts (auth_source='ldap') have no usable local password; the
-    // LDAP path validates the password by binding to the directory directly.
     if (row.auth_source === 'ldap') return null;
     const valid = await Bun.password.verify(password, row.password);
     if (!valid) return null;
@@ -242,21 +537,26 @@ function rowToAuthUser(r: any): AuthUser {
     };
 }
 
+const ADMIN_COLS = `id, username, full_name, email, totp_enabled, created_by_user_id,
+    auth_source, ldap_config_id, ldap_dn, roles, created_at`;
+
 export function listAdmins(): AuthUser[] {
     if (!db) return [];
-    const rows = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_by_user_id, auth_source, ldap_config_id, ldap_dn, created_at FROM users ORDER BY created_at ASC').all() as any[];
+    const rows = db.prepare(`SELECT ${ADMIN_COLS} FROM proxy_users
+        WHERE roles LIKE '%admin%' ORDER BY created_at ASC`).all() as any[];
     return rows.map(rowToAuthUser);
 }
 
 export function getAdmin(id: number): AuthUser | null {
     if (!db) return null;
-    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_by_user_id, auth_source, ldap_config_id, ldap_dn, created_at FROM users WHERE id = $id').get({ $id: id }) as any;
+    const row = db.prepare(`SELECT ${ADMIN_COLS} FROM proxy_users
+        WHERE id = $id AND roles LIKE '%admin%'`).get({ $id: id }) as any;
     return row ? rowToAuthUser(row) : null;
 }
 
 export function countAdmins(): number {
     if (!db) return 0;
-    const row = db.prepare('SELECT COUNT(*) as c FROM users').get() as any;
+    const row = db.prepare("SELECT COUNT(*) as c FROM proxy_users WHERE roles LIKE '%admin%'").get() as any;
     return row?.c || 0;
 }
 
@@ -266,33 +566,52 @@ export async function createAdditionalAdmin(
 ): Promise<AuthUser> {
     if (!db) throw new Error('Auth not initialized');
     const hash = await Bun.password.hash(password, 'bcrypt');
-    db.prepare(`INSERT INTO users (username, password, totp_secret, totp_enabled, full_name, email, created_by_user_id)
-        VALUES ($u, $p, '', 0, $fn, $em, $cb)`)
+    // If a row with the same username already exists (e.g. a proxy user being
+    // promoted), just grant it the admin role instead of creating a duplicate.
+    const existing = db.prepare("SELECT id, roles FROM proxy_users WHERE username = $u").get({ $u: username }) as any;
+    if (existing) {
+        const roles = String(existing.roles || 'proxy').split(',').map((r: string) => r.trim()).filter(Boolean);
+        if (!roles.includes('admin')) roles.push('admin');
+        if (!roles.includes('proxy')) roles.push('proxy');
+        db.prepare(`UPDATE proxy_users
+            SET password = $p, totp_secret = '', totp_enabled = 0,
+                full_name = $fn, email = $em, created_by_user_id = $cb,
+                roles = $r, updated_at = datetime('now')
+            WHERE id = $id`).run({
+            $p: hash, $fn: fullName.trim(), $em: email.trim().toLowerCase(),
+            $cb: createdByUserId, $r: roles.join(','), $id: existing.id,
+        });
+        const row = db.prepare(`SELECT ${ADMIN_COLS} FROM proxy_users WHERE id = $id`).get({ $id: existing.id }) as any;
+        return rowToAuthUser(row);
+    }
+    db.prepare(`INSERT INTO proxy_users
+        (username, password, totp_secret, totp_enabled, full_name, email,
+         created_by_user_id, roles)
+        VALUES ($u, $p, '', 0, $fn, $em, $cb, 'admin,proxy')`)
         .run({ $u: username, $p: hash, $fn: fullName.trim(), $em: email.trim().toLowerCase(), $cb: createdByUserId });
-    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, created_by_user_id, auth_source, ldap_config_id, ldap_dn, created_at FROM users WHERE username = $u').get({ $u: username }) as any;
+    const row = db.prepare(`SELECT ${ADMIN_COLS} FROM proxy_users WHERE username = $u`).get({ $u: username }) as any;
     return rowToAuthUser(row);
 }
 
-/** Delete an admin. Refuses to drop below 1 admin. Caller MUST prevent self-deletion. */
+/** Delete an admin. Refuses to drop below 1 admin. Caller MUST prevent self-deletion.
+ *  Cascades to all OAuth tokens, sessions, SSO via the FKs. */
 export function deleteAdmin(id: number): { deleted: boolean; reason?: string } {
     if (!db) return { deleted: false, reason: 'Auth not initialized' };
     if (countAdmins() <= 1) return { deleted: false, reason: 'Cannot delete the last admin' };
-    // Drop any admin-shadow proxy row first so OAuth tokens get cleaned up via cascade.
-    db.prepare("DELETE FROM proxy_users WHERE auth_source = 'admin_shadow' AND ldap_dn = $ref")
-        .run({ $ref: ADMIN_SHADOW_REF_PREFIX + id });
-    const result = db.prepare('DELETE FROM users WHERE id = $id').run({ $id: id });
+    const result = db.prepare("DELETE FROM proxy_users WHERE id = $id AND roles LIKE '%admin%'").run({ $id: id });
     if (result.changes === 0) return { deleted: false, reason: 'Admin not found' };
     return { deleted: true };
 }
 
 export async function updateAdminPassword(id: number, newPassword: string): Promise<boolean> {
     if (!db) return false;
-    // Refuse to set a local password on a shadow (LDAP) account — the password
-    // lives in the directory.
-    const row = db.prepare("SELECT auth_source FROM users WHERE id = $id").get({ $id: id }) as any;
-    if (row?.auth_source === 'ldap') return false;
+    // Refuse to set a local password on an LDAP-sourced row — password lives in
+    // the directory.
+    const row = db.prepare("SELECT auth_source, roles FROM proxy_users WHERE id = $id").get({ $id: id }) as any;
+    if (!row || !String(row.roles || '').includes('admin')) return false;
+    if (row.auth_source === 'ldap') return false;
     const hash = await Bun.password.hash(newPassword, 'bcrypt');
-    const result = db.prepare("UPDATE users SET password = $p, updated_at = datetime('now') WHERE id = $id")
+    const result = db.prepare("UPDATE proxy_users SET password = $p, updated_at = datetime('now') WHERE id = $id")
         .run({ $p: hash, $id: id });
     return result.changes > 0;
 }
@@ -300,19 +619,20 @@ export async function updateAdminPassword(id: number, newPassword: string): Prom
 /** Returns the stored TOTP secret for an admin (empty string if none). */
 export function getAdminTotpSecret(id: number): string {
     if (!db) return '';
-    const row = db.prepare('SELECT totp_secret FROM users WHERE id = $id').get({ $id: id }) as any;
+    const row = db.prepare("SELECT totp_secret FROM proxy_users WHERE id = $id AND roles LIKE '%admin%'").get({ $id: id }) as any;
     return row?.totp_secret || '';
 }
 
 /** Used during first login when the admin hasn't yet configured TOTP. */
 export function setAdminTotp(id: number, totpSecret: string): boolean {
     if (!db) return false;
-    const result = db.prepare("UPDATE users SET totp_secret = $t, totp_enabled = 1, updated_at = datetime('now') WHERE id = $id")
-        .run({ $t: totpSecret, $id: id });
+    const result = db.prepare(`UPDATE proxy_users
+        SET totp_secret = $t, totp_enabled = 1, updated_at = datetime('now')
+        WHERE id = $id AND roles LIKE '%admin%'`).run({ $t: totpSecret, $id: id });
     return result.changes > 0;
 }
 
-// ─── LDAP shadow admins ─────────────────────────────────────────────────────
+// ─── LDAP-sourced admins ────────────────────────────────────────────────────
 
 export interface LdapAdminProvisionInput {
     ldapConfigId: number;
@@ -322,41 +642,43 @@ export interface LdapAdminProvisionInput {
     email: string;
 }
 
-/** Find a shadow admin by (ldap_config_id, ldap_dn). */
+/** Find an admin (any source) by (ldap_config_id, ldap_dn). */
 export function findLdapShadowAdmin(ldapConfigId: number, ldapDn: string): AuthUser | null {
     if (!db) return null;
-    const row = db.prepare(`SELECT id, username, full_name, email, totp_enabled, created_by_user_id, auth_source, ldap_config_id, ldap_dn, created_at
-        FROM users WHERE auth_source = 'ldap' AND ldap_config_id = $cid AND ldap_dn = $dn`)
+    const row = db.prepare(`SELECT ${ADMIN_COLS} FROM proxy_users
+        WHERE auth_source = 'ldap' AND ldap_config_id = $cid AND ldap_dn = $dn
+          AND roles LIKE '%admin%'`)
         .get({ $cid: ldapConfigId, $dn: ldapDn }) as any;
     return row ? rowToAuthUser(row) : null;
 }
 
-/** Create or refresh a shadow admin and return it. Username conflicts with local users abort with null. */
+/** Create or refresh an LDAP-sourced admin. Returns null on username collision
+ *  with a row that is not already this same LDAP user (local-wins). */
 export function upsertLdapShadowAdmin(input: LdapAdminProvisionInput): AuthUser | null {
     if (!db) return null;
     const existing = findLdapShadowAdmin(input.ldapConfigId, input.ldapDn);
     if (existing) {
-        // Sync attrs in case they changed in the directory.
-        db.prepare(`UPDATE users SET full_name = $fn, email = $em, updated_at = datetime('now') WHERE id = $id`)
-            .run({ $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(), $id: existing.id });
+        db.prepare(`UPDATE proxy_users SET full_name = $fn, email = $em, updated_at = datetime('now')
+            WHERE id = $id`).run({ $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(), $id: existing.id });
         return getAdmin(existing.id);
     }
-    // Username collision with a local admin → abort (local wins).
-    const collision = db.prepare(`SELECT id, auth_source FROM users WHERE username = $u`).get({ $u: input.username }) as any;
+    const collision = db.prepare("SELECT id FROM proxy_users WHERE username = $u").get({ $u: input.username }) as any;
     if (collision) return null;
-    db.prepare(`INSERT INTO users (username, password, totp_secret, totp_enabled, full_name, email, auth_source, ldap_config_id, ldap_dn)
-        VALUES ($u, '', '', 0, $fn, $em, 'ldap', $cid, $dn)`)
-        .run({ $u: input.username, $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(), $cid: input.ldapConfigId, $dn: input.ldapDn });
-    const row = db.prepare(`SELECT id, username, full_name, email, totp_enabled, created_by_user_id, auth_source, ldap_config_id, ldap_dn, created_at
-        FROM users WHERE username = $u`).get({ $u: input.username }) as any;
+    db.prepare(`INSERT INTO proxy_users
+        (username, password, totp_secret, totp_enabled, full_name, email,
+         auth_source, ldap_config_id, ldap_dn, roles)
+        VALUES ($u, '', '', 0, $fn, $em, 'ldap', $cid, $dn, 'admin,proxy')`)
+        .run({ $u: input.username, $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(),
+            $cid: input.ldapConfigId, $dn: input.ldapDn });
+    const row = db.prepare(`SELECT ${ADMIN_COLS} FROM proxy_users WHERE username = $u`).get({ $u: input.username }) as any;
     return row ? rowToAuthUser(row) : null;
 }
 
-/** Returns true if any local (non-LDAP) admin exists. Used to warn before
- *  provisioning the first LDAP admin (avoid lockout if AD goes down). */
+/** Returns true if any non-LDAP admin exists. */
 export function hasLocalAdmins(): boolean {
     if (!db) return false;
-    const row = db.prepare("SELECT COUNT(*) as c FROM users WHERE auth_source = 'local' OR auth_source IS NULL").get() as any;
+    const row = db.prepare(`SELECT COUNT(*) as c FROM proxy_users
+        WHERE roles LIKE '%admin%' AND (auth_source = 'local' OR auth_source IS NULL)`).get() as any;
     return (row?.c || 0) > 0;
 }
 
@@ -523,12 +845,18 @@ export function createSession(userId: number, ip: string, userAgent: string): st
 export function validateSession(sessionId: string): { user: AuthUser } | null {
     if (!db || !sessionId) return null;
     const row = db.prepare(`
-        SELECT s.id, s.expires_at, u.id as user_id, u.username, u.created_at
-        FROM sessions s JOIN users u ON s.user_id = u.id
+        SELECT s.id, s.expires_at, u.id as user_id, u.username, u.created_at, u.roles
+        FROM sessions s JOIN proxy_users u ON s.user_id = u.id
         WHERE s.id = $id
     `).get({ $id: sessionId }) as any;
     if (!row) return null;
     if (new Date(row.expires_at) < new Date()) {
+        db.prepare('DELETE FROM sessions WHERE id = $id').run({ $id: sessionId });
+        return null;
+    }
+    // A dashboard session is only valid if the underlying account still carries
+    // the admin role (an admin demoted via Audit/SQL invalidates open sessions).
+    if (!String(row.roles || '').includes('admin')) {
         db.prepare('DELETE FROM sessions WHERE id = $id').run({ $id: sessionId });
         return null;
     }
@@ -628,7 +956,7 @@ function rowToProxyUser(r: any): ProxyUser {
         email: r.email || '',
         totpEnabled: !!r.totp_enabled,
         createdAt: r.created_at,
-        authSource: (r.auth_source || 'local') as 'local' | 'ldap' | 'admin_shadow',
+        authSource: (r.auth_source || 'local') as 'local' | 'ldap',
         ldapConfigId: r.ldap_config_id ?? null,
         ldapDn: r.ldap_dn ?? null,
         ldapOrphan: !!r.ldap_orphan,
@@ -658,10 +986,11 @@ export function getProxyUser(id: number): ProxyUser | null {
 
 export function deleteProxyUser(id: number): boolean {
     if (!db) return false;
-    // Refuse to delete admin shadow rows — they are recreated on next login
-    // and the admin should be managed via the Admins page.
-    const row = db.prepare("SELECT auth_source FROM proxy_users WHERE id = $id").get({ $id: id }) as any;
-    if (row?.auth_source === 'admin_shadow') return false;
+    // Refuse to delete via the proxy-user page if the row carries the admin role
+    // — these are managed in the Admins page (which also enforces the
+    // "at least one admin" guard).
+    const row = db.prepare("SELECT roles FROM proxy_users WHERE id = $id").get({ $id: id }) as any;
+    if (row && String(row.roles || '').includes('admin')) return false;
     const result = db.prepare('DELETE FROM proxy_users WHERE id = $id').run({ $id: id });
     return result.changes > 0;
 }
@@ -669,7 +998,7 @@ export function deleteProxyUser(id: number): boolean {
 export async function updateProxyUserPassword(id: number, newPassword: string): Promise<boolean> {
     if (!db) return false;
     const row = db.prepare("SELECT auth_source FROM proxy_users WHERE id = $id").get({ $id: id }) as any;
-    if (row?.auth_source === 'ldap' || row?.auth_source === 'admin_shadow') return false;
+    if (row?.auth_source === 'ldap') return false;
     const hash = await Bun.password.hash(newPassword, 'bcrypt');
     const result = db.prepare("UPDATE proxy_users SET password = $p, updated_at = datetime('now') WHERE id = $id")
         .run({ $p: hash, $id: id });
@@ -692,9 +1021,9 @@ export function findProxyUserByEmailOrUsername(email: string, username: string):
 
 export function updateProxyUserInfo(id: number, fullName: string, email: string): boolean {
     if (!db) return false;
-    // Shadow rows are synced from their source (admin or LDAP) at login time.
+    // LDAP-sourced rows are refreshed from the directory at login.
     const row = db.prepare("SELECT auth_source FROM proxy_users WHERE id = $id").get({ $id: id }) as any;
-    if (row?.auth_source === 'admin_shadow' || row?.auth_source === 'ldap') return false;
+    if (row?.auth_source === 'ldap') return false;
     const result = db.prepare("UPDATE proxy_users SET full_name = $fn, email = $em, updated_at = datetime('now') WHERE id = $id")
         .run({ $fn: fullName.trim(), $em: email.trim().toLowerCase(), $id: id });
     return result.changes > 0;
@@ -781,7 +1110,14 @@ export interface LdapProxyProvisionInput {
     fullName: string;
     email: string;
     groups?: string[];  // Cached set of group DNs from the directory; persisted for later allow-list checks.
+    autoAdoptLocal?: boolean;  // When true, allows adopting a local row whose email matches.
 }
+
+export type LdapProvisionOutcome =
+    | { ok: true; user: ProxyUser; adopted?: { eventId: number; previousAuthSource: string; matchedOn: 'email' } }
+    | { ok: false; reason: 'username_collision' | 'multi_directory_conflict' | 'local_has_totp' | 'auto_adopt_disabled' | 'auth_unavailable';
+        collidingUserId?: number; otherConfigId?: number }
+;
 
 export function findLdapShadowProxyUser(ldapConfigId: number, ldapDn: string): ProxyUser | null {
     if (!db) return null;
@@ -791,9 +1127,32 @@ export function findLdapShadowProxyUser(ldapConfigId: number, ldapDn: string): P
     return row ? rowToProxyUser(row) : null;
 }
 
-export function upsertLdapShadowProxyUser(input: LdapProxyProvisionInput): ProxyUser | null {
-    if (!db) return null;
+/** Idempotent provisioning of an LDAP-sourced proxy_users row.
+ *
+ *  Behaviour (in order):
+ *    A) Same (ldap_config_id, ldap_dn) already exists → update attrs/groups.
+ *    B) Email collides with a row sourced from a DIFFERENT LDAP directory →
+ *       refuse (multi_directory_conflict). Sign of misconfiguration.
+ *    C) Email collides with a LOCAL row:
+ *         - if !autoAdoptLocal → refuse (auto_adopt_disabled)
+ *         - if local row has TOTP → refuse (local_has_totp): protecting
+ *           deliberately-secured account
+ *         - else → ADOPT: mutate the local row to LDAP, queue an
+ *           ldap_adoption_event in 'pending' state for admin confirmation
+ *    D) Username collides with another non-LDAP row (no email match) → refuse
+ *       (username_collision).
+ *    E) Otherwise → INSERT a fresh row.
+ *
+ *  The legacy `null` return path of older callers is preserved by exporting
+ *  a thin wrapper `upsertLdapShadowProxyUser` that maps `{ok:false}` → null.
+ */
+export function upsertLdapShadowProxyUserDetailed(input: LdapProxyProvisionInput): LdapProvisionOutcome {
+    if (!db) return { ok: false, reason: 'auth_unavailable' };
     const groupsJson = JSON.stringify(Array.isArray(input.groups) ? input.groups : []);
+    const normalizedEmail = input.email.trim().toLowerCase();
+    const cleanFullName = input.fullName.trim();
+
+    // A) Same LDAP identity → straight update.
     const existing = findLdapShadowProxyUser(input.ldapConfigId, input.ldapDn);
     if (existing) {
         db.prepare(`UPDATE proxy_users
@@ -801,91 +1160,199 @@ export function upsertLdapShadowProxyUser(input: LdapProxyProvisionInput): Proxy
                 ldap_groups_last_seen = $g, ldap_last_sync_at = datetime('now'),
                 ldap_orphan = 0, updated_at = datetime('now')
             WHERE id = $id`)
-            .run({
-                $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(),
-                $g: groupsJson, $id: existing.id,
-            });
-        return getProxyUser(existing.id);
+            .run({ $fn: cleanFullName, $em: normalizedEmail, $g: groupsJson, $id: existing.id });
+        const updated = getProxyUser(existing.id);
+        return updated ? { ok: true, user: updated } : { ok: false, reason: 'auth_unavailable' };
     }
-    const collision = db.prepare(`SELECT id FROM proxy_users WHERE username = $u`).get({ $u: input.username }) as any;
-    if (collision) return null;
+
+    // B+C) Look for an email collision (only if we have a non-empty email).
+    if (normalizedEmail) {
+        const emailRow = db.prepare(`SELECT id, auth_source, ldap_config_id, totp_enabled, password, username, email, roles
+            FROM proxy_users WHERE email = $e AND email != ''`).get({ $e: normalizedEmail }) as any;
+        if (emailRow) {
+            if (emailRow.auth_source === 'ldap' && emailRow.ldap_config_id !== input.ldapConfigId) {
+                // B) Cross-directory conflict — always refuse.
+                return { ok: false, reason: 'multi_directory_conflict', collidingUserId: emailRow.id, otherConfigId: emailRow.ldap_config_id };
+            }
+            if (emailRow.auth_source === 'local' || emailRow.auth_source === null) {
+                // C) Local match — adopt only if explicitly opted in and the
+                //    local row does NOT have TOTP enabled.
+                if (!input.autoAdoptLocal) {
+                    return { ok: false, reason: 'auto_adopt_disabled', collidingUserId: emailRow.id };
+                }
+                if (emailRow.totp_enabled) {
+                    return { ok: false, reason: 'local_has_totp', collidingUserId: emailRow.id };
+                }
+                // Snapshot for reversal.
+                const eventResult = db.prepare(`INSERT INTO ldap_adoption_events
+                    (proxy_user_id, ldap_config_id, ldap_dn, matched_on, matched_value,
+                     previous_auth_source, previous_password_hash, previous_username, previous_email, state)
+                    VALUES ($pid, $cid, $dn, 'email', $mv, $pas, $pph, $pun, $pem, 'pending')`).run({
+                    $pid: emailRow.id,
+                    $cid: input.ldapConfigId,
+                    $dn: input.ldapDn,
+                    $mv: normalizedEmail,
+                    $pas: emailRow.auth_source || 'local',
+                    $pph: emailRow.password || '',
+                    $pun: emailRow.username,
+                    $pem: emailRow.email,
+                });
+                const eventId = Number(eventResult.lastInsertRowid);
+                db.prepare(`UPDATE proxy_users SET
+                    auth_source = 'ldap',
+                    ldap_config_id = $cid,
+                    ldap_dn = $dn,
+                    password = '',
+                    totp_secret = NULL,
+                    totp_enabled = 0,
+                    ldap_groups_last_seen = $g,
+                    ldap_last_sync_at = datetime('now'),
+                    ldap_orphan = 0,
+                    full_name = $fn,
+                    username = $u,
+                    updated_at = datetime('now')
+                    WHERE id = $id`).run({
+                    $cid: input.ldapConfigId, $dn: input.ldapDn, $g: groupsJson,
+                    $fn: cleanFullName, $u: input.username, $id: emailRow.id,
+                });
+                const adopted = getProxyUser(emailRow.id);
+                if (!adopted) return { ok: false, reason: 'auth_unavailable' };
+                return { ok: true, user: adopted, adopted: { eventId, previousAuthSource: emailRow.auth_source || 'local', matchedOn: 'email' } };
+            }
+        }
+    }
+
+    // D) Username collision without email match.
+    const usernameCollision = db.prepare(`SELECT id FROM proxy_users WHERE username = $u`).get({ $u: input.username }) as any;
+    if (usernameCollision) {
+        return { ok: false, reason: 'username_collision', collidingUserId: usernameCollision.id };
+    }
+
+    // E) Fresh insert.
     db.prepare(`INSERT INTO proxy_users
         (username, full_name, email, password, totp_secret, totp_enabled,
-         auth_source, ldap_config_id, ldap_dn, ldap_groups_last_seen, ldap_last_sync_at)
-        VALUES ($u, $fn, $em, '', NULL, 0, 'ldap', $cid, $dn, $g, datetime('now'))`)
+         auth_source, ldap_config_id, ldap_dn, ldap_groups_last_seen, ldap_last_sync_at, roles)
+        VALUES ($u, $fn, $em, '', NULL, 0, 'ldap', $cid, $dn, $g, datetime('now'), 'proxy')`)
         .run({
-            $u: input.username, $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(),
+            $u: input.username, $fn: cleanFullName, $em: normalizedEmail,
             $cid: input.ldapConfigId, $dn: input.ldapDn, $g: groupsJson,
         });
-    const row = db.prepare(`SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at
+    const row = db.prepare(`SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at
         FROM proxy_users WHERE username = $u`).get({ $u: input.username }) as any;
-    return row ? rowToProxyUser(row) : null;
+    const created = row ? rowToProxyUser(row) : null;
+    return created ? { ok: true, user: created } : { ok: false, reason: 'auth_unavailable' };
 }
 
-// ─── Admin shadow proxy users (for OAuth login as admin) ────────────────────
-// Admins live in `users`, but OAuth refresh tokens / codes / SSO sessions all
-// reference `proxy_users(id)`. To let an admin authenticate against OAuth apps,
-// we mirror them into `proxy_users` with auth_source='admin_shadow' and stash
-// the original admin id in `ldap_dn` (re-purposed as a generic external-ref
-// slot — saves a schema migration).
-
-const ADMIN_SHADOW_REF_PREFIX = 'admin:';
-
-export interface AdminShadowProvisionInput {
-    adminId: number;
-    username: string;
-    fullName: string;
-    email: string;
+/** Legacy wrapper. Returns the user on success, null on any failure mode.
+ *  Use upsertLdapShadowProxyUserDetailed when you need to distinguish reasons. */
+export function upsertLdapShadowProxyUser(input: LdapProxyProvisionInput): ProxyUser | null {
+    const outcome = upsertLdapShadowProxyUserDetailed(input);
+    return outcome.ok ? outcome.user : null;
 }
 
-/** Given an admin-shadow proxy_users row, returns the original admin id (or null). */
-export function adminIdFromShadow(shadowProxy: ProxyUser): number | null {
-    if (shadowProxy.authSource !== 'admin_shadow') return null;
-    const ref = shadowProxy.ldapDn || '';
-    if (!ref.startsWith(ADMIN_SHADOW_REF_PREFIX)) return null;
-    const id = parseInt(ref.slice(ADMIN_SHADOW_REF_PREFIX.length), 10);
-    return Number.isFinite(id) ? id : null;
+// ─── LDAP adoption events ───────────────────────────────────────────────────
+
+export interface LdapAdoptionEvent {
+    id: number;
+    proxyUserId: number;
+    ldapConfigId: number;
+    ldapDn: string;
+    matchedOn: string;
+    matchedValue: string;
+    previousAuthSource: string;
+    previousUsername: string;
+    previousEmail: string;
+    state: 'pending' | 'confirmed' | 'reverted';
+    createdAt: string;
+    resolvedAt: string | null;
+    resolvedBy: number | null;
 }
 
-export function findAdminShadowProxyUser(adminId: number): ProxyUser | null {
-    if (!db) return null;
-    const ref = ADMIN_SHADOW_REF_PREFIX + adminId;
-    const row = db.prepare(`SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at
-        FROM proxy_users WHERE auth_source = 'admin_shadow' AND ldap_dn = $ref`)
-        .get({ $ref: ref }) as any;
-    return row ? rowToProxyUser(row) : null;
+function rowToAdoptionEvent(r: any): LdapAdoptionEvent {
+    return {
+        id: r.id,
+        proxyUserId: r.proxy_user_id,
+        ldapConfigId: r.ldap_config_id,
+        ldapDn: r.ldap_dn,
+        matchedOn: r.matched_on,
+        matchedValue: r.matched_value,
+        previousAuthSource: r.previous_auth_source,
+        previousUsername: r.previous_username || '',
+        previousEmail: r.previous_email || '',
+        state: (r.state || 'pending') as 'pending' | 'confirmed' | 'reverted',
+        createdAt: r.created_at,
+        resolvedAt: r.resolved_at || null,
+        resolvedBy: r.resolved_by ?? null,
+    };
 }
 
-/** Create or refresh an admin shadow row. Returns null on username collision with
- *  a non-admin-shadow proxy_users row (admin still wins for *new* logins, but we
- *  can't silently overwrite an existing user). */
-export function upsertAdminShadowProxyUser(input: AdminShadowProvisionInput): ProxyUser | null {
-    if (!db) return null;
-    const ref = ADMIN_SHADOW_REF_PREFIX + input.adminId;
-    const existing = findAdminShadowProxyUser(input.adminId);
-    if (existing) {
-        db.prepare(`UPDATE proxy_users
-            SET full_name = $fn, email = $em, username = $u, updated_at = datetime('now')
-            WHERE id = $id`)
-            .run({ $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(), $u: input.username, $id: existing.id });
-        return getProxyUser(existing.id);
-    }
-    // Username collision with a non-shadow proxy_user → refuse. Admin
-    // identity protection: we don't override an existing real proxy user.
-    const collision = db.prepare(`SELECT id, auth_source FROM proxy_users WHERE username = $u`).get({ $u: input.username }) as any;
-    if (collision) return null;
-    db.prepare(`INSERT INTO proxy_users
-        (username, full_name, email, password, totp_secret, totp_enabled,
-         auth_source, ldap_config_id, ldap_dn, ldap_groups_last_seen)
-        VALUES ($u, $fn, $em, '', NULL, 0, 'admin_shadow', NULL, $ref, '[]')`)
-        .run({
-            $u: input.username, $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(),
-            $ref: ref,
-        });
-    const row = db.prepare(`SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at
-        FROM proxy_users WHERE auth_source = 'admin_shadow' AND ldap_dn = $ref`)
-        .get({ $ref: ref }) as any;
-    return row ? rowToProxyUser(row) : null;
+export function listAdoptionEvents(state?: 'pending' | 'confirmed' | 'reverted'): LdapAdoptionEvent[] {
+    if (!db) return [];
+    const rows = state
+        ? db.prepare(`SELECT id, proxy_user_id, ldap_config_id, ldap_dn, matched_on, matched_value,
+            previous_auth_source, previous_username, previous_email, state, created_at, resolved_at, resolved_by
+            FROM ldap_adoption_events WHERE state = $s ORDER BY created_at DESC`).all({ $s: state }) as any[]
+        : db.prepare(`SELECT id, proxy_user_id, ldap_config_id, ldap_dn, matched_on, matched_value,
+            previous_auth_source, previous_username, previous_email, state, created_at, resolved_at, resolved_by
+            FROM ldap_adoption_events ORDER BY created_at DESC LIMIT 200`).all() as any[];
+    return rows.map(rowToAdoptionEvent);
+}
+
+export function countPendingAdoptions(): number {
+    if (!db) return 0;
+    const row = db.prepare("SELECT COUNT(*) AS c FROM ldap_adoption_events WHERE state = 'pending'").get() as any;
+    return row?.c || 0;
+}
+
+export function confirmAdoption(eventId: number, resolvedBy: number): boolean {
+    if (!db) return false;
+    const result = db.prepare(`UPDATE ldap_adoption_events
+        SET state = 'confirmed', resolved_at = datetime('now'), resolved_by = $rb
+        WHERE id = $id AND state = 'pending'`).run({ $id: eventId, $rb: resolvedBy });
+    return result.changes > 0;
+}
+
+/** Revert an adoption: restore the original local row, detach it from LDAP, and
+ *  recreate a fresh LDAP row for the directory user so they keep working. */
+export interface AdoptionRevertResult {
+    reverted: boolean;
+    restoredUserId?: number;
+    newLdapUserId?: number;
+}
+
+export function revertAdoption(eventId: number, resolvedBy: number): AdoptionRevertResult {
+    if (!db) return { reverted: false };
+    const event = db.prepare("SELECT * FROM ldap_adoption_events WHERE id = $id AND state = 'pending'").get({ $id: eventId }) as any;
+    if (!event) return { reverted: false };
+
+    // 1) Restore the row to its previous local form.
+    db.prepare(`UPDATE proxy_users SET
+        auth_source = $as,
+        ldap_config_id = NULL,
+        ldap_dn = NULL,
+        ldap_groups_last_seen = '[]',
+        ldap_last_sync_at = NULL,
+        ldap_orphan = 0,
+        password = $pwd,
+        username = $un,
+        email = $em,
+        totp_secret = NULL,
+        totp_enabled = 0,
+        updated_at = datetime('now')
+        WHERE id = $id`).run({
+        $as: event.previous_auth_source || 'local',
+        $pwd: event.previous_password_hash || '',
+        $un: event.previous_username || '',
+        $em: event.previous_email || '',
+        $id: event.proxy_user_id,
+    });
+
+    // 2) Mark the event reverted.
+    db.prepare(`UPDATE ldap_adoption_events
+        SET state = 'reverted', resolved_at = datetime('now'), resolved_by = $rb
+        WHERE id = $id`).run({ $id: eventId, $rb: resolvedBy });
+
+    return { reverted: true, restoredUserId: event.proxy_user_id };
 }
 
 /** Returns the cached LDAP group DNs for a shadow user (empty array otherwise). */

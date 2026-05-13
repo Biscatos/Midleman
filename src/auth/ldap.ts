@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS ldap_configs (
     enabled             INTEGER NOT NULL DEFAULT 1,
     timeout_ms          INTEGER NOT NULL DEFAULT 5000,
     default_profile     TEXT NOT NULL DEFAULT '',
+    auto_adopt_local    INTEGER NOT NULL DEFAULT 0,
     created_at          TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -77,6 +78,7 @@ export interface LdapConfig {
     enabled: boolean;
     timeoutMs: number;
     defaultProfile: string;  // profile assigned to new proxy shadow users; '' = none
+    autoAdoptLocal: boolean; // OFF by default — see plan: collision handling
     adminGroups: string[];   // group DNs that grant admin role
     createdAt: string;
     updatedAt: string;
@@ -101,6 +103,7 @@ export interface LdapConfigInput {
     timeoutMs?: number;
     defaultProfile?: string;
     adminGroups?: string[];
+    autoAdoptLocal?: boolean;
 }
 
 // ─── Encryption key (derived from JWT RSA private key on disk) ──────────────
@@ -164,6 +167,9 @@ export function initLdap(dataDir: string): void {
         if (!cols.includes('default_profile')) {
             db.exec("ALTER TABLE ldap_configs ADD COLUMN default_profile TEXT NOT NULL DEFAULT ''");
         }
+        if (!cols.includes('auto_adopt_local')) {
+            db.exec("ALTER TABLE ldap_configs ADD COLUMN auto_adopt_local INTEGER NOT NULL DEFAULT 0");
+        }
     } catch {}
     const count = (db.prepare('SELECT COUNT(*) as c FROM ldap_configs WHERE enabled = 1').get() as any)?.c || 0;
     console.log(`🪪 LDAP: ${count} enabled directory(ies)`);
@@ -223,6 +229,7 @@ function rowToConfig(r: any): LdapConfig {
         enabled: !!r.enabled,
         timeoutMs: r.timeout_ms || 5000,
         defaultProfile: r.default_profile || '',
+        autoAdoptLocal: !!r.auto_adopt_local,
         adminGroups: loadAdminGroups(r.id),
         createdAt: r.created_at,
         updatedAt: r.updated_at,
@@ -272,9 +279,9 @@ export function createLdapConfig(input: LdapConfigInput): LdapConfig {
     db.prepare(`INSERT INTO ldap_configs
         (name, url, bind_dn, bind_password_enc, base_dn, user_filter,
          username_attr, email_attr, fullname_attr, group_attr,
-         start_tls, tls_verify, scope, totp_policy, enabled, timeout_ms, default_profile)
+         start_tls, tls_verify, scope, totp_policy, enabled, timeout_ms, default_profile, auto_adopt_local)
         VALUES ($n, $u, $bd, $bp, $base, $f, $ua, $ea, $fa, $ga,
-                $st, $tv, $sc, $tp, $en, $to, $dp)`).run({
+                $st, $tv, $sc, $tp, $en, $to, $dp, $aa)`).run({
         $n: input.name.trim(),
         $u: input.url.trim(),
         $bd: (input.bindDn || '').trim(),
@@ -292,6 +299,7 @@ export function createLdapConfig(input: LdapConfigInput): LdapConfig {
         $en: input.enabled === false ? 0 : 1,
         $to: input.timeoutMs || 5000,
         $dp: (input.defaultProfile || '').trim().toLowerCase(),
+        $aa: input.autoAdoptLocal ? 1 : 0,
     });
     const row = db.prepare('SELECT * FROM ldap_configs WHERE name = $n').get({ $n: input.name.trim() }) as any;
     if (Array.isArray(input.adminGroups)) setAdminGroups(row.id, input.adminGroups);
@@ -329,6 +337,7 @@ export function updateLdapConfig(id: number, input: Partial<LdapConfigInput>): L
     if (input.enabled !== undefined) set('enabled', 'en', input.enabled ? 1 : 0);
     if (input.timeoutMs !== undefined) set('timeout_ms', 'to', input.timeoutMs);
     if (input.defaultProfile !== undefined) set('default_profile', 'dp', input.defaultProfile.trim().toLowerCase());
+    if (input.autoAdoptLocal !== undefined) set('auto_adopt_local', 'aa', input.autoAdoptLocal ? 1 : 0);
 
     if (input.adminGroups !== undefined) setAdminGroups(id, input.adminGroups);
 
@@ -441,6 +450,7 @@ export interface LdapAuthResult {
     raw: Record<string, string | string[]>;
     totpPolicy: LdapTotpPolicy;
     scope: LdapScope;
+    autoAdoptLocal: boolean; // mirrored from the LdapConfig so callers don't need to re-fetch
 }
 
 export type LdapAuthFailure =
@@ -563,6 +573,7 @@ export async function authenticateAgainst(cfg: LdapConfig, login: string, passwo
             raw,
             totpPolicy: cfg.totpPolicy,
             scope: cfg.scope,
+            autoAdoptLocal: cfg.autoAdoptLocal,
         },
     };
 }

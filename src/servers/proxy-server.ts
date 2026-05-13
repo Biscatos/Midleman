@@ -1,6 +1,6 @@
 import type { ProxyProfile } from '../core/types';
 import { handleDirectProxy } from '../proxy/proxy';
-import { verifyProxyUserCredentials, signJwt, getJwtMaxAge, checkRateLimit, proxyUserHasProfile, createProxyLoginChallenge, consumeProxyLoginChallenge, peekProxyLoginChallenge, generateTotpSecret, verifyTotp, setupProxyUserTotp, userIdToUuid, upsertLdapShadowProxyUser, assignProxyUserToProfile } from '../auth/auth';
+import { verifyProxyUserCredentials, signJwt, getJwtMaxAge, checkRateLimit, proxyUserHasProfile, createProxyLoginChallenge, consumeProxyLoginChallenge, peekProxyLoginChallenge, generateTotpSecret, verifyTotp, setupProxyUserTotp, userIdToUuid, upsertLdapShadowProxyUserDetailed, assignProxyUserToProfile, logAudit } from '../auth/auth';
 import { tryLdapLogin } from '../auth/ldap';
 import { renderConsentMarkdown, escapeHtmlAttr } from '../core/consent';
 import QRCode from 'qrcode';
@@ -115,18 +115,44 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                     if (!cred) {
                         const ldap = await tryLdapLogin('proxy', username, password);
                         if (ldap.ok) {
-                            const shadow = upsertLdapShadowProxyUser({
+                            const outcome = upsertLdapShadowProxyUserDetailed({
                                 ldapConfigId: ldap.auth.configId,
                                 ldapDn: ldap.auth.dn,
                                 username: ldap.auth.username,
                                 fullName: ldap.auth.fullName,
                                 email: ldap.auth.email,
                                 groups: ldap.auth.groups,
+                                autoAdoptLocal: ldap.auth.autoAdoptLocal,
                             });
-                            if (!shadow) {
-                                return jsonRes(409, { error: 'A local user already uses this username.' });
+                            if (!outcome.ok) {
+                                logAudit({
+                                    action: 'ldap.provision.refused',
+                                    actorUsername: ldap.auth.username,
+                                    details: {
+                                        directory: ldap.auth.configName,
+                                        dn: ldap.auth.dn,
+                                        reason: outcome.reason,
+                                        collidingUserId: 'collidingUserId' in outcome ? outcome.collidingUserId : undefined,
+                                        profile: profile.name,
+                                    },
+                                });
+                                return jsonRes(401, { error: 'Invalid username or password' });
                             }
-                            // Auto-attach to directory's default profile (may differ from current profile).
+                            const shadow = outcome.user;
+                            if (outcome.adopted) {
+                                logAudit({
+                                    action: 'ldap.user.adopted',
+                                    actorUserId: shadow.id,
+                                    actorUsername: shadow.username,
+                                    details: {
+                                        directory: ldap.auth.configName,
+                                        dn: ldap.auth.dn,
+                                        matchedOn: outcome.adopted.matchedOn,
+                                        adoptionEventId: outcome.adopted.eventId,
+                                        previousAuthSource: outcome.adopted.previousAuthSource,
+                                    },
+                                });
+                            }
                             if (ldap.grantedProfile) {
                                 assignProxyUserToProfile(shadow.id, ldap.grantedProfile);
                             }

@@ -13,7 +13,7 @@ import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, adminIdFromShadow } from './auth/auth';
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption } from './auth/auth';
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClientConsent, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
 import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin, runLdapSync, getLastLdapSyncReport } from './auth/ldap';
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
@@ -1281,20 +1281,8 @@ const server = Bun.serve({
                 // GET /admin/proxy-users — list all global proxy users
                 if (url.pathname === '/admin/proxy-users' && req.method === 'GET') {
                     const users = listAllProxyUsers().map(u => {
-                        // For admin-shadow rows, surface the REAL TOTP status of the
-                        // underlying admin row — the proxy_users.totp_enabled flag is
-                        // never populated for shadows (TOTP lives in `users`).
-                        let totpEnabled = u.totpEnabled;
-                        if (u.authSource === 'admin_shadow') {
-                            const adminId = adminIdFromShadow(u);
-                            if (adminId !== null) {
-                                const admin = getAdmin(adminId);
-                                totpEnabled = !!admin?.totpEnabled;
-                            }
-                        }
                         return {
                             ...u,
-                            totpEnabled,
                             profiles: listProfilesForProxyUser(u.id),
                         };
                     });
@@ -1705,6 +1693,36 @@ const server = Bun.serve({
                     const me = getAuthedAdmin(req);
                     logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'ldap.sync.forced', details: { durationMs: report.durationMs, configs: report.configs.length }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                     return jsonRes(200, { report } as unknown as Record<string, unknown>);
+                }
+
+                // ── LDAP adoption events ─────────────────────────────────────────────────
+
+                if (url.pathname === '/admin/ldap/adoptions' && req.method === 'GET') {
+                    const stateParam = url.searchParams.get('state');
+                    const state = stateParam === 'pending' || stateParam === 'confirmed' || stateParam === 'reverted'
+                        ? stateParam : undefined;
+                    return jsonRes(200, {
+                        pending: countPendingAdoptions(),
+                        events: listAdoptionEvents(state) as unknown as Record<string, unknown>[],
+                    });
+                }
+
+                if (url.pathname.match(/^\/admin\/ldap\/adoptions\/\d+\/confirm$/) && req.method === 'POST') {
+                    const id = Number(url.pathname.split('/')[4]);
+                    const me = getAuthedAdmin(req);
+                    const ok = confirmAdoption(id, me?.id || 0);
+                    if (!ok) return jsonRes(404, { error: 'Adoption event not found or already resolved' });
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'ldap.user.adoption_confirmed', targetType: 'adoption_event', targetId: id, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { status: 'ok' });
+                }
+
+                if (url.pathname.match(/^\/admin\/ldap\/adoptions\/\d+\/revert$/) && req.method === 'POST') {
+                    const id = Number(url.pathname.split('/')[4]);
+                    const me = getAuthedAdmin(req);
+                    const result = revertAdoption(id, me?.id || 0);
+                    if (!result.reverted) return jsonRes(404, { error: 'Adoption event not found or already resolved' });
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'ldap.user.adoption_reverted', targetType: 'adoption_event', targetId: id, details: { restoredUserId: result.restoredUserId }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { status: 'ok', restoredUserId: result.restoredUserId });
                 }
 
                 // ── TCP/UDP Proxy CRUD ───────────────────────────────────────────────────

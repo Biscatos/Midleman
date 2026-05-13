@@ -79,6 +79,13 @@
         <span class="sidebar-link-label">LDAP</span>
         <span class="sidebar-badge" id="navLdapBadge">0</span>
       </button>
+      <button class="sidebar-link" data-page="ldapconflicts" data-tooltip="Conflitos LDAP" onclick="navigate('ldapconflicts')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        <span class="sidebar-link-label">Conflitos LDAP</span>
+        <span class="sidebar-badge" id="navLdapConflictsBadge" style="display:none">0</span>
+      </button>
       <button class="sidebar-link" data-page="audit" data-tooltip="Audit Log" onclick="navigate('audit')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
@@ -713,6 +720,46 @@
             <li>A password do bind admin é cifrada em AES-256-GCM com chave derivada da chave RSA do JWT.</li>
             <li>O filtro deve conter <code style="background:var(--surface2);padding:1px 6px;border-radius:4px">{login}</code>. Default cobre <code>uid</code>, <code>mail</code> e <code>sAMAccountName</code>.</li>
           </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ LDAP CONFLICTS ═══ -->
+    <div class="page" id="pageLdapconflicts">
+      <div class="page-header">
+        <h2>Conflitos LDAP</h2>
+        <p>Adopções automáticas pendentes e histórico. Cada linha representa um utilizador local que foi tomado por uma identidade LDAP por <strong>match de email</strong>. Confirma ou reverte caso a caso.</p>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-body" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:12.5px;color:var(--text2)">Filtrar:</span>
+          <button class="btn btn-sm" id="ldapcBtnPending" onclick="filterLdapAdoptions('pending')">Pendentes</button>
+          <button class="btn btn-sm" id="ldapcBtnConfirmed" onclick="filterLdapAdoptions('confirmed')">Confirmadas</button>
+          <button class="btn btn-sm" id="ldapcBtnReverted" onclick="filterLdapAdoptions('reverted')">Revertidas</button>
+          <button class="btn btn-sm" id="ldapcBtnAll" onclick="filterLdapAdoptions('')">Tudo</button>
+          <span style="flex:1"></span>
+          <button class="btn btn-sm" onclick="fetchLdapAdoptions()">Atualizar</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--surface2);text-align:left">
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Quando</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">User local</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Match</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">DN LDAP</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Estado</th>
+                <th style="padding:10px 12px"></th>
+              </tr>
+            </thead>
+            <tbody id="ldapcListBody">
+              <tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">A carregar...</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -1770,6 +1817,13 @@
             <label for="ldapDefaultProfile">Profile default para proxy users</label>
             <input type="text" id="ldapDefaultProfile" placeholder="ex: acme" autocomplete="off">
             <span class="ldap-hint">Atribuído automaticamente no primeiro login a users que cheguem por este directory. Vazio = shadow account sem acesso até ser associada manualmente.</span>
+          </div>
+          <div class="form-group span-2">
+            <label class="ldap-check" style="margin-top:8px">
+              <input type="checkbox" id="ldapAutoAdoptLocal">
+              <span>Auto-adoptar utilizadores locais com mesmo email</span>
+            </label>
+            <span class="ldap-hint" style="color:var(--err-text)"><strong>Risco:</strong> Permite que uma password AD tome posse de uma conta local com email igual. Activa só em directories onde tens a certeza que não há homónimos. Adopções ficam pendentes de confirmação manual em <em>LDAP → Conflitos</em>. Contas locais com 2FA configurado são sempre recusadas mesmo com esta opção ligada.</span>
           </div>
         </div>
       </div>

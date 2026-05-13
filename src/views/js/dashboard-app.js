@@ -269,6 +269,7 @@ const PAGE_TITLES = {
   oauthclients: 'OAuth Clients',
   admins: 'Admins',
   ldap: 'LDAP',
+  ldapconflicts: 'Conflitos LDAP',
   audit: 'Audit Log'
 };
 
@@ -287,6 +288,7 @@ function navigate(page) {
   if (page === 'oauthclients') { fetchOauthClients(); }
   if (page === 'admins') { fetchAdmins(); }
   if (page === 'ldap') { fetchLdapConfigs(); }
+  if (page === 'ldapconflicts') { filterLdapAdoptions('pending'); }
   if (page === 'audit') { fetchAuditLogs(true); }
   const titleEl = document.getElementById('topbarPageTitle');
   if (titleEl) titleEl.textContent = PAGE_TITLES[page] || page;
