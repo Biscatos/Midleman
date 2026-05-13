@@ -56,6 +56,11 @@
     .secret-box .lbl { color: var(--text2); font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; font-family: inherit; }
     .secret-box .val { color: var(--text); user-select: all; cursor: text; }
     .warn { color: var(--err-text); font-size: 11.5px; margin-top: 10px; }
+    .copy-row { display: flex; align-items: center; gap: 8px; }
+    .copy-row .val { flex: 1; min-width: 0; }
+    .copy-btn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 5px; color: var(--text2); font-size: 11px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; cursor: pointer; margin: 0; white-space: nowrap; transition: background .15s, color .15s; }
+    .copy-btn:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+    .copy-btn.copied { color: var(--ok-text); border-color: var(--ok-bdr); background: var(--ok-bg); }
     .hint { font-size: 11.5px; color: var(--text3); margin-top: 4px; }
     a { color: var(--btn); text-decoration: none; }
     details.consent { margin-top: 10px; border-top: 1px solid var(--card-bdr); padding-top: 10px; }
@@ -102,11 +107,30 @@
     const list = document.getElementById('list');
     const form = document.getElementById('form');
 
+    function copyVal(btn, text) {
+      navigator.clipboard.writeText(text).then(() => {
+        btn.classList.add('copied');
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'Copy'; }, 2000);
+      }).catch(() => {
+        btn.textContent = 'Error';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+      });
+    }
+
     function showOk(msg, secret) {
       alerts.innerHTML = `<div class="alert-ok">${msg}${secret ? `
         <div class="secret-box">
-          <div class="lbl">client_id</div><div class="val">${secret.id}</div>
-          <div class="lbl" style="margin-top:10px">client_secret</div><div class="val">${secret.secret}</div>
+          <div class="lbl">client_id</div>
+          <div class="copy-row">
+            <div class="val" id="_cid">${escape(secret.id)}</div>
+            <button class="copy-btn" onclick="copyVal(this,'${secret.id.replace(/'/g,"\\'")}')">Copy</button>
+          </div>
+          <div class="lbl" style="margin-top:10px">client_secret</div>
+          <div class="copy-row">
+            <div class="val" id="_csec">${escape(secret.secret)}</div>
+            <button class="copy-btn" onclick="copyVal(this,'${secret.secret.replace(/'/g,"\\'")}')">Copy</button>
+          </div>
           <div class="warn">⚠ Save this secret now — it cannot be retrieved again.</div>
         </div>` : ''}</div>`;
     }

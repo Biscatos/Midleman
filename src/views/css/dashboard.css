@@ -347,7 +347,7 @@ body.sidebar-collapsed .app {
   grid-template-columns: 60px 1fr;
 }
 body.sidebar-collapsed .sidebar { overflow: visible; }
-body.sidebar-collapsed .sidebar-nav { overflow-x: visible; padding: 10px 6px; }
+body.sidebar-collapsed .sidebar-nav { overflow-x: visible; padding: 10px 0; }
 
 body.sidebar-collapsed .sidebar-brand-name,
 body.sidebar-collapsed .sidebar-link-label,
@@ -372,7 +372,7 @@ body.sidebar-collapsed .sidebar-section-label:first-of-type {
   display: none;
 }
 body.sidebar-collapsed .sidebar-status { display: none; }
-body.sidebar-collapsed .sidebar-link { justify-content: center; padding: 8px; gap: 0; }
+body.sidebar-collapsed .sidebar-link { width: 44px; margin: 0 auto; justify-content: center; padding: 9px 0; gap: 0; }
 body.sidebar-collapsed .sidebar-link svg { opacity: 0.65; }
 body.sidebar-collapsed .sidebar-link:hover svg,
 body.sidebar-collapsed .sidebar-link.active svg { opacity: 1; }

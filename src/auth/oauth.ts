@@ -433,15 +433,22 @@ function matchUserGroupsAgainstRules(userGroups: string[], rules: string[]): str
     if (!rules.length || !userGroups.length) return '';
     const wantDn = new Set<string>();
     const wantCn = new Set<string>();
+    let wildcard = false;
     for (const raw of rules) {
         const v = raw.trim();
         if (!v) continue;
+        if (v === '*') { wildcard = true; continue; }
         if (/^cn\s*=/i.test(v) && v.includes(',')) {
             wantDn.add(v.toLowerCase());
         } else {
             wantCn.add(v.replace(/^cn\s*=\s*/i, '').toLowerCase());
         }
     }
+    // Wildcard: any group within this directory is acceptable. User must still
+    // have at least one group (guaranteed above) — ensures orphan/groupless
+    // accounts don't pass just because of '*'. Directory scoping is enforced
+    // by the caller via ldap_config_id.
+    if (wildcard) return userGroups[0];
     for (const g of userGroups) {
         const dn = String(g);
         if (wantDn.has(dn.toLowerCase())) return dn;

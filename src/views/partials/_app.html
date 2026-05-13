@@ -1527,14 +1527,14 @@
             <span style="font-size:11px;color:var(--text3)">aditivo à lista acima</span>
           </div>
           <p style="font-size:11.5px;color:var(--text3);margin:0 0 12px;line-height:1.5">
-            Qualquer utilizador LDAP cujo <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">memberOf</code> contenha um destes grupos terá acesso. Aceita CN curto (ex: <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">DSI-DESENVOLVIMENTO-INOVACAO</code>) ou DN completo.
+            Qualquer utilizador LDAP cujo <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">memberOf</code> contenha um destes grupos terá acesso. Aceita CN curto (ex: <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">DSI-DESENVOLVIMENTO-INOVACAO</code>) ou DN completo. Use <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">*</code> para aceitar qualquer grupo deste directório (os utilizadores locais continuam limitados à lista acima).
           </p>
           <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
             <select id="oclgConfigSelect"
               style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px;min-width:140px">
               <option value="">Directory…</option>
             </select>
-            <input id="oclgGroupInput" type="text" placeholder="CN ou DN do grupo"
+            <input id="oclgGroupInput" type="text" placeholder="CN, DN ou * (qualquer grupo)"
               style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px;font-family:'SF Mono',ui-monospace,monospace">
             <button class="btn btn-primary btn-sm" onclick="addLdapGroupToClientUI()" style="white-space:nowrap">Adicionar</button>
           </div>

@@ -19,6 +19,7 @@ import {
     verifyProxyUserCredentials, verifyTotp, getProxyUser, getJwtMaxAge,
     signJwt, verifyJwt, userIdToUuid,
     upsertLdapShadowProxyUserDetailed, assignProxyUserToProfile, findLdapShadowProxyUser, logAudit,
+    checkRateLimit,
 } from '../auth/auth';
 import { tryLdapLogin } from '../auth/ldap';
 
@@ -247,8 +248,10 @@ export async function handleAuthorize(req: Request, url: URL): Promise<Response>
 
 // ─── /oauth/login (POST) — step 1: username + password ─────────────────────
 
-function buildSuccessResponse(authReq: AuthRequest, userId: number, req: Request): Response {
-    const ssoId = createSsoSession(userId, getClientIp(req), req.headers.get('user-agent') || '');
+function buildSuccessResponse(authReq: AuthRequest, userId: number, req: Request, opts?: { totpUsed?: boolean }): Response {
+    const ip = getClientIp(req);
+    const ua = req.headers.get('user-agent') || '';
+    const ssoId = createSsoSession(userId, ip, ua);
     const code = issueAuthCode({
         clientId: authReq.clientId, userId, redirectUri: authReq.redirectUri,
         codeChallenge: authReq.codeChallenge, scope: authReq.scope, nonce: authReq.nonce || undefined,
@@ -256,6 +259,16 @@ function buildSuccessResponse(authReq: AuthRequest, userId: number, req: Request
     const u = new URL(authReq.redirectUri);
     u.searchParams.set('code', code);
     if (authReq.state) u.searchParams.set('state', authReq.state);
+
+    const user = getProxyUser(userId);
+    logAudit({
+        action: 'oauth.login.success',
+        actorUserId: userId,
+        actorUsername: user?.username,
+        details: { clientId: authReq.clientId, totpUsed: !!opts?.totpUsed, ssoId },
+        ip,
+        userAgent: ua,
+    });
 
     return new Response(JSON.stringify({ status: 'ok', redirect: u.toString() }), {
         status: 200,
@@ -277,6 +290,20 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
 
     if (!authRequestId || !username || !password) {
         return jsonError(400, 'invalid_request', 'Missing required fields');
+    }
+
+    // Rate limit by IP and by username — same 5 attempts / 15 min as proxy login.
+    // Prefixed with 'oauth:' so OAuth counters are independent from dashboard login.
+    const clientIp = getClientIp(req);
+    if (!checkRateLimit(`oauth:ip:${clientIp}`) || !checkRateLimit(`oauth:u:${username.toLowerCase()}`)) {
+        logAudit({
+            action: 'oauth.login.rate_limited',
+            actorUsername: username,
+            details: { ip: clientIp },
+            ip: clientIp,
+            userAgent: req.headers.get('user-agent') || undefined,
+        });
+        return jsonError(429, 'too_many_requests', 'Too many attempts. Try again in 15 minutes.');
     }
 
     const authReq = consumeAuthRequest(authRequestId);
@@ -372,6 +399,13 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
     }
 
     if (!cred) {
+        logAudit({
+            action: 'oauth.login.failed',
+            actorUsername: username,
+            details: { clientId: authReq.clientId, reason: 'invalid_credentials' },
+            ip: clientIp,
+            userAgent: req.headers.get('user-agent') || undefined,
+        });
         // Re-store the auth request so user can retry without restarting
         const newId = storeAuthRequest(authReq);
         return new Response(JSON.stringify({ error: 'Invalid username or password', auth_request: newId }), {
@@ -384,6 +418,14 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
 
     // Admins skip the OAuth client allow-list (they are dashboard admins).
     if (!isAdmin && !isUserAllowedForClient(cred.user.id, authReq.clientId)) {
+        logAudit({
+            action: 'oauth.login.denied',
+            actorUserId: cred.user.id,
+            actorUsername: cred.user.username,
+            details: { clientId: authReq.clientId, reason: 'not_in_allow_list' },
+            ip: clientIp,
+            userAgent: req.headers.get('user-agent') || undefined,
+        });
         const newId = storeAuthRequest(authReq);
         return new Response(JSON.stringify({ error: 'access_denied', error_description: 'Não tem acesso a esta aplicação.', auth_request: newId }), {
             status: 403,
@@ -449,6 +491,20 @@ export async function handleOauthTotp(req: Request): Promise<Response> {
         return jsonError(400, 'invalid_request', 'Missing challengeToken or totpCode');
     }
 
+    const clientIp = getClientIp(req);
+    // TOTP brute-force protection: rate-limit by IP and by the challenge token
+    // (challenge token is single-use anyway, but a fresh one is re-issued after
+    // each failure — the per-IP limit is the real backstop).
+    if (!checkRateLimit(`oauth:totp:ip:${clientIp}`)) {
+        logAudit({
+            action: 'oauth.totp.rate_limited',
+            details: { ip: clientIp },
+            ip: clientIp,
+            userAgent: req.headers.get('user-agent') || undefined,
+        });
+        return jsonError(429, 'too_many_requests', 'Too many attempts. Try again in 15 minutes.');
+    }
+
     const challenge = consumeLoginChallenge(challengeToken);
     if (!challenge) {
         return jsonError(400, 'invalid_request', 'Login session expired. Restart the sign-in flow.');
@@ -460,6 +516,15 @@ export async function handleOauthTotp(req: Request): Promise<Response> {
     }
 
     if (!verifyTotp(challenge.totpSecret, totpCode)) {
+        const totpUser = getProxyUser(challenge.userId);
+        logAudit({
+            action: 'oauth.totp.failed',
+            actorUserId: challenge.userId,
+            actorUsername: totpUser?.username,
+            details: { clientId: authReq.clientId },
+            ip: clientIp,
+            userAgent: req.headers.get('user-agent') || undefined,
+        });
         // Re-issue challenge so user can retry the code.
         const newAuthRequestId = storeAuthRequest(authReq);
         const newChallenge = createOauthLoginChallenge(challenge.userId, challenge.totpSecret, newAuthRequestId);
@@ -469,7 +534,7 @@ export async function handleOauthTotp(req: Request): Promise<Response> {
         });
     }
 
-    return buildSuccessResponse(authReq, challenge.userId, req);
+    return buildSuccessResponse(authReq, challenge.userId, req, { totpUsed: true });
 }
 
 // ─── /oauth/token ───────────────────────────────────────────────────────────
@@ -517,12 +582,33 @@ async function parseTokenBody(req: Request): Promise<Record<string, string>> {
 export async function handleToken(req: Request): Promise<Response> {
     if (req.method !== 'POST') return jsonError(405, 'method_not_allowed');
 
+    const clientIp = getClientIp(req);
+    // Per-IP and per-client rate-limit on client_secret verification. Stops
+    // brute-force against client_secret without locking out a legitimate client
+    // making many concurrent refresh-token calls from one IP (we use 'token:'
+    // prefix and keys distinct from interactive-login counters).
+    if (!checkRateLimit(`oauth:token:ip:${clientIp}`)) {
+        return jsonError(429, 'too_many_requests', 'Too many attempts. Try again in 15 minutes.');
+    }
+
     const body = await parseTokenBody(req);
     const creds = extractClientCredentials(req, body);
     if (!creds) return jsonError(401, 'invalid_client', 'Missing client credentials');
 
+    if (!checkRateLimit(`oauth:token:c:${creds.clientId}`)) {
+        return jsonError(429, 'too_many_requests', 'Too many attempts. Try again in 15 minutes.');
+    }
+
     const ok = await verifyClientSecret(creds.clientId, creds.clientSecret);
-    if (!ok) return jsonError(401, 'invalid_client', 'Invalid client credentials');
+    if (!ok) {
+        logAudit({
+            action: 'oauth.token.client_auth_failed',
+            details: { clientId: creds.clientId, ip: clientIp },
+            ip: clientIp,
+            userAgent: req.headers.get('user-agent') || undefined,
+        });
+        return jsonError(401, 'invalid_client', 'Invalid client credentials');
+    }
 
     const grant = (body.grant_type || '').trim();
     if (grant === 'authorization_code') {
@@ -666,24 +752,56 @@ export function handleOauthLogout(req: Request, url: URL): Response {
     const postLogoutRedirectUri = params.get('post_logout_redirect_uri');
     const state = params.get('state');
 
+    const ip = getClientIp(req);
+    const ua = req.headers.get('user-agent') || '';
+
+    // Resolve the user before destroying state, so we can audit who logged out.
+    let logoutUserId: number | undefined;
+    let logoutUsername: string | undefined;
+    let logoutClientId: string | undefined;
+    let logoutScope: 'all_sessions' | 'single_session' | 'unknown' = 'unknown';
+
     // Destroy the SSO session cookie.
     const cookies = parseCookies(req);
     const ssoId = cookies[SSO_COOKIE];
-    if (ssoId) destroySsoSession(ssoId);
+    if (ssoId) {
+        const sso = validateSsoSession(ssoId);
+        if (sso) logoutUserId = sso.userId;
+        destroySsoSession(ssoId);
+    }
 
     // If we have a valid id_token_hint, revoke all refresh tokens AND all SSO sessions for that user.
     if (idTokenHint) {
         const payload = verifyJwt(idTokenHint);
         const userId = payload?.midleman_uid as number | undefined;
+        logoutClientId = payload?.aud as string | undefined;
         if (userId) {
+            logoutUserId = userId;
             revokeAllUserRefreshTokens(userId); // also calls destroyAllUserSsoSessions internally
+            logoutScope = 'all_sessions';
         }
-    } else if (ssoId) {
+    } else if (ssoId && logoutUserId) {
         // No id_token_hint but we have a cookie — destroy all SSO sessions for that user too.
         // (revokeAllUserRefreshTokens already covers this when hint is present)
-        const sso = validateSsoSession(ssoId);
-        if (sso) destroyAllUserSsoSessions(sso.userId);
+        destroyAllUserSsoSessions(logoutUserId);
+        logoutScope = 'all_sessions';
+    } else if (ssoId) {
+        logoutScope = 'single_session';
     }
+
+    if (logoutUserId) {
+        const u = getProxyUser(logoutUserId);
+        logoutUsername = u?.username;
+    }
+
+    logAudit({
+        action: 'oauth.logout',
+        actorUserId: logoutUserId ?? null,
+        actorUsername: logoutUsername,
+        details: { clientId: logoutClientId, scope: logoutScope, hadIdTokenHint: !!idTokenHint, hadSsoCookie: !!ssoId },
+        ip,
+        userAgent: ua,
+    });
 
     const clearCookie = `${SSO_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
 
