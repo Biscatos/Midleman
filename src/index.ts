@@ -66,6 +66,22 @@ initLdap(config.requestLog.dataDir);
 // Initialize SMTP (depends on initJwt for password encryption key)
 initSmtp(config.requestLog.dataDir);
 
+function getInviteResourceNames(profileNames: string[], oauthClientIds: string[]): string[] {
+    const proxyNames = profileNames
+        .map(profileName => {
+            const profile = config.proxyProfiles.find(p => p.name === profileName);
+            return (profile?.loginTitle || profile?.name || profileName).trim();
+        })
+        .filter(Boolean);
+    const oauthNames = oauthClientIds
+        .map(clientId => {
+            const client = getOauthClient(clientId);
+            return (client?.name || clientId).trim();
+        })
+        .filter(Boolean);
+    return Array.from(new Set([...proxyNames, ...oauthNames]));
+}
+
 // Initialize consent_pages before OAuth (oauth_clients.consent_page_id references it).
 initConsentPages();
 // Initialize OAuth2/OIDC storage + load login template
@@ -2153,9 +2169,10 @@ const server = Bun.serve({
                     const inviteUrl = `${protocol}://${reqHost}/invite/${invite.token}`;
                     let emailSent: boolean | undefined;
                     let emailError: string | undefined;
-                    const primaryProfile = profileNames[0] || '';
+                    const resourceNames = getInviteResourceNames(profileNames, oauthClientIds);
+                    const primaryProfile = resourceNames[0] || profileNames[0] || '';
                     if (isSmtpConfigured()) {
-                        const tpl = renderProxyInviteEmail({ inviteUrl, profileName: primaryProfile, invitedName, note, expiresInHours });
+                        const tpl = renderProxyInviteEmail({ inviteUrl, profileName: primaryProfile, invitedName, note, expiresInHours, resourceNames });
                         const r = await sendMail({ to: email, subject: tpl.subject, html: tpl.html, text: tpl.text });
                         emailSent = r.ok;
                         emailError = r.error;
@@ -2181,7 +2198,8 @@ const server = Bun.serve({
                     const protocol = req.headers.get('x-forwarded-proto') || 'http';
                     const inviteUrl = `${protocol}://${reqHost}/invite/${invite.token}`;
                     const expiresInHours = Math.max(1, Math.round((new Date(invite.expiresAt).getTime() - Date.now()) / 3_600_000));
-                    const tpl = renderProxyInviteEmail({ inviteUrl, profileName: invite.profileName, invitedName: invite.invitedName, note: invite.note, expiresInHours });
+                    const resourceNames = getInviteResourceNames(invite.profileNames || (invite.profileName ? [invite.profileName] : []), invite.oauthClientIds || []);
+                    const tpl = renderProxyInviteEmail({ inviteUrl, profileName: invite.profileName, invitedName: invite.invitedName, note: invite.note, expiresInHours, resourceNames });
                     const r = await sendMail({ to: invite.email, subject: tpl.subject, html: tpl.html, text: tpl.text });
                     if (!r.ok) return jsonRes(502, { error: r.error || 'Failed to send email' });
                     console.log(`✅ Invite resent to "${invite.email}"`);

@@ -568,12 +568,43 @@ function escHtml(s: string): string {
     return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
 
+function getInviteBrandName(): string {
+    return cachedConfig?.fromName?.trim() || '';
+}
+
+function appendBrand(base: string, brandName: string): string {
+    return brandName ? `${base} — ${brandName}` : base;
+}
+
+function formatNaturalList(items: string[], wrap: (item: string) => string): string {
+    if (items.length === 0) return '';
+    if (items.length === 1) return wrap(items[0]);
+    if (items.length === 2) return `${wrap(items[0])} and ${wrap(items[1])}`;
+    return `${items.slice(0, -1).map(wrap).join(', ')}, and ${wrap(items[items.length - 1])}`;
+}
+
+function summarizeInviteSubject(resourceNames: string[]): string {
+    if (resourceNames.length === 0) return 'Invitation';
+    if (resourceNames.length === 1) return `Invitation to ${resourceNames[0]}`;
+    if (resourceNames.length === 2) return `Invitation to ${resourceNames[0]} and ${resourceNames[1]}`;
+    return `Invitation to ${resourceNames[0]}, ${resourceNames[1]} and ${resourceNames.length - 2} more`;
+}
+
 export function renderAdminInviteEmail(p: InviteEmailParams): { subject: string; html: string; text: string } {
-    const subject = 'Admin invitation — Midleman';
+    const brandName = getInviteBrandName();
+    const subject = appendBrand('Admin invitation', brandName);
     const hello = p.fullName ? `Hi ${p.fullName},` : 'Hi,';
     const noteHtml = p.note ? `<p style="margin:16px 0 0;padding:12px 14px;background:#f6f7fb;border-left:3px solid #0078d4;font-size:13px;color:#52525b;font-style:italic">${escHtml(p.note)}</p>` : '';
     const noteText = p.note ? `\n\nNote: ${p.note}` : '';
     const expHours = p.expiresInHours;
+    const footerHtml = brandName ? `<p style="margin:16px 0 0;font-size:11px;color:#a1a1aa;text-align:center;letter-spacing:0.08em;text-transform:uppercase">${escHtml(brandName)}</p>` : '';
+    const footerText = brandName ? `\n— ${brandName}` : '';
+    const inviteLineHtml = brandName
+        ? `You have been invited to create an administrator account on <strong>${escHtml(brandName)}</strong>. To complete registration, click the button below and set your username and password.`
+        : 'You have been invited to create an administrator account. To complete registration, click the button below and set your username and password.';
+    const inviteLineText = brandName
+        ? `You have been invited to create an administrator account on ${brandName}.`
+        : 'You have been invited to create an administrator account.';
     const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 16px">
 <tr><td align="center">
@@ -581,23 +612,23 @@ export function renderAdminInviteEmail(p: InviteEmailParams): { subject: string;
 <tr><td>
 <h1 style="margin:0 0 16px;font-size:22px;font-weight:500;color:#0f1015">Admin invitation</h1>
 <p style="margin:0 0 14px;font-size:14px;color:#52525b;line-height:1.6">${escHtml(hello)}</p>
-<p style="margin:0 0 20px;font-size:14px;color:#52525b;line-height:1.6">You have been invited to create an administrator account on <strong>Midleman</strong>. To complete registration, click the button below and set your username and password.</p>
+<p style="margin:0 0 20px;font-size:14px;color:#52525b;line-height:1.6">${inviteLineHtml}</p>
 <p style="margin:24px 0"><a href="${escHtml(p.inviteUrl)}" style="display:inline-block;background:#0078d4;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600">Accept invitation</a></p>
 <p style="margin:0 0 4px;font-size:12px;color:#71717a">Or copy this link:</p>
 <p style="margin:0;font-size:12px;color:#52525b;word-break:break-all"><a href="${escHtml(p.inviteUrl)}" style="color:#0078d4">${escHtml(p.inviteUrl)}</a></p>
 ${noteHtml}
 <p style="margin:24px 0 0;font-size:12px;color:#71717a">This invitation expires in ${expHours} hour${expHours === 1 ? '' : 's'}. If you were not expecting this email, you can safely ignore it.</p>
 </td></tr></table>
-<p style="margin:16px 0 0;font-size:11px;color:#a1a1aa;text-align:center;letter-spacing:0.08em;text-transform:uppercase">Midleman</p>
+${footerHtml}
 </td></tr></table></body></html>`;
     const text = `${hello}
 
-You have been invited to create an administrator account on Midleman.
+${inviteLineText}
 Accept the invitation at: ${p.inviteUrl}
 ${noteText}
 
 This invitation expires in ${expHours} hour${expHours === 1 ? '' : 's'}.
-— Midleman`;
+${footerText}`.trim();
     return { subject, html, text };
 }
 
@@ -607,21 +638,37 @@ export interface ProxyInviteEmailParams {
     invitedName: string;
     note?: string;
     expiresInHours: number;
+    resourceNames?: string[];
 }
 
 export function renderProxyInviteEmail(p: ProxyInviteEmailParams): { subject: string; html: string; text: string } {
-    const hasProfile = !!p.profileName;
-    const subject = hasProfile ? `Invitation to ${p.profileName} — Midleman` : `Invitation — Midleman`;
+    const resourceNames = Array.from(new Set((p.resourceNames || []).map(name => name.trim()).filter(Boolean)));
+    if (resourceNames.length === 0 && p.profileName) resourceNames.push(p.profileName);
+    const hasResources = resourceNames.length > 0;
+    const brandName = getInviteBrandName();
+    const subject = appendBrand(summarizeInviteSubject(resourceNames), brandName);
     const hello = p.invitedName ? `Hi ${p.invitedName},` : 'Hi,';
     const noteHtml = p.note ? `<p style="margin:16px 0 0;padding:12px 14px;background:#f6f7fb;border-left:3px solid #0078d4;font-size:13px;color:#52525b;font-style:italic">${escHtml(p.note)}</p>` : '';
     const noteText = p.note ? `\n\nNote: ${p.note}` : '';
     const expHours = p.expiresInHours;
-    const accessLine = hasProfile
-        ? `You have been invited to access <strong>${escHtml(p.profileName)}</strong> on Midleman. Click the button below to set a username and password.`
-        : `You have been invited to Midleman. Click the button below to set a username and password.`;
-    const accessLineText = hasProfile
-        ? `You have been invited to access "${p.profileName}" on Midleman.`
-        : `You have been invited to Midleman.`;
+    const footerHtml = brandName ? `<p style="margin:16px 0 0;font-size:11px;color:#a1a1aa;text-align:center;letter-spacing:0.08em;text-transform:uppercase">${escHtml(brandName)}</p>` : '';
+    const footerText = brandName ? `\n— ${brandName}` : '';
+    const resourceListHtml = formatNaturalList(resourceNames, name => `<strong>${escHtml(name)}</strong>`);
+    const resourceListText = formatNaturalList(resourceNames, name => `"${name}"`);
+    const accessLine = hasResources
+        ? (brandName
+            ? `You have been invited to access ${resourceListHtml} on <strong>${escHtml(brandName)}</strong>. Click the button below to set a username and password.`
+            : `You have been invited to access ${resourceListHtml}. Click the button below to set a username and password.`)
+        : (brandName
+            ? `You have been invited to <strong>${escHtml(brandName)}</strong>. Click the button below to set a username and password.`
+            : 'You have been invited. Click the button below to set a username and password.');
+    const accessLineText = hasResources
+        ? (brandName
+            ? `You have been invited to access ${resourceListText} on ${brandName}.`
+            : `You have been invited to access ${resourceListText}.`)
+        : (brandName
+            ? `You have been invited to ${brandName}.`
+            : 'You have been invited.');
     const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 16px">
 <tr><td align="center">
@@ -636,7 +683,7 @@ export function renderProxyInviteEmail(p: ProxyInviteEmailParams): { subject: st
 ${noteHtml}
 <p style="margin:24px 0 0;font-size:12px;color:#71717a">This invitation expires in ${expHours} hour${expHours === 1 ? '' : 's'}. If you were not expecting this email, you can safely ignore it.</p>
 </td></tr></table>
-<p style="margin:16px 0 0;font-size:11px;color:#a1a1aa;text-align:center;letter-spacing:0.08em;text-transform:uppercase">Midleman</p>
+${footerHtml}
 </td></tr></table></body></html>`;
     const text = `${hello}
 
@@ -645,7 +692,7 @@ Accept the invitation at: ${p.inviteUrl}
 ${noteText}
 
 This invitation expires in ${expHours} hour${expHours === 1 ? '' : 's'}.
-— Midleman`;
+${footerText}`.trim();
     return { subject, html, text };
 }
 

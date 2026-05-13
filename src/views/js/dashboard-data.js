@@ -291,6 +291,7 @@ async function fetchProfiles() {
     const res = await api('/admin/profiles'); if (!res.ok) return;
     const d = await res.json(); _allProfiles = d.profiles || [];
     filterProfiles();
+    if (_allInvites.length) renderInvites(_allInvites);
     document.getElementById('navProfileBadge').textContent = _allProfiles.length;
     document.getElementById('ovProfileNames').textContent = _allProfiles.map(p => p.name).join(', ') || 'none';
   } catch { }
@@ -491,6 +492,8 @@ async function restartProfileAction(name) {
 }
 
 // ─── Global Proxy Users ─────────────────────────────────────────────────────
+let _allOauthClients = [];
+let _allInvites = [];
 let _allProxyUsers = [];
 
 let _userRoleFilter = '';
@@ -1092,8 +1095,19 @@ async function fetchInvites() {
     const res = await api('/admin/invites');
     if (!res.ok) return;
     const d = await res.json();
-    renderInvites(d.invites || []);
+    _allInvites = d.invites || [];
+    renderInvites(_allInvites);
   } catch {}
+}
+
+function _inviteProfileLabel(name) {
+  const profile = _allProfiles.find(p => p.name === name);
+  return (profile && (profile.loginTitle || profile.name)) || name;
+}
+
+function _inviteOauthLabel(clientId) {
+  const client = _allOauthClients.find(c => c.clientId === clientId);
+  return (client && client.name) || clientId;
 }
 
 function renderInvites(invites) {
@@ -1122,12 +1136,12 @@ function renderInvites(invites) {
     const proxyChips = profileNames.map(p =>
       `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--surface2);border:1px solid var(--border);padding:1px 7px;border-radius:10px;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text)">
          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-         ${esc(p)}
+         ${esc(_inviteProfileLabel(p))}
        </span>`).join('');
     const oauthChips = oauthIds.map(c =>
       `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--accent-bg);border:1px solid rgba(0,120,212,0.3);color:var(--accent);padding:1px 7px;border-radius:10px;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-         ${esc(c)}
+         ${esc(_inviteOauthLabel(c))}
        </span>`).join('');
     const resources = (profileNames.length + oauthIds.length) > 0
       ? `<div style="display:flex;flex-wrap:wrap;gap:4px">${proxyChips}${oauthChips}</div>`
@@ -2353,7 +2367,9 @@ async function fetchOauthClients() {
     const res = await api('/admin/oauth-clients');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const { clients } = await res.json();
+    _allOauthClients = clients || [];
     renderOauthClients(clients || []);
+    if (_allInvites.length) renderInvites(_allInvites);
     const badge = document.getElementById('navOauthBadge');
     if (badge) badge.textContent = String(clients.length);
   } catch (e) {
