@@ -14,7 +14,8 @@ import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook,
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
 import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption } from './auth/auth';
-import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClientConsent, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
+import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
+import { initConsentPages, listConsentPages, getConsentPage, createConsentPage, updateConsentPage, deleteConsentPage, findConsentPageOauthReferences } from './auth/consent-pages';
 import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin, runLdapSync, getLastLdapSyncReport } from './auth/ldap';
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
 import { readFileSync } from 'fs';
@@ -61,6 +62,8 @@ initJwt(config.requestLog.dataDir, process.env.JWT_ISSUER || '', config.auth.ses
 // Initialize LDAP directories (depends on initJwt for bind-password encryption key)
 initLdap(config.requestLog.dataDir);
 
+// Initialize consent_pages before OAuth (oauth_clients.consent_page_id references it).
+initConsentPages();
 // Initialize OAuth2/OIDC storage + load login template
 initOauth();
 try {
@@ -1155,8 +1158,7 @@ const server = Bun.serve({
                             loginLogo: profile.loginLogo || '',
                             allowSelfSignedTls: !!profile.allowSelfSignedTls,
                             consentEnabled: !!profile.consentEnabled,
-                            consentTitle: profile.consentTitle || '',
-                            consentBody: profile.consentBody || '',
+                            consentPageId: profile.consentPageId ?? null,
                             blockedExtensions: profile.blockedExtensions ? Array.from(profile.blockedExtensions) : [],
                             allowedIps: profile.allowedIps || [],
                             port: getProxyServerPort(profile.name),
@@ -1183,8 +1185,7 @@ const server = Bun.serve({
                         loginLogo: p.loginLogo || '',
                         allowSelfSignedTls: !!p.allowSelfSignedTls,
                         consentEnabled: !!p.consentEnabled,
-                        consentTitle: p.consentTitle || '',
-                        consentBody: p.consentBody || '',
+                        consentPageId: p.consentPageId ?? null,
                         port: getProxyServerPort(p.name),
                         running: isProxyServerRunning(p.name),
                     }));
@@ -1219,8 +1220,12 @@ const server = Bun.serve({
                     if (typeof input.allowSelfSignedTls === 'boolean') profile.allowSelfSignedTls = input.allowSelfSignedTls;
                     if (typeof input.supabaseMode === 'boolean') profile.supabaseMode = input.supabaseMode;
                     if (typeof input.consentEnabled === 'boolean') profile.consentEnabled = input.consentEnabled;
-                    if (typeof input.consentTitle === 'string') profile.consentTitle = input.consentTitle;
-                    if (typeof input.consentBody === 'string') profile.consentBody = input.consentBody;
+                    if (input.consentPageId === null) {
+                        profile.consentPageId = null;
+                    } else if (typeof input.consentPageId === 'number') {
+                        if (!getConsentPage(input.consentPageId)) return jsonRes(400, { error: 'consentPageId references an unknown page' });
+                        profile.consentPageId = input.consentPageId;
+                    }
                     if (input.blockedExtensions) {
                         profile.blockedExtensions = new Set(
                             (input.blockedExtensions as string[]).map(e => e.trim().toLowerCase().replace(/^\.?/, '.'))
@@ -1457,12 +1462,76 @@ const server = Bun.serve({
                     return jsonRes(200, queryAuditLogs(q));
                 }
 
-                // ── OAuth clients ────────────────────────────────────────────────────────
+                // ── Consent pages ────────────────────────────────────────────────────────
 
-                if (url.pathname === '/admin/oauth-clients/ui' && req.method === 'GET') {
-                    const html = readFileSync(resolve(import.meta.dir, 'views/oauth-clients.html'), 'utf-8');
-                    return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+                if (url.pathname === '/admin/consent-pages' && req.method === 'GET') {
+                    return jsonRes(200, { pages: listConsentPages() });
                 }
+
+                if (url.pathname === '/admin/consent-pages' && req.method === 'POST') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    try {
+                        const page = createConsentPage({
+                            name: String(body.name || ''),
+                            title: String(body.title || ''),
+                            body: String(body.body || ''),
+                        });
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'consent_page.create', targetType: 'consent_page', targetId: page.id, details: { name: page.name }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(201, { page });
+                    } catch (err) {
+                        return jsonRes(400, { error: err instanceof Error ? err.message : String(err) });
+                    }
+                }
+
+                if (url.pathname.match(/^\/admin\/consent-pages\/\d+$/) && req.method === 'GET') {
+                    const id = Number(url.pathname.split('/').pop());
+                    const page = getConsentPage(id);
+                    if (!page) return jsonRes(404, { error: 'Page not found' });
+                    return jsonRes(200, { page });
+                }
+
+                if (url.pathname.match(/^\/admin\/consent-pages\/\d+$/) && req.method === 'PUT') {
+                    const id = Number(url.pathname.split('/').pop());
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    try {
+                        const page = updateConsentPage(id, {
+                            name: typeof body.name === 'string' ? body.name : undefined,
+                            title: typeof body.title === 'string' ? body.title : undefined,
+                            body: typeof body.body === 'string' ? body.body : undefined,
+                        });
+                        if (!page) return jsonRes(404, { error: 'Page not found' });
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'consent_page.update', targetType: 'consent_page', targetId: id, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { page });
+                    } catch (err) {
+                        return jsonRes(400, { error: err instanceof Error ? err.message : String(err) });
+                    }
+                }
+
+                if (url.pathname.match(/^\/admin\/consent-pages\/\d+$/) && req.method === 'DELETE') {
+                    const id = Number(url.pathname.split('/').pop());
+                    const oauthRefs = findConsentPageOauthReferences(id);
+                    const profileRefs = config.proxyProfiles
+                        .filter(p => p.consentPageId === id)
+                        .map(p => ({ kind: 'proxy_profile' as const, id: p.name, name: p.name }));
+                    const refs = [...oauthRefs, ...profileRefs];
+                    if (refs.length > 0) {
+                        return jsonRes(409, {
+                            error: 'Page is in use. Detach it from the listed targets first.',
+                            references: refs,
+                        });
+                    }
+                    const deleted = deleteConsentPage(id);
+                    if (!deleted) return jsonRes(404, { error: 'Page not found' });
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'consent_page.delete', targetType: 'consent_page', targetId: id, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { status: 'deleted' });
+                }
+
+                // ── OAuth clients ────────────────────────────────────────────────────────
 
                 if (url.pathname === '/admin/oauth-clients' && req.method === 'GET') {
                     return jsonRes(200, { clients: listOauthClients() });
@@ -1490,20 +1559,45 @@ const server = Bun.serve({
                     }
                 }
 
-                if (url.pathname.match(/^\/admin\/oauth-clients\/[^/]+\/consent$/) && req.method === 'PUT') {
-                    const clientId = decodeURIComponent(url.pathname.split('/')[3]);
+                if (url.pathname.match(/^\/admin\/oauth-clients\/[^/]+$/) && req.method === 'PUT') {
+                    const clientId = decodeURIComponent(url.pathname.split('/').pop()!);
                     let body: any;
                     try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
-                    const enabled = !!body.enabled;
-                    const title = typeof body.title === 'string' ? body.title : '';
-                    const consentBody = typeof body.body === 'string' ? body.body : '';
-                    if (title.length > 200) return jsonRes(400, { error: 'title too long (max 200)' });
-                    if (consentBody.length > 20_000) return jsonRes(400, { error: 'body too long (max 20000)' });
-                    const ok = updateOauthClientConsent(clientId, enabled, title, consentBody);
-                    if (!ok) return jsonRes(404, { error: 'Client not found' });
+                    const input: Parameters<typeof updateOauthClient>[1] = {};
+                    if (typeof body.name === 'string') input.name = body.name;
+                    if (Array.isArray(body.redirectUris)) {
+                        input.redirectUris = body.redirectUris.map((s: string) => String(s).trim()).filter(Boolean);
+                    }
+                    if (typeof body.consentEnabled === 'boolean') input.consentEnabled = body.consentEnabled;
+                    if (body.consentPageId === null) {
+                        input.consentPageId = null;
+                    } else if (typeof body.consentPageId === 'number') {
+                        if (!Number.isInteger(body.consentPageId) || body.consentPageId < 1) {
+                            return jsonRes(400, { error: 'consentPageId must be a positive integer' });
+                        }
+                        if (!getConsentPage(body.consentPageId)) return jsonRes(400, { error: 'consentPageId references an unknown page' });
+                        input.consentPageId = body.consentPageId;
+                    }
+                    let result;
+                    try { result = updateOauthClient(clientId, input); }
+                    catch (err) { return jsonRes(400, { error: err instanceof Error ? err.message : String(err) }); }
+                    if (!result.updated && !result.redirectUrisChanged) {
+                        // Either client not found OR nothing changed — disambiguate.
+                        if (!getOauthClient(clientId)) return jsonRes(404, { error: 'Client not found' });
+                        return jsonRes(200, { status: 'no_changes' });
+                    }
                     const me = getAuthedAdmin(req);
-                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'oauth_client.consent.update', targetType: 'oauth_client', targetId: clientId, details: { enabled }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
-                    return jsonRes(200, { status: 'ok' });
+                    logAudit({
+                        actorUserId: me?.id, actorUsername: me?.username,
+                        action: 'oauth_client.update', targetType: 'oauth_client', targetId: clientId,
+                        details: {
+                            changedFields: Object.keys(input),
+                            redirectUrisChanged: result.redirectUrisChanged,
+                            revokedRefreshTokens: result.revokedRefreshTokens,
+                        },
+                        ip: reqClientIp(req), userAgent: req.headers.get('user-agent'),
+                    });
+                    return jsonRes(200, { status: 'ok', redirectUrisChanged: result.redirectUrisChanged, revokedRefreshTokens: result.revokedRefreshTokens });
                 }
 
                 if (url.pathname.match(/^\/admin\/oauth-clients\/[^/]+$/) && req.method === 'DELETE') {

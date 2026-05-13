@@ -2,7 +2,20 @@ import type { ProxyProfile } from '../core/types';
 import { handleDirectProxy } from '../proxy/proxy';
 import { verifyProxyUserCredentials, signJwt, getJwtMaxAge, checkRateLimit, proxyUserHasProfile, createProxyLoginChallenge, consumeProxyLoginChallenge, peekProxyLoginChallenge, generateTotpSecret, verifyTotp, setupProxyUserTotp, userIdToUuid, upsertLdapShadowProxyUserDetailed, assignProxyUserToProfile, logAudit } from '../auth/auth';
 import { tryLdapLogin } from '../auth/ldap';
+import { getConsentPage } from '../auth/consent-pages';
 import { renderConsentMarkdown, escapeHtmlAttr } from '../core/consent';
+
+/** Resolve the consent page linked to a profile. Degrades silently to "no consent
+ *  shown" when consentEnabled is true but the linked page was deleted. */
+function resolveProfileConsent(profile: ProxyProfile): { enabled: boolean; title: string; body: string } {
+    if (!profile.consentEnabled || !profile.consentPageId) return { enabled: false, title: '', body: '' };
+    const page = getConsentPage(profile.consentPageId);
+    if (!page) return { enabled: false, title: '', body: '' };
+    const title = (page.title || '').trim();
+    const body = (page.body || '').trim();
+    if (!title && !body) return { enabled: false, title: '', body: '' };
+    return { enabled: true, title: title || 'Termos de utilização', body };
+}
 import QRCode from 'qrcode';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -78,15 +91,15 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                 if (url.pathname === '/auth/login' && req.method === 'GET') {
                     const loginTitle = profile.loginTitle || 'Midleman';
                     const loginLogoUrl = safeLogoUrl(profile.loginLogo, profile.targetUrl);
-                    const consentEnabled = !!profile.consentEnabled && !!((profile.consentTitle || '').trim() || (profile.consentBody || '').trim());
+                    const consent = resolveProfileConsent(profile);
                     const html = proxyLoginHtml
                         .replace(/\{\{PROFILE_NAME\}\}/g, profile.name)
                         .replace(/\{\{REQUIRE_2FA\}\}/g, profile.require2fa ? 'true' : 'false')
                         .replace(/\{\{LOGIN_TITLE\}\}/g, loginTitle)
                         .replace(/\{\{LOGIN_LOGO_URL\}\}/g, loginLogoUrl)
-                        .replace(/\{\{CONSENT_ENABLED\}\}/g, consentEnabled ? '1' : '0')
-                        .replace(/\{\{CONSENT_TITLE\}\}/g, escapeHtmlAttr(profile.consentTitle || 'Termos de utilização'))
-                        .replace(/\{\{CONSENT_BODY\}\}/g, renderConsentMarkdown(profile.consentBody || ''));
+                        .replace(/\{\{CONSENT_ENABLED\}\}/g, consent.enabled ? '1' : '0')
+                        .replace(/\{\{CONSENT_TITLE\}\}/g, escapeHtmlAttr(consent.title))
+                        .replace(/\{\{CONSENT_BODY\}\}/g, renderConsentMarkdown(consent.body));
                     return new Response(html, {
                         status: 200,
                         headers: { 'Content-Type': 'text/html; charset=utf-8', ...SECURITY_HEADERS },
@@ -258,16 +271,16 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
             const renderLoginHtml = (profileName: string, require2fa: boolean) => {
                 const loginTitle = profile.loginTitle || 'Midleman';
                 const loginLogoUrl = safeLogoUrl(profile.loginLogo, profile.targetUrl);
-                const consentEnabled = !!profile.consentEnabled && !!((profile.consentTitle || '').trim() || (profile.consentBody || '').trim());
+                const consent = resolveProfileConsent(profile);
                 return proxyLoginHtml
                     .replace(/\{\{PROFILE_NAME\}\}/g, profileName)
                     .replace(/\{\{REQUIRE_2FA\}\}/g, require2fa ? 'true' : 'false')
                     .replace(/\{\{LOGIN_TITLE\}\}/g, loginTitle)
                     .replace(/\{\{LOGIN_LOGO_URL\}\}/g, loginLogoUrl)
                     .replace(/\{\{LOGIN_TITLE_SUFFIX\}\}/g, profile.loginTitle ? '' : ' — Midleman')
-                    .replace(/\{\{CONSENT_ENABLED\}\}/g, consentEnabled ? '1' : '0')
-                    .replace(/\{\{CONSENT_TITLE\}\}/g, escapeHtmlAttr(profile.consentTitle || 'Termos de utilização'))
-                    .replace(/\{\{CONSENT_BODY\}\}/g, renderConsentMarkdown(profile.consentBody || ''));
+                    .replace(/\{\{CONSENT_ENABLED\}\}/g, consent.enabled ? '1' : '0')
+                    .replace(/\{\{CONSENT_TITLE\}\}/g, escapeHtmlAttr(consent.title))
+                    .replace(/\{\{CONSENT_BODY\}\}/g, renderConsentMarkdown(consent.body));
             };
 
             return handleDirectProxy(req, profile, startTime, renderLoginHtml);

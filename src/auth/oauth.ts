@@ -95,6 +95,11 @@ export function initOauth(): void {
     if (!cols.includes('consent_title'))         db.exec("ALTER TABLE oauth_clients ADD COLUMN consent_title TEXT");
     if (!cols.includes('consent_body'))          db.exec("ALTER TABLE oauth_clients ADD COLUMN consent_body TEXT");
     if (!cols.includes('allow_list_enabled'))    db.exec("ALTER TABLE oauth_clients ADD COLUMN allow_list_enabled INTEGER NOT NULL DEFAULT 0");
+    // consent_page_id references consent_pages.id (created by initConsentPages()).
+    // Weak reference: we do NOT add a FK constraint so init order is flexible.
+    // The consent_title/consent_body columns above are kept for historical data
+    // but are no longer read or written — replaced by the join to consent_pages.
+    if (!cols.includes('consent_page_id'))       db.exec("ALTER TABLE oauth_clients ADD COLUMN consent_page_id INTEGER");
     // Cleanup expired codes / refresh tokens / sessions once per hour.
     cleanupExpired();
     setInterval(cleanupExpired, 60 * 60 * 1000);
@@ -121,7 +126,10 @@ export interface OauthClient {
     redirectUris: string[];
     createdAt: string;
     consentEnabled: boolean;
+    consentPageId: number | null;
+    /** Resolved from consent_pages via JOIN. Empty string when no page is linked. */
     consentTitle: string;
+    /** Resolved from consent_pages via JOIN. Empty string when no page is linked. */
     consentBody: string;
     allowListEnabled: boolean;
 }
@@ -133,10 +141,7 @@ function randomToken(byteLength: number): string {
 }
 
 /** Create a new OAuth client. The plaintext secret is returned ONCE — never retrievable again. */
-export async function createOauthClient(name: string, redirectUris: string[]): Promise<{ client: OauthClient; clientSecret: string }> {
-    const db = getAuthDb();
-    if (!db) throw new Error('Auth not initialized');
-    if (!name.trim()) throw new Error('Client name required');
+function validateRedirectUris(redirectUris: string[]): void {
     if (!Array.isArray(redirectUris) || redirectUris.length === 0) throw new Error('At least one redirect_uri required');
     for (const uri of redirectUris) {
         try {
@@ -144,10 +149,17 @@ export async function createOauthClient(name: string, redirectUris: string[]): P
             if (u.protocol !== 'https:' && u.hostname !== 'localhost' && u.hostname !== '127.0.0.1') {
                 throw new Error(`redirect_uri must use https:// (got ${uri})`);
             }
-        } catch (err) {
+        } catch {
             throw new Error(`Invalid redirect_uri: ${uri}`);
         }
     }
+}
+
+export async function createOauthClient(name: string, redirectUris: string[]): Promise<{ client: OauthClient; clientSecret: string }> {
+    const db = getAuthDb();
+    if (!db) throw new Error('Auth not initialized');
+    if (!name.trim()) throw new Error('Client name required');
+    validateRedirectUris(redirectUris);
     const clientId = randomToken(16);
     const clientSecret = randomToken(32);
     const secretHash = await Bun.password.hash(clientSecret, 'bcrypt');
@@ -159,13 +171,96 @@ export async function createOauthClient(name: string, redirectUris: string[]): P
     };
 }
 
-export function updateOauthClientConsent(clientId: string, enabled: boolean, title: string, body: string): boolean {
-    const db = getAuthDb();
-    if (!db) return false;
-    const result = db.prepare("UPDATE oauth_clients SET consent_enabled = $e, consent_title = $t, consent_body = $b, updated_at = datetime('now') WHERE client_id = $id")
-        .run({ $e: enabled ? 1 : 0, $t: title || null, $b: body || null, $id: clientId });
-    return result.changes > 0;
+export interface UpdateOauthClientInput {
+    name?: string;
+    redirectUris?: string[];
+    consentEnabled?: boolean;
+    /** Reference to a row in consent_pages. null clears the link. */
+    consentPageId?: number | null;
 }
+
+export interface UpdateOauthClientResult {
+    updated: boolean;
+    redirectUrisChanged: boolean;
+    revokedRefreshTokens: number;
+}
+
+/** Atomically update editable fields of an OAuth client. When redirect_uris
+ *  change, all refresh tokens for the client are revoked (and SSO sessions
+ *  for affected users are *not* touched — sessions are short-lived; refresh
+ *  revocation forces re-auth on next token refresh). */
+export function updateOauthClient(clientId: string, input: UpdateOauthClientInput): UpdateOauthClientResult {
+    const db = getAuthDb();
+    if (!db) return { updated: false, redirectUrisChanged: false, revokedRefreshTokens: 0 };
+    const existing = db.prepare('SELECT * FROM oauth_clients WHERE client_id = $id').get({ $id: clientId }) as any;
+    if (!existing) return { updated: false, redirectUrisChanged: false, revokedRefreshTokens: 0 };
+
+    const sets: string[] = [];
+    const params: Record<string, unknown> = { $id: clientId };
+    let redirectUrisChanged = false;
+
+    if (input.name !== undefined) {
+        const trimmed = input.name.trim();
+        if (!trimmed) throw new Error('Client name cannot be empty');
+        if (trimmed !== existing.name) {
+            sets.push('name = $n');
+            params.$n = trimmed;
+        }
+    }
+
+    if (input.redirectUris !== undefined) {
+        validateRedirectUris(input.redirectUris);
+        const newJson = JSON.stringify(input.redirectUris);
+        if (newJson !== (existing.redirect_uris || '[]')) {
+            sets.push('redirect_uris = $r');
+            params.$r = newJson;
+            redirectUrisChanged = true;
+        }
+    }
+
+    if (input.consentEnabled !== undefined) {
+        const e = input.consentEnabled ? 1 : 0;
+        if (e !== (existing.consent_enabled ? 1 : 0)) {
+            sets.push('consent_enabled = $ce');
+            params.$ce = e;
+        }
+    }
+    if (input.consentPageId !== undefined) {
+        const v = input.consentPageId ?? null;
+        if (v !== (existing.consent_page_id ?? null)) {
+            sets.push('consent_page_id = $cpid');
+            params.$cpid = v;
+        }
+    }
+
+    if (sets.length === 0) {
+        return { updated: false, redirectUrisChanged: false, revokedRefreshTokens: 0 };
+    }
+
+    sets.push("updated_at = datetime('now')");
+    db.prepare(`UPDATE oauth_clients SET ${sets.join(', ')} WHERE client_id = $id`).run(params);
+
+    let revoked = 0;
+    if (redirectUrisChanged) {
+        const r = db.prepare("UPDATE oauth_refresh_tokens SET revoked_at = datetime('now') WHERE client_id = $id AND revoked_at IS NULL")
+            .run({ $id: clientId });
+        revoked = r.changes;
+    }
+
+    return { updated: true, redirectUrisChanged, revokedRefreshTokens: revoked };
+}
+
+// SELECT joining consent_pages, exposing the page fields under cp_* aliases.
+// consent_title / consent_body inline columns are intentionally NOT read —
+// they remain in the schema as legacy data but the live values come from
+// consent_pages via consent_page_id.
+const CLIENT_SELECT = `
+    SELECT oc.*,
+           cp.title AS cp_title,
+           cp.body  AS cp_body
+      FROM oauth_clients oc
+      LEFT JOIN consent_pages cp ON cp.id = oc.consent_page_id
+`;
 
 function rowToClient(r: any): OauthClient {
     return {
@@ -174,8 +269,11 @@ function rowToClient(r: any): OauthClient {
         redirectUris: JSON.parse(r.redirect_uris || '[]'),
         createdAt: r.created_at,
         consentEnabled: !!r.consent_enabled,
-        consentTitle: r.consent_title || '',
-        consentBody: r.consent_body || '',
+        consentPageId: r.consent_page_id ?? null,
+        // When consent_enabled=true but no page is linked (or page was deleted),
+        // these resolve to '' — login handlers treat that as "no consent shown".
+        consentTitle: r.cp_title || '',
+        consentBody: r.cp_body || '',
         allowListEnabled: !!r.allow_list_enabled,
     };
 }
@@ -183,14 +281,14 @@ function rowToClient(r: any): OauthClient {
 export function getOauthClient(clientId: string): OauthClient | null {
     const db = getAuthDb();
     if (!db || !clientId) return null;
-    const row = db.prepare('SELECT * FROM oauth_clients WHERE client_id = $id').get({ $id: clientId }) as any;
+    const row = db.prepare(`${CLIENT_SELECT} WHERE oc.client_id = $id`).get({ $id: clientId }) as any;
     return row ? rowToClient(row) : null;
 }
 
 export function listOauthClients(): OauthClient[] {
     const db = getAuthDb();
     if (!db) return [];
-    const rows = db.prepare('SELECT * FROM oauth_clients ORDER BY created_at DESC').all() as any[];
+    const rows = db.prepare(`${CLIENT_SELECT} ORDER BY oc.created_at DESC`).all() as any[];
     return rows.map(rowToClient);
 }
 

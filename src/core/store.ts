@@ -28,8 +28,8 @@ interface StoredProfile {
     allowSelfSignedTls?: boolean;
     supabaseMode?: boolean;
     consentEnabled?: boolean;
-    consentTitle?: string;
-    consentBody?: string;
+    /** Reference to a row in consent_pages (auth DB). null/undefined means no page linked. */
+    consentPageId?: number | null;
 }
 
 // Default path — override with DATA_DIR env var for Docker volumes
@@ -82,8 +82,7 @@ function toRuntime(stored: StoredProfile): ProxyProfile {
     if (stored.allowSelfSignedTls !== undefined) profile.allowSelfSignedTls = stored.allowSelfSignedTls;
     if (stored.supabaseMode !== undefined) profile.supabaseMode = stored.supabaseMode;
     if (stored.consentEnabled !== undefined) profile.consentEnabled = stored.consentEnabled;
-    if (stored.consentTitle !== undefined) profile.consentTitle = stored.consentTitle;
-    if (stored.consentBody !== undefined) profile.consentBody = stored.consentBody;
+    if (stored.consentPageId !== undefined) profile.consentPageId = stored.consentPageId;
 
     return profile;
 }
@@ -119,8 +118,8 @@ function toStored(profile: ProxyProfile): StoredProfile {
     if (profile.allowSelfSignedTls !== undefined) stored.allowSelfSignedTls = profile.allowSelfSignedTls;
     if (profile.supabaseMode !== undefined) stored.supabaseMode = profile.supabaseMode;
     if (profile.consentEnabled !== undefined) stored.consentEnabled = profile.consentEnabled;
-    if (profile.consentTitle !== undefined) stored.consentTitle = profile.consentTitle;
-    if (profile.consentBody !== undefined) stored.consentBody = profile.consentBody;
+    // Persist null explicitly so an admin can clear a previously linked page.
+    if (profile.consentPageId !== undefined) stored.consentPageId = profile.consentPageId;
 
     return stored;
 }
@@ -225,10 +224,9 @@ export function validateProfileInput(input: unknown): string | null {
     if (p.loginLogo !== undefined && typeof p.loginLogo !== 'string') return '"loginLogo" must be a string';
     if (typeof p.loginLogo === 'string' && p.loginLogo.length > 200_000) return '"loginLogo" exceeds maximum size (200KB)';
     if (p.consentEnabled !== undefined && typeof p.consentEnabled !== 'boolean') return '"consentEnabled" must be a boolean';
-    if (p.consentTitle !== undefined && typeof p.consentTitle !== 'string') return '"consentTitle" must be a string';
-    if (typeof p.consentTitle === 'string' && p.consentTitle.length > 200) return '"consentTitle" must be 200 characters or fewer';
-    if (p.consentBody !== undefined && typeof p.consentBody !== 'string') return '"consentBody" must be a string';
-    if (typeof p.consentBody === 'string' && p.consentBody.length > 20_000) return '"consentBody" must be 20000 characters or fewer';
+    if (p.consentPageId !== undefined && p.consentPageId !== null && (typeof p.consentPageId !== 'number' || !Number.isInteger(p.consentPageId) || p.consentPageId < 1)) {
+        return '"consentPageId" must be a positive integer or null';
+    }
 
     // Validate URL
     try {

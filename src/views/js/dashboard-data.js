@@ -191,7 +191,7 @@ function showContextMenu(e, btn) {
 
 // ─── Data Fetch ──────────────────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchAdmins(), fetchLdapConfigs(), fetchLdapAdoptions()]);
+  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchConsentPages(), fetchAdmins(), fetchLdapConfigs(), fetchLdapAdoptions()]);
 }
 
 async function fetchHealth() {
@@ -350,7 +350,9 @@ function renderProfiles(profiles) {
 }
 
 // ─── Profile CRUD ────────────────────────────────────────────────────────────
-function openProfileModal(profile = null) {
+async function openProfileModal(profile = null) {
+  // Pages may not be loaded yet on first open — make sure the dropdown has options.
+  if (!_consentPages.length) await fetchConsentPages();
   editingProfile = profile;
   document.getElementById('modalTitle').textContent = profile ? 'Edit Proxy' : 'New Proxy';
   document.getElementById('pName').value = profile ? profile.name : ''; document.getElementById('pName').disabled = !!profile;
@@ -369,8 +371,7 @@ function openProfileModal(profile = null) {
   document.getElementById('pLoginLogo').value = profile ? (profile.loginLogo || '') : '';
   document.getElementById('pLoginLogoFile').value = '';
   document.getElementById('pConsentEnabled').checked = profile ? !!profile.consentEnabled : false;
-  document.getElementById('pConsentTitle').value = profile ? (profile.consentTitle || '') : '';
-  document.getElementById('pConsentBody').value = profile ? (profile.consentBody || '') : '';
+  _populateConsentPageDropdown('pConsentPageId', profile ? profile.consentPageId : null);
   toggleConsentFields();
   updateLogoPreview();
   document.getElementById('pBlocked').value = profile?.blockedExtensions ? profile.blockedExtensions.join(', ') : '';
@@ -438,9 +439,15 @@ async function saveProfile() {
   if (loginTitle) body.loginTitle = loginTitle;
   if (loginLogo) body.loginLogo = loginLogo;
   if (authMode === 'login') {
-    body.consentEnabled = document.getElementById('pConsentEnabled').checked;
-    body.consentTitle = document.getElementById('pConsentTitle').value;
-    body.consentBody = document.getElementById('pConsentBody').value;
+    const consentEnabled = document.getElementById('pConsentEnabled').checked;
+    const consentPageRaw = document.getElementById('pConsentPageId').value;
+    const consentPageId = consentPageRaw ? Number(consentPageRaw) : null;
+    if (consentEnabled && !consentPageId) {
+      toast('Escolhe uma página de consentimento ou desactiva o consent.', 'error');
+      return;
+    }
+    body.consentEnabled = consentEnabled;
+    body.consentPageId = consentPageId;
   }
   const blocked = v('pBlocked'); if (blocked) body.blockedExtensions = blocked.split(',').map(s => s.trim()).filter(Boolean);
   const allowedIps = IpTagInput.getValue('pAllowedIps'); if (allowedIps.length) body.allowedIps = allowedIps;
@@ -2185,6 +2192,7 @@ function renderOauthClients(clients) {
       '<td style="padding:10px 8px;color:var(--text3);font-size:11.5px">' + esc(created) + '</td>' +
       '<td style="padding:10px 8px">' + accessBadge + '</td>' +
       '<td style="padding:10px 12px;text-align:right;white-space:nowrap">' +
+        '<button class="btn btn-sm" onclick="openEditOauthClientModal(' + cid + ')" style="margin-right:4px">Editar</button>' +
         '<button class="btn btn-sm" onclick="openOauthClientUsersModal(' + cid + ',' + cname + ')" style="margin-right:4px">Utilizadores</button>' +
         '<button class="btn btn-sm btn-ghost" onclick="deleteOauthClient(' + cid + ',' + cname + ')" style="color:var(--err-text)">Apagar</button>' +
       '</td>' +
@@ -2192,11 +2200,45 @@ function renderOauthClients(clients) {
   }).join('');
 }
 
-function openCreateOauthClientModal() {
+// Tracks the client being edited (null in create mode) and the original URIs
+// joined by newline, used to detect a real change before warning/revoking.
+let _editingOauthClientId = null;
+let _editingOauthClientOriginalUris = '';
+
+function _populateConsentPageDropdown(selectId, selectedId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  const options = ['<option value="">— Escolhe uma página —</option>'];
+  for (const p of (_consentPages || [])) {
+    const selected = (selectedId != null && Number(selectedId) === p.id) ? ' selected' : '';
+    options.push('<option value="' + p.id + '"' + selected + '>' + esc(p.name) + (p.title ? ' — ' + esc(p.title) : '') + '</option>');
+  }
+  sel.innerHTML = options.join('');
+}
+
+function _resetOauthClientForm() {
   document.getElementById('oauthClientName').value = '';
   document.getElementById('oauthClientUris').value = '';
+  document.getElementById('oauthClientConsentEnabled').checked = false;
+  _populateConsentPageDropdown('oauthClientConsentPageId', null);
+  document.getElementById('oauthClientConsentFields').style.display = 'none';
+  document.getElementById('oauthClientUrisChangeWarning').style.display = 'none';
   document.getElementById('oauthClientForm').style.display = '';
   document.getElementById('oauthClientSecret').style.display = 'none';
+  document.getElementById('oauthClientCancelBtn').style.display = '';
+}
+
+function toggleOauthClientConsentFields() {
+  const on = document.getElementById('oauthClientConsentEnabled').checked;
+  document.getElementById('oauthClientConsentFields').style.display = on ? '' : 'none';
+}
+
+async function openCreateOauthClientModal() {
+  _editingOauthClientId = null;
+  _editingOauthClientOriginalUris = '';
+  // Ensure dropdown reflects latest pages.
+  if (!_consentPages.length) await fetchConsentPages();
+  _resetOauthClientForm();
   document.getElementById('oauthClientSubmitBtn').textContent = 'Criar';
   document.getElementById('oauthClientSubmitBtn').onclick = submitOauthClient;
   document.getElementById('oauthClientCancelBtn').textContent = 'Cancelar';
@@ -2204,8 +2246,45 @@ function openCreateOauthClientModal() {
   document.getElementById('oauthClientModal').style.display = 'flex';
 }
 
+async function openEditOauthClientModal(clientId) {
+  try {
+    // Refresh pages so the dropdown is current (admin may have just created one).
+    await fetchConsentPages();
+    const res = await api('/admin/oauth-clients');
+    if (!res.ok) return toast('Falha a carregar client', 'error');
+    const data = await res.json();
+    const client = (data.clients || []).find(c => c.clientId === clientId);
+    if (!client) return toast('Client não encontrado', 'error');
+
+    _editingOauthClientId = clientId;
+    _resetOauthClientForm();
+    document.getElementById('oauthClientName').value = client.name || '';
+    const urisText = (client.redirectUris || []).join('\n');
+    document.getElementById('oauthClientUris').value = urisText;
+    _editingOauthClientOriginalUris = urisText;
+    document.getElementById('oauthClientConsentEnabled').checked = !!client.consentEnabled;
+    _populateConsentPageDropdown('oauthClientConsentPageId', client.consentPageId);
+    toggleOauthClientConsentFields();
+
+    // Live-warn when the user changes the URIs vs original.
+    document.getElementById('oauthClientUris').oninput = function () {
+      const changed = this.value.trim() !== _editingOauthClientOriginalUris.trim();
+      document.getElementById('oauthClientUrisChangeWarning').style.display = changed ? '' : 'none';
+    };
+
+    document.getElementById('oauthClientSubmitBtn').textContent = 'Guardar';
+    document.getElementById('oauthClientSubmitBtn').onclick = submitEditOauthClient;
+    document.getElementById('oauthClientCancelBtn').textContent = 'Cancelar';
+    document.getElementById('oauthClientModalTitle').textContent = 'Editar — ' + (client.name || clientId);
+    document.getElementById('oauthClientModal').style.display = 'flex';
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
 function closeOauthClientModal() {
   document.getElementById('oauthClientModal').style.display = 'none';
+  document.getElementById('oauthClientUris').oninput = null;
+  _editingOauthClientId = null;
+  _editingOauthClientOriginalUris = '';
 }
 
 async function submitOauthClient() {
@@ -2231,6 +2310,44 @@ async function submitOauthClient() {
     document.getElementById('oauthClientCancelBtn').style.display = 'none';
     document.getElementById('oauthClientModalTitle').textContent = 'Client criado';
     toast('OAuth client criado');
+    fetchOauthClients();
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+async function submitEditOauthClient() {
+  if (!_editingOauthClientId) return;
+  const name = document.getElementById('oauthClientName').value.trim();
+  const redirectUris = document.getElementById('oauthClientUris').value
+    .split('\n').map(s => s.trim()).filter(Boolean);
+  if (!name) return toast('Nome obrigatório', 'error');
+  if (!redirectUris.length) return toast('Pelo menos uma redirect URI', 'error');
+  const urisChanged = redirectUris.join('\n') !== _editingOauthClientOriginalUris.trim();
+  if (urisChanged && !confirm('Alterar redirect URIs vai revogar todos os refresh tokens deste client. Continuar?')) return;
+  const consentEnabled = document.getElementById('oauthClientConsentEnabled').checked;
+  const consentPageRaw = document.getElementById('oauthClientConsentPageId').value;
+  const consentPageId = consentPageRaw ? Number(consentPageRaw) : null;
+  if (consentEnabled && !consentPageId) {
+    return toast('Escolhe uma página de consentimento ou desactiva o consent.', 'error');
+  }
+  const payload = {
+    name,
+    redirectUris,
+    consentEnabled,
+    consentPageId,
+  };
+  try {
+    const res = await api('/admin/oauth-clients/' + encodeURIComponent(_editingOauthClientId), {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return toast(data.error || 'Falha a guardar', 'error');
+    if (data.redirectUrisChanged && data.revokedRefreshTokens > 0) {
+      toast('Client actualizado — ' + data.revokedRefreshTokens + ' refresh token(s) revogados');
+    } else {
+      toast(data.status === 'no_changes' ? 'Sem alterações' : 'Client actualizado');
+    }
+    closeOauthClientModal();
     fetchOauthClients();
   } catch (e) { toast('Erro: ' + e.message, 'error'); }
 }
@@ -3048,6 +3165,151 @@ async function revertLdapAdoption(id) {
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Falha', 'error'); }
     toast('Adopção revertida');
     fetchLdapAdoptions();
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+// ─── Consent pages ──────────────────────────────────────────────────────────
+let _consentPages = [];
+let _editingConsentPageId = null;
+
+async function fetchConsentPages() {
+  try {
+    const res = await api('/admin/consent-pages');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const { pages } = await res.json();
+    _consentPages = pages || [];
+    renderConsentPages(_consentPages);
+    const badge = document.getElementById('navConsentBadge');
+    if (badge) badge.textContent = String(_consentPages.length);
+  } catch (e) {
+    const tbody = document.getElementById('consentPagesListBody');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="4" style="padding:40px;text-align:center;color:var(--err-text)">Erro: ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+function renderConsentPages(pages) {
+  const tbody = document.getElementById('consentPagesListBody');
+  if (!tbody) return;
+  if (!pages.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="padding:40px;text-align:center;color:var(--text3)">Sem páginas — cria a primeira para a referenciares em clients ou profiles.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = pages.map(p => {
+    const updated = p.updatedAt ? new Date(p.updatedAt).toLocaleString() : '—';
+    return '<tr style="border-top:1px solid var(--border)">' +
+      '<td style="padding:10px 12px;font-family:\'SF Mono\',ui-monospace,monospace;font-size:12px;font-weight:500">' + esc(p.name) + '</td>' +
+      '<td style="padding:10px 8px">' + esc(p.title || '—') + '</td>' +
+      '<td style="padding:10px 8px;color:var(--text3);font-size:11.5px">' + esc(updated) + '</td>' +
+      '<td style="padding:10px 12px;text-align:right;white-space:nowrap">' +
+        '<button class="btn btn-sm" onclick="openEditConsentPageModal(' + p.id + ')" style="margin-right:4px">Editar</button>' +
+        '<button class="btn btn-sm btn-ghost" onclick="deleteConsentPage(' + p.id + ',' + JSON.stringify(p.name).replace(/"/g, '&quot;') + ')" style="color:var(--err-text)">Apagar</button>' +
+      '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+/** Tiny safe markdown renderer for the live preview only.
+ *  Backend renderConsentMarkdown is authoritative for what users see. */
+function renderConsentMarkdownPreview(src) {
+  if (!src) return '';
+  const escapeHtml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const lines = src.split(/\r?\n/);
+  const out = [];
+  let listOpen = false, paraBuf = [];
+  const flushPara = () => { if (paraBuf.length) { out.push('<p>' + inline(paraBuf.join(' ')) + '</p>'); paraBuf = []; } };
+  const closeList = () => { if (listOpen) { out.push('</ul>'); listOpen = false; } };
+  function inline(text) {
+    let t = escapeHtml(text);
+    t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    t = t.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    return t;
+  }
+  for (const ln of lines) {
+    const trimmed = ln.trim();
+    if (!trimmed) { closeList(); flushPara(); continue; }
+    if (/^[-*]\s+/.test(trimmed)) {
+      flushPara();
+      if (!listOpen) { out.push('<ul style="margin:0 0 8px;padding-left:18px">'); listOpen = true; }
+      out.push('<li>' + inline(trimmed.replace(/^[-*]\s+/, '')) + '</li>');
+    } else {
+      closeList();
+      paraBuf.push(trimmed);
+    }
+  }
+  closeList();
+  flushPara();
+  return out.join('');
+}
+
+function renderConsentPagePreview() {
+  const title = document.getElementById('consentPageTitle').value || '';
+  const body = document.getElementById('consentPageBody').value || '';
+  document.getElementById('consentPagePreviewTitle').textContent = title || ' ';
+  document.getElementById('consentPagePreviewBody').innerHTML = renderConsentMarkdownPreview(body) || '<span style="color:var(--text3)">A pré-visualização aparece aqui.</span>';
+}
+
+function openCreateConsentPageModal() {
+  _editingConsentPageId = null;
+  document.getElementById('consentPageName').value = '';
+  document.getElementById('consentPageTitle').value = '';
+  document.getElementById('consentPageBody').value = '';
+  document.getElementById('consentPageModalTitle').textContent = 'Nova página';
+  document.getElementById('consentPageSubmitBtn').textContent = 'Criar';
+  renderConsentPagePreview();
+  document.getElementById('consentPageModal').style.display = 'flex';
+}
+
+function openEditConsentPageModal(id) {
+  const page = _consentPages.find(p => p.id === id);
+  if (!page) return toast('Página não encontrada', 'error');
+  _editingConsentPageId = id;
+  document.getElementById('consentPageName').value = page.name || '';
+  document.getElementById('consentPageTitle').value = page.title || '';
+  document.getElementById('consentPageBody').value = page.body || '';
+  document.getElementById('consentPageModalTitle').textContent = 'Editar — ' + page.name;
+  document.getElementById('consentPageSubmitBtn').textContent = 'Guardar';
+  renderConsentPagePreview();
+  document.getElementById('consentPageModal').style.display = 'flex';
+}
+
+function closeConsentPageModal() {
+  document.getElementById('consentPageModal').style.display = 'none';
+  _editingConsentPageId = null;
+}
+
+async function submitConsentPage() {
+  const name = document.getElementById('consentPageName').value.trim();
+  const title = document.getElementById('consentPageTitle').value;
+  const body = document.getElementById('consentPageBody').value;
+  if (!name) return toast('Nome obrigatório', 'error');
+  const payload = { name, title, body };
+  try {
+    const url = _editingConsentPageId
+      ? '/admin/consent-pages/' + _editingConsentPageId
+      : '/admin/consent-pages';
+    const method = _editingConsentPageId ? 'PUT' : 'POST';
+    const res = await api(url, { method, body: JSON.stringify(payload) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return toast(data.error || 'Falha a guardar', 'error');
+    toast(_editingConsentPageId ? 'Página actualizada' : 'Página criada');
+    closeConsentPageModal();
+    fetchConsentPages();
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+async function deleteConsentPage(id, name) {
+  if (!confirm('Apagar página "' + name + '"?')) return;
+  try {
+    const res = await api('/admin/consent-pages/' + id, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 409 && Array.isArray(data.references)) {
+      const list = data.references.map(r => '• [' + r.kind + '] ' + r.name).join('\n');
+      return toast('Em uso por:\n' + list, 'error');
+    }
+    if (!res.ok) return toast(data.error || 'Falha a apagar', 'error');
+    toast('Página apagada');
+    fetchConsentPages();
   } catch (e) { toast('Erro: ' + e.message, 'error'); }
 }
 

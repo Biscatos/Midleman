@@ -267,6 +267,7 @@ const PAGE_TITLES = {
   webhooks: 'Webhooks',
   proxyusers: 'Users',
   oauthclients: 'OAuth Clients',
+  consentpages: 'Páginas de consentimento',
   admins: 'Admins',
   ldap: 'LDAP',
   ldapconflicts: 'Conflitos LDAP',
@@ -286,6 +287,7 @@ function navigate(page) {
   if (page === 'requests') { rlPage = 1; fetchRequestLogs(); }
   if (page === 'proxyusers') { fetchProxyUsers(); fetchInvites(); }
   if (page === 'oauthclients') { fetchOauthClients(); }
+  if (page === 'consentpages') { fetchConsentPages(); }
   if (page === 'admins') { fetchAdmins(); }
   if (page === 'ldap') { fetchLdapConfigs(); }
   if (page === 'ldapconflicts') { filterLdapAdoptions('pending'); }

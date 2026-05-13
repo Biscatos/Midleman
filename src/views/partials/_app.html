@@ -79,12 +79,13 @@
         <span class="sidebar-link-label">LDAP</span>
         <span class="sidebar-badge" id="navLdapBadge">0</span>
       </button>
-      <button class="sidebar-link" data-page="ldapconflicts" data-tooltip="Conflitos LDAP" onclick="navigate('ldapconflicts')">
+      <button class="sidebar-link" data-page="consentpages" data-tooltip="Consent Pages" onclick="navigate('consentpages')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/><line x1="9" y1="9" x2="11" y2="9"/>
         </svg>
-        <span class="sidebar-link-label">Conflitos LDAP</span>
-        <span class="sidebar-badge" id="navLdapConflictsBadge" style="display:none">0</span>
+        <span class="sidebar-link-label">Consent Pages</span>
+        <span class="sidebar-badge" id="navConsentBadge">0</span>
       </button>
       <button class="sidebar-link" data-page="audit" data-tooltip="Audit Log" onclick="navigate('audit')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -631,6 +632,78 @@
       </div>
     </div>
 
+    <!-- ═══ CONSENT PAGES ═══ -->
+    <div class="page" id="pageConsentpages">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h2>Páginas de consentimento</h2>
+          <p>Biblioteca de páginas reutilizáveis. OAuth clients e proxy profiles referenciam por nome em vez de duplicar o texto.</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" onclick="openCreateConsentPageModal()" style="display:inline-flex;align-items:center;gap:6px">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+            Nova página
+          </button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--surface2);text-align:left">
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Nome</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Título</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Actualizado</th>
+                <th style="padding:10px 12px"></th>
+              </tr>
+            </thead>
+            <tbody id="consentPagesListBody">
+              <tr><td colspan="4" style="padding:40px;text-align:center;color:var(--text3)">A carregar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Consent page editor modal -->
+    <div id="consentPageModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div style="max-width:760px;width:100%;max-height:92vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <h3 style="margin:0;font-size:15px" id="consentPageModalTitle">Nova página</h3>
+          <button onclick="closeConsentPageModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">&times;</button>
+        </div>
+        <div style="padding:20px;overflow-y:auto;flex:1">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div>
+              <div class="form-group" style="margin-bottom:12px">
+                <label class="form-label">Nome interno</label>
+                <input type="text" id="consentPageName" class="form-input" placeholder="ex: termos-gdpr-pt" maxlength="80">
+                <p style="font-size:11px;color:var(--text3);margin-top:4px">Label que aparece no dropdown ao escolher a página.</p>
+              </div>
+              <div class="form-group" style="margin-bottom:12px">
+                <label class="form-label">Título</label>
+                <input type="text" id="consentPageTitle" class="form-input" placeholder="ex: Termos de utilização" maxlength="200">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Corpo (markdown limitado)</label>
+                <textarea id="consentPageBody" class="form-input" rows="14" placeholder="Suporta **bold**, *italic*, [link](https://…), - listas." maxlength="20000" oninput="renderConsentPagePreview()" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px;resize:vertical"></textarea>
+                <p style="font-size:11px;color:var(--text3);margin-top:4px">Parágrafos, listas, bold/italic e links http(s).</p>
+              </div>
+            </div>
+            <div>
+              <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:var(--text3);margin-bottom:8px">Pré-visualização</div>
+              <div id="consentPagePreviewTitle" style="font-size:15px;font-weight:600;margin-bottom:10px;color:var(--text)">&nbsp;</div>
+              <div id="consentPagePreviewBody" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:14px;font-size:13px;line-height:1.6;color:var(--text2);min-height:280px;max-height:480px;overflow-y:auto"></div>
+            </div>
+          </div>
+        </div>
+        <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="closeConsentPageModal()">Cancelar</button>
+          <button class="btn btn-primary btn-sm" id="consentPageSubmitBtn" onclick="submitConsentPage()">Criar</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ ADMINS ═══ -->
     <div class="page" id="pageAdmins">
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
@@ -977,6 +1050,22 @@
           <label class="form-label">Redirect URIs (uma por linha)</label>
           <textarea id="oauthClientUris" class="form-input" rows="3" placeholder="https://xxxx.supabase.co/auth/v1/callback" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px;resize:vertical"></textarea>
           <p style="font-size:11.5px;color:var(--text3);margin-top:6px">HTTPS obrigatório (exceto http://localhost para dev). Match exato — sem wildcards.</p>
+        </div>
+        <div id="oauthClientUrisChangeWarning" style="display:none;background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.25);color:#ca8a04;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:14px">
+          Alterar redirect URIs revoga todos os refresh tokens deste client — os apps terão de re-autenticar.
+        </div>
+        <div class="form-group" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:8px">
+            <input type="checkbox" id="oauthClientConsentEnabled" onchange="toggleOauthClientConsentFields()">
+            <span>Mostrar página de consentimento antes do login</span>
+          </label>
+          <div id="oauthClientConsentFields" style="display:none">
+            <label class="form-label" style="font-size:11.5px;color:var(--text3)">Página de consentimento</label>
+            <select id="oauthClientConsentPageId" class="form-input" style="cursor:pointer">
+              <option value="">— Escolhe uma página —</option>
+            </select>
+            <p style="font-size:11px;color:var(--text3);margin-top:6px">Gere as páginas em <a href="#" onclick="navigate('consentpages');return false" style="color:var(--accent)">Páginas de consentimento</a>.</p>
+          </div>
         </div>
       </div>
       <div id="oauthClientSecret" style="display:none">
@@ -1402,9 +1491,11 @@
             <span>Show consent modal before sign-in</span>
           </label>
           <div id="pConsentFields" style="display:none;margin-top:10px">
-            <input type="text" id="pConsentTitle" placeholder="Title (e.g. Termos de utilização)" maxlength="200" style="margin-bottom:8px">
-            <textarea id="pConsentBody" rows="6" placeholder="Body. Supports **bold**, *italic*, [link](https://…), and - lists." maxlength="20000" style="width:100%;font-family:inherit;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);resize:vertical"></textarea>
-            <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Limited markdown: paragraphs, lists, bold/italic, and http(s) links.</span>
+            <label style="font-size:11.5px;color:var(--text3);display:block;margin-bottom:4px">Consent page</label>
+            <select id="pConsentPageId" style="width:100%;height:38px;padding:0 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;cursor:pointer">
+              <option value="">— Choose a page —</option>
+            </select>
+            <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Manage pages in <a href="#" onclick="navigate('consentpages');return false" style="color:var(--accent)">Páginas de consentimento</a>.</span>
           </div>
         </div>
         <div class="form-group"><label>Blocked Extensions</label><input type="text" id="pBlocked"
