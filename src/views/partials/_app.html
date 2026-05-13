@@ -79,6 +79,14 @@
         <span class="sidebar-link-label">LDAP</span>
         <span class="sidebar-badge" id="navLdapBadge">0</span>
       </button>
+      <button class="sidebar-link" data-page="email" data-tooltip="Email / SMTP" onclick="navigate('email')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+          <polyline points="22,6 12,13 2,6"/>
+        </svg>
+        <span class="sidebar-link-label">Email</span>
+        <span class="sidebar-badge" id="navSmtpBadge" style="display:none">!</span>
+      </button>
       <button class="sidebar-link" data-page="consentpages" data-tooltip="Consent Pages" onclick="navigate('consentpages')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
@@ -516,13 +524,13 @@
     <div class="page" id="pageProxyusers">
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
-          <h2>Utilizadores</h2>
-          <p>Contas de acesso aos proxies. Crie utilizadores diretamente ou convide por link.</p>
+          <h2>Users</h2>
+          <p>Accounts that access the proxies. Create users directly or invite by link.</p>
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-primary btn-sm" onclick="openCreateInviteModal()" style="display:inline-flex;align-items:center;gap:6px">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
-            Convidar
+            Invite
           </button>
         </div>
       </div>
@@ -533,17 +541,17 @@
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
               <tr style="background:var(--surface2);text-align:left">
-                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Nome</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Email / Utilizador</th>
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Email / Username</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">2FA</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Proxies</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Criado</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Created</th>
                 <th style="padding:10px 12px"></th>
               </tr>
             </thead>
             <tbody id="proxyUserListBody">
               <tr>
-                <td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">A carregar...</td>
+                <td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td>
               </tr>
             </tbody>
           </table>
@@ -555,23 +563,23 @@
         <div class="card-header">
           <h3 style="display:flex;align-items:center;gap:8px">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
-            Links de Convite
+            Invite Links
           </h3>
-          <button class="btn btn-sm btn-ghost" onclick="fetchInvites()">Atualizar</button>
+          <button class="btn btn-sm btn-ghost" onclick="fetchInvites()">Refresh</button>
         </div>
         <div class="card-body" style="padding:0;overflow-x:auto">
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
               <tr style="background:var(--surface2);text-align:left">
-                <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Convidado</th>
+                <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Invitee</th>
                 <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Proxies</th>
-                <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Estado</th>
-                <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Expira</th>
+                <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Status</th>
+                <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Expires</th>
                 <th style="padding:8px 12px"></th>
               </tr>
             </thead>
             <tbody id="inviteListBody">
-              <tr><td colspan="5" style="padding:30px;text-align:center;color:var(--text3)">A carregar...</td></tr>
+              <tr><td colspan="5" style="padding:30px;text-align:center;color:var(--text3)">Loading...</td></tr>
             </tbody>
           </table>
         </div>
@@ -583,12 +591,12 @@
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
           <h2>OAuth Clients</h2>
-          <p>Aplicações externas (Supabase, etc.) que autenticam utilizadores via Midleman como provedor OAuth2/OIDC.</p>
+          <p>External applications (Supabase, etc.) that authenticate users via Midleman as the OAuth2/OIDC provider.</p>
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-primary btn-sm" onclick="openCreateOauthClientModal()" style="display:inline-flex;align-items:center;gap:6px">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-            Novo client
+            New client
           </button>
         </div>
       </div>
@@ -598,16 +606,16 @@
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
               <tr style="background:var(--surface2);text-align:left">
-                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Nome</th>
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Client ID</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Redirect URIs</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Criado</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Acesso</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Created</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Access</th>
                 <th style="padding:10px 12px"></th>
               </tr>
             </thead>
             <tbody id="oauthClientListBody">
-              <tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">A carregar...</td></tr>
+              <tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
             </tbody>
           </table>
         </div>
@@ -615,11 +623,11 @@
 
       <div class="card">
         <div class="card-header">
-          <h3>Endpoints OIDC</h3>
+          <h3>OIDC Endpoints</h3>
         </div>
         <div class="card-body">
           <p style="font-size:12.5px;color:var(--text2);margin-bottom:10px">
-            Configura no Supabase como Custom OAuth provider usando estes URLs (substitui pelo teu domínio público — porta JWKS_PORT atrás do Nginx):
+            Configure in Supabase as a Custom OAuth provider using these URLs (replace with your public domain — JWKS_PORT behind Nginx):
           </p>
           <div id="oauthEndpoints" style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:12px;line-height:1.8;color:var(--text2)">
             <div><span style="color:var(--text3)">Discovery:</span> <span id="oeDiscovery">—</span></div>
@@ -636,13 +644,13 @@
     <div class="page" id="pageConsentpages">
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
-          <h2>Páginas de consentimento</h2>
-          <p>Biblioteca de páginas reutilizáveis. OAuth clients e proxy profiles referenciam por nome em vez de duplicar o texto.</p>
+          <h2>Consent Pages</h2>
+          <p>Library of reusable pages. OAuth clients and proxy profiles reference them by name instead of duplicating the text.</p>
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-primary btn-sm" onclick="openCreateConsentPageModal()" style="display:inline-flex;align-items:center;gap:6px">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-            Nova página
+            New page
           </button>
         </div>
       </div>
@@ -651,14 +659,14 @@
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
               <tr style="background:var(--surface2);text-align:left">
-                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Nome</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Título</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Actualizado</th>
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Title</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Updated</th>
                 <th style="padding:10px 12px"></th>
               </tr>
             </thead>
             <tbody id="consentPagesListBody">
-              <tr><td colspan="4" style="padding:40px;text-align:center;color:var(--text3)">A carregar...</td></tr>
+              <tr><td colspan="4" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
             </tbody>
           </table>
         </div>
@@ -669,37 +677,37 @@
     <div id="consentPageModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
       <div style="max-width:760px;width:100%;max-height:92vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
         <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-          <h3 style="margin:0;font-size:15px" id="consentPageModalTitle">Nova página</h3>
+          <h3 style="margin:0;font-size:15px" id="consentPageModalTitle">New page</h3>
           <button onclick="closeConsentPageModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">&times;</button>
         </div>
         <div style="padding:20px;overflow-y:auto;flex:1">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
             <div>
               <div class="form-group" style="margin-bottom:12px">
-                <label class="form-label">Nome interno</label>
-                <input type="text" id="consentPageName" class="form-input" placeholder="ex: termos-gdpr-pt" maxlength="80">
-                <p style="font-size:11px;color:var(--text3);margin-top:4px">Label que aparece no dropdown ao escolher a página.</p>
+                <label class="form-label">Internal name</label>
+                <input type="text" id="consentPageName" class="form-input" placeholder="e.g. gdpr-terms-en" maxlength="80">
+                <p style="font-size:11px;color:var(--text3);margin-top:4px">Label shown in the dropdown when selecting the page.</p>
               </div>
               <div class="form-group" style="margin-bottom:12px">
-                <label class="form-label">Título</label>
-                <input type="text" id="consentPageTitle" class="form-input" placeholder="ex: Termos de utilização" maxlength="200">
+                <label class="form-label">Title</label>
+                <input type="text" id="consentPageTitle" class="form-input" placeholder="e.g. Terms of use" maxlength="200">
               </div>
               <div class="form-group">
-                <label class="form-label">Corpo (markdown limitado)</label>
-                <textarea id="consentPageBody" class="form-input" rows="14" placeholder="Suporta **bold**, *italic*, [link](https://…), - listas." maxlength="20000" oninput="renderConsentPagePreview()" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px;resize:vertical"></textarea>
-                <p style="font-size:11px;color:var(--text3);margin-top:4px">Parágrafos, listas, bold/italic e links http(s).</p>
+                <label class="form-label">Body (limited markdown)</label>
+                <textarea id="consentPageBody" class="form-input" rows="14" placeholder="Supports **bold**, *italic*, [link](https://…), - lists." maxlength="20000" oninput="renderConsentPagePreview()" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px;resize:vertical"></textarea>
+                <p style="font-size:11px;color:var(--text3);margin-top:4px">Paragraphs, lists, bold/italic and http(s) links.</p>
               </div>
             </div>
             <div>
-              <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:var(--text3);margin-bottom:8px">Pré-visualização</div>
+              <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:var(--text3);margin-bottom:8px">Preview</div>
               <div id="consentPagePreviewTitle" style="font-size:15px;font-weight:600;margin-bottom:10px;color:var(--text)">&nbsp;</div>
               <div id="consentPagePreviewBody" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:14px;font-size:13px;line-height:1.6;color:var(--text2);min-height:280px;max-height:480px;overflow-y:auto"></div>
             </div>
           </div>
         </div>
         <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
-          <button class="btn btn-ghost btn-sm" onclick="closeConsentPageModal()">Cancelar</button>
-          <button class="btn btn-primary btn-sm" id="consentPageSubmitBtn" onclick="submitConsentPage()">Criar</button>
+          <button class="btn btn-ghost btn-sm" onclick="closeConsentPageModal()">Cancel</button>
+          <button class="btn btn-primary btn-sm" id="consentPageSubmitBtn" onclick="submitConsentPage()">Create</button>
         </div>
       </div>
     </div>
@@ -708,17 +716,17 @@
     <div class="page" id="pageAdmins">
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
-          <h2>Administradores</h2>
-          <p>Utilizadores com acesso ao dashboard. Cada admin pode criar e remover outros admins.</p>
+          <h2>Administrators</h2>
+          <p>Users with dashboard access. Every admin can create and remove other admins.</p>
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-sm" onclick="openAdminInviteModal()" style="display:inline-flex;align-items:center;gap:6px">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-            Convidar
+            Invite
           </button>
           <button class="btn btn-primary btn-sm" onclick="openCreateAdminModal()" style="display:inline-flex;align-items:center;gap:6px">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-            Novo admin
+            New admin
           </button>
         </div>
       </div>
@@ -728,15 +736,15 @@
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
               <tr style="background:var(--surface2);text-align:left">
-                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Nome</th>
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Email</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">2FA</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Criado</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Created</th>
                 <th style="padding:10px 12px"></th>
               </tr>
             </thead>
             <tbody id="adminListBody">
-              <tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">A carregar...</td></tr>
+              <tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
             </tbody>
           </table>
         </div>
@@ -748,16 +756,21 @@
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
           <h2>LDAP / Active Directory</h2>
-          <p>Directories externos para autenticar admins e/ou utilizadores de profiles. Suporta múltiplos servidores em paralelo.</p>
+          <p>External directories used to authenticate admins and/or profile users. Multiple servers can run in parallel.</p>
         </div>
         <div style="display:flex;gap:8px">
-          <button class="btn btn-sm" onclick="forceLdapSync()" id="ldapSyncBtn" title="Re-verifica os grupos LDAP de todos os shadow users agora e revoga acessos perdidos" style="display:inline-flex;align-items:center;gap:6px">
+          <button class="btn btn-sm" onclick="openLdapConflictsModal()" id="ldapConflictsBtn" title="Pending adoptions that linked a local user to an LDAP identity by email match" style="display:inline-flex;align-items:center;gap:6px;position:relative">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            Conflicts
+            <span class="sidebar-badge" id="ldapConflictsBtnBadge" style="display:none;margin-left:2px">0</span>
+          </button>
+          <button class="btn btn-sm" onclick="forceLdapSync()" id="ldapSyncBtn" title="Re-checks LDAP groups for every shadow user and revokes lost access" style="display:inline-flex;align-items:center;gap:6px">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10"/><path d="M20.49 15a9 9 0 01-14.85 3.36L1 14"/></svg>
-            Sync agora
+            Sync now
           </button>
           <button class="btn btn-primary btn-sm" onclick="openCreateLdapModal()" style="display:inline-flex;align-items:center;gap:6px">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-            Novo directory
+            New directory
           </button>
         </div>
       </div>
@@ -768,71 +781,174 @@
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
               <tr style="background:var(--surface2);text-align:left">
-                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Nome</th>
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">URL</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Base DN</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Scope</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">2FA</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Estado</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Status</th>
                 <th style="padding:10px 12px"></th>
               </tr>
             </thead>
             <tbody id="ldapListBody">
-              <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">A carregar...</td></tr>
+              <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
             </tbody>
           </table>
         </div>
       </div>
 
       <div class="card" style="margin-top:16px">
-        <div class="card-header"><h3>Notas</h3></div>
+        <div class="card-header"><h3>Notes</h3></div>
         <div class="card-body">
           <ul style="font-size:12.5px;color:var(--text2);line-height:1.7;padding-left:18px;margin:0">
-            <li><strong>Scope</strong>: <em>admin</em> → apenas login do dashboard; <em>proxy</em> → apenas profiles; <em>both</em> → ambos.</li>
-            <li><strong>2FA</strong>: <em>required</em> obriga TOTP no primeiro login; <em>optional</em> permite saltar; <em>disabled</em> ignora. Admins via LDAP exigem sempre TOTP.</li>
-            <li>A password do bind admin é cifrada em AES-256-GCM com chave derivada da chave RSA do JWT.</li>
-            <li>O filtro deve conter <code style="background:var(--surface2);padding:1px 6px;border-radius:4px">{login}</code>. Default cobre <code>uid</code>, <code>mail</code> e <code>sAMAccountName</code>.</li>
+            <li><strong>Scope</strong>: <em>admin</em> → dashboard login only; <em>proxy</em> → profile users only; <em>both</em> → both.</li>
+            <li><strong>2FA</strong>: <em>required</em> enforces TOTP on first login; <em>optional</em> allows skipping; <em>disabled</em> ignores it. LDAP admins always require TOTP.</li>
+            <li>The bind admin password is encrypted with AES-256-GCM using a key derived from the JWT RSA key.</li>
+            <li>The filter must contain <code style="background:var(--surface2);padding:1px 6px;border-radius:4px">{login}</code>. Default covers <code>uid</code>, <code>mail</code> and <code>sAMAccountName</code>.</li>
           </ul>
         </div>
       </div>
     </div>
 
-    <!-- ═══ LDAP CONFLICTS ═══ -->
-    <div class="page" id="pageLdapconflicts">
-      <div class="page-header">
-        <h2>Conflitos LDAP</h2>
-        <p>Adopções automáticas pendentes e histórico. Cada linha representa um utilizador local que foi tomado por uma identidade LDAP por <strong>match de email</strong>. Confirma ou reverte caso a caso.</p>
-      </div>
-
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-body" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <span style="font-size:12.5px;color:var(--text2)">Filtrar:</span>
-          <button class="btn btn-sm" id="ldapcBtnPending" onclick="filterLdapAdoptions('pending')">Pendentes</button>
-          <button class="btn btn-sm" id="ldapcBtnConfirmed" onclick="filterLdapAdoptions('confirmed')">Confirmadas</button>
-          <button class="btn btn-sm" id="ldapcBtnReverted" onclick="filterLdapAdoptions('reverted')">Revertidas</button>
-          <button class="btn btn-sm" id="ldapcBtnAll" onclick="filterLdapAdoptions('')">Tudo</button>
-          <span style="flex:1"></span>
-          <button class="btn btn-sm" onclick="fetchLdapAdoptions()">Atualizar</button>
+    <!-- ═══ LDAP CONFLICTS MODAL ═══ -->
+    <div id="ldapConflictsModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div style="max-width:1100px;width:100%;max-height:92vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+          <div>
+            <h3 style="margin:0 0 4px;font-size:16px">LDAP Conflicts</h3>
+            <p style="margin:0;font-size:12.5px;color:var(--text2);line-height:1.5">Pending and historical auto-adoptions. Each row is a local user that was taken over by an LDAP identity via <strong>email match</strong>. Confirm or revert case by case.</p>
+          </div>
+          <button onclick="closeLdapConflictsModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">&times;</button>
         </div>
-      </div>
-
-      <div class="card">
-        <div class="card-body" style="padding:0;overflow-x:auto">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:12.5px;color:var(--text2)">Filter:</span>
+          <button class="btn btn-sm" id="ldapcBtnPending" onclick="filterLdapAdoptions('pending')">Pending</button>
+          <button class="btn btn-sm" id="ldapcBtnConfirmed" onclick="filterLdapAdoptions('confirmed')">Confirmed</button>
+          <button class="btn btn-sm" id="ldapcBtnReverted" onclick="filterLdapAdoptions('reverted')">Reverted</button>
+          <button class="btn btn-sm" id="ldapcBtnAll" onclick="filterLdapAdoptions('')">All</button>
+          <span style="flex:1"></span>
+          <button class="btn btn-sm" onclick="fetchLdapAdoptions()">Refresh</button>
+        </div>
+        <div style="overflow-y:auto;flex:1">
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
-              <tr style="background:var(--surface2);text-align:left">
-                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Quando</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">User local</th>
+              <tr style="background:var(--surface2);text-align:left;position:sticky;top:0;z-index:1">
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">When</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Local user</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Match</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">DN LDAP</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Estado</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">LDAP DN</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Status</th>
                 <th style="padding:10px 12px"></th>
               </tr>
             </thead>
             <tbody id="ldapcListBody">
-              <tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">A carregar...</td></tr>
+              <tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ EMAIL / SMTP ═══ -->
+    <div class="page" id="pageEmail">
+      <div class="page-header">
+        <h2>Email (SMTP)</h2>
+        <p>Configure the SMTP server used to deliver outgoing email from Midleman — including admin invites.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Server</h3>
+        </div>
+        <div class="card-body">
+          <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">Address of the SMTP server that will deliver the mail. Usually provided by your email provider (Gmail, Outlook 365, SendGrid, Mailgun, etc.) or by your organisation's mail server.</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Host</label>
+            <input id="smtpHost" type="text" placeholder="smtp.example.com" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Port</label>
+            <input id="smtpPort" type="number" min="1" max="65535" placeholder="587" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Security</label>
+            <select id="smtpSecurity" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+              <option value="starttls">STARTTLS (port 587)</option>
+              <option value="tls">TLS / SSL (port 465)</option>
+              <option value="none">None (unencrypted)</option>
+            </select>
+          </div>
+          <div style="display:flex;align-items:flex-end">
+            <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text2)">
+              <input id="smtpAllowInvalid" type="checkbox"> Accept self-signed certificates
+            </label>
+          </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-header"><h3>Sending credentials</h3></div>
+        <div class="card-body">
+          <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">Account used by Midleman to authenticate against the SMTP server. Without it the server will usually reject the message (unless it accepts anonymous relay from your network). For Gmail/Outlook it is typically an <em>app password</em>; for SendGrid/Mailgun it's the service username and API key. Leave both empty if your server does not require authentication.</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Username</label>
+              <input id="smtpUsername" type="text" autocomplete="off" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Password</label>
+              <input id="smtpPassword" type="password" autocomplete="new-password" placeholder="(unchanged)" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+              <p style="font-size:11px;color:var(--text3);margin-top:6px" id="smtpPwHint">Leave empty to keep the current password.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-header"><h3>Sender identity</h3></div>
+        <div class="card-body">
+          <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">What appears in the <code style="background:var(--surface2);padding:1px 6px;border-radius:4px">From:</code> header of outgoing messages. Recipients will see this address as the origin of the message and will reply to it. It must be an address the SMTP server is authorised to send from — otherwise messages may be rejected or flagged as spam.</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Email <span style="color:var(--err-text)">*</span></label>
+              <input id="smtpFromAddress" type="email" placeholder="no-reply@example.com" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Display name</label>
+              <input id="smtpFromName" type="text" placeholder="Midleman" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-primary btn-sm" onclick="saveSmtpConfig()">Save</button>
+        <button class="btn btn-sm" id="smtpTestBtn" onclick="testSmtpConnectionUi()">Test connection</button>
+        <button class="btn btn-sm" id="smtpTestCancelBtn" onclick="cancelSmtpTest()" style="display:none;color:var(--err-text)">Cancel test</button>
+        <button class="btn btn-sm" onclick="openSmtpSendTestModal()">Send test email</button>
+        <button class="btn btn-sm" onclick="clearSmtpConfig()" id="smtpClearBtn" style="display:none;margin-left:auto;color:var(--err-text)">Remove configuration</button>
+      </div>
+      <div id="smtpStatus" style="margin-top:14px;font-size:12.5px"></div>
+    </div>
+
+    <!-- ═══ SMTP SEND TEST MODAL ═══ -->
+    <div id="smtpSendTestModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div style="max-width:440px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+          <div><h3 style="margin:0;font-size:16px">Send test email</h3><p style="margin:4px 0 0;font-size:12.5px;color:var(--text2)">Sends a message using the saved configuration.</p></div>
+          <button onclick="closeSmtpSendTestModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">&times;</button>
+        </div>
+        <div style="padding:16px 22px">
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Recipient</label>
+          <input id="smtpTestTo" type="email" placeholder="you@example.com" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+          <div id="smtpTestStatus" style="margin-top:12px;font-size:12.5px"></div>
+        </div>
+        <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn btn-sm" onclick="closeSmtpSendTestModal()">Close</button>
+          <button class="btn btn-sm" id="smtpSendCancelBtn" onclick="cancelSmtpSend()" style="display:none;color:var(--err-text)">Cancel send</button>
+          <button class="btn btn-primary btn-sm" onclick="sendSmtpTest()" id="smtpTestSendBtn">Send</button>
         </div>
       </div>
     </div>
@@ -841,7 +957,7 @@
     <div class="page" id="pageAudit">
       <div class="page-header">
         <h2>Audit Log</h2>
-        <p>Histórico de ações administrativas — quem fez o quê, quando, e de onde.</p>
+        <p>History of administrative actions — who did what, when, and from where.</p>
       </div>
 
       <div class="card audit-filters" style="margin-bottom:16px">
@@ -892,8 +1008,8 @@
             </div>
           </div>
           <div class="audit-filter-actions">
-            <button class="btn" onclick="resetAuditFilters()">Limpar</button>
-            <button class="btn btn-primary" onclick="fetchAuditLogs(true)">Aplicar</button>
+            <button class="btn" onclick="resetAuditFilters()">Clear</button>
+            <button class="btn btn-primary" onclick="fetchAuditLogs(true)">Apply</button>
           </div>
         </div>
       </div>
@@ -903,7 +1019,7 @@
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
               <tr style="background:var(--surface2);text-align:left">
-                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Quando</th>
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">When</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Actor</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Action</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Target</th>
@@ -912,15 +1028,15 @@
               </tr>
             </thead>
             <tbody id="auditListBody">
-              <tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">A carregar...</td></tr>
+              <tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
             </tbody>
           </table>
         </div>
         <div class="card-body" style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border)">
           <span id="auditTotal" style="font-size:12px;color:var(--text3)">—</span>
           <div style="display:flex;gap:6px">
-            <button class="btn btn-ghost btn-sm" onclick="auditPrevPage()" id="auditPrev">‹ Anterior</button>
-            <button class="btn btn-ghost btn-sm" onclick="auditNextPage()" id="auditNext">Seguinte ›</button>
+            <button class="btn btn-ghost btn-sm" onclick="auditPrevPage()" id="auditPrev">‹ Prev</button>
+            <button class="btn btn-ghost btn-sm" onclick="auditNextPage()" id="auditNext">Next ›</button>
           </div>
         </div>
       </div>
@@ -935,7 +1051,7 @@
 <div class="modal-overlay" id="adminModal">
   <div class="modal" style="max-width:460px">
     <div class="modal-header">
-      <h3 id="adminModalTitle">Novo administrador</h3>
+      <h3 id="adminModalTitle">New administrator</h3>
       <button class="close-btn" onclick="closeAdminModal()">&times;</button>
     </div>
     <form onsubmit="event.preventDefault(); submitNewAdmin()">
@@ -943,26 +1059,26 @@
         <div class="form-grid" style="gap:12px">
           <div class="form-group span-2">
             <label>Username *</label>
-            <input type="text" id="adminUsername" placeholder="joao" autocomplete="off">
+            <input type="text" id="adminUsername" placeholder="john" autocomplete="off">
           </div>
           <div class="form-group span-2">
-            <label>Nome completo</label>
-            <input type="text" id="adminFullName" placeholder="João Silva" autocomplete="off">
+            <label>Full name</label>
+            <input type="text" id="adminFullName" placeholder="John Doe" autocomplete="off">
           </div>
           <div class="form-group span-2">
             <label>Email</label>
-            <input type="email" id="adminEmail" placeholder="joao@example.com" autocomplete="off">
+            <input type="email" id="adminEmail" placeholder="john@example.com" autocomplete="off">
           </div>
           <div class="form-group span-2">
-            <label>Password inicial *</label>
-            <input type="password" id="adminPassword" placeholder="Mínimo 8 caracteres" autocomplete="new-password">
-            <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">O novo admin pode alterar a password a qualquer momento.</span>
+            <label>Initial password *</label>
+            <input type="password" id="adminPassword" placeholder="Minimum 8 characters" autocomplete="new-password">
+            <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">The new admin can change the password at any time.</span>
           </div>
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn" onclick="closeAdminModal()">Cancelar</button>
-        <button type="submit" class="btn btn-primary">Criar</button>
+        <button type="button" class="btn" onclick="closeAdminModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create</button>
       </div>
     </form>
   </div>
@@ -972,7 +1088,7 @@
 <div class="modal-overlay" id="adminInviteModal">
   <div class="modal" style="max-width:480px">
     <div class="modal-header">
-      <h3>Convidar administrador</h3>
+      <h3>Invite administrator</h3>
       <button class="close-btn" onclick="closeAdminInviteModal()">&times;</button>
     </div>
     <div id="adminInviteFormWrap">
@@ -980,43 +1096,44 @@
         <div class="form-grid" style="gap:12px">
           <div class="form-group span-2">
             <label>Email</label>
-            <input type="email" id="adminInviteEmail" placeholder="joao@example.com (opcional)" autocomplete="off">
+            <input type="email" id="adminInviteEmail" placeholder="john@example.com (optional)" autocomplete="off">
           </div>
           <div class="form-group span-2">
-            <label>Nome completo</label>
-            <input type="text" id="adminInviteFullName" placeholder="João Silva (opcional)" autocomplete="off">
+            <label>Full name</label>
+            <input type="text" id="adminInviteFullName" placeholder="John Doe (optional)" autocomplete="off">
           </div>
           <div class="form-group span-2">
-            <label>Nota</label>
-            <input type="text" id="adminInviteNote" placeholder="Ex: para substituir o João... (opcional)" autocomplete="off">
+            <label>Note</label>
+            <input type="text" id="adminInviteNote" placeholder="e.g. replacement for John... (optional)" autocomplete="off">
           </div>
           <div class="form-group span-2">
-            <label>Expiração</label>
+            <label>Expiration</label>
             <select id="adminInviteExpires" style="width:100%;height:40px;padding:0 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;font-family:inherit;outline:none;cursor:pointer">
-              <option value="24">24 horas</option>
-              <option value="48">48 horas</option>
-              <option value="168" selected>7 dias</option>
-              <option value="720">30 dias</option>
+              <option value="24">24 hours</option>
+              <option value="48">48 hours</option>
+              <option value="168" selected>7 days</option>
+              <option value="720">30 days</option>
             </select>
           </div>
         </div>
         <div id="adminInviteError" style="display:none;margin-top:12px;padding:10px 12px;border-radius:6px;background:var(--err-bg,rgba(220,38,38,.08));border:1px solid var(--err-bdr,rgba(220,38,38,.15));color:var(--err-text,#dc2626);font-size:13px"></div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn" onclick="closeAdminInviteModal()">Cancelar</button>
-        <button type="button" class="btn btn-primary" onclick="submitAdminInvite()">Gerar link</button>
+        <button type="button" class="btn" onclick="closeAdminInviteModal()">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="submitAdminInvite()">Generate link</button>
       </div>
     </div>
     <div id="adminInviteResult" style="display:none">
       <div class="modal-body">
-        <p style="font-size:13px;color:var(--text2);margin-bottom:14px">Link de convite gerado. Partilhe-o com o utilizador — é válido para uso único.</p>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:8px">Invite link generated. Share it with the user — it can only be used once.</p>
+        <p id="adminInviteEmailStatus" style="font-size:12.5px;margin:0 0 12px"></p>
         <div style="display:flex;align-items:stretch;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden">
           <input type="text" id="adminInviteUrl" readonly style="flex:1;padding:10px 12px;font-size:12px;border:none;background:var(--surface2);color:var(--text);font-family:monospace;outline:none">
-          <button onclick="copyAdminInviteUrl()" style="padding:0 14px;border:none;border-left:1px solid var(--border);background:var(--surface2);color:var(--text2);cursor:pointer;font-size:12px;white-space:nowrap;font-family:inherit" id="adminInviteCopyBtn">Copiar</button>
+          <button onclick="copyAdminInviteUrl()" style="padding:0 14px;border:none;border-left:1px solid var(--border);background:var(--surface2);color:var(--text2);cursor:pointer;font-size:12px;white-space:nowrap;font-family:inherit" id="adminInviteCopyBtn">Copy</button>
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-primary" onclick="closeAdminInviteModal()">Fechar</button>
+        <button type="button" class="btn btn-primary" onclick="closeAdminInviteModal()">Close</button>
       </div>
     </div>
   </div>
@@ -1037,40 +1154,40 @@
 <div id="oauthClientModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
   <div style="max-width:560px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
     <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-      <h3 style="margin:0;font-size:15px" id="oauthClientModalTitle">Novo OAuth Client</h3>
+      <h3 style="margin:0;font-size:15px" id="oauthClientModalTitle">New OAuth Client</h3>
       <button class="btn-icon" onclick="closeOauthClientModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">&times;</button>
     </div>
     <div style="padding:22px" id="oauthClientModalBody">
       <div id="oauthClientForm">
         <div class="form-group" style="margin-bottom:14px">
-          <label class="form-label">Nome</label>
-          <input type="text" id="oauthClientName" class="form-input" placeholder="Supabase — produção">
+          <label class="form-label">Name</label>
+          <input type="text" id="oauthClientName" class="form-input" placeholder="Supabase — production">
         </div>
         <div class="form-group">
-          <label class="form-label">Redirect URIs (uma por linha)</label>
+          <label class="form-label">Redirect URIs (one per line)</label>
           <textarea id="oauthClientUris" class="form-input" rows="3" placeholder="https://xxxx.supabase.co/auth/v1/callback" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px;resize:vertical"></textarea>
-          <p style="font-size:11.5px;color:var(--text3);margin-top:6px">HTTPS obrigatório (exceto http://localhost para dev). Match exato — sem wildcards.</p>
+          <p style="font-size:11.5px;color:var(--text3);margin-top:6px">HTTPS required (except http://localhost for dev). Exact match — no wildcards.</p>
         </div>
         <div id="oauthClientUrisChangeWarning" style="display:none;background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.25);color:#ca8a04;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:14px">
-          Alterar redirect URIs revoga todos os refresh tokens deste client — os apps terão de re-autenticar.
+          Changing redirect URIs revokes every refresh token for this client — apps will have to re-authenticate.
         </div>
         <div class="form-group" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:8px">
             <input type="checkbox" id="oauthClientConsentEnabled" onchange="toggleOauthClientConsentFields()">
-            <span>Mostrar página de consentimento antes do login</span>
+            <span>Show consent page before sign-in</span>
           </label>
           <div id="oauthClientConsentFields" style="display:none">
-            <label class="form-label" style="font-size:11.5px;color:var(--text3)">Página de consentimento</label>
+            <label class="form-label" style="font-size:11.5px;color:var(--text3)">Consent page</label>
             <select id="oauthClientConsentPageId" class="form-input" style="cursor:pointer">
-              <option value="">— Escolhe uma página —</option>
+              <option value="">— Choose a page —</option>
             </select>
-            <p style="font-size:11px;color:var(--text3);margin-top:6px">Gere as páginas em <a href="#" onclick="navigate('consentpages');return false" style="color:var(--accent)">Páginas de consentimento</a>.</p>
+            <p style="font-size:11px;color:var(--text3);margin-top:6px">Manage pages in <a href="#" onclick="navigate('consentpages');return false" style="color:var(--accent)">Consent Pages</a>.</p>
           </div>
         </div>
       </div>
       <div id="oauthClientSecret" style="display:none">
         <div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);color:#4ade80;padding:10px 14px;border-radius:6px;font-size:12.5px;margin-bottom:14px">
-          Client criado. <strong>Guarda o secret agora</strong> — não voltará a ser mostrado.
+          Client created. <strong>Save the secret now</strong> — it will not be shown again.
         </div>
         <label class="form-label" style="margin-top:0">client_id</label>
         <div class="copy-box" id="newClientId" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;user-select:all;word-break:break-all;margin-bottom:12px"></div>
@@ -1079,8 +1196,8 @@
       </div>
     </div>
     <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
-      <button class="btn btn-ghost btn-sm" onclick="closeOauthClientModal()" id="oauthClientCancelBtn">Cancelar</button>
-      <button class="btn btn-primary btn-sm" onclick="submitOauthClient()" id="oauthClientSubmitBtn">Criar</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeOauthClientModal()" id="oauthClientCancelBtn">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="submitOauthClient()" id="oauthClientSubmitBtn">Create</button>
     </div>
   </div>
 </div>
@@ -1495,7 +1612,7 @@
             <select id="pConsentPageId" style="width:100%;height:38px;padding:0 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;cursor:pointer">
               <option value="">— Choose a page —</option>
             </select>
-            <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Manage pages in <a href="#" onclick="navigate('consentpages');return false" style="color:var(--accent)">Páginas de consentimento</a>.</span>
+            <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Manage pages in <a href="#" onclick="navigate('consentpages');return false" style="color:var(--accent)">Consent Pages</a>.</span>
           </div>
         </div>
         <div class="form-group"><label>Blocked Extensions</label><input type="text" id="pBlocked"
@@ -1541,7 +1658,7 @@
 <div class="modal-overlay" id="newProxyUserModal">
   <div class="modal" style="max-width:480px">
     <div class="modal-header">
-      <h3>Novo Utilizador</h3><button class="close-btn" onclick="closeNewProxyUserModal()">&times;</button>
+      <h3>New User</h3><button class="close-btn" onclick="closeNewProxyUserModal()">&times;</button>
     </div>
     <form onsubmit="event.preventDefault(); _editUserId ? saveEditProxyUser() : saveNewProxyUser();" style="display: contents;">
       <div class="modal-body">
@@ -1549,26 +1666,26 @@
           style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);color:#fca5a5;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px">
         </div>
         <div class="form-grid" style="gap:12px">
-          <div class="form-group span-2"><label>Nome Completo</label><input type="text" id="npuFullName"
-              placeholder="ex: João Silva" autocomplete="off"></div>
+          <div class="form-group span-2"><label>Full Name</label><input type="text" id="npuFullName"
+              placeholder="e.g. John Doe" autocomplete="off"></div>
           <div class="form-group span-2"><label>Email</label><input type="email" id="npuEmail"
-              placeholder="ex: joao@empresa.com" autocomplete="off">
-            <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">Permite login por email.</span>
+              placeholder="e.g. john@company.com" autocomplete="off">
+            <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">Allows login by email.</span>
           </div>
-          <div class="form-group span-2"><label>Nome de utilizador *</label><input type="text" id="npuUsername"
-              placeholder="ex: joao.silva" autocomplete="off"></div>
-          <div class="form-group span-2"><label>Palavra-passe * (mín. 6 caracteres)</label><input type="password"
-              id="npuPassword" placeholder="Palavra-passe" autocomplete="new-password"></div>
+          <div class="form-group span-2"><label>Username *</label><input type="text" id="npuUsername"
+              placeholder="e.g. john.doe" autocomplete="off"></div>
+          <div class="form-group span-2"><label>Password * (min. 6 characters)</label><input type="password"
+              id="npuPassword" placeholder="Password" autocomplete="new-password"></div>
           <div class="form-group span-2">
-            <label>Atribuir a Proxies</label>
+            <label>Assign to Proxies</label>
             <div id="npuProfileChecks"
               style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px">
             </div>
           </div>
         </div>
       </div>
-      <div class="modal-footer"><button type="button" class="btn" onclick="closeNewProxyUserModal()">Cancelar</button><button
-          type="submit" class="btn btn-primary">Criar Utilizador</button></div>
+      <div class="modal-footer"><button type="button" class="btn" onclick="closeNewProxyUserModal()">Cancel</button><button
+          type="submit" class="btn btn-primary">Create User</button></div>
     </form>
   </div>
 </div>
@@ -1583,10 +1700,10 @@
     <div class="modal-body">
       <!-- Toggle allow-list -->
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm);border:1px solid var(--border)">
-        <label style="flex:1;font-size:13px;font-weight:500;color:var(--text)">Restringir acesso (allow-list)</label>
+        <label style="flex:1;font-size:13px;font-weight:500;color:var(--text)">Restrict access (allow-list)</label>
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text2)">
           <input type="checkbox" id="oauthAllowListToggle" onchange="toggleOauthAllowList(this.checked)" style="accent-color:var(--primary)">
-          Ativado
+          Enabled
         </label>
       </div>
       <!-- Add user row (only visible when allow-list enabled) -->
@@ -1594,9 +1711,9 @@
         <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center">
           <select id="ocuAddSelect"
             style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
-            <option value="">Selecionar utilizador...</option>
+            <option value="">Select user...</option>
           </select>
-          <button class="btn btn-primary btn-sm" onclick="addUserToOauthClientUI()" style="white-space:nowrap">Adicionar</button>
+          <button class="btn btn-primary btn-sm" onclick="addUserToOauthClientUI()" style="white-space:nowrap">Add</button>
         </div>
         <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead>
@@ -1607,47 +1724,47 @@
             </tr>
           </thead>
           <tbody id="ocuListBody">
-            <tr><td colspan="3" style="padding:20px;text-align:center;color:var(--text3)">Nenhum utilizador na lista.</td></tr>
+            <tr><td colspan="3" style="padding:20px;text-align:center;color:var(--text3)">No users on the list.</td></tr>
           </tbody>
         </table>
 
         <!-- LDAP group rules -->
         <div style="margin-top:22px;padding-top:18px;border-top:1px solid var(--border)">
           <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px">
-            <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:var(--text3)">Grupos LDAP autorizados</div>
-            <span style="font-size:11px;color:var(--text3)">aditivo à lista acima</span>
+            <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:var(--text3)">Allowed LDAP groups</div>
+            <span style="font-size:11px;color:var(--text3)">additive to the list above</span>
           </div>
           <p style="font-size:11.5px;color:var(--text3);margin:0 0 12px;line-height:1.5">
-            Qualquer utilizador LDAP cujo <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">memberOf</code> contenha um destes grupos terá acesso. Aceita CN curto (ex: <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">DSI-DESENVOLVIMENTO-INOVACAO</code>) ou DN completo. Use <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">*</code> para aceitar qualquer grupo deste directório (os utilizadores locais continuam limitados à lista acima).
+            Any LDAP user whose <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">memberOf</code> contains one of these groups will be granted access. Accepts short CN (e.g. <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">DSI-DEVELOPMENT-INNOVATION</code>) or full DN. Use <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">*</code> to accept any group from this directory (local users remain restricted to the list above).
           </p>
           <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
             <select id="oclgConfigSelect"
               style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px;min-width:140px">
               <option value="">Directory…</option>
             </select>
-            <input id="oclgGroupInput" type="text" placeholder="CN, DN ou * (qualquer grupo)"
+            <input id="oclgGroupInput" type="text" placeholder="CN, DN or * (any group)"
               style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px;font-family:'SF Mono',ui-monospace,monospace">
-            <button class="btn btn-primary btn-sm" onclick="addLdapGroupToClientUI()" style="white-space:nowrap">Adicionar</button>
+            <button class="btn btn-primary btn-sm" onclick="addLdapGroupToClientUI()" style="white-space:nowrap">Add</button>
           </div>
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
               <tr style="background:var(--surface2);text-align:left">
                 <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Directory</th>
-                <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Grupo</th>
+                <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Group</th>
                 <th style="padding:8px 12px"></th>
               </tr>
             </thead>
             <tbody id="oclgListBody">
-              <tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">Sem regras de grupo configuradas.</td></tr>
+              <tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">No group rules configured.</td></tr>
             </tbody>
           </table>
         </div>
       </div>
       <div id="oauthAllowListOpen" style="display:none;padding:8px 0;font-size:13px;color:var(--text3)">
-        Allow-list desativada — todos os utilizadores registados têm acesso a este client.
+        Allow-list disabled — every registered user can access this client.
       </div>
     </div>
-    <div class="modal-footer"><button class="btn" onclick="closeOauthClientUsersModal()">Fechar</button></div>
+    <div class="modal-footer"><button class="btn" onclick="closeOauthClientUsersModal()">Close</button></div>
   </div>
 </div>
 
@@ -1726,7 +1843,7 @@
 <div class="modal-overlay" id="createInviteModal">
   <div class="modal" style="max-width:480px">
     <div class="modal-header">
-      <h3>Gerar Link de Convite</h3>
+      <h3>Generate Invite Link</h3>
       <button class="close-btn" onclick="closeCreateInviteModal()">&times;</button>
     </div>
     <div class="modal-body">
@@ -1736,55 +1853,56 @@
       <div id="inviteGenResult" style="display:none;margin-bottom:16px">
         <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px;display:flex;align-items:center;gap:6px">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
-          Link gerado com sucesso
+          Link generated successfully
         </div>
+        <p id="inviteEmailStatus" style="font-size:12.5px;margin:0 0 10px"></p>
         <div style="display:flex;gap:6px;align-items:center">
           <input type="text" id="inviteLinkInput" readonly
             style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:12px;font-family:monospace;outline:none">
           <button onclick="copyInviteLink()" id="copyInviteBtn"
-            style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0">Copiar</button>
+            style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0">Copy</button>
         </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:6px">Partilhe este link com o utilizador. Só pode ser usado uma vez.</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px">Share this link with the user. It can be used only once.</div>
       </div>
 
       <div class="form-grid" style="gap:12px" id="inviteGenForm">
         <div class="form-group span-2">
           <label>Proxy <span style="color:var(--red)">*</span></label>
           <select id="invProfileSelect" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px">
-            <option value="">A carregar...</option>
+            <option value="">Loading...</option>
           </select>
-          <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">A página de registo usará o nome e logo deste proxy.</span>
+          <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">The signup page will use the name and logo of this proxy.</span>
         </div>
         <div class="form-group span-2">
-          <label>Email do convidado <span style="color:var(--red)">*</span></label>
-          <input type="email" id="invEmailInput" placeholder="ex: joao.silva@empresa.com" autocomplete="off">
-          <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">Se já tiver conta, o acesso é vinculado automaticamente.</span>
+          <label>Invitee email <span style="color:var(--red)">*</span></label>
+          <input type="email" id="invEmailInput" placeholder="e.g. john.doe@company.com" autocomplete="off">
+          <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">If they already have an account, access is linked automatically.</span>
         </div>
         <div class="form-group span-2">
-          <label>Nome do convidado <span style="color:var(--red)">*</span></label>
-          <input type="text" id="invNameInput" placeholder="ex: João Silva" maxlength="100" autocomplete="off">
+          <label>Invitee name <span style="color:var(--red)">*</span></label>
+          <input type="text" id="invNameInput" placeholder="e.g. John Doe" maxlength="100" autocomplete="off">
         </div>
         <div class="form-group span-2">
-          <label>Nota <span style="color:var(--text3);font-weight:400">(opcional)</span></label>
-          <input type="text" id="invNoteInput" placeholder="ex: Acesso ao painel de relatórios" maxlength="200" autocomplete="off">
-          <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">Texto de contexto visível na página de registo.</span>
+          <label>Note <span style="color:var(--text3);font-weight:400">(optional)</span></label>
+          <input type="text" id="invNoteInput" placeholder="e.g. Access to the reports dashboard" maxlength="200" autocomplete="off">
+          <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">Context text shown on the signup page.</span>
         </div>
         <div class="form-group span-2">
-          <label>Validade</label>
+          <label>Validity</label>
           <select id="invExpirySelect" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px">
-            <option value="24">24 horas</option>
-            <option value="48" selected>48 horas</option>
-            <option value="72">3 dias</option>
-            <option value="168">7 dias</option>
-            <option value="336">14 dias</option>
-            <option value="720">30 dias</option>
+            <option value="24">24 hours</option>
+            <option value="48" selected>48 hours</option>
+            <option value="72">3 days</option>
+            <option value="168">7 days</option>
+            <option value="336">14 days</option>
+            <option value="720">30 days</option>
           </select>
         </div>
       </div>
     </div>
     <div class="modal-footer" id="inviteGenFooter">
-      <button class="btn" onclick="closeCreateInviteModal()">Fechar</button>
-      <button class="btn btn-primary" onclick="generateInvite()" id="inviteGenBtn">Gerar Link</button>
+      <button class="btn" onclick="closeCreateInviteModal()">Close</button>
+      <button class="btn btn-primary" onclick="generateInvite()" id="inviteGenBtn">Generate Link</button>
     </div>
   </div>
 </div>
@@ -1793,7 +1911,7 @@
 <div class="modal-overlay" id="ldapModal">
   <div class="modal" style="max-width:720px">
     <div class="modal-header">
-      <h3 id="ldapModalTitle">Novo directory LDAP</h3>
+      <h3 id="ldapModalTitle">New LDAP directory</h3>
       <button class="close-btn" onclick="closeLdapModal()">&times;</button>
     </div>
     <div class="modal-body">
@@ -1801,10 +1919,10 @@
 
       <!-- Section: Connection -->
       <div class="ldap-section">
-        <div class="ldap-section-title">Ligação</div>
+        <div class="ldap-section-title">Connection</div>
         <div class="form-grid">
           <div class="form-group">
-            <label for="ldapName">Nome <span class="req">*</span></label>
+            <label for="ldapName">Name <span class="req">*</span></label>
             <input type="text" id="ldapName" placeholder="corp-ad" autocomplete="off">
           </div>
           <div class="form-group">
@@ -1821,33 +1939,33 @@
           </div>
           <div class="form-group">
             <label for="ldapBindPassword">Bind password</label>
-            <input type="password" id="ldapBindPassword" placeholder="(opcional)" autocomplete="new-password">
+            <input type="password" id="ldapBindPassword" placeholder="(optional)" autocomplete="new-password">
           </div>
         </div>
         <div class="ldap-checks">
           <label class="ldap-check">
             <input type="checkbox" id="ldapStartTls">
-            <span>StartTLS <span class="ldap-hint">(só para ldap://)</span></span>
+            <span>StartTLS <span class="ldap-hint">(only for ldap://)</span></span>
           </label>
           <label class="ldap-check">
             <input type="checkbox" id="ldapTlsVerify" checked>
-            <span>Validar certificado TLS</span>
+            <span>Validate TLS certificate</span>
           </label>
           <label class="ldap-check">
             <input type="checkbox" id="ldapEnabled" checked>
-            <span>Directory ativo</span>
+            <span>Directory enabled</span>
           </label>
         </div>
       </div>
 
       <!-- Section: User mapping -->
       <div class="ldap-section">
-        <div class="ldap-section-title">Mapeamento de utilizadores</div>
+        <div class="ldap-section-title">User mapping</div>
         <div class="form-grid">
           <div class="form-group span-2">
-            <label for="ldapUserFilter">Filtro de pesquisa</label>
+            <label for="ldapUserFilter">Search filter</label>
             <input type="text" id="ldapUserFilter" placeholder="(|(uid={login})(mail={login})(sAMAccountName={login}))" autocomplete="off" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12.5px">
-            <span class="ldap-hint">Deve conter <code>{login}</code>. Default cobre OpenLDAP e AD.</span>
+            <span class="ldap-hint">Must contain <code>{login}</code>. Default covers OpenLDAP and AD.</span>
           </div>
           <div class="form-group">
             <label for="ldapUsernameAttr">Username attr</label>
@@ -1870,22 +1988,22 @@
 
       <!-- Section: Policy -->
       <div class="ldap-section">
-        <div class="ldap-section-title">Política</div>
+        <div class="ldap-section-title">Policy</div>
         <div class="form-grid">
           <div class="form-group">
             <label for="ldapScope">Scope</label>
             <select id="ldapScope">
-              <option value="both">Ambos (admin + proxy)</option>
-              <option value="admin">Apenas admins</option>
-              <option value="proxy">Apenas proxy users</option>
+              <option value="both">Both (admin + proxy)</option>
+              <option value="admin">Admins only</option>
+              <option value="proxy">Proxy users only</option>
             </select>
           </div>
           <div class="form-group">
             <label for="ldapTotpPolicy">2FA</label>
             <select id="ldapTotpPolicy">
-              <option value="optional">Opcional</option>
-              <option value="required">Obrigatória</option>
-              <option value="disabled">Desativada</option>
+              <option value="optional">Optional</option>
+              <option value="required">Required</option>
+              <option value="disabled">Disabled</option>
             </select>
           </div>
           <div class="form-group span-2">
@@ -1897,24 +2015,24 @@
 
       <!-- Section: Authorization mapping -->
       <div class="ldap-section">
-        <div class="ldap-section-title">Autorização</div>
+        <div class="ldap-section-title">Authorization</div>
         <div class="form-grid">
           <div class="form-group span-2">
-            <label for="ldapAdminGroups">Grupos de admin (um por linha)</label>
-            <textarea id="ldapAdminGroups" rows="3" placeholder="DSI-DESENVOLVIMENTO-INOVACAO&#10;ou&#10;CN=midleman-admins,OU=Groups,DC=example,DC=com" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12.5px;resize:vertical"></textarea>
-            <span class="ldap-hint">Aceita o <strong>nome curto</strong> do grupo (CN) ou o <strong>DN completo</strong>. Ex.: <code>DSI-DESENVOLVIMENTO-INOVACAO</code> ou <code>CN=...,OU=...,DC=...</code>. O user só entra como admin se um destes aparecer em <code>memberOf</code>. Vazio = nenhum admin LDAP.</span>
+            <label for="ldapAdminGroups">Admin groups (one per line)</label>
+            <textarea id="ldapAdminGroups" rows="3" placeholder="DSI-DEVELOPMENT-INNOVATION&#10;or&#10;CN=midleman-admins,OU=Groups,DC=example,DC=com" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12.5px;resize:vertical"></textarea>
+            <span class="ldap-hint">Accepts the <strong>short name</strong> of the group (CN) or the <strong>full DN</strong>. e.g. <code>DSI-DEVELOPMENT-INNOVATION</code> or <code>CN=...,OU=...,DC=...</code>. The user only signs in as admin if one of these appears in <code>memberOf</code>. Empty = no LDAP admins.</span>
           </div>
           <div class="form-group span-2">
-            <label for="ldapDefaultProfile">Profile default para proxy users</label>
-            <input type="text" id="ldapDefaultProfile" placeholder="ex: acme" autocomplete="off">
-            <span class="ldap-hint">Atribuído automaticamente no primeiro login a users que cheguem por este directory. Vazio = shadow account sem acesso até ser associada manualmente.</span>
+            <label for="ldapDefaultProfile">Default profile for proxy users</label>
+            <input type="text" id="ldapDefaultProfile" placeholder="e.g. acme" autocomplete="off">
+            <span class="ldap-hint">Assigned automatically on first login to users coming via this directory. Empty = shadow account without access until manually assigned.</span>
           </div>
           <div class="form-group span-2">
             <label class="ldap-check" style="margin-top:8px">
               <input type="checkbox" id="ldapAutoAdoptLocal">
-              <span>Auto-adoptar utilizadores locais com mesmo email</span>
+              <span>Auto-adopt local users with the same email</span>
             </label>
-            <span class="ldap-hint" style="color:var(--err-text)"><strong>Risco:</strong> Permite que uma password AD tome posse de uma conta local com email igual. Activa só em directories onde tens a certeza que não há homónimos. Adopções ficam pendentes de confirmação manual em <em>LDAP → Conflitos</em>. Contas locais com 2FA configurado são sempre recusadas mesmo com esta opção ligada.</span>
+            <span class="ldap-hint" style="color:var(--err-text)"><strong>Risk:</strong> Allows an AD password to take over a local account with the same email. Enable only in directories where you're sure there are no namesakes. Adoptions stay pending for manual confirmation in <em>LDAP → Conflicts</em>. Local accounts that have 2FA configured are always refused even with this option enabled.</span>
           </div>
         </div>
       </div>
@@ -1923,12 +2041,12 @@
     </div>
     <div class="modal-footer ldap-modal-footer">
       <div class="ldap-test-row">
-        <input type="text" id="ldapTestLogin" placeholder="Login para testar (opcional)" autocomplete="off">
-        <button class="btn" onclick="testLdap()" id="ldapTestBtn">Testar ligação</button>
+        <input type="text" id="ldapTestLogin" placeholder="Login to test (optional)" autocomplete="off">
+        <button class="btn" onclick="testLdap()" id="ldapTestBtn">Test connection</button>
       </div>
       <div class="ldap-footer-actions">
-        <button class="btn" onclick="closeLdapModal()">Cancelar</button>
-        <button class="btn btn-primary" onclick="submitLdap()" id="ldapSubmitBtn">Criar</button>
+        <button class="btn" onclick="closeLdapModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitLdap()" id="ldapSubmitBtn">Create</button>
       </div>
     </div>
   </div>

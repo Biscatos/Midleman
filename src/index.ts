@@ -17,6 +17,7 @@ import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, genera
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
 import { initConsentPages, listConsentPages, getConsentPage, createConsentPage, updateConsentPage, deleteConsentPage, findConsentPageOauthReferences } from './auth/consent-pages';
 import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin, runLdapSync, getLastLdapSyncReport } from './auth/ldap';
+import { initSmtp, getSmtpConfig, publicSmtpConfig, validateSmtpInput, saveSmtpConfig, deleteSmtpConfig, isSmtpConfigured, testSmtpConnection, sendMail, renderTestEmail, renderAdminInviteEmail, renderProxyInviteEmail } from './core/smtp';
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
@@ -61,6 +62,9 @@ initJwt(config.requestLog.dataDir, process.env.JWT_ISSUER || '', config.auth.ses
 
 // Initialize LDAP directories (depends on initJwt for bind-password encryption key)
 initLdap(config.requestLog.dataDir);
+
+// Initialize SMTP (depends on initJwt for password encryption key)
+initSmtp(config.requestLog.dataDir);
 
 // Initialize consent_pages before OAuth (oauth_clients.consent_page_id references it).
 initConsentPages();
@@ -1432,8 +1436,16 @@ const server = Bun.serve({
                     const reqHost = req.headers.get('host') || `localhost:${config.port}`;
                     const protocol = req.headers.get('x-forwarded-proto') || 'http';
                     const inviteUrl = `${protocol}://${reqHost}/admin-invite/${invite.token}`;
-                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'admin.invite.create', targetType: 'admin', details: { email, fullName, expiresInHours }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
-                    return jsonRes(200, { invite, inviteUrl });
+                    let emailSent: boolean | undefined;
+                    let emailError: string | undefined;
+                    if (email && isSmtpConfigured()) {
+                        const tpl = renderAdminInviteEmail({ inviteUrl, fullName, note, expiresInHours });
+                        const r = await sendMail({ to: email, subject: tpl.subject, html: tpl.html, text: tpl.text });
+                        emailSent = r.ok;
+                        emailError = r.error;
+                    }
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'admin.invite.create', targetType: 'admin', details: { email, fullName, expiresInHours, emailSent: emailSent ?? null, emailError: emailError ?? null }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { invite, inviteUrl, emailSent: emailSent ?? false, emailError: emailError ?? null });
                 }
 
                 if (url.pathname === '/admin/admins/invites' && req.method === 'GET') {
@@ -1445,6 +1457,62 @@ const server = Bun.serve({
                     const ok = revokeAdminInvite(token);
                     if (!ok) return jsonRes(404, { error: 'Convite não encontrado ou já usado' });
                     return jsonRes(200, { status: 'revoked' });
+                }
+
+                // ── SMTP / Email ─────────────────────────────────────────────────────────
+
+                if (url.pathname === '/admin/smtp' && req.method === 'GET') {
+                    return jsonRes(200, { smtp: publicSmtpConfig(getSmtpConfig()) });
+                }
+
+                if (url.pathname === '/admin/smtp' && req.method === 'PUT') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const err = validateSmtpInput(body);
+                    if (err) return jsonRes(400, { error: err });
+                    try {
+                        const cfg = saveSmtpConfig(body);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'smtp.update', targetType: 'smtp', details: { host: cfg.host, port: cfg.port, security: cfg.security, fromAddress: cfg.fromAddress }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { smtp: publicSmtpConfig(cfg) });
+                    } catch (e) {
+                        return jsonRes(500, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
+                if (url.pathname === '/admin/smtp' && req.method === 'DELETE') {
+                    deleteSmtpConfig();
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'smtp.delete', targetType: 'smtp', ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { status: 'deleted' });
+                }
+
+                if (url.pathname === '/admin/smtp/test' && req.method === 'POST') {
+                    let body: any = undefined;
+                    if (req.headers.get('content-length') && req.headers.get('content-length') !== '0') {
+                        try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                        if (body && Object.keys(body).length) {
+                            const err = validateSmtpInput(body);
+                            if (err) return jsonRes(400, { error: err });
+                        } else {
+                            body = undefined;
+                        }
+                    }
+                    const result = await testSmtpConnection(body, { signal: req.signal });
+                    return jsonRes(result.ok ? 200 : 400, { ...result });
+                }
+
+                if (url.pathname === '/admin/smtp/send-test' && req.method === 'POST') {
+                    if (!isSmtpConfigured()) return jsonRes(400, { error: 'SMTP not configured. Save settings first.' });
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const to = (body?.to || '').trim();
+                    if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return jsonRes(400, { error: '"to" must be a valid email' });
+                    const tpl = renderTestEmail();
+                    const result = await sendMail({ to, subject: tpl.subject, html: tpl.html, text: tpl.text }, { signal: req.signal });
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'smtp.test_send', targetType: 'smtp', details: { to, ok: result.ok, error: result.error }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(result.ok ? 200 : 400, { ...result });
                 }
 
                 // ── Audit log ────────────────────────────────────────────────────────────
@@ -2013,8 +2081,19 @@ const server = Bun.serve({
                     const note = (body.note || '').trim().slice(0, 200);
                     const expiresInHours = Math.min(Math.max(parseInt(body.expiresInHours) || 48, 1), 720);
                     const invite = createInviteToken(profileName, email, invitedName, note, expiresInHours);
-                    console.log(`✅ Invite for "${profileName}" to "${email}" created (expires in ${expiresInHours}h)`);
-                    return jsonRes(200, { invite });
+                    const reqHost = req.headers.get('host') || `localhost:${config.port}`;
+                    const protocol = req.headers.get('x-forwarded-proto') || 'http';
+                    const inviteUrl = `${protocol}://${reqHost}/invite/${invite.token}`;
+                    let emailSent: boolean | undefined;
+                    let emailError: string | undefined;
+                    if (isSmtpConfigured()) {
+                        const tpl = renderProxyInviteEmail({ inviteUrl, profileName, invitedName, note, expiresInHours });
+                        const r = await sendMail({ to: email, subject: tpl.subject, html: tpl.html, text: tpl.text });
+                        emailSent = r.ok;
+                        emailError = r.error;
+                    }
+                    console.log(`✅ Invite for "${profileName}" to "${email}" created (expires in ${expiresInHours}h, emailSent=${emailSent ?? 'n/a'})`);
+                    return jsonRes(200, { invite, inviteUrl, emailSent: emailSent ?? false, emailError: emailError ?? null });
                 }
 
                 // DELETE /admin/invites/:token — revoke invite token

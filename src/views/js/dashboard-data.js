@@ -443,7 +443,7 @@ async function saveProfile() {
     const consentPageRaw = document.getElementById('pConsentPageId').value;
     const consentPageId = consentPageRaw ? Number(consentPageRaw) : null;
     if (consentEnabled && !consentPageId) {
-      toast('Escolhe uma página de consentimento ou desactiva o consent.', 'error');
+      toast('Choose a consent page or disable consent.', 'error');
       return;
     }
     body.consentEnabled = consentEnabled;
@@ -508,16 +508,16 @@ function renderProxyUsers(users) {
   const c = document.getElementById('proxyUserListBody');
   if (!c) return;
   if (users.length === 0) {
-    c.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Nenhum utilizador. Clique em "+ Novo Utilizador" ou "Convidar".</td></tr>';
+    c.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No users yet. Click "+ New User" or "Invite".</td></tr>';
     return;
   }
   c.innerHTML = users.map(u => {
     const twoFa = u.totpEnabled
-      ? '<span style="color:var(--green)">Ativo</span>'
+      ? '<span style="color:var(--green)">Active</span>'
       : '<span style="color:var(--text3)">Off</span>';
     const profiles = (u.profiles || []).map(p => `<span style="background:var(--surface2);padding:1px 6px;border-radius:3px;font-size:11px;font-family:monospace">${esc(p)}</span>`).join(' ');
-    const ldapTag = u.authSource === 'ldap' ? ' <span class="badge-ldap" title="Conta sincronizada de LDAP">LDAP</span>' : '';
-    const adminTag = u.authSource === 'admin_shadow' ? ' <span class="badge-admin-shadow" title="Espelho automático de um administrador — não editar diretamente">ADMIN</span>' : '';
+    const ldapTag = u.authSource === 'ldap' ? ' <span class="badge-ldap" title="Account synced from LDAP">LDAP</span>' : '';
+    const adminTag = u.authSource === 'admin_shadow' ? ' <span class="badge-admin-shadow" title="Automatic mirror of an administrator — do not edit directly">ADMIN</span>' : '';
     const nameCell = u.fullName
       ? `<div style="font-weight:600;color:var(--text)">${esc(u.fullName)}${ldapTag}${adminTag}</div><div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`
       : `<div style="font-weight:600;color:var(--text)">${esc(u.username)}${ldapTag}${adminTag}</div>`;
@@ -526,17 +526,17 @@ function renderProxyUsers(users) {
       : `<div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`;
     const isShadow = u.authSource === 'admin_shadow';
     const actionsCell = isShadow
-      ? `<span style="color:var(--text3);font-size:11px" title="Esta linha é um espelho automático da conta de administrador — gerir em Admins">—</span>`
-      : `<button onclick="openEditProxyUserModal(${u.id})" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Editar">Editar</button>
-         <button onclick="openUserProfilesModal(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Gerir proxies">Proxies</button>
+      ? `<span style="color:var(--text3);font-size:11px" title="This row is an automatic mirror of the administrator account — manage in Admins">—</span>`
+      : `<button onclick="openEditProxyUserModal(${u.id})" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Edit">Edit</button>
+         <button onclick="openUserProfilesModal(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Manage proxies">Proxies</button>
          ${u.totpEnabled ? `<button onclick="reset2fa(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--orange);font-size:11px;margin-right:4px" title="Reset 2FA">Reset 2FA</button>` : ''}
-         <button onclick="deleteProxyUserAction(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px" title="Eliminar">Eliminar</button>`;
+         <button onclick="deleteProxyUserAction(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px" title="Delete">Delete</button>`;
     return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
       <td style="padding:8px 12px">${nameCell}</td>
       <td style="padding:8px">${emailCell}</td>
       <td style="padding:8px">${twoFa}</td>
       <td style="padding:8px">${profiles || '<span style="color:var(--text3)">—</span>'}</td>
-      <td style="padding:8px;color:var(--text3);font-size:12px">${u.createdAt ? new Date(u.createdAt).toLocaleDateString('pt-PT') : '-'}</td>
+      <td style="padding:8px;color:var(--text3);font-size:12px">${u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-GB') : '-'}</td>
       <td style="padding:8px 12px;text-align:right;white-space:nowrap">${actionsCell}</td>
     </tr>`;
   }).join('');
@@ -572,7 +572,7 @@ function closeNewProxyUserModal() {
   _editUserId = null;
   // Reset modal to "create" state
   document.querySelector('#newProxyUserModal .modal-header h3').textContent = 'Novo Utilizador';
-  document.querySelector('#newProxyUserModal .modal-footer button[type="submit"]').textContent = 'Criar Utilizador';
+  document.querySelector('#newProxyUserModal .modal-footer button[type="submit"]').textContent = 'Create User';
   document.getElementById('npuProfileChecks').closest('.form-group').style.display = '';
   document.getElementById('npuUsername').readOnly = false;
   document.getElementById('npuUsername').style.opacity = '';
@@ -587,18 +587,18 @@ async function saveNewProxyUser() {
   const password = document.getElementById('npuPassword').value;
   if (!username || username.length < 2) { errEl.textContent = 'Nome de utilizador deve ter pelo menos 2 caracteres.'; errEl.style.display = 'block'; return; }
   if (!password || password.length < 6) { errEl.textContent = 'Palavra-passe deve ter pelo menos 6 caracteres.'; errEl.style.display = 'block'; return; }
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = 'Email inválido.'; errEl.style.display = 'block'; return; }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = 'Invalid email.'; errEl.style.display = 'block'; return; }
   const profiles = [...document.querySelectorAll('#npuProfileChecks input:checked')].map(c => c.value);
   try {
     const res = await api('/admin/proxy-users', {
       method: 'POST', body: JSON.stringify({ fullName, email, username, password, profiles }),
     });
     const data = await res.json();
-    if (!res.ok) { errEl.textContent = data.error || 'Erro'; errEl.style.display = 'block'; return; }
+    if (!res.ok) { errEl.textContent = data.error || 'Error'; errEl.style.display = 'block'; return; }
     toast('Utilizador "' + username + '" criado');
     closeNewProxyUserModal();
     fetchProxyUsers();
-  } catch (e) { errEl.textContent = 'Erro: ' + e.message; errEl.style.display = 'block'; }
+  } catch (e) { errEl.textContent = 'Error: ' + e.message; errEl.style.display = 'block'; }
 }
 
 // ─── Edit Proxy User Modal ────────────────────────────────────────────────────
@@ -615,8 +615,8 @@ async function openEditProxyUserModal(id) {
   document.getElementById('npuPassword').value = '';
   document.getElementById('npuError').style.display = 'none';
   // Change modal title and footer
-  document.querySelector('#newProxyUserModal .modal-header h3').textContent = 'Editar Utilizador';
-  document.querySelector('#newProxyUserModal .modal-footer button[type="submit"]').textContent = 'Guardar';
+  document.querySelector('#newProxyUserModal .modal-header h3').textContent = 'Edit User';
+  document.querySelector('#newProxyUserModal .modal-footer button[type="submit"]').textContent = 'Save';
   document.getElementById('newProxyUserModal').classList.add('active');
   // Hide profile checkboxes section for edit (managed separately)
   document.getElementById('npuProfileChecks').closest('.form-group').style.display = 'none';
@@ -630,7 +630,7 @@ async function saveEditProxyUser() {
   const fullName = document.getElementById('npuFullName').value.trim();
   const email = document.getElementById('npuEmail').value.trim();
   const password = document.getElementById('npuPassword').value;
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = 'Email inválido.'; errEl.style.display = 'block'; return; }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = 'Invalid email.'; errEl.style.display = 'block'; return; }
   const body = { fullName, email };
   if (password) {
     if (password.length < 6) { errEl.textContent = 'Palavra-passe deve ter pelo menos 6 caracteres.'; errEl.style.display = 'block'; return; }
@@ -639,11 +639,11 @@ async function saveEditProxyUser() {
   try {
     const res = await api('/admin/proxy-users/' + _editUserId, { method: 'PUT', body: JSON.stringify(body) });
     const data = await res.json();
-    if (!res.ok) { errEl.textContent = data.error || 'Erro'; errEl.style.display = 'block'; return; }
+    if (!res.ok) { errEl.textContent = data.error || 'Error'; errEl.style.display = 'block'; return; }
     toast('Utilizador atualizado');
     closeNewProxyUserModal();
     fetchProxyUsers();
-  } catch (e) { errEl.textContent = 'Erro: ' + e.message; errEl.style.display = 'block'; }
+  } catch (e) { errEl.textContent = 'Error: ' + e.message; errEl.style.display = 'block'; }
 }
 
 async function deleteProxyUserAction(id, username) {
@@ -857,7 +857,7 @@ async function openCreateInviteModal() {
   document.getElementById('inviteGenError').style.display = 'none';
   document.getElementById('inviteGenResult').style.display = 'none';
   document.getElementById('inviteGenForm').style.display = '';
-  document.getElementById('inviteGenFooter').innerHTML = '<button class="btn" onclick="closeCreateInviteModal()">Fechar</button><button class="btn btn-primary" onclick="generateInvite()" id="inviteGenBtn">Gerar Link</button>';
+  document.getElementById('inviteGenFooter').innerHTML = '<button class="btn" onclick="closeCreateInviteModal()">Close</button><button class="btn btn-primary" onclick="generateInvite()" id="inviteGenBtn">Generate Link</button>';
   document.getElementById('invEmailInput').value = '';
   document.getElementById('invNameInput').value = '';
   document.getElementById('invNoteInput').value = '';
@@ -871,13 +871,13 @@ async function openCreateInviteModal() {
     const profiles = res.ok ? ((await res.json()).profiles || []) : _allProfiles;
     const loginProfiles = profiles.filter(p => (p.authMode || 'none') === 'login');
     if (loginProfiles.length === 0) {
-      sel.innerHTML = '<option value="" disabled>Nenhum proxy com modo "login" disponível</option>';
+      sel.innerHTML = '<option value="" disabled>No proxy with "login" mode available</option>';
     } else {
-      sel.innerHTML = '<option value="">Selecionar proxy...</option>' +
+      sel.innerHTML = '<option value="">Select proxy...</option>' +
         loginProfiles.map(p => `<option value="${esc(p.name)}">${esc(p.loginTitle || p.name)}</option>`).join('');
     }
   } catch {
-    sel.innerHTML = '<option value="" disabled>Erro ao carregar proxies</option>';
+    sel.innerHTML = '<option value="" disabled>Failed to load proxies</option>';
   }
 }
 
@@ -891,7 +891,7 @@ async function generateInvite() {
   const profileName = document.getElementById('invProfileSelect').value;
   if (!profileName) { errEl.textContent = 'Selecione um proxy para o convite.'; errEl.style.display = 'block'; return; }
   const email = document.getElementById('invEmailInput').value.trim();
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = 'Introduza um email válido para o convidado.'; errEl.style.display = 'block'; return; }
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = 'Enter a valid email for the invitee.'; errEl.style.display = 'block'; return; }
   const invitedName = document.getElementById('invNameInput').value.trim();
   if (!invitedName) { errEl.textContent = 'Introduza o nome do convidado.'; errEl.style.display = 'block'; return; }
   const note = document.getElementById('invNoteInput').value.trim();
@@ -901,15 +901,28 @@ async function generateInvite() {
   try {
     const res = await api('/admin/invites', { method: 'POST', body: JSON.stringify({ profileName, email, invitedName, note, expiresInHours }) });
     const data = await res.json();
-    if (!res.ok) { errEl.textContent = data.error || 'Erro ao gerar convite.'; errEl.style.display = 'block'; btn.disabled = false; btn.textContent = 'Gerar Link'; return; }
-    const link = window.location.origin + '/invite/' + data.invite.token;
+    if (!res.ok) { errEl.textContent = data.error || 'Failed to generate invite.'; errEl.style.display = 'block'; btn.disabled = false; btn.textContent = 'Generate Link'; return; }
+    const link = data.inviteUrl || (window.location.origin + '/invite/' + data.invite.token);
     document.getElementById('inviteLinkInput').value = link;
     document.getElementById('inviteGenResult').style.display = 'block';
     document.getElementById('inviteGenForm').style.display = 'none';
-    document.getElementById('inviteGenFooter').innerHTML = '<button class="btn" onclick="closeCreateInviteModal()">Fechar</button><button class="btn btn-primary" onclick="openCreateInviteModal()">Gerar Outro</button>';
+    const statusEl = document.getElementById('inviteEmailStatus');
+    if (statusEl) {
+      if (data.emailSent) {
+        statusEl.textContent = '✔ Email sent to ' + email;
+        statusEl.style.color = 'var(--ok-text)';
+      } else if (data.emailError) {
+        statusEl.textContent = '⚠ Email not sent: ' + data.emailError + '. Copy the link below.';
+        statusEl.style.color = 'var(--err-text)';
+      } else {
+        statusEl.textContent = 'ℹ SMTP not configured — copy the link below.';
+        statusEl.style.color = 'var(--text2)';
+      }
+    }
+    document.getElementById('inviteGenFooter').innerHTML = '<button class="btn" onclick="closeCreateInviteModal()">Close</button><button class="btn btn-primary" onclick="openCreateInviteModal()">Generate Another</button>';
     fetchInvites();
   } catch (e) {
-    errEl.textContent = 'Erro: ' + e.message; errEl.style.display = 'block';
+    errEl.textContent = 'Error: ' + e.message; errEl.style.display = 'block';
     btn.disabled = false; btn.textContent = 'Gerar Link';
   }
 }
@@ -937,7 +950,7 @@ function renderInvites(invites) {
   const tbody = document.getElementById('inviteListBody');
   if (!tbody) return;
   if (invites.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" style="padding:30px;text-align:center;color:var(--text3)">Nenhum convite. Clique em "Convidar" para gerar um link.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="padding:30px;text-align:center;color:var(--text3)">No invites yet. Click "Invite" to generate a link.</td></tr>';
     return;
   }
   const now = new Date();
@@ -951,14 +964,14 @@ function renderInvites(invites) {
     } else if (expired) {
       badge = '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">Expirado</span>';
     } else {
-      badge = '<span style="background:var(--accent-bg);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">Ativo</span>';
+      badge = '<span style="background:var(--accent-bg);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">Active</span>';
     }
     const profileTags = inv.profileName
       ? `<span style="background:var(--surface2);padding:1px 6px;border-radius:3px;font-size:11px;font-family:monospace">${esc(inv.profileName)}</span>`
       : '<span style="color:var(--text3)">—</span>';
-    const expiresStr = expires.toLocaleDateString('pt-PT', { day:'2-digit', month:'short', year:'numeric' });
+    const expiresStr = expires.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
     const copyBtn = (!used && !expired)
-      ? `<button onclick="copyTokenLink('${esc(inv.token)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Copiar link">Copiar</button>`
+      ? `<button onclick="copyTokenLink('${esc(inv.token)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Copy link">Copy</button>`
       : '';
     const revokeBtn = (!used)
       ? `<button onclick="revokeInvite('${esc(inv.token)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px" title="Revogar">Revogar</button>`
@@ -982,12 +995,12 @@ function copyTokenLink(token) {
 }
 
 async function revokeInvite(token) {
-  if (!confirm('Revogar este convite? O link deixará de funcionar.')) return;
+  if (!confirm('Revoke this invite? The link will stop working.')) return;
   try {
     const res = await api('/admin/invites/' + token, { method: 'DELETE' });
-    if (res.ok) { toast('Convite revogado'); fetchInvites(); }
-    else { const d = await res.json(); toast(d.error || 'Erro', 'error'); }
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+    if (res.ok) { toast('Invite revoked'); fetchInvites(); }
+    else { const d = await res.json(); toast(d.error || 'Error', 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 // ─── Targets (deprecated — removed) ─────────────────────────────────────────
@@ -2151,14 +2164,14 @@ async function fetchOauthClients() {
     if (badge) badge.textContent = String(clients.length);
   } catch (e) {
     document.getElementById('oauthClientListBody').innerHTML =
-      '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--err-text)">Erro: ' + esc(e.message) + '</td></tr>';
+      '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
   }
   renderOauthEndpoints();
 }
 
 function renderOauthEndpoints() {
   const origin = window.location.protocol + '//' + window.location.hostname;
-  const note = ' <span style="color:var(--text3)">(substitui pelo issuer público)</span>';
+  const note = ' <span style="color:var(--text3)">(replace with the public issuer)</span>';
   const set = (id, path) => {
     const el = document.getElementById(id);
     if (el) el.innerHTML = esc(origin + ':JWKS_PORT' + path) + note;
@@ -2180,8 +2193,8 @@ function renderOauthClients(clients) {
     const uris = (c.redirectUris || []).map(esc).join('<br>');
     const created = c.createdAt ? new Date(c.createdAt).toLocaleString() : '—';
     const accessBadge = c.allowListEnabled
-      ? '<span style="display:inline-block;background:rgba(234,179,8,.15);color:#ca8a04;border:1px solid rgba(234,179,8,.3);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">Restrito</span>'
-      : '<span style="display:inline-block;background:rgba(34,197,94,.1);color:var(--green);border:1px solid rgba(34,197,94,.25);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">Aberto</span>';
+      ? '<span style="display:inline-block;background:rgba(234,179,8,.15);color:#ca8a04;border:1px solid rgba(234,179,8,.3);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">Restricted</span>'
+      : '<span style="display:inline-block;background:rgba(34,197,94,.1);color:var(--green);border:1px solid rgba(34,197,94,.25);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">Open</span>';
     // Encode args so that JSON's double quotes don't terminate the onclick="" attribute.
     const cid = JSON.stringify(c.clientId).replace(/"/g, '&quot;');
     const cname = JSON.stringify(c.name).replace(/"/g, '&quot;');
@@ -2192,9 +2205,9 @@ function renderOauthClients(clients) {
       '<td style="padding:10px 8px;color:var(--text3);font-size:11.5px">' + esc(created) + '</td>' +
       '<td style="padding:10px 8px">' + accessBadge + '</td>' +
       '<td style="padding:10px 12px;text-align:right;white-space:nowrap">' +
-        '<button class="btn btn-sm" onclick="openEditOauthClientModal(' + cid + ')" style="margin-right:4px">Editar</button>' +
-        '<button class="btn btn-sm" onclick="openOauthClientUsersModal(' + cid + ',' + cname + ')" style="margin-right:4px">Utilizadores</button>' +
-        '<button class="btn btn-sm btn-ghost" onclick="deleteOauthClient(' + cid + ',' + cname + ')" style="color:var(--err-text)">Apagar</button>' +
+        '<button class="btn btn-sm" onclick="openEditOauthClientModal(' + cid + ')" style="margin-right:4px">Edit</button>' +
+        '<button class="btn btn-sm" onclick="openOauthClientUsersModal(' + cid + ',' + cname + ')" style="margin-right:4px">Users</button>' +
+        '<button class="btn btn-sm btn-ghost" onclick="deleteOauthClient(' + cid + ',' + cname + ')" style="color:var(--err-text)">Delete</button>' +
       '</td>' +
       '</tr>';
   }).join('');
@@ -2208,7 +2221,7 @@ let _editingOauthClientOriginalUris = '';
 function _populateConsentPageDropdown(selectId, selectedId) {
   const sel = document.getElementById(selectId);
   if (!sel) return;
-  const options = ['<option value="">— Escolhe uma página —</option>'];
+  const options = ['<option value="">— Choose a page —</option>'];
   for (const p of (_consentPages || [])) {
     const selected = (selectedId != null && Number(selectedId) === p.id) ? ' selected' : '';
     options.push('<option value="' + p.id + '"' + selected + '>' + esc(p.name) + (p.title ? ' — ' + esc(p.title) : '') + '</option>');
@@ -2239,10 +2252,10 @@ async function openCreateOauthClientModal() {
   // Ensure dropdown reflects latest pages.
   if (!_consentPages.length) await fetchConsentPages();
   _resetOauthClientForm();
-  document.getElementById('oauthClientSubmitBtn').textContent = 'Criar';
+  document.getElementById('oauthClientSubmitBtn').textContent = 'Create';
   document.getElementById('oauthClientSubmitBtn').onclick = submitOauthClient;
-  document.getElementById('oauthClientCancelBtn').textContent = 'Cancelar';
-  document.getElementById('oauthClientModalTitle').textContent = 'Novo OAuth Client';
+  document.getElementById('oauthClientCancelBtn').textContent = 'Cancel';
+  document.getElementById('oauthClientModalTitle').textContent = 'New OAuth Client';
   document.getElementById('oauthClientModal').style.display = 'flex';
 }
 
@@ -2251,10 +2264,10 @@ async function openEditOauthClientModal(clientId) {
     // Refresh pages so the dropdown is current (admin may have just created one).
     await fetchConsentPages();
     const res = await api('/admin/oauth-clients');
-    if (!res.ok) return toast('Falha a carregar client', 'error');
+    if (!res.ok) return toast('Failed to load client', 'error');
     const data = await res.json();
     const client = (data.clients || []).find(c => c.clientId === clientId);
-    if (!client) return toast('Client não encontrado', 'error');
+    if (!client) return toast('Client not found', 'error');
 
     _editingOauthClientId = clientId;
     _resetOauthClientForm();
@@ -2272,12 +2285,12 @@ async function openEditOauthClientModal(clientId) {
       document.getElementById('oauthClientUrisChangeWarning').style.display = changed ? '' : 'none';
     };
 
-    document.getElementById('oauthClientSubmitBtn').textContent = 'Guardar';
+    document.getElementById('oauthClientSubmitBtn').textContent = 'Save';
     document.getElementById('oauthClientSubmitBtn').onclick = submitEditOauthClient;
-    document.getElementById('oauthClientCancelBtn').textContent = 'Cancelar';
-    document.getElementById('oauthClientModalTitle').textContent = 'Editar — ' + (client.name || clientId);
+    document.getElementById('oauthClientCancelBtn').textContent = 'Cancel';
+    document.getElementById('oauthClientModalTitle').textContent = 'Edit — ' + (client.name || clientId);
     document.getElementById('oauthClientModal').style.display = 'flex';
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 function closeOauthClientModal() {
@@ -2291,27 +2304,27 @@ async function submitOauthClient() {
   const name = document.getElementById('oauthClientName').value.trim();
   const redirectUris = document.getElementById('oauthClientUris').value
     .split('\n').map(s => s.trim()).filter(Boolean);
-  if (!name) return toast('Nome obrigatório', 'error');
-  if (!redirectUris.length) return toast('Pelo menos uma redirect URI', 'error');
+  if (!name) return toast('Name is required', 'error');
+  if (!redirectUris.length) return toast('At least one redirect URI', 'error');
   try {
     const res = await api('/admin/oauth-clients', {
       method: 'POST',
       body: JSON.stringify({ name, redirectUris }),
     });
     const data = await res.json();
-    if (!res.ok) return toast(data.error || 'Falha ao criar', 'error');
+    if (!res.ok) return toast(data.error || 'Failed to create', 'error');
 
     document.getElementById('newClientId').textContent = data.client.clientId;
     document.getElementById('newClientSecret').textContent = data.clientSecret;
     document.getElementById('oauthClientForm').style.display = 'none';
     document.getElementById('oauthClientSecret').style.display = '';
-    document.getElementById('oauthClientSubmitBtn').textContent = 'Concluído';
+    document.getElementById('oauthClientSubmitBtn').textContent = 'Done';
     document.getElementById('oauthClientSubmitBtn').onclick = closeOauthClientModal;
     document.getElementById('oauthClientCancelBtn').style.display = 'none';
-    document.getElementById('oauthClientModalTitle').textContent = 'Client criado';
-    toast('OAuth client criado');
+    document.getElementById('oauthClientModalTitle').textContent = 'Client created';
+    toast('OAuth client created');
     fetchOauthClients();
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function submitEditOauthClient() {
@@ -2319,15 +2332,15 @@ async function submitEditOauthClient() {
   const name = document.getElementById('oauthClientName').value.trim();
   const redirectUris = document.getElementById('oauthClientUris').value
     .split('\n').map(s => s.trim()).filter(Boolean);
-  if (!name) return toast('Nome obrigatório', 'error');
-  if (!redirectUris.length) return toast('Pelo menos uma redirect URI', 'error');
+  if (!name) return toast('Name is required', 'error');
+  if (!redirectUris.length) return toast('At least one redirect URI', 'error');
   const urisChanged = redirectUris.join('\n') !== _editingOauthClientOriginalUris.trim();
-  if (urisChanged && !confirm('Alterar redirect URIs vai revogar todos os refresh tokens deste client. Continuar?')) return;
+  if (urisChanged && !confirm('Changing redirect URIs will revoke every refresh token for this client. Continue?')) return;
   const consentEnabled = document.getElementById('oauthClientConsentEnabled').checked;
   const consentPageRaw = document.getElementById('oauthClientConsentPageId').value;
   const consentPageId = consentPageRaw ? Number(consentPageRaw) : null;
   if (consentEnabled && !consentPageId) {
-    return toast('Escolhe uma página de consentimento ou desactiva o consent.', 'error');
+    return toast('Choose a consent page or disable consent.', 'error');
   }
   const payload = {
     name,
@@ -2341,28 +2354,28 @@ async function submitEditOauthClient() {
       body: JSON.stringify(payload),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) return toast(data.error || 'Falha a guardar', 'error');
+    if (!res.ok) return toast(data.error || 'Failed to save', 'error');
     if (data.redirectUrisChanged && data.revokedRefreshTokens > 0) {
-      toast('Client actualizado — ' + data.revokedRefreshTokens + ' refresh token(s) revogados');
+      toast('Client updated — ' + data.revokedRefreshTokens + ' refresh token(s) revoked');
     } else {
-      toast(data.status === 'no_changes' ? 'Sem alterações' : 'Client actualizado');
+      toast(data.status === 'no_changes' ? 'No changes' : 'Client updated');
     }
     closeOauthClientModal();
     fetchOauthClients();
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function deleteOauthClient(clientId, name) {
-  if (!confirm('Apagar client "' + name + '"? Todos os tokens emitidos serão revogados.')) return;
+  if (!confirm('Delete client "' + name + '"? Every issued token will be revoked.')) return;
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(clientId), { method: 'DELETE' });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      return toast(data.error || 'Falha ao apagar', 'error');
+      return toast(data.error || 'Failed to delete', 'error');
     }
-    toast('Client apagado');
+    toast('Client deleted');
     fetchOauthClients();
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 // ─── OAuth Client Allow-list modal ──────────────────────────────────────────────────────
@@ -2381,7 +2394,7 @@ async function openOauthClientUsersModal(clientId, clientName) {
     if (res.ok) {
       const data = await res.json();
       const sel = document.getElementById('ocuAddSelect');
-      sel.innerHTML = '<option value="">Selecionar utilizador...</option>' +
+      sel.innerHTML = '<option value="">Select user...</option>' +
         (data.users || []).map(u => '<option value="' + u.id + '">' + esc(u.username) + (u.email ? ' — ' + esc(u.email) : '') + '</option>').join('');
     }
   } catch {}
@@ -2412,10 +2425,10 @@ async function refreshOauthClientUsers() {
       tbody.innerHTML = users.map(u => '<tr style="border-top:1px solid var(--border)">' +
         '<td style="padding:8px 12px;font-weight:500">' + esc(u.username) + '</td>' +
         '<td style="padding:8px;color:var(--text2);font-size:12px">' + esc(u.email || '—') + '</td>' +
-        '<td style="padding:8px 12px;text-align:right"><button class="btn btn-sm btn-ghost" onclick="removeUserFromOauthClientUI(' + u.id + ',\'' + esc(u.username) + '\')" style="color:var(--err-text)">Remover</button></td>' +
+        '<td style="padding:8px 12px;text-align:right"><button class="btn btn-sm btn-ghost" onclick="removeUserFromOauthClientUI(' + u.id + ',\'' + esc(u.username) + '\')" style="color:var(--err-text)">Remove</button></td>' +
         '</tr>').join('');
     }
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function toggleOauthAllowList(enabled) {
@@ -2425,11 +2438,11 @@ async function toggleOauthAllowList(enabled) {
       method: 'PUT',
       body: JSON.stringify({ enabled }),
     });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Falha', 'error'); }
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
     toast(enabled ? 'Allow-list ativada' : 'Allow-list desativada');
     await refreshOauthClientUsers();
     fetchOauthClients(); // refresh badge in table
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function addUserToOauthClientUI() {
@@ -2442,22 +2455,22 @@ async function addUserToOauthClientUI() {
       method: 'POST',
       body: JSON.stringify({ userId: Number(userId) }),
     });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Falha', 'error'); }
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
     sel.value = '';
     toast('Utilizador adicionado');
     await refreshOauthClientUsers();
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function removeUserFromOauthClientUI(userId, username) {
   if (!_ocuClientId) return;
-  if (!confirm('Remover "' + username + '" do acesso a este client?')) return;
+  if (!confirm('Remove "' + username + '" from this client\'s access?')) return;
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/users/' + encodeURIComponent(userId), { method: 'DELETE' });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Falha', 'error'); }
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
     toast('Utilizador removido');
     await refreshOauthClientUsers();
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 // ─── OAuth client: LDAP group rules ────────────────────────────────────────
@@ -2486,9 +2499,9 @@ async function refreshOauthClientLdapGroups() {
     tbody.innerHTML = rules.map(r => '<tr style="border-top:1px solid var(--border)">' +
       '<td style="padding:8px 12px;font-weight:500">' + esc(dirName(r.ldapConfigId)) + '</td>' +
       '<td style="padding:8px;color:var(--text2);font-family:\'SF Mono\',ui-monospace,monospace;font-size:11.5px;word-break:break-all">' + esc(r.groupMatch) + '</td>' +
-      '<td style="padding:8px 12px;text-align:right"><button class="btn btn-sm btn-ghost" onclick="removeLdapGroupFromClientUI(' + r.id + ')" style="color:var(--err-text)">Remover</button></td>' +
+      '<td style="padding:8px 12px;text-align:right"><button class="btn btn-sm btn-ghost" onclick="removeLdapGroupFromClientUI(' + r.id + ')" style="color:var(--err-text)">Remove</button></td>' +
       '</tr>').join('');
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function addLdapGroupToClientUI() {
@@ -2502,22 +2515,22 @@ async function addLdapGroupToClientUI() {
       method: 'POST',
       body: JSON.stringify({ ldapConfigId, groupMatch }),
     });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Falha', 'error'); }
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
     document.getElementById('oclgGroupInput').value = '';
     toast('Regra adicionada');
     await refreshOauthClientLdapGroups();
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function removeLdapGroupFromClientUI(ruleId) {
   if (!_ocuClientId) return;
-  if (!confirm('Remover esta regra de grupo? Utilizadores que dependiam dela perderão acesso no próximo login (ou na próxima sincronização).')) return;
+  if (!confirm('Remove this group rule? Users that depended on it will lose access on the next login (or sync).')) return;
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/ldap-groups/' + encodeURIComponent(ruleId), { method: 'DELETE' });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Falha', 'error'); }
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
     toast('Regra removida');
     await refreshOauthClientLdapGroups();
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 // ─── Admins ──────────────────────────────────────────────────────────────────
@@ -2534,7 +2547,7 @@ async function fetchAdmins() {
     if (badge) badge.textContent = String((data.admins || []).length);
   } catch (e) {
     document.getElementById('adminListBody').innerHTML =
-      '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--err-text)">Erro: ' + esc(e.message) + '</td></tr>';
+      '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
   }
 }
 
@@ -2553,8 +2566,8 @@ function renderAdmins(admins) {
       ? '<div style="font-weight:500">' + esc(a.fullName) + meTag + ldapTag + '</div><div style="font-size:11px;color:var(--text3);font-family:monospace">' + esc(a.username) + '</div>'
       : '<div style="font-weight:500">' + esc(a.username) + meTag + ldapTag + '</div>';
     const twoFa = a.totpEnabled
-      ? '<span style="color:var(--green)">Ativo</span>'
-      : '<span style="color:var(--err-text);font-size:11.5px">Pendente</span>';
+      ? '<span style="color:var(--green)">Active</span>'
+      : '<span style="color:var(--err-text);font-size:11.5px">Pending</span>';
     const created = a.createdAt ? new Date(a.createdAt).toLocaleString() : '—';
     const resetBtn = isLdap
       ? ''
@@ -2562,7 +2575,7 @@ function renderAdmins(admins) {
     const actions = isMe
       ? '<span style="color:var(--text3);font-size:11.5px">—</span>'
       : resetBtn +
-        '<button class="btn btn-sm btn-ghost" onclick="deleteAdminUser(' + a.id + ',&quot;' + esc(a.username) + '&quot;)" style="color:var(--err-text)">Apagar</button>';
+        '<button class="btn btn-sm btn-ghost" onclick="deleteAdminUser(' + a.id + ',&quot;' + esc(a.username) + '&quot;)" style="color:var(--err-text)">Delete</button>';
     return '<tr style="border-top:1px solid var(--border)">' +
       '<td style="padding:10px 12px">' + nameCell + '</td>' +
       '<td style="padding:10px 8px;color:var(--text2)">' + esc(a.email || '—') + '</td>' +
@@ -2592,23 +2605,23 @@ async function submitNewAdmin() {
   try {
     const res = await api('/admin/admins', { method: 'POST', body: JSON.stringify({ username, fullName, email, password }) });
     const data = await res.json();
-    if (!res.ok) return toast(data.error || 'Falha ao criar', 'error');
+    if (!res.ok) return toast(data.error || 'Failed to create', 'error');
     toast('Admin "' + username + '" criado');
     closeAdminModal();
     fetchAdmins();
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function deleteAdminUser(id, username) {
-  if (!confirm('Apagar admin "' + username + '"?')) return;
+  if (!confirm('Delete admin "' + username + '"?')) return;
   try {
     const res = await api('/admin/admins/' + id, { method: 'DELETE' });
     if (!res.ok) {
       const data = await res.json().catch(function() { return {}; });
-      return toast(data.error || 'Falha ao apagar', 'error');
+      return toast(data.error || 'Failed to delete', 'error');
     }
     toast('Admin apagado'); fetchAdmins();
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function resetAdminPassword(id, username) {
@@ -2618,9 +2631,9 @@ async function resetAdminPassword(id, username) {
   try {
     const res = await api('/admin/admins/' + id + '/password', { method: 'PATCH', body: JSON.stringify({ password: newPass }) });
     const data = await res.json();
-    if (!res.ok) return toast(data.error || 'Falha', 'error');
+    if (!res.ok) return toast(data.error || 'Failed', 'error');
     toast('Password atualizada');
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 // ─── Admin Invites ────────────────────────────────────────────────────────────
@@ -2652,12 +2665,27 @@ async function submitAdminInvite() {
       body: JSON.stringify({ email, fullName, note, expiresInHours }),
     });
     const data = await res.json();
-    if (!res.ok) { errEl.textContent = data.error || 'Erro ao gerar convite.'; errEl.style.display = 'block'; return; }
+    if (!res.ok) { errEl.textContent = data.error || 'Failed to generate invite.'; errEl.style.display = 'block'; return; }
     document.getElementById('adminInviteFormWrap').style.display = 'none';
     document.getElementById('adminInviteUrl').value = data.inviteUrl || '';
     document.getElementById('adminInviteResult').style.display = '';
+    const statusEl = document.getElementById('adminInviteEmailStatus');
+    if (statusEl) {
+      if (data.emailSent) {
+        statusEl.textContent = '✔ Email sent to ' + email;
+        statusEl.style.color = 'var(--ok-text)';
+      } else if (email && data.emailError) {
+        statusEl.textContent = '⚠ Email not sent: ' + data.emailError + '. Copy the link below.';
+        statusEl.style.color = 'var(--err-text)';
+      } else if (email) {
+        statusEl.textContent = 'ℹ SMTP not configured — copy the link below.';
+        statusEl.style.color = 'var(--text2)';
+      } else {
+        statusEl.textContent = '';
+      }
+    }
   } catch (e) {
-    errEl.textContent = 'Erro de rede: ' + e.message;
+    errEl.textContent = 'Network error: ' + e.message;
     errEl.style.display = 'block';
   }
 }
@@ -2670,6 +2698,195 @@ function copyAdminInviteUrl() {
   const orig = btn.textContent;
   btn.textContent = 'Copiado!';
   setTimeout(() => { btn.textContent = orig; }, 1500);
+}
+
+// ─── SMTP / Email ─────────────────────────────────────────────────────────────
+let _smtpHasPassword = false;
+let _smtpTestController = null;
+let _smtpSendController = null;
+
+function setSmtpStatus(elId, msg, kind) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (!msg) { el.textContent = ''; el.style.color = ''; return; }
+  const colorMap = { ok: 'var(--ok-text)', err: 'var(--err-text)', info: 'var(--text2)' };
+  el.style.color = colorMap[kind] || colorMap.info;
+  el.textContent = msg;
+}
+
+async function fetchSmtpConfig() {
+  try {
+    const res = await api('/admin/smtp');
+    if (!res.ok) return;
+    const data = await res.json();
+    const cfg = data.smtp;
+    const hostEl = document.getElementById('smtpHost');
+    const portEl = document.getElementById('smtpPort');
+    const secEl  = document.getElementById('smtpSecurity');
+    const userEl = document.getElementById('smtpUsername');
+    const pwEl   = document.getElementById('smtpPassword');
+    const fromAEl= document.getElementById('smtpFromAddress');
+    const fromNEl= document.getElementById('smtpFromName');
+    const allowEl= document.getElementById('smtpAllowInvalid');
+    const clearBtn = document.getElementById('smtpClearBtn');
+    const pwHint = document.getElementById('smtpPwHint');
+    if (cfg) {
+      hostEl.value = cfg.host || '';
+      portEl.value = cfg.port || 587;
+      secEl.value = cfg.security || 'starttls';
+      userEl.value = cfg.username || '';
+      pwEl.value = '';
+      fromAEl.value = cfg.fromAddress || '';
+      fromNEl.value = cfg.fromName || '';
+      allowEl.checked = !!cfg.allowInvalidCerts;
+      _smtpHasPassword = !!cfg.hasPassword;
+      pwHint.textContent = _smtpHasPassword
+        ? 'Leave empty to keep the current password.'
+        : 'No password set.';
+      clearBtn.style.display = '';
+      setSmtpStatus('smtpStatus', 'Active configuration: ' + cfg.host + ':' + cfg.port, 'ok');
+    } else {
+      hostEl.value = '';
+      portEl.value = 587;
+      secEl.value = 'starttls';
+      userEl.value = '';
+      pwEl.value = '';
+      fromAEl.value = '';
+      fromNEl.value = '';
+      allowEl.checked = false;
+      _smtpHasPassword = false;
+      pwHint.textContent = 'No password set.';
+      clearBtn.style.display = 'none';
+      setSmtpStatus('smtpStatus', 'No SMTP configuration active.', 'info');
+    }
+  } catch (e) {
+    setSmtpStatus('smtpStatus', 'Failed to load: ' + e.message, 'err');
+  }
+}
+
+function _readSmtpForm(includePasswordOnlyIfFilled) {
+  const pw = document.getElementById('smtpPassword').value;
+  const body = {
+    host: document.getElementById('smtpHost').value.trim(),
+    port: parseInt(document.getElementById('smtpPort').value, 10) || 0,
+    security: document.getElementById('smtpSecurity').value,
+    username: document.getElementById('smtpUsername').value.trim(),
+    fromAddress: document.getElementById('smtpFromAddress').value.trim(),
+    fromName: document.getElementById('smtpFromName').value.trim(),
+    allowInvalidCerts: document.getElementById('smtpAllowInvalid').checked,
+  };
+  if (!includePasswordOnlyIfFilled || pw) body.password = pw;
+  return body;
+}
+
+async function saveSmtpConfig() {
+  const body = _readSmtpForm(true);
+  if (!body.host) { setSmtpStatus('smtpStatus', 'Host is required.', 'err'); return; }
+  if (!body.fromAddress) { setSmtpStatus('smtpStatus', 'Sender email is required.', 'err'); return; }
+  setSmtpStatus('smtpStatus', 'Saving…', 'info');
+  try {
+    const res = await api('/admin/smtp', { method: 'PUT', body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) { setSmtpStatus('smtpStatus', data.error || 'Failed to save.', 'err'); return; }
+    toast('SMTP configuration saved');
+    await fetchSmtpConfig();
+  } catch (e) {
+    setSmtpStatus('smtpStatus', 'Network error: ' + e.message, 'err');
+  }
+}
+
+async function testSmtpConnectionUi() {
+  const body = _readSmtpForm(true);
+  if (!body.host) { setSmtpStatus('smtpStatus', 'Host is required.', 'err'); return; }
+  if (!body.fromAddress) { setSmtpStatus('smtpStatus', 'Sender email is required.', 'err'); return; }
+  if (_smtpTestController) return;
+  _smtpTestController = new AbortController();
+  document.getElementById('smtpTestBtn').style.display = 'none';
+  document.getElementById('smtpTestCancelBtn').style.display = '';
+  setSmtpStatus('smtpStatus', 'Testing connection…', 'info');
+  try {
+    const res = await fetch('/admin/smtp/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: _smtpTestController.signal,
+    });
+    if (res.status === 401) { window.location.reload(); return; }
+    const data = await res.json();
+    if (data.ok) setSmtpStatus('smtpStatus', 'Connection OK ✔', 'ok');
+    else setSmtpStatus('smtpStatus', 'Failed: ' + (data.error || 'unknown error'), 'err');
+  } catch (e) {
+    if (e.name === 'AbortError') setSmtpStatus('smtpStatus', 'Test cancelled.', 'info');
+    else setSmtpStatus('smtpStatus', 'Network error: ' + e.message, 'err');
+  } finally {
+    _smtpTestController = null;
+    document.getElementById('smtpTestBtn').style.display = '';
+    document.getElementById('smtpTestCancelBtn').style.display = 'none';
+  }
+}
+
+function cancelSmtpTest() {
+  if (_smtpTestController) _smtpTestController.abort();
+}
+
+async function clearSmtpConfig() {
+  if (!confirm('Remove the entire SMTP configuration?')) return;
+  try {
+    const res = await api('/admin/smtp', { method: 'DELETE' });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return setSmtpStatus('smtpStatus', d.error || 'Error', 'err'); }
+    toast('SMTP configuration removed');
+    await fetchSmtpConfig();
+  } catch (e) {
+    setSmtpStatus('smtpStatus', 'Network error: ' + e.message, 'err');
+  }
+}
+
+function openSmtpSendTestModal() {
+  document.getElementById('smtpTestTo').value = '';
+  setSmtpStatus('smtpTestStatus', '', 'info');
+  document.getElementById('smtpSendTestModal').style.display = 'flex';
+}
+function closeSmtpSendTestModal() {
+  document.getElementById('smtpSendTestModal').style.display = 'none';
+}
+
+async function sendSmtpTest() {
+  const to = document.getElementById('smtpTestTo').value.trim();
+  if (!to) { setSmtpStatus('smtpTestStatus', 'Enter a recipient.', 'err'); return; }
+  if (_smtpSendController) return;
+  _smtpSendController = new AbortController();
+  const sendBtn = document.getElementById('smtpTestSendBtn');
+  const cancelBtn = document.getElementById('smtpSendCancelBtn');
+  sendBtn.style.display = 'none';
+  cancelBtn.style.display = '';
+  setSmtpStatus('smtpTestStatus', 'Sending…', 'info');
+  try {
+    const res = await fetch('/admin/smtp/send-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to }),
+      signal: _smtpSendController.signal,
+    });
+    if (res.status === 401) { window.location.reload(); return; }
+    const data = await res.json();
+    if (data.ok) {
+      setSmtpStatus('smtpTestStatus', 'Email sent ✔', 'ok');
+      toast('Test email sent');
+    } else {
+      setSmtpStatus('smtpTestStatus', 'Failed: ' + (data.error || 'unknown error'), 'err');
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') setSmtpStatus('smtpTestStatus', 'Send cancelled.', 'info');
+    else setSmtpStatus('smtpTestStatus', 'Network error: ' + e.message, 'err');
+  } finally {
+    _smtpSendController = null;
+    sendBtn.style.display = '';
+    cancelBtn.style.display = 'none';
+  }
+}
+
+function cancelSmtpSend() {
+  if (_smtpSendController) _smtpSendController.abort();
 }
 
 // ─── Audit Log ───────────────────────────────────────────────────────────────
@@ -2696,7 +2913,7 @@ async function fetchAuditLogs(resetOffset) {
     renderAuditLogs(data.logs || [], data.total || 0);
   } catch (e) {
     document.getElementById('auditListBody').innerHTML =
-      '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--err-text)">Erro: ' + esc(e.message) + '</td></tr>';
+      '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
   }
 }
 
@@ -2776,7 +2993,7 @@ async function fetchLdapConfigs() {
     if (badge) badge.textContent = String(_ldapConfigs.filter(c => c.enabled).length);
   } catch (e) {
     document.getElementById('ldapListBody').innerHTML =
-      '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--err-text)">Erro: ' + esc(e.message) + '</td></tr>';
+      '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
   }
 }
 
@@ -2805,8 +3022,8 @@ function renderLdapConfigs(configs) {
     return '<span style="font-size:11px;color:' + color + ';font-weight:600">' + label + '</span>';
   };
   const stateBadge = enabled => enabled
-    ? '<span style="display:inline-block;background:rgba(34,197,94,.1);color:var(--green);border:1px solid rgba(34,197,94,.25);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">Ativo</span>'
-    : '<span style="display:inline-block;background:rgba(148,163,184,.15);color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">Inativo</span>';
+    ? '<span style="display:inline-block;background:rgba(34,197,94,.1);color:var(--green);border:1px solid rgba(34,197,94,.25);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">Active</span>'
+    : '<span style="display:inline-block;background:rgba(148,163,184,.15);color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">Inactive</span>';
 
   tbody.innerHTML = configs.map(c =>
     '<tr style="border-top:1px solid var(--border)">' +
@@ -2817,8 +3034,8 @@ function renderLdapConfigs(configs) {
       '<td style="padding:10px 8px">' + totpBadge(c.totpPolicy) + '</td>' +
       '<td style="padding:10px 8px">' + stateBadge(c.enabled) + '</td>' +
       '<td style="padding:10px 12px;text-align:right;white-space:nowrap">' +
-        '<button class="btn btn-sm" onclick="openEditLdapModal(' + c.id + ')" style="margin-right:4px">Editar</button>' +
-        '<button class="btn btn-sm btn-ghost" onclick="deleteLdapConfig(' + c.id + ',' + JSON.stringify(c.name) + ')" style="color:var(--err-text)">Apagar</button>' +
+        '<button class="btn btn-sm" onclick="openEditLdapModal(' + c.id + ')" style="margin-right:4px">Edit</button>' +
+        '<button class="btn btn-sm btn-ghost" onclick="deleteLdapConfig(' + c.id + ',' + JSON.stringify(c.name) + ')" style="color:var(--err-text)">Delete</button>' +
       '</td>' +
     '</tr>'
   ).join('');
@@ -2856,13 +3073,13 @@ function _ldapResetForm() {
 function openCreateLdapModal() {
   _ldapResetForm();
   document.getElementById('ldapModalTitle').textContent = 'Novo directory LDAP';
-  document.getElementById('ldapSubmitBtn').textContent = 'Criar';
+  document.getElementById('ldapSubmitBtn').textContent = 'Create';
   document.getElementById('ldapModal').classList.add('active');
 }
 
 function openEditLdapModal(id) {
   const c = _ldapConfigs.find(x => x.id === id);
-  if (!c) return toast('Config não encontrada', 'error');
+  if (!c) return toast('Config not found', 'error');
   _ldapResetForm();
   document.getElementById('ldapEditId').value = String(c.id);
   document.getElementById('ldapName').value = c.name;
@@ -2885,8 +3102,8 @@ function openEditLdapModal(id) {
   document.getElementById('ldapAdminGroups').value = (c.adminGroups || []).join('\n');
   document.getElementById('ldapDefaultProfile').value = c.defaultProfile || '';
   document.getElementById('ldapAutoAdoptLocal').checked = !!c.autoAdoptLocal;
-  document.getElementById('ldapModalTitle').textContent = 'Editar directory: ' + c.name;
-  document.getElementById('ldapSubmitBtn').textContent = 'Guardar';
+  document.getElementById('ldapModalTitle').textContent = 'Edit directory: ' + c.name;
+  document.getElementById('ldapSubmitBtn').textContent = 'Save';
   document.getElementById('ldapModal').classList.add('active');
 }
 
@@ -2898,9 +3115,9 @@ function _ldapCollectPayload(isEdit) {
   const name = document.getElementById('ldapName').value.trim();
   const url = document.getElementById('ldapUrl').value.trim();
   const baseDn = document.getElementById('ldapBaseDn').value.trim();
-  if (!name) { toast('Nome obrigatório', 'error'); return null; }
-  if (!url)  { toast('URL obrigatório (ldap:// ou ldaps://)', 'error'); return null; }
-  if (!baseDn) { toast('Base DN obrigatório', 'error'); return null; }
+  if (!name) { toast('Name is required', 'error'); return null; }
+  if (!url)  { toast('URL is required (ldap:// or ldaps://)', 'error'); return null; }
+  if (!baseDn) { toast('Base DN is required', 'error'); return null; }
 
   const payload = {
     name, url, baseDn,
@@ -2942,72 +3159,72 @@ async function submitLdap() {
       body: JSON.stringify(payload),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) return toast(data.error || 'Falha', 'error');
+    if (!res.ok) return toast(data.error || 'Failed', 'error');
     toast(isEdit ? 'Directory atualizado' : 'Directory criado');
     closeLdapModal();
     fetchLdapConfigs();
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function deleteLdapConfig(id, name) {
-  if (!confirm('Apagar directory "' + name + '"?\n\nUtilizadores LDAP já provisionados ficam sem origem — não conseguirão fazer login até voltares a configurar.')) return;
+  if (!confirm('Delete directory "' + name + '"?\n\nAlready-provisioned LDAP users will lose their source — they won\'t be able to log in until you configure it again.')) return;
   try {
     const res = await api('/admin/ldap/configs/' + encodeURIComponent(id), { method: 'DELETE' });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      return toast(data.error || 'Falha ao apagar', 'error');
+      return toast(data.error || 'Failed to delete', 'error');
     }
     toast('Directory apagado');
     fetchLdapConfigs();
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function forceLdapSync() {
   const btn = document.getElementById('ldapSyncBtn');
   const out = document.getElementById('ldapSyncReport');
-  const origText = btn ? btn.textContent : 'Sync agora';
-  if (btn) { btn.disabled = true; btn.textContent = 'A sincronizar…'; }
+  const origText = btn ? btn.textContent : 'Sync now';
+  if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
   if (out) {
     out.style.display = 'block';
-    out.innerHTML = 'A correr sincronização contra todos os directories ativos…';
+    out.innerHTML = 'Running sync against every active directory…';
   }
   try {
     const res = await api('/admin/ldap/sync', { method: 'POST' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      if (out) out.innerHTML = '<span style="color:var(--err-text)">Falhou: ' + esc(data.error || 'erro desconhecido') + '</span>';
+      if (out) out.innerHTML = '<span style="color:var(--err-text)">Failed: ' + esc(data.error || 'unknown error') + '</span>';
       return;
     }
     const report = data.report || {};
     const cfgs = report.configs || [];
     if (cfgs.length === 0) {
-      out.innerHTML = '<strong>Sync concluído</strong> em ' + (report.durationMs || 0) + 'ms — nenhum directory ativo.';
+      out.innerHTML = '<strong>Sync complete</strong> in ' + (report.durationMs || 0) + 'ms — no active directory.';
     } else {
       const rows = cfgs.map(c => {
         const errBits = (c.errors && c.errors.length)
-          ? ' · <span style="color:var(--err-text)">' + c.errors.length + ' erro(s)</span>'
+          ? ' · <span style="color:var(--err-text)">' + c.errors.length + ' error(s)</span>'
           : '';
         return '<div style="padding:4px 0;border-top:1px solid var(--border);display:flex;justify-content:space-between;gap:12px">' +
           '<span><strong>' + esc(c.configName) + '</strong></span>' +
           '<span style="color:var(--text3)">' +
             c.users + ' user(s) · ' +
-            c.groupsUpdated + ' atualizados · ' +
-            c.revokedClients + ' tokens revogados · ' +
-            c.orphans + ' órfãos' +
+            c.groupsUpdated + ' updated · ' +
+            c.revokedClients + ' tokens revoked · ' +
+            c.orphans + ' orphan(s)' +
             errBits +
           '</span>' +
           '</div>';
       }).join('');
       out.innerHTML =
         '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">' +
-          '<strong>Sync concluído</strong>' +
+          '<strong>Sync complete</strong>' +
           '<span style="color:var(--text3);font-size:11.5px">' + (report.durationMs || 0) + 'ms</span>' +
         '</div>' + rows;
     }
     // Refresh table because orphan/sync status may have changed
     fetchLdapConfigs();
   } catch (e) {
-    if (out) out.innerHTML = '<span style="color:var(--err-text)">Erro: ' + esc(e.message) + '</span>';
+    if (out) out.innerHTML = '<span style="color:var(--err-text)">Error: ' + esc(e.message) + '</span>';
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = origText; }
   }
@@ -3026,14 +3243,14 @@ async function testLdap() {
   const btn = document.getElementById('ldapTestBtn');
   tr.style.display = 'block';
   _ldapSetTestState(tr, '');
-  tr.innerHTML = '<div class="ldap-test-title">A testar…</div>';
+  tr.innerHTML = '<div class="ldap-test-title">Testing…</div>';
   btn.disabled = true;
 
   try {
     if (!editId) {
       _ldapSetTestState(tr, 'fail');
-      tr.innerHTML = '<div class="ldap-test-title">Guarda primeiro</div>' +
-        '<div style="color:var(--text2)">Clica em <strong>Criar</strong> e depois reabre o directory para testar a ligação.</div>';
+      tr.innerHTML = '<div class="ldap-test-title">Save first</div>' +
+        '<div style="color:var(--text2)">Click <strong>Create</strong> and then reopen the directory to test the connection.</div>';
       return;
     }
     const res = await api('/admin/ldap/configs/' + encodeURIComponent(editId) + '/test', {
@@ -3043,7 +3260,7 @@ async function testLdap() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       _ldapSetTestState(tr, 'fail');
-      tr.innerHTML = '<div class="ldap-test-title">✗ Erro HTTP ' + res.status + '</div>' +
+      tr.innerHTML = '<div class="ldap-test-title">✗ HTTP Error ' + res.status + '</div>' +
         '<div style="color:var(--text2)">' + esc(data.error || '') + '</div>';
       return;
     }
@@ -3067,12 +3284,12 @@ async function testLdap() {
     }
     _ldapSetTestState(tr, data.ok ? 'ok' : 'fail');
     tr.innerHTML =
-      '<div class="ldap-test-title">' + (data.ok ? '✓ Sucesso' : '✗ Falhou') +
+      '<div class="ldap-test-title">' + (data.ok ? '✓ Success' : '✗ Failed') +
       ' <span style="color:var(--text3);font-weight:500;margin-left:6px">' + (data.durationMs || 0) + 'ms</span></div>' +
       stepsHtml + sampleHtml;
   } catch (e) {
     _ldapSetTestState(tr, 'fail');
-    tr.innerHTML = '<div class="ldap-test-title">✗ Erro</div><div style="color:var(--text2)">' + esc(e.message) + '</div>';
+    tr.innerHTML = '<div class="ldap-test-title">✗ Error</div><div style="color:var(--text2)">' + esc(e.message) + '</div>';
   } finally {
     btn.disabled = false;
   }
@@ -3088,16 +3305,26 @@ async function fetchLdapAdoptions() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     renderLdapAdoptions(data.events || []);
-    const badge = document.getElementById('navLdapConflictsBadge');
+    const badge = document.getElementById('ldapConflictsBtnBadge');
     if (badge) {
       const pending = Number(data.pending || 0);
       if (pending > 0) { badge.textContent = String(pending); badge.style.display = ''; }
       else { badge.style.display = 'none'; }
     }
   } catch (e) {
-    document.getElementById('ldapcListBody').innerHTML =
-      '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--err-text)">Erro: ' + esc(e.message) + '</td></tr>';
+    const body = document.getElementById('ldapcListBody');
+    if (body) body.innerHTML =
+      '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
   }
+}
+
+function openLdapConflictsModal() {
+  document.getElementById('ldapConflictsModal').style.display = 'flex';
+  filterLdapAdoptions('pending');
+}
+
+function closeLdapConflictsModal() {
+  document.getElementById('ldapConflictsModal').style.display = 'none';
 }
 
 function filterLdapAdoptions(state) {
@@ -3118,14 +3345,14 @@ function filterLdapAdoptions(state) {
 function renderLdapAdoptions(events) {
   const tbody = document.getElementById('ldapcListBody');
   if (!events.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Sem registos.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No records.</td></tr>';
     return;
   }
   const stateBadge = s => {
     const map = {
-      pending:   ['Pendente',  'rgba(234,179,8,.15)',  '#ca8a04'],
-      confirmed: ['Confirmada','rgba(34,197,94,.1)',   'var(--green)'],
-      reverted:  ['Revertida', 'rgba(148,163,184,.15)','var(--text3)'],
+      pending:   ['Pending',   'rgba(234,179,8,.15)',  '#ca8a04'],
+      confirmed: ['Confirmed', 'rgba(34,197,94,.1)',   'var(--green)'],
+      reverted:  ['Reverted',  'rgba(148,163,184,.15)','var(--text3)'],
     };
     const [label, bg, fg] = map[s] || map.pending;
     return '<span style="display:inline-block;background:' + bg + ';color:' + fg + ';border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">' + label + '</span>';
@@ -3149,23 +3376,23 @@ function renderLdapAdoptions(events) {
 }
 
 async function confirmLdapAdoption(id) {
-  if (!confirm('Confirmar esta adopção? A conta local fica permanentemente substituída pela identidade LDAP.')) return;
+  if (!confirm('Confirm this adoption? The local account becomes permanently replaced by the LDAP identity.')) return;
   try {
     const res = await api('/admin/ldap/adoptions/' + encodeURIComponent(id) + '/confirm', { method: 'POST' });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Falha', 'error'); }
-    toast('Adopção confirmada');
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
+    toast('Adoption confirmed');
     fetchLdapAdoptions();
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function revertLdapAdoption(id) {
-  if (!confirm('Reverter? A conta local volta ao estado anterior (username, email e password hash originais). A identidade LDAP terá de ser registada manualmente noutro user — sessões e tokens ficam revogados.')) return;
+  if (!confirm('Revert? The local account goes back to its previous state (original username, email and password hash). The LDAP identity will need to be registered manually on another user — sessions and tokens get revoked.')) return;
   try {
     const res = await api('/admin/ldap/adoptions/' + encodeURIComponent(id) + '/revert', { method: 'POST' });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Falha', 'error'); }
-    toast('Adopção revertida');
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
+    toast('Adoption reverted');
     fetchLdapAdoptions();
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 // ─── Consent pages ──────────────────────────────────────────────────────────
@@ -3183,7 +3410,7 @@ async function fetchConsentPages() {
     if (badge) badge.textContent = String(_consentPages.length);
   } catch (e) {
     const tbody = document.getElementById('consentPagesListBody');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="4" style="padding:40px;text-align:center;color:var(--err-text)">Erro: ' + esc(e.message) + '</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="4" style="padding:40px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
   }
 }
 
@@ -3191,7 +3418,7 @@ function renderConsentPages(pages) {
   const tbody = document.getElementById('consentPagesListBody');
   if (!tbody) return;
   if (!pages.length) {
-    tbody.innerHTML = '<tr><td colspan="4" style="padding:40px;text-align:center;color:var(--text3)">Sem páginas — cria a primeira para a referenciares em clients ou profiles.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" style="padding:40px;text-align:center;color:var(--text3)">No pages yet — create the first one to reference it from clients or profiles.</td></tr>';
     return;
   }
   tbody.innerHTML = pages.map(p => {
@@ -3201,8 +3428,8 @@ function renderConsentPages(pages) {
       '<td style="padding:10px 8px">' + esc(p.title || '—') + '</td>' +
       '<td style="padding:10px 8px;color:var(--text3);font-size:11.5px">' + esc(updated) + '</td>' +
       '<td style="padding:10px 12px;text-align:right;white-space:nowrap">' +
-        '<button class="btn btn-sm" onclick="openEditConsentPageModal(' + p.id + ')" style="margin-right:4px">Editar</button>' +
-        '<button class="btn btn-sm btn-ghost" onclick="deleteConsentPage(' + p.id + ',' + JSON.stringify(p.name).replace(/"/g, '&quot;') + ')" style="color:var(--err-text)">Apagar</button>' +
+        '<button class="btn btn-sm" onclick="openEditConsentPageModal(' + p.id + ')" style="margin-right:4px">Edit</button>' +
+        '<button class="btn btn-sm btn-ghost" onclick="deleteConsentPage(' + p.id + ',' + JSON.stringify(p.name).replace(/"/g, '&quot;') + ')" style="color:var(--err-text)">Delete</button>' +
       '</td>' +
       '</tr>';
   }).join('');
@@ -3246,7 +3473,7 @@ function renderConsentPagePreview() {
   const title = document.getElementById('consentPageTitle').value || '';
   const body = document.getElementById('consentPageBody').value || '';
   document.getElementById('consentPagePreviewTitle').textContent = title || ' ';
-  document.getElementById('consentPagePreviewBody').innerHTML = renderConsentMarkdownPreview(body) || '<span style="color:var(--text3)">A pré-visualização aparece aqui.</span>';
+  document.getElementById('consentPagePreviewBody').innerHTML = renderConsentMarkdownPreview(body) || '<span style="color:var(--text3)">Preview appears here.</span>';
 }
 
 function openCreateConsentPageModal() {
@@ -3254,21 +3481,21 @@ function openCreateConsentPageModal() {
   document.getElementById('consentPageName').value = '';
   document.getElementById('consentPageTitle').value = '';
   document.getElementById('consentPageBody').value = '';
-  document.getElementById('consentPageModalTitle').textContent = 'Nova página';
-  document.getElementById('consentPageSubmitBtn').textContent = 'Criar';
+  document.getElementById('consentPageModalTitle').textContent = 'New page';
+  document.getElementById('consentPageSubmitBtn').textContent = 'Create';
   renderConsentPagePreview();
   document.getElementById('consentPageModal').style.display = 'flex';
 }
 
 function openEditConsentPageModal(id) {
   const page = _consentPages.find(p => p.id === id);
-  if (!page) return toast('Página não encontrada', 'error');
+  if (!page) return toast('Page not found', 'error');
   _editingConsentPageId = id;
   document.getElementById('consentPageName').value = page.name || '';
   document.getElementById('consentPageTitle').value = page.title || '';
   document.getElementById('consentPageBody').value = page.body || '';
-  document.getElementById('consentPageModalTitle').textContent = 'Editar — ' + page.name;
-  document.getElementById('consentPageSubmitBtn').textContent = 'Guardar';
+  document.getElementById('consentPageModalTitle').textContent = 'Edit — ' + page.name;
+  document.getElementById('consentPageSubmitBtn').textContent = 'Save';
   renderConsentPagePreview();
   document.getElementById('consentPageModal').style.display = 'flex';
 }
@@ -3282,7 +3509,7 @@ async function submitConsentPage() {
   const name = document.getElementById('consentPageName').value.trim();
   const title = document.getElementById('consentPageTitle').value;
   const body = document.getElementById('consentPageBody').value;
-  if (!name) return toast('Nome obrigatório', 'error');
+  if (!name) return toast('Name is required', 'error');
   const payload = { name, title, body };
   try {
     const url = _editingConsentPageId
@@ -3291,25 +3518,25 @@ async function submitConsentPage() {
     const method = _editingConsentPageId ? 'PUT' : 'POST';
     const res = await api(url, { method, body: JSON.stringify(payload) });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) return toast(data.error || 'Falha a guardar', 'error');
-    toast(_editingConsentPageId ? 'Página actualizada' : 'Página criada');
+    if (!res.ok) return toast(data.error || 'Failed to save', 'error');
+    toast(_editingConsentPageId ? 'Page updated' : 'Page created');
     closeConsentPageModal();
     fetchConsentPages();
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function deleteConsentPage(id, name) {
-  if (!confirm('Apagar página "' + name + '"?')) return;
+  if (!confirm('Delete page "' + name + '"?')) return;
   try {
     const res = await api('/admin/consent-pages/' + id, { method: 'DELETE' });
     const data = await res.json().catch(() => ({}));
     if (res.status === 409 && Array.isArray(data.references)) {
       const list = data.references.map(r => '• [' + r.kind + '] ' + r.name).join('\n');
-      return toast('Em uso por:\n' + list, 'error');
+      return toast('In use by:\n' + list, 'error');
     }
-    if (!res.ok) return toast(data.error || 'Falha a apagar', 'error');
-    toast('Página apagada');
+    if (!res.ok) return toast(data.error || 'Failed to delete', 'error');
+    toast('Page deleted');
     fetchConsentPages();
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 

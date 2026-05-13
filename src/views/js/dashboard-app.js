@@ -267,10 +267,10 @@ const PAGE_TITLES = {
   webhooks: 'Webhooks',
   proxyusers: 'Users',
   oauthclients: 'OAuth Clients',
-  consentpages: 'Páginas de consentimento',
+  consentpages: 'Consent Pages',
   admins: 'Admins',
   ldap: 'LDAP',
-  ldapconflicts: 'Conflitos LDAP',
+  email: 'Email (SMTP)',
   audit: 'Audit Log'
 };
 
@@ -289,8 +289,8 @@ function navigate(page) {
   if (page === 'oauthclients') { fetchOauthClients(); }
   if (page === 'consentpages') { fetchConsentPages(); }
   if (page === 'admins') { fetchAdmins(); }
-  if (page === 'ldap') { fetchLdapConfigs(); }
-  if (page === 'ldapconflicts') { filterLdapAdoptions('pending'); }
+  if (page === 'ldap') { fetchLdapConfigs(); filterLdapAdoptions('pending'); }
+  if (page === 'email') { fetchSmtpConfig(); }
   if (page === 'audit') { fetchAuditLogs(true); }
   const titleEl = document.getElementById('topbarPageTitle');
   if (titleEl) titleEl.textContent = PAGE_TITLES[page] || page;
