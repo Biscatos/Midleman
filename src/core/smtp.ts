@@ -657,7 +657,7 @@ export function renderProxyInviteEmail(p: ProxyInviteEmailParams): { subject: st
     const resourceListText = formatNaturalList(resourceNames, name => `"${name}"`);
     const accessLine = hasResources
         ? (brandName
-            ? `You have been invited to access ${resourceListHtml} on <strong>${escHtml(brandName)}</strong>. Click the button below to set a username and password.`
+            ? `You have been invited to access ${resourceListHtml} on <strong>$System Access Services</strong>. Click the button below to set a username and password.`
             : `You have been invited to access ${resourceListHtml}. Click the button below to set a username and password.`)
         : (brandName
             ? `You have been invited to <strong>${escHtml(brandName)}</strong>. Click the button below to set a username and password.`
