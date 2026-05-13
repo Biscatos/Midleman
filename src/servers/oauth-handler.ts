@@ -20,6 +20,7 @@ import {
     signJwt, verifyJwt, userIdToUuid,
     upsertLdapShadowProxyUser, assignProxyUserToProfile, findLdapShadowProxyUser, logAudit,
     verifyCredentials, upsertAdminShadowProxyUser, upsertLdapShadowAdmin,
+    getAdminTotpSecret,
 } from '../auth/auth';
 import { tryLdapLogin } from '../auth/ldap';
 
@@ -129,8 +130,8 @@ setInterval(() => {
 // ─── Login challenges (between password step and TOTP step) ─────────────────
 
 interface LoginChallenge {
-    userId: number;
-    totpSecret: string;
+    userId: number;          // shadow proxy_users.id used to sign the eventual JWT
+    totpSecret: string;      // secret used to validate the code
     authRequestId: string;
     expiresAt: number;
 }
@@ -290,6 +291,9 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
     //    `proxy_users` with auth_source='admin_shadow' so the rest of the OAuth
     //    pipeline (codes, refresh tokens, SSO sessions) works unchanged.
     let cred: { user: import('../core/types').ProxyUser; totpSecret: string | null } | null = null;
+    /** When set, the authenticated user is an admin; TOTP is mandatory and the
+     *  secret is read/written against the original `users` row. */
+    let adminCtx: { adminId: number; via: 'local' | 'ldap' } | null = null;
     {
         // 0a) Local admin
         const adminLocal = await verifyCredentials(username, password);
@@ -314,6 +318,7 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
                 details: { via: 'local', shadowProxyId: shadow.id, clientId: authReq.clientId },
             });
             cred = { user: shadow, totpSecret: adminLocal.totpSecret || null };
+            adminCtx = { adminId: adminLocal.user.id, via: 'local' };
         }
 
         // 0b) LDAP admin (only if local admin didn't match)
@@ -347,9 +352,12 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
                         actorUsername: admin.username,
                         details: { via: 'ldap', directory: ldap.auth.configName, dn: ldap.auth.dn, shadowProxyId: shadow.id, clientId: authReq.clientId },
                     });
-                    // LDAP admin shadows enter the standard "no local TOTP secret" branch
-                    // below — same as LDAP proxy shadows.
-                    cred = { user: shadow, totpSecret: null };
+                    // Read the stored TOTP secret from the admin row so re-logins
+                    // skip setup. First-time logins will see an empty secret and
+                    // fall into the setup branch below.
+                    const adminTotpSecret = getAdminTotpSecret(admin.id);
+                    cred = { user: shadow, totpSecret: adminTotpSecret || null };
+                    adminCtx = { adminId: admin.id, via: 'ldap' };
                 }
                 // If admin was OK but upsertLdapShadowAdmin returned null (username
                 // collision with a local admin), fall through to proxy login.
@@ -436,6 +444,45 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
         });
     }
 
+    // Admin shadow → TOTP is mandatory, regardless of the shadow row's flags
+    // (which are never populated; the real state lives on `users`).
+    if (adminCtx) {
+        const newAuthRequestId = storeAuthRequest(authReq);
+        if (cred.totpSecret) {
+            // Re-login: admin already enrolled. Standard verification step.
+            const challengeToken = createOauthLoginChallenge(cred.user.id, cred.totpSecret, newAuthRequestId);
+            return new Response(JSON.stringify({ status: 'totp_required', challengeToken }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            });
+        }
+        // SECURITY: refuse first-time TOTP enrolment via OAuth.
+        //
+        // Rationale: if an attacker has compromised the AD password of an admin
+        // who never enrolled TOTP, OAuth-side enrolment would let them register
+        // their own authenticator — turning a single-factor breach into full
+        // admin access without ever touching the dashboard.
+        //
+        // Admins MUST enrol via the dashboard first (where the same restriction
+        // is acceptable because the dashboard is the source of trust for admin
+        // accounts). After that, OAuth re-logins work via the standard verify
+        // path above.
+        logAudit({
+            action: 'oauth.admin_totp_enrol_blocked',
+            actorUserId: adminCtx.adminId,
+            actorUsername: cred.user.username,
+            details: { via: adminCtx.via, clientId: authReq.clientId, reason: 'no_totp_yet' },
+        });
+        return new Response(JSON.stringify({
+            error: 'Two-factor authentication is required for admin sign-in. Open the Midleman dashboard once to set it up, then try again.',
+            auth_request: newAuthRequestId,
+        }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+        });
+    }
+
+    // Non-admin path (proxy users): preserve existing behaviour.
     if (cred.user.totpEnabled && cred.totpSecret) {
         const newAuthRequestId = storeAuthRequest(authReq);
         const challengeToken = createOauthLoginChallenge(cred.user.id, cred.totpSecret, newAuthRequestId);
@@ -472,7 +519,7 @@ export async function handleOauthTotp(req: Request): Promise<Response> {
     }
 
     if (!verifyTotp(challenge.totpSecret, totpCode)) {
-        // Re-issue challenge so user can retry the code
+        // Re-issue challenge so user can retry the code.
         const newAuthRequestId = storeAuthRequest(authReq);
         const newChallenge = createOauthLoginChallenge(challenge.userId, challenge.totpSecret, newAuthRequestId);
         return new Response(JSON.stringify({ error: 'Invalid authenticator code', challengeToken: newChallenge }), {

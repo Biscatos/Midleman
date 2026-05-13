@@ -838,6 +838,15 @@ export interface AdminShadowProvisionInput {
     email: string;
 }
 
+/** Given an admin-shadow proxy_users row, returns the original admin id (or null). */
+export function adminIdFromShadow(shadowProxy: ProxyUser): number | null {
+    if (shadowProxy.authSource !== 'admin_shadow') return null;
+    const ref = shadowProxy.ldapDn || '';
+    if (!ref.startsWith(ADMIN_SHADOW_REF_PREFIX)) return null;
+    const id = parseInt(ref.slice(ADMIN_SHADOW_REF_PREFIX.length), 10);
+    return Number.isFinite(id) ? id : null;
+}
+
 export function findAdminShadowProxyUser(adminId: number): ProxyUser | null {
     if (!db) return null;
     const ref = ADMIN_SHADOW_REF_PREFIX + adminId;

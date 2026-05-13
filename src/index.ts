@@ -382,7 +382,12 @@ const server = Bun.serve({
                 // 1) Local-first: try the local user table (also rejects shadow LDAP rows).
                 let cred = await verifyCredentials(username, password);
 
-                // 2) Fallback to LDAP if no local match and any admin-scoped directory exists.
+                // 2) Fallback to LDAP if no local match. We deliberately collapse
+                //    ALL failure modes (bad credentials, missing admin group, username
+                //    collision, LDAP server error) to the same generic 401 response
+                //    so that the caller cannot tell the difference. Details — incl.
+                //    the directory, dn, matched group, and any error reason — go to
+                //    the audit log only.
                 if (!cred) {
                     const ldap = await tryLdapLogin('admin', username, password);
                     if (ldap.ok) {
@@ -398,32 +403,27 @@ const server = Bun.serve({
                                 },
                                 ip: clientIp, userAgent: req.headers.get('user-agent'),
                             });
-                            return jsonRes(403, {
-                                error: 'LDAP user is not in an admin group for this directory.',
-                                hint: 'Check Audit Log for the exact group DNs returned by the directory — copy them into the directory\'s "Grupos de admin" list.',
-                                userGroups: ldap.auth.groups,
+                            // Do NOT confirm to the caller that the password was correct.
+                        } else {
+                            const shadow = upsertLdapShadowAdmin({
+                                ldapConfigId: ldap.auth.configId,
+                                ldapDn: ldap.auth.dn,
+                                username: ldap.auth.username,
+                                fullName: ldap.auth.fullName,
+                                email: ldap.auth.email,
                             });
+                            if (!shadow) {
+                                logAudit({ action: 'admin.login.failed', actorUsername: username, details: { reason: 'ldap_username_collision', dn: ldap.auth.dn }, ip: clientIp, userAgent: req.headers.get('user-agent') });
+                                // Same 401 below — admins resolve collision via audit + manual cleanup.
+                            } else {
+                                logAudit({ action: 'ldap.login.success', actorUserId: shadow.id, actorUsername: shadow.username, details: { directory: ldap.auth.configName, role: 'admin', dn: ldap.auth.dn, matchedGroup: ldap.matchedAdminGroup }, ip: clientIp, userAgent: req.headers.get('user-agent') });
+                                // Pull the stored TOTP secret so subsequent logins skip the setup flow.
+                                cred = { user: shadow, totpSecret: getAdminTotpSecret(shadow.id) };
+                            }
                         }
-                        const shadow = upsertLdapShadowAdmin({
-                            ldapConfigId: ldap.auth.configId,
-                            ldapDn: ldap.auth.dn,
-                            username: ldap.auth.username,
-                            fullName: ldap.auth.fullName,
-                            email: ldap.auth.email,
-                        });
-                        if (!shadow) {
-                            logAudit({ action: 'admin.login.failed', actorUsername: username, details: { reason: 'ldap_username_collision', dn: ldap.auth.dn }, ip: clientIp, userAgent: req.headers.get('user-agent') });
-                            return jsonRes(409, { error: 'A local admin already uses this username. Ask an admin to rename or remove it.' });
-                        }
-                        logAudit({ action: 'ldap.login.success', actorUserId: shadow.id, actorUsername: shadow.username, details: { directory: ldap.auth.configName, role: 'admin', dn: ldap.auth.dn, matchedGroup: ldap.matchedAdminGroup }, ip: clientIp, userAgent: req.headers.get('user-agent') });
-                        // Pull the stored TOTP secret so subsequent logins skip the setup flow.
-                        // First-time LDAP login: totpEnabled=false, secret empty → setup branch below kicks in.
-                        // Subsequent logins: totpEnabled=true, secret populated → normal TOTP challenge.
-                        cred = { user: shadow, totpSecret: getAdminTotpSecret(shadow.id) };
                     } else if (ldap.reason === 'server_error') {
                         logAudit({ action: 'admin.login.failed', actorUsername: username, details: { reason: 'ldap_server_error', detail: ldap.detail }, ip: clientIp, userAgent: req.headers.get('user-agent') });
-                        // Surface the LDAP-side reason (admin-only audience here, so it's fine).
-                        return jsonRes(502, { error: 'LDAP error: ' + (ldap.detail || 'unknown'), hint: 'Check the directory config in Dashboard → LDAP and run "Testar ligação".' });
+                        // Same 401 below — error detail stays in audit only.
                     }
                     // invalid_credentials | no_directory → fall through to generic failure below
                 }
