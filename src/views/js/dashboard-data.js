@@ -510,24 +510,27 @@ function renderProxyUsers(users) {
       : '<span style="color:var(--text3)">Off</span>';
     const profiles = (u.profiles || []).map(p => `<span style="background:var(--surface2);padding:1px 6px;border-radius:3px;font-size:11px;font-family:monospace">${esc(p)}</span>`).join(' ');
     const ldapTag = u.authSource === 'ldap' ? ' <span class="badge-ldap" title="Conta sincronizada de LDAP">LDAP</span>' : '';
+    const adminTag = u.authSource === 'admin_shadow' ? ' <span class="badge-admin-shadow" title="Espelho automático de um administrador — não editar diretamente">ADMIN</span>' : '';
     const nameCell = u.fullName
-      ? `<div style="font-weight:600;color:var(--text)">${esc(u.fullName)}${ldapTag}</div><div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`
-      : `<div style="font-weight:600;color:var(--text)">${esc(u.username)}${ldapTag}</div>`;
+      ? `<div style="font-weight:600;color:var(--text)">${esc(u.fullName)}${ldapTag}${adminTag}</div><div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`
+      : `<div style="font-weight:600;color:var(--text)">${esc(u.username)}${ldapTag}${adminTag}</div>`;
     const emailCell = u.email
       ? `<div style="font-size:12px;color:var(--text2)">${esc(u.email)}</div><div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`
       : `<div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`;
+    const isShadow = u.authSource === 'admin_shadow';
+    const actionsCell = isShadow
+      ? `<span style="color:var(--text3);font-size:11px" title="Esta linha é um espelho automático da conta de administrador — gerir em Admins">—</span>`
+      : `<button onclick="openEditProxyUserModal(${u.id})" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Editar">Editar</button>
+         <button onclick="openUserProfilesModal(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Gerir proxies">Proxies</button>
+         ${u.totpEnabled ? `<button onclick="reset2fa(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--orange);font-size:11px;margin-right:4px" title="Reset 2FA">Reset 2FA</button>` : ''}
+         <button onclick="deleteProxyUserAction(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px" title="Eliminar">Eliminar</button>`;
     return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
       <td style="padding:8px 12px">${nameCell}</td>
       <td style="padding:8px">${emailCell}</td>
       <td style="padding:8px">${twoFa}</td>
       <td style="padding:8px">${profiles || '<span style="color:var(--text3)">—</span>'}</td>
       <td style="padding:8px;color:var(--text3);font-size:12px">${u.createdAt ? new Date(u.createdAt).toLocaleDateString('pt-PT') : '-'}</td>
-      <td style="padding:8px 12px;text-align:right;white-space:nowrap">
-        <button onclick="openEditProxyUserModal(${u.id})" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Editar">Editar</button>
-        <button onclick="openUserProfilesModal(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Gerir proxies">Proxies</button>
-        ${u.totpEnabled ? `<button onclick="reset2fa(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--orange);font-size:11px;margin-right:4px" title="Reset 2FA">Reset 2FA</button>` : ''}
-        <button onclick="deleteProxyUserAction(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px" title="Eliminar">Eliminar</button>
-      </td>
+      <td style="padding:8px 12px;text-align:right;white-space:nowrap">${actionsCell}</td>
     </tr>`;
   }).join('');
 }

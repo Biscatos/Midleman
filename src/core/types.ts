@@ -165,7 +165,7 @@ export interface ProxyUser {
   email: string;
   totpEnabled: boolean;
   createdAt: string;
-  authSource?: 'local' | 'ldap';
+  authSource?: 'local' | 'ldap' | 'admin_shadow';
   ldapConfigId?: number | null;
   ldapDn?: string | null;
   ldapOrphan?: boolean;

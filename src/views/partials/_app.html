@@ -724,42 +724,56 @@
         <p>Histórico de ações administrativas — quem fez o quê, quando, e de onde.</p>
       </div>
 
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
-          <div style="flex:1;min-width:140px">
-            <label class="form-label">Actor</label>
-            <input type="text" id="auditFilterActor" class="form-input" placeholder="username">
+      <div class="card audit-filters" style="margin-bottom:16px">
+        <div class="card-body">
+          <div class="audit-filter-grid">
+            <div class="form-group">
+              <label for="auditFilterActor">Actor</label>
+              <input type="text" id="auditFilterActor" placeholder="username">
+            </div>
+            <div class="form-group">
+              <label for="auditFilterAction">Action</label>
+              <select id="auditFilterAction">
+                <option value="">All</option>
+                <option value="admin.login">admin.login</option>
+                <option value="admin.login.failed">admin.login.failed</option>
+                <option value="admin.logout">admin.logout</option>
+                <option value="admin.create">admin.create</option>
+                <option value="admin.delete">admin.delete</option>
+                <option value="admin.password_reset">admin.password_reset</option>
+                <option value="ldap.login.success">ldap.login.success</option>
+                <option value="ldap.access.revoked">ldap.access.revoked</option>
+                <option value="ldap.user.orphaned">ldap.user.orphaned</option>
+                <option value="ldap.sync.forced">ldap.sync.forced</option>
+                <option value="ldap.config.create">ldap.config.create</option>
+                <option value="ldap.config.update">ldap.config.update</option>
+                <option value="ldap.config.delete">ldap.config.delete</option>
+                <option value="ldap.config.test">ldap.config.test</option>
+                <option value="profile.create">profile.create</option>
+                <option value="profile.update">profile.update</option>
+                <option value="profile.delete">profile.delete</option>
+                <option value="proxy_user.create">proxy_user.create</option>
+                <option value="proxy_user.delete">proxy_user.delete</option>
+                <option value="oauth_client.create">oauth_client.create</option>
+                <option value="oauth_client.delete">oauth_client.delete</option>
+                <option value="oauth_client.user.add">oauth_client.user.add</option>
+                <option value="oauth_client.user.remove">oauth_client.user.remove</option>
+                <option value="oauth_client.ldap_group.add">oauth_client.ldap_group.add</option>
+                <option value="oauth_client.ldap_group.remove">oauth_client.ldap_group.remove</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="auditFilterFrom">From</label>
+              <input type="date" id="auditFilterFrom">
+            </div>
+            <div class="form-group">
+              <label for="auditFilterTo">To</label>
+              <input type="date" id="auditFilterTo">
+            </div>
           </div>
-          <div style="flex:1;min-width:140px">
-            <label class="form-label">Action</label>
-            <select id="auditFilterAction" class="form-input">
-              <option value="">All</option>
-              <option value="admin.login">admin.login</option>
-              <option value="admin.login.failed">admin.login.failed</option>
-              <option value="admin.logout">admin.logout</option>
-              <option value="admin.create">admin.create</option>
-              <option value="admin.delete">admin.delete</option>
-              <option value="admin.password_reset">admin.password_reset</option>
-              <option value="profile.create">profile.create</option>
-              <option value="profile.update">profile.update</option>
-              <option value="profile.delete">profile.delete</option>
-              <option value="proxy_user.create">proxy_user.create</option>
-              <option value="proxy_user.delete">proxy_user.delete</option>
-              <option value="oauth_client.create">oauth_client.create</option>
-              <option value="oauth_client.delete">oauth_client.delete</option>
-            </select>
-          </div>
-          <div style="flex:1;min-width:140px">
-            <label class="form-label">From</label>
-            <input type="date" id="auditFilterFrom" class="form-input">
-          </div>
-          <div style="flex:1;min-width:140px">
-            <label class="form-label">To</label>
-            <input type="date" id="auditFilterTo" class="form-input">
-          </div>
-          <div style="display:flex;gap:6px">
-            <button class="btn btn-primary btn-sm" onclick="fetchAuditLogs(true)">Aplicar</button>
-            <button class="btn btn-ghost btn-sm" onclick="resetAuditFilters()">Limpar</button>
+          <div class="audit-filter-actions">
+            <button class="btn" onclick="resetAuditFilters()">Limpar</button>
+            <button class="btn btn-primary" onclick="fetchAuditLogs(true)">Aplicar</button>
           </div>
         </div>
       </div>

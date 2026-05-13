@@ -19,6 +19,7 @@ import {
     verifyProxyUserCredentials, verifyTotp, getProxyUser, getJwtMaxAge,
     signJwt, verifyJwt, userIdToUuid,
     upsertLdapShadowProxyUser, assignProxyUserToProfile, findLdapShadowProxyUser, logAudit,
+    verifyCredentials, upsertAdminShadowProxyUser, upsertLdapShadowAdmin,
 } from '../auth/auth';
 import { tryLdapLogin } from '../auth/ldap';
 
@@ -284,8 +285,82 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
         return jsonError(400, 'invalid_request', 'Login session expired. Restart the sign-in flow.');
     }
 
-    // 1) Local-first
-    let cred = await verifyProxyUserCredentials(username, password);
+    // 0) Admin-first: dashboard admins (local OR LDAP) can authenticate against
+    //    OAuth apps using their dashboard credentials. We mirror them into
+    //    `proxy_users` with auth_source='admin_shadow' so the rest of the OAuth
+    //    pipeline (codes, refresh tokens, SSO sessions) works unchanged.
+    let cred: { user: import('../core/types').ProxyUser; totpSecret: string | null } | null = null;
+    {
+        // 0a) Local admin
+        const adminLocal = await verifyCredentials(username, password);
+        if (adminLocal) {
+            const shadow = upsertAdminShadowProxyUser({
+                adminId: adminLocal.user.id,
+                username: adminLocal.user.username,
+                fullName: adminLocal.user.fullName || '',
+                email: adminLocal.user.email || '',
+            });
+            if (!shadow) {
+                const newId = storeAuthRequest(authReq);
+                return new Response(JSON.stringify({
+                    error: 'A proxy user with the same username already exists. Ask an admin to rename one of them.',
+                    auth_request: newId,
+                }), { status: 409, headers: { 'Content-Type': 'application/json' } });
+            }
+            logAudit({
+                action: 'oauth.admin_login',
+                actorUserId: adminLocal.user.id,
+                actorUsername: adminLocal.user.username,
+                details: { via: 'local', shadowProxyId: shadow.id, clientId: authReq.clientId },
+            });
+            cred = { user: shadow, totpSecret: adminLocal.totpSecret || null };
+        }
+
+        // 0b) LDAP admin (only if local admin didn't match)
+        if (!cred) {
+            const ldap = await tryLdapLogin('admin', username, password);
+            if (ldap.ok && ldap.role === 'admin') {
+                const admin = upsertLdapShadowAdmin({
+                    ldapConfigId: ldap.auth.configId,
+                    ldapDn: ldap.auth.dn,
+                    username: ldap.auth.username,
+                    fullName: ldap.auth.fullName,
+                    email: ldap.auth.email,
+                });
+                if (admin) {
+                    const shadow = upsertAdminShadowProxyUser({
+                        adminId: admin.id,
+                        username: admin.username,
+                        fullName: admin.fullName || '',
+                        email: admin.email || '',
+                    });
+                    if (!shadow) {
+                        const newId = storeAuthRequest(authReq);
+                        return new Response(JSON.stringify({
+                            error: 'A proxy user with the same username already exists. Ask an admin to rename one of them.',
+                            auth_request: newId,
+                        }), { status: 409, headers: { 'Content-Type': 'application/json' } });
+                    }
+                    logAudit({
+                        action: 'oauth.admin_login',
+                        actorUserId: admin.id,
+                        actorUsername: admin.username,
+                        details: { via: 'ldap', directory: ldap.auth.configName, dn: ldap.auth.dn, shadowProxyId: shadow.id, clientId: authReq.clientId },
+                    });
+                    // LDAP admin shadows enter the standard "no local TOTP secret" branch
+                    // below — same as LDAP proxy shadows.
+                    cred = { user: shadow, totpSecret: null };
+                }
+                // If admin was OK but upsertLdapShadowAdmin returned null (username
+                // collision with a local admin), fall through to proxy login.
+            }
+            // ldap.role === 'denied' (LDAP user without admin group) → also falls
+            // through; user might be a normal proxy user.
+        }
+    }
+
+    // 1) Proxy user local
+    if (!cred) cred = await verifyProxyUserCredentials(username, password);
 
     // 2) Fallback to LDAP if no local match
     if (!cred) {

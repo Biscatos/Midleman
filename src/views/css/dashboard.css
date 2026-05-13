@@ -356,7 +356,20 @@ body.sidebar-collapsed .sidebar-user-info {
   opacity: 0; max-width: 0; pointer-events: none;
 }
 body.sidebar-collapsed .sidebar-section-label {
-  opacity: 0; max-height: 0; padding: 0; pointer-events: none;
+  /* Hide the text but keep the slot as a small visual gap between sections. */
+  font-size: 0;
+  color: transparent;
+  margin: 8px 14px 6px;
+  padding: 0;
+  border-top: 1px solid var(--border);
+  pointer-events: none;
+  height: 1px;
+  max-height: 1px;
+  overflow: hidden;
+}
+/* First section label has nothing above it — no separator needed. */
+body.sidebar-collapsed .sidebar-section-label:first-of-type {
+  display: none;
 }
 body.sidebar-collapsed .sidebar-status { display: none; }
 body.sidebar-collapsed .sidebar-link { justify-content: center; padding: 8px; gap: 0; }
@@ -364,9 +377,32 @@ body.sidebar-collapsed .sidebar-link svg { opacity: 0.65; }
 body.sidebar-collapsed .sidebar-link:hover svg,
 body.sidebar-collapsed .sidebar-link.active svg { opacity: 1; }
 body.sidebar-collapsed .sidebar-collapse-btn svg { transform: rotate(180deg); }
-body.sidebar-collapsed .sidebar-brand { justify-content: center; padding: 14px 8px; }
-body.sidebar-collapsed .sidebar-footer { align-items: center; }
-body.sidebar-collapsed .sidebar-user { justify-content: center; gap: 0; }
+/* Stack the brand logo and the collapse toggle vertically so each sits centered
+   in the 60px-wide rail. */
+body.sidebar-collapsed .sidebar-header {
+  flex-direction: column;
+  padding: 12px 0 10px;
+  gap: 8px;
+}
+body.sidebar-collapsed .sidebar-brand {
+  flex: 0 0 auto;
+  width: 100%;
+  justify-content: center;
+  padding: 0;
+}
+body.sidebar-collapsed .sidebar-collapse-btn {
+  margin: 0;
+}
+body.sidebar-collapsed .sidebar-footer {
+  align-items: center;
+  padding: 10px 0;
+}
+body.sidebar-collapsed .sidebar-user {
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  width: 100%;
+}
 
 body.sidebar-collapsed .sidebar-link[data-tooltip]::after {
   content: attr(data-tooltip);
@@ -879,12 +915,49 @@ body.sidebar-collapsed .sidebar-link:hover[data-tooltip]::after { opacity: 1; }
   cursor: not-allowed;
 }
 
+/* ─── Audit log filter bar ────────────────────────────────────────────────── */
+.audit-filter-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1.6fr 1fr 1fr;
+  gap: 14px;
+}
+.audit-filter-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+@media (max-width: 900px) {
+  .audit-filter-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 540px) {
+  .audit-filter-grid { grid-template-columns: 1fr; }
+  .audit-filter-actions { justify-content: stretch; }
+  .audit-filter-actions .btn { flex: 1; }
+}
+
 /* ─── LDAP badge (used in admin/proxy user tables) ────────────────────────── */
 .badge-ldap {
   display: inline-block;
   background: rgba(99, 102, 241, 0.12);
   color: #6366f1;
   border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  margin-left: 6px;
+  vertical-align: middle;
+  font-family: inherit;
+}
+.badge-admin-shadow {
+  display: inline-block;
+  background: rgba(234, 88, 12, 0.12);
+  color: #ea580c;
+  border: 1px solid rgba(234, 88, 12, 0.3);
   border-radius: 4px;
   padding: 1px 6px;
   font-size: 10px;

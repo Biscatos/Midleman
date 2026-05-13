@@ -277,6 +277,9 @@ export async function createAdditionalAdmin(
 export function deleteAdmin(id: number): { deleted: boolean; reason?: string } {
     if (!db) return { deleted: false, reason: 'Auth not initialized' };
     if (countAdmins() <= 1) return { deleted: false, reason: 'Cannot delete the last admin' };
+    // Drop any admin-shadow proxy row first so OAuth tokens get cleaned up via cascade.
+    db.prepare("DELETE FROM proxy_users WHERE auth_source = 'admin_shadow' AND ldap_dn = $ref")
+        .run({ $ref: ADMIN_SHADOW_REF_PREFIX + id });
     const result = db.prepare('DELETE FROM users WHERE id = $id').run({ $id: id });
     if (result.changes === 0) return { deleted: false, reason: 'Admin not found' };
     return { deleted: true };
@@ -625,7 +628,7 @@ function rowToProxyUser(r: any): ProxyUser {
         email: r.email || '',
         totpEnabled: !!r.totp_enabled,
         createdAt: r.created_at,
-        authSource: (r.auth_source || 'local') as 'local' | 'ldap',
+        authSource: (r.auth_source || 'local') as 'local' | 'ldap' | 'admin_shadow',
         ldapConfigId: r.ldap_config_id ?? null,
         ldapDn: r.ldap_dn ?? null,
         ldapOrphan: !!r.ldap_orphan,
@@ -655,6 +658,10 @@ export function getProxyUser(id: number): ProxyUser | null {
 
 export function deleteProxyUser(id: number): boolean {
     if (!db) return false;
+    // Refuse to delete admin shadow rows — they are recreated on next login
+    // and the admin should be managed via the Admins page.
+    const row = db.prepare("SELECT auth_source FROM proxy_users WHERE id = $id").get({ $id: id }) as any;
+    if (row?.auth_source === 'admin_shadow') return false;
     const result = db.prepare('DELETE FROM proxy_users WHERE id = $id').run({ $id: id });
     return result.changes > 0;
 }
@@ -662,7 +669,7 @@ export function deleteProxyUser(id: number): boolean {
 export async function updateProxyUserPassword(id: number, newPassword: string): Promise<boolean> {
     if (!db) return false;
     const row = db.prepare("SELECT auth_source FROM proxy_users WHERE id = $id").get({ $id: id }) as any;
-    if (row?.auth_source === 'ldap') return false;
+    if (row?.auth_source === 'ldap' || row?.auth_source === 'admin_shadow') return false;
     const hash = await Bun.password.hash(newPassword, 'bcrypt');
     const result = db.prepare("UPDATE proxy_users SET password = $p, updated_at = datetime('now') WHERE id = $id")
         .run({ $p: hash, $id: id });
@@ -685,6 +692,9 @@ export function findProxyUserByEmailOrUsername(email: string, username: string):
 
 export function updateProxyUserInfo(id: number, fullName: string, email: string): boolean {
     if (!db) return false;
+    // Shadow rows are synced from their source (admin or LDAP) at login time.
+    const row = db.prepare("SELECT auth_source FROM proxy_users WHERE id = $id").get({ $id: id }) as any;
+    if (row?.auth_source === 'admin_shadow' || row?.auth_source === 'ldap') return false;
     const result = db.prepare("UPDATE proxy_users SET full_name = $fn, email = $em, updated_at = datetime('now') WHERE id = $id")
         .run({ $fn: fullName.trim(), $em: email.trim().toLowerCase(), $id: id });
     return result.changes > 0;
@@ -809,6 +819,63 @@ export function upsertLdapShadowProxyUser(input: LdapProxyProvisionInput): Proxy
         });
     const row = db.prepare(`SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at
         FROM proxy_users WHERE username = $u`).get({ $u: input.username }) as any;
+    return row ? rowToProxyUser(row) : null;
+}
+
+// ─── Admin shadow proxy users (for OAuth login as admin) ────────────────────
+// Admins live in `users`, but OAuth refresh tokens / codes / SSO sessions all
+// reference `proxy_users(id)`. To let an admin authenticate against OAuth apps,
+// we mirror them into `proxy_users` with auth_source='admin_shadow' and stash
+// the original admin id in `ldap_dn` (re-purposed as a generic external-ref
+// slot — saves a schema migration).
+
+const ADMIN_SHADOW_REF_PREFIX = 'admin:';
+
+export interface AdminShadowProvisionInput {
+    adminId: number;
+    username: string;
+    fullName: string;
+    email: string;
+}
+
+export function findAdminShadowProxyUser(adminId: number): ProxyUser | null {
+    if (!db) return null;
+    const ref = ADMIN_SHADOW_REF_PREFIX + adminId;
+    const row = db.prepare(`SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at
+        FROM proxy_users WHERE auth_source = 'admin_shadow' AND ldap_dn = $ref`)
+        .get({ $ref: ref }) as any;
+    return row ? rowToProxyUser(row) : null;
+}
+
+/** Create or refresh an admin shadow row. Returns null on username collision with
+ *  a non-admin-shadow proxy_users row (admin still wins for *new* logins, but we
+ *  can't silently overwrite an existing user). */
+export function upsertAdminShadowProxyUser(input: AdminShadowProvisionInput): ProxyUser | null {
+    if (!db) return null;
+    const ref = ADMIN_SHADOW_REF_PREFIX + input.adminId;
+    const existing = findAdminShadowProxyUser(input.adminId);
+    if (existing) {
+        db.prepare(`UPDATE proxy_users
+            SET full_name = $fn, email = $em, username = $u, updated_at = datetime('now')
+            WHERE id = $id`)
+            .run({ $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(), $u: input.username, $id: existing.id });
+        return getProxyUser(existing.id);
+    }
+    // Username collision with a non-shadow proxy_user → refuse. Admin
+    // identity protection: we don't override an existing real proxy user.
+    const collision = db.prepare(`SELECT id, auth_source FROM proxy_users WHERE username = $u`).get({ $u: input.username }) as any;
+    if (collision) return null;
+    db.prepare(`INSERT INTO proxy_users
+        (username, full_name, email, password, totp_secret, totp_enabled,
+         auth_source, ldap_config_id, ldap_dn, ldap_groups_last_seen)
+        VALUES ($u, $fn, $em, '', NULL, 0, 'admin_shadow', NULL, $ref, '[]')`)
+        .run({
+            $u: input.username, $fn: input.fullName.trim(), $em: input.email.trim().toLowerCase(),
+            $ref: ref,
+        });
+    const row = db.prepare(`SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at
+        FROM proxy_users WHERE auth_source = 'admin_shadow' AND ldap_dn = $ref`)
+        .get({ $ref: ref }) as any;
     return row ? rowToProxyUser(row) : null;
 }
 
