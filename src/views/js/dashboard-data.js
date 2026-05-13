@@ -571,81 +571,9 @@ function renderProxyUsers(users) {
   }).join('');
 }
 
-async function openNewProxyUserModal() {
-  document.getElementById('npuFullName').value = '';
-  document.getElementById('npuEmail').value = '';
-  document.getElementById('npuUsername').value = '';
-  document.getElementById('npuPassword').value = '';
-  document.getElementById('npuIsAdmin').checked = false;
-  document.getElementById('npuIsAdminGroup').style.display = '';
-  document.getElementById('npuError').style.display = 'none';
-  document.getElementById('newProxyUserModal').classList.add('active');
-  // Build profile checkboxes — fetch fresh
-  const container = document.getElementById('npuProfileChecks');
-  container.innerHTML = '<span style="font-size:12px;color:var(--text3)">Loading...</span>';
-  try {
-    const res = await api('/admin/profiles');
-    const profiles = res.ok ? ((await res.json()).profiles || []) : _allProfiles;
-    const loginProfiles = profiles.filter(p => (p.authMode || 'none') === 'login');
-    if (loginProfiles.length === 0) {
-      container.innerHTML = '<span style="font-size:12px;color:var(--text3)">No proxies with login auth mode. Create one first.</span>';
-    } else {
-      container.innerHTML = loginProfiles.map(p =>
-        `<label style="display:flex;align-items:center;gap:6px;padding:3px 0;cursor:pointer;font-size:13px"><input type="checkbox" value="${esc(p.name)}" style="accent-color:var(--accent)"> ${esc(p.name)}</label>`
-      ).join('');
-    }
-  } catch {
-    container.innerHTML = '<span style="font-size:12px;color:var(--red)">Failed to load proxies.</span>';
-  }
-}
 function closeNewProxyUserModal() {
   document.getElementById('newProxyUserModal').classList.remove('active');
   _editUserId = null;
-  // Reset modal to "create" state
-  document.querySelector('#newProxyUserModal .modal-header h3').textContent = 'New User';
-  document.querySelector('#newProxyUserModal .modal-footer button[type="submit"]').textContent = 'Create User';
-  document.getElementById('npuProfileChecks').closest('.form-group').style.display = '';
-  document.getElementById('npuIsAdminGroup').style.display = '';
-  document.getElementById('npuIsAdmin').checked = false;
-  document.getElementById('npuUsername').readOnly = false;
-  document.getElementById('npuUsername').style.opacity = '';
-}
-
-async function saveNewProxyUser() {
-  const errEl = document.getElementById('npuError');
-  errEl.style.display = 'none';
-  const fullName = document.getElementById('npuFullName').value.trim();
-  const email = document.getElementById('npuEmail').value.trim();
-  const username = document.getElementById('npuUsername').value.trim();
-  const password = document.getElementById('npuPassword').value;
-  const isAdmin = document.getElementById('npuIsAdmin').checked;
-  if (!username || username.length < 2) { errEl.textContent = 'Username must be at least 2 characters.'; errEl.style.display = 'block'; return; }
-  if (!password || password.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; errEl.style.display = 'block'; return; }
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = 'Invalid email.'; errEl.style.display = 'block'; return; }
-  const profiles = [...document.querySelectorAll('#npuProfileChecks input:checked')].map(c => c.value);
-  try {
-    const res = await api('/admin/proxy-users', {
-      method: 'POST', body: JSON.stringify({ fullName, email, username, password, profiles }),
-    });
-    const data = await res.json();
-    if (!res.ok) { errEl.textContent = data.error || 'Error'; errEl.style.display = 'block'; return; }
-    // Promote to admin in a follow-up PUT (create doesn't accept isAdmin).
-    if (isAdmin && data.user?.id) {
-      const promoteRes = await api('/admin/proxy-users/' + data.user.id, {
-        method: 'PUT', body: JSON.stringify({ isAdmin: true }),
-      });
-      if (!promoteRes.ok) {
-        const pd = await promoteRes.json().catch(() => ({}));
-        toast('User created, but failed to promote: ' + (pd.error || 'unknown'), 'error');
-        closeNewProxyUserModal();
-        fetchProxyUsers();
-        return;
-      }
-    }
-    toast('User "' + username + '" created' + (isAdmin ? ' (admin)' : ''));
-    closeNewProxyUserModal();
-    fetchProxyUsers();
-  } catch (e) { errEl.textContent = 'Error: ' + e.message; errEl.style.display = 'block'; }
 }
 
 // ─── Edit Proxy User Modal ────────────────────────────────────────────────────
@@ -655,25 +583,21 @@ async function openEditProxyUserModal(id) {
   _editUserId = id;
   const user = _allProxyUsers.find(u => u.id === id);
   if (!user) return;
-  // Reuse newProxyUserModal but repurpose it for editing
   document.getElementById('npuFullName').value = user.fullName || '';
   document.getElementById('npuEmail').value = user.email || '';
   document.getElementById('npuUsername').value = user.username;
   document.getElementById('npuPassword').value = '';
+  document.getElementById('npuPassword').placeholder = 'Leave blank to keep current password';
   document.getElementById('npuIsAdmin').checked = !!user.isAdmin;
-  // Hide the admin toggle when editing yourself — the backend refuses
-  // self-demote anyway, and the checkbox would be misleading.
+  // Hide the admin toggle when editing yourself — backend refuses self-demote.
   const isSelf = user.id === _currentUserId;
   document.getElementById('npuIsAdminGroup').style.display = isSelf ? 'none' : '';
   document.getElementById('npuError').style.display = 'none';
-  // Change modal title and footer
-  document.querySelector('#newProxyUserModal .modal-header h3').textContent = 'Edit User';
-  document.querySelector('#newProxyUserModal .modal-footer button[type="submit"]').textContent = 'Save';
-  document.getElementById('newProxyUserModal').classList.add('active');
-  // Hide profile checkboxes section for edit (managed separately)
+  // Profile assignment is managed elsewhere — hide the section.
   document.getElementById('npuProfileChecks').closest('.form-group').style.display = 'none';
   document.getElementById('npuUsername').readOnly = true;
   document.getElementById('npuUsername').style.opacity = '0.5';
+  document.getElementById('newProxyUserModal').classList.add('active');
 }
 
 async function saveEditProxyUser() {
@@ -1175,49 +1099,88 @@ async function fetchInvites() {
 function renderInvites(invites) {
   const tbody = document.getElementById('inviteListBody');
   if (!tbody) return;
-  if (invites.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" style="padding:30px;text-align:center;color:var(--text3)">No invites yet. Click "Invite" to generate a link.</td></tr>';
+  const card = document.getElementById('invitesCard');
+  const now = new Date();
+  const active = invites.filter(i => !i.usedAt && new Date(i.expiresAt) > now);
+  if (active.length === 0) {
+    if (card) card.style.display = 'none';
+    tbody.innerHTML = '';
     return;
   }
-  const now = new Date();
+  if (card) card.style.display = '';
+  invites = active;
   tbody.innerHTML = invites.map(inv => {
     const expires = new Date(inv.expiresAt);
-    const expired = expires < now;
-    const used = !!inv.usedAt;
-    let badge;
-    if (used) {
-      badge = `<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">Usado por ${esc(inv.usedBy)}</span>`;
-    } else if (expired) {
-      badge = '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">Expirado</span>';
-    } else {
-      badge = '<span style="background:var(--accent-bg);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">Active</span>';
-    }
-    const profileTagsArr = (inv.profileNames && inv.profileNames.length ? inv.profileNames : (inv.profileName ? [inv.profileName] : []))
-      .map(p => `<span style="background:var(--surface2);padding:1px 6px;border-radius:3px;font-size:11px;font-family:monospace">${esc(p)}</span>`);
-    const oauthTagsArr = (inv.oauthClientIds || [])
-      .map(c => `<span style="background:var(--accent-bg);color:var(--accent);padding:1px 6px;border-radius:3px;font-size:11px;font-family:monospace">oauth:${esc(c)}</span>`);
-    const allTags = [...profileTagsArr, ...oauthTagsArr];
-    const profileTags = allTags.length
-      ? `<div style="display:flex;flex-wrap:wrap;gap:3px">${allTags.join('')}</div>`
+    const expiresAbs = expires.toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+    const expiresRel = _relativeFuture(expires, now);
+    const created = inv.createdAt ? new Date(inv.createdAt) : null;
+    const createdRel = created ? _relativePast(created, now) : '—';
+    const createdAbs = created ? created.toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+
+    const profileNames = inv.profileNames && inv.profileNames.length ? inv.profileNames : (inv.profileName ? [inv.profileName] : []);
+    const oauthIds = inv.oauthClientIds || [];
+    const proxyChips = profileNames.map(p =>
+      `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--surface2);border:1px solid var(--border);padding:1px 7px;border-radius:10px;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text)">
+         <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+         ${esc(p)}
+       </span>`).join('');
+    const oauthChips = oauthIds.map(c =>
+      `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--accent-bg);border:1px solid rgba(0,120,212,0.3);color:var(--accent);padding:1px 7px;border-radius:10px;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
+         <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+         ${esc(c)}
+       </span>`).join('');
+    const resources = (profileNames.length + oauthIds.length) > 0
+      ? `<div style="display:flex;flex-wrap:wrap;gap:4px">${proxyChips}${oauthChips}</div>`
       : '<span style="color:var(--text3)">—</span>';
-    const expiresStr = expires.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
-    const copyBtn = (!used && !expired)
-      ? `<button onclick="copyTokenLink('${esc(inv.token)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Copy link">Copy</button>`
-      : '';
-    const revokeBtn = (!used)
-      ? `<button onclick="revokeInvite('${esc(inv.token)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px" title="Revogar">Revogar</button>`
-      : '';
+
     const nameEmail = inv.invitedName
-      ? `<div style="font-weight:600;font-size:13px;color:var(--text)">${esc(inv.invitedName)}</div><div style="font-size:11px;color:var(--text3)">${esc(inv.email)}</div>`
+      ? `<div style="font-weight:600;font-size:13px;color:var(--text)">${esc(inv.invitedName)}</div><div style="font-size:11px;color:var(--text3)">${esc(inv.email || '—')}</div>`
       : `<div style="font-size:13px;color:var(--text2)">${esc(inv.email) || '<span style="color:var(--text3)">—</span>'}</div>`;
+
+    const copyBtn = `<button onclick="copyTokenLink('${esc(inv.token)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Copy invite link">Copy</button>`;
+    const resendBtn = inv.email
+      ? `<button onclick="resendInviteFromList('${esc(inv.token)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--accent);font-size:11px;margin-right:4px" title="Resend invite by email">Email</button>`
+      : '';
+    const revokeBtn = `<button onclick="revokeInvite('${esc(inv.token)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px" title="Revoke">Revoke</button>`;
+
     return `<tr style="border-bottom:1px solid var(--border);transition:background .15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
       <td style="padding:8px 12px">${nameEmail}</td>
-      <td style="padding:8px">${profileTags}</td>
-      <td style="padding:8px">${badge}</td>
-      <td style="padding:8px;color:var(--text3);font-size:12px">${expiresStr}</td>
-      <td style="padding:8px 12px;text-align:right;white-space:nowrap">${copyBtn}${revokeBtn}</td>
+      <td style="padding:8px">${resources}</td>
+      <td style="padding:8px;font-size:12px" title="${esc(expiresAbs)}"><span style="color:var(--text)">${esc(expiresRel)}</span></td>
+      <td style="padding:8px;font-size:12px;color:var(--text3)" title="${esc(createdAbs)}">${esc(createdRel)}</td>
+      <td style="padding:8px 12px;text-align:right;white-space:nowrap">${copyBtn}${resendBtn}${revokeBtn}</td>
     </tr>`;
   }).join('');
+}
+
+function _relativeFuture(date, now) {
+  const ms = date.getTime() - now.getTime();
+  if (ms <= 0) return 'now';
+  const m = Math.floor(ms / 60000);
+  if (m < 60) return `in ${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `in ${h}h`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? 'in 1 day' : `in ${d} days`;
+}
+function _relativePast(date, now) {
+  const ms = now.getTime() - date.getTime();
+  if (ms < 60000) return 'just now';
+  const m = Math.floor(ms / 60000);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? '1 day ago' : `${d} days ago`;
+}
+
+async function resendInviteFromList(token) {
+  try {
+    const res = await api('/admin/invites/' + encodeURIComponent(token) + '/resend', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) toast('Invite email sent');
+    else toast(data.error || 'Failed to send email', 'error');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 function copyTokenLink(token) {
