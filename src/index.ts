@@ -13,7 +13,7 @@ import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption } from './auth/auth';
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption } from './auth/auth';
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
 import { initConsentPages, listConsentPages, getConsentPage, createConsentPage, updateConsentPage, deleteConsentPage, findConsentPageOauthReferences } from './auth/consent-pages';
 import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin, runLdapSync, getLastLdapSyncReport } from './auth/ldap';
@@ -799,9 +799,10 @@ const server = Bun.serve({
                 // Check if user already exists
                 const existing = findProxyUserByEmailOrUsername(email, '');
                 if (existing) {
-                    assignProxyUserToProfile(existing.id, invite.profileName);
+                    for (const pn of invite.profileNames) assignProxyUserToProfile(existing.id, pn);
+                    for (const cid of invite.oauthClientIds) addUserToOauthClient(cid, existing.id);
                     useInviteToken(token, existing.username);
-                    console.log(`✅ Existing user "${existing.username}" linked to profile "${invite.profileName}" via invite`);
+                    console.log(`✅ Existing user "${existing.username}" linked to ${invite.profileNames.length} proxy(ies) + ${invite.oauthClientIds.length} OAuth client(s) via invite`);
                     return jsonRes(200, { status: 'linked', username: existing.username, profileName: invite.profileName });
                 }
 
@@ -813,9 +814,10 @@ const server = Bun.serve({
 
                 try {
                     const user = await createProxyUser(derivedUsername, password, fullName, email);
-                    assignProxyUserToProfile(user.id, invite.profileName);
+                    for (const pn of invite.profileNames) assignProxyUserToProfile(user.id, pn);
+                    for (const cid of invite.oauthClientIds) addUserToOauthClient(cid, user.id);
                     useInviteToken(token, user.username);
-                    console.log(`✅ Proxy user "${user.username}" created via invite for profile "${invite.profileName}"`);
+                    console.log(`✅ Proxy user "${user.username}" created via invite (${invite.profileNames.length} proxy(ies) + ${invite.oauthClientIds.length} OAuth client(s))`);
                     return jsonRes(200, { status: 'created', username: user.username, profileName: invite.profileName });
                 } catch (err: any) {
                     if (err.message?.includes('UNIQUE')) return jsonRes(409, { error: 'Já existe uma conta com este email. Recarregue a página.' });
@@ -1295,7 +1297,8 @@ const server = Bun.serve({
                             profiles: listProfilesForProxyUser(u.id),
                         };
                     });
-                    return jsonRes(200, { users });
+                    const me = getAuthedAdmin(req);
+                    return jsonRes(200, { users, currentUserId: me?.id ?? null });
                 }
 
                 // POST /admin/proxy-users — create a new global proxy user
@@ -1334,7 +1337,7 @@ const server = Bun.serve({
                     return jsonRes(200, { user: { ...user, profiles: listProfilesForProxyUser(userId) } });
                 }
 
-                // PUT /admin/proxy-users/:id — update user (password, info, reset 2fa)
+                // PUT /admin/proxy-users/:id — update user (password, info, reset 2fa, admin role)
                 if (url.pathname.match(/^\/admin\/proxy-users\/\d+$/) && req.method === 'PUT') {
                     const userId = parseInt(url.pathname.split('/').pop()!, 10);
                     let body: any;
@@ -1353,6 +1356,32 @@ const server = Bun.serve({
                     }
                     if (body.reset2fa) {
                         disableProxyUserTotp(userId);
+                    }
+                    if (typeof body.isAdmin === 'boolean') {
+                        const current = getProxyUser(userId);
+                        if (!current) return jsonRes(404, { error: 'User not found' });
+                        const me = getAuthedAdmin(req);
+                        // Guard A: refuse self-demote. The current session still
+                        // carries admin privileges in its cookie; removing the
+                        // role here would let the user keep doing admin things
+                        // until refresh. Ask another admin to do it.
+                        if (!body.isAdmin && current.isAdmin && me?.id === userId) {
+                            return jsonRes(409, { error: "You can't remove admin from your own account. Ask another admin." });
+                        }
+                        // Guard B: refuse demoting the last admin.
+                        if (!body.isAdmin && current.isAdmin && countAdmins() <= 1) {
+                            return jsonRes(409, { error: 'Cannot demote the last admin. Promote someone else first.' });
+                        }
+                        const changed = setProxyUserAdminRole(userId, body.isAdmin);
+                        if (changed) {
+                            logAudit({
+                                actorUserId: me?.id, actorUsername: me?.username,
+                                action: body.isAdmin ? 'admin.promote' : 'admin.demote',
+                                targetType: 'proxy_user', targetId: userId,
+                                details: { username: current.username },
+                                ip: reqClientIp(req), userAgent: req.headers.get('user-agent'),
+                            });
+                        }
                     }
                     return jsonRes(200, { status: 'updated' });
                 }
@@ -1457,6 +1486,26 @@ const server = Bun.serve({
                     const ok = revokeAdminInvite(token);
                     if (!ok) return jsonRes(404, { error: 'Convite não encontrado ou já usado' });
                     return jsonRes(200, { status: 'revoked' });
+                }
+
+                // POST /admin/admins/invites/:token/resend — resend admin invite email
+                if (url.pathname.match(/^\/admin\/admins\/invites\/[^/]+\/resend$/) && req.method === 'POST') {
+                    const token = url.pathname.split('/')[4];
+                    const invite = getAdminInvite(token);
+                    if (!invite) return jsonRes(404, { error: 'Invite not found' });
+                    if (invite.usedAt) return jsonRes(409, { error: 'Invite already used' });
+                    if (new Date(invite.expiresAt) < new Date()) return jsonRes(409, { error: 'Invite expired' });
+                    if (!invite.email) return jsonRes(400, { error: 'Invite has no email address' });
+                    if (!isSmtpConfigured()) return jsonRes(400, { error: 'SMTP not configured. Configure SMTP in Settings first.' });
+                    const reqHost = req.headers.get('host') || `localhost:${config.port}`;
+                    const protocol = req.headers.get('x-forwarded-proto') || 'http';
+                    const inviteUrl = `${protocol}://${reqHost}/admin-invite/${invite.token}`;
+                    const expiresInHours = Math.max(1, Math.round((new Date(invite.expiresAt).getTime() - Date.now()) / 3_600_000));
+                    const tpl = renderAdminInviteEmail({ inviteUrl, fullName: invite.fullName, note: invite.note, expiresInHours });
+                    const r = await sendMail({ to: invite.email, subject: tpl.subject, html: tpl.html, text: tpl.text });
+                    if (!r.ok) return jsonRes(502, { error: r.error || 'Failed to send email' });
+                    console.log(`✅ Admin invite resent to "${invite.email}"`);
+                    return jsonRes(200, { status: 'sent', emailSent: true });
                 }
 
                 // ── SMTP / Email ─────────────────────────────────────────────────────────
@@ -2070,30 +2119,73 @@ const server = Bun.serve({
                 if (url.pathname === '/admin/invites' && req.method === 'POST') {
                     let body: any;
                     try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
-                    const profileName = (body.profileName || '').trim().toLowerCase();
-                    if (!profileName) return jsonRes(400, { error: 'profileName is required' });
-                    const profileExists = config.proxyProfiles.some(p => p.name === profileName);
-                    if (!profileExists) return jsonRes(404, { error: `Profile "${profileName}" not found` });
+                    // Accept either profileNames[] / oauthClientIds[] (new) or profileName (legacy).
+                    let profileNames: string[] = Array.isArray(body.profileNames)
+                        ? body.profileNames.map((s: any) => String(s || '').trim().toLowerCase()).filter(Boolean)
+                        : [];
+                    if (profileNames.length === 0 && body.profileName) {
+                        const pn = String(body.profileName).trim().toLowerCase();
+                        if (pn) profileNames = [pn];
+                    }
+                    const oauthClientIds: string[] = Array.isArray(body.oauthClientIds)
+                        ? body.oauthClientIds.map((s: any) => String(s || '').trim()).filter(Boolean)
+                        : [];
+                    for (const pn of profileNames) {
+                        if (!config.proxyProfiles.some(p => p.name === pn)) {
+                            return jsonRes(404, { error: `Profile "${pn}" not found` });
+                        }
+                    }
+                    for (const cid of oauthClientIds) {
+                        if (!getOauthClient(cid)) return jsonRes(404, { error: `OAuth client "${cid}" not found` });
+                    }
                     const email = (body.email || '').trim().toLowerCase();
                     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonRes(400, { error: 'Valid email is required' });
                     const invitedName = (body.invitedName || '').trim().slice(0, 100);
                     if (!invitedName) return jsonRes(400, { error: 'invitedName is required' });
                     const note = (body.note || '').trim().slice(0, 200);
                     const expiresInHours = Math.min(Math.max(parseInt(body.expiresInHours) || 48, 1), 720);
-                    const invite = createInviteToken(profileName, email, invitedName, note, expiresInHours);
+                    if (profileNames.length === 0 && oauthClientIds.length === 0) {
+                        return jsonRes(400, { error: 'Select at least one proxy or OAuth client.' });
+                    }
+                    const invite = createInviteToken(profileNames, oauthClientIds, email, invitedName, note, expiresInHours);
                     const reqHost = req.headers.get('host') || `localhost:${config.port}`;
                     const protocol = req.headers.get('x-forwarded-proto') || 'http';
                     const inviteUrl = `${protocol}://${reqHost}/invite/${invite.token}`;
                     let emailSent: boolean | undefined;
                     let emailError: string | undefined;
+                    const primaryProfile = profileNames[0] || '';
                     if (isSmtpConfigured()) {
-                        const tpl = renderProxyInviteEmail({ inviteUrl, profileName, invitedName, note, expiresInHours });
+                        const tpl = renderProxyInviteEmail({ inviteUrl, profileName: primaryProfile, invitedName, note, expiresInHours });
                         const r = await sendMail({ to: email, subject: tpl.subject, html: tpl.html, text: tpl.text });
                         emailSent = r.ok;
                         emailError = r.error;
                     }
-                    console.log(`✅ Invite for "${profileName}" to "${email}" created (expires in ${expiresInHours}h, emailSent=${emailSent ?? 'n/a'})`);
+                    const summary = [
+                        profileNames.length ? `${profileNames.length} proxy${profileNames.length === 1 ? '' : 'ies'}` : '',
+                        oauthClientIds.length ? `${oauthClientIds.length} OAuth client${oauthClientIds.length === 1 ? '' : 's'}` : '',
+                    ].filter(Boolean).join(' + ') || 'no resources';
+                    console.log(`✅ Invite for ${summary} to "${email}" created (expires in ${expiresInHours}h, emailSent=${emailSent ?? 'n/a'})`);
                     return jsonRes(200, { invite, inviteUrl, emailSent: emailSent ?? false, emailError: emailError ?? null });
+                }
+
+                // POST /admin/invites/:token/resend — resend invite email
+                if (url.pathname.match(/^\/admin\/invites\/[^/]+\/resend$/) && req.method === 'POST') {
+                    const token = url.pathname.split('/')[3];
+                    const invite = getInviteToken(token);
+                    if (!invite) return jsonRes(404, { error: 'Invite not found' });
+                    if (invite.usedAt) return jsonRes(409, { error: 'Invite already used' });
+                    if (new Date(invite.expiresAt) < new Date()) return jsonRes(409, { error: 'Invite expired' });
+                    if (!invite.email) return jsonRes(400, { error: 'Invite has no email address' });
+                    if (!isSmtpConfigured()) return jsonRes(400, { error: 'SMTP not configured. Configure SMTP in Settings first.' });
+                    const reqHost = req.headers.get('host') || `localhost:${config.port}`;
+                    const protocol = req.headers.get('x-forwarded-proto') || 'http';
+                    const inviteUrl = `${protocol}://${reqHost}/invite/${invite.token}`;
+                    const expiresInHours = Math.max(1, Math.round((new Date(invite.expiresAt).getTime() - Date.now()) / 3_600_000));
+                    const tpl = renderProxyInviteEmail({ inviteUrl, profileName: invite.profileName, invitedName: invite.invitedName, note: invite.note, expiresInHours });
+                    const r = await sendMail({ to: invite.email, subject: tpl.subject, html: tpl.html, text: tpl.text });
+                    if (!r.ok) return jsonRes(502, { error: r.error || 'Failed to send email' });
+                    console.log(`✅ Invite resent to "${invite.email}"`);
+                    return jsonRes(200, { status: 'sent', emailSent: true });
                 }
 
                 // DELETE /admin/invites/:token — revoke invite token

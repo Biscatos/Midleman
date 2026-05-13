@@ -65,13 +65,6 @@
       </button>
 
       <div class="sidebar-section-label">Config</div>
-      <button class="sidebar-link" data-page="admins" data-tooltip="Admins" onclick="navigate('admins')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"/>
-        </svg>
-        <span class="sidebar-link-label">Admins</span>
-        <span class="sidebar-badge" id="navAdminBadge">0</span>
-      </button>
       <button class="sidebar-link" data-page="ldap" data-tooltip="LDAP" onclick="navigate('ldap')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/>
@@ -520,18 +513,38 @@
       </div>
     </div>
 
-    <!-- ═══ PROXY USERS ═══ -->
+    <!-- ═══ USERS ═══ -->
     <div class="page" id="pageProxyusers">
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
           <h2>Users</h2>
-          <p>Accounts that access the proxies. Create users directly or invite by link.</p>
+          <p>Every account: dashboard admins, proxy users, and LDAP-backed identities. Promote a user to admin via Edit.</p>
         </div>
         <div style="display:flex;gap:8px">
-          <button class="btn btn-primary btn-sm" onclick="openCreateInviteModal()" style="display:inline-flex;align-items:center;gap:6px">
+          <button class="btn btn-sm" onclick="openCreateInviteModal()" style="display:inline-flex;align-items:center;gap:6px">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
             Invite
           </button>
+          <button class="btn btn-primary btn-sm" onclick="openNewProxyUserModal()" style="display:inline-flex;align-items:center;gap:6px">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+            New user
+          </button>
+        </div>
+      </div>
+
+      <!-- Role filter -->
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-body" style="padding:12px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:12.5px;color:var(--text2)">Filter:</span>
+          <select id="userRoleFilter" onchange="filterProxyUsersByRole()"
+            style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px;min-width:140px">
+            <option value="">All roles</option>
+            <option value="admin">Admins only</option>
+            <option value="user">Users only</option>
+            <option value="ldap">LDAP only</option>
+            <option value="local">Local only</option>
+          </select>
+          <span id="userRoleFilterCount" style="font-size:12px;color:var(--text3);margin-left:auto"></span>
         </div>
       </div>
 
@@ -543,6 +556,7 @@
               <tr style="background:var(--surface2);text-align:left">
                 <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Email / Username</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Role</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">2FA</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Proxies</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Created</th>
@@ -551,7 +565,7 @@
             </thead>
             <tbody id="proxyUserListBody">
               <tr>
-                <td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td>
+                <td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td>
               </tr>
             </tbody>
           </table>
@@ -708,45 +722,6 @@
         <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn btn-ghost btn-sm" onclick="closeConsentPageModal()">Cancel</button>
           <button class="btn btn-primary btn-sm" id="consentPageSubmitBtn" onclick="submitConsentPage()">Create</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ═══ ADMINS ═══ -->
-    <div class="page" id="pageAdmins">
-      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
-        <div>
-          <h2>Administrators</h2>
-          <p>Users with dashboard access. Every admin can create and remove other admins.</p>
-        </div>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-sm" onclick="openAdminInviteModal()" style="display:inline-flex;align-items:center;gap:6px">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-            Invite
-          </button>
-          <button class="btn btn-primary btn-sm" onclick="openCreateAdminModal()" style="display:inline-flex;align-items:center;gap:6px">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-            New admin
-          </button>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-body" style="padding:0;overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:13px">
-            <thead>
-              <tr style="background:var(--surface2);text-align:left">
-                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Email</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">2FA</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Created</th>
-                <th style="padding:10px 12px"></th>
-              </tr>
-            </thead>
-            <tbody id="adminListBody">
-              <tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
-            </tbody>
-          </table>
         </div>
       </div>
     </div>
@@ -1046,98 +1021,6 @@
     </div><!-- /.content -->
   </div><!-- /.main -->
 </div><!-- /.app -->
-
-<!-- Admin create modal -->
-<div class="modal-overlay" id="adminModal">
-  <div class="modal" style="max-width:460px">
-    <div class="modal-header">
-      <h3 id="adminModalTitle">New administrator</h3>
-      <button class="close-btn" onclick="closeAdminModal()">&times;</button>
-    </div>
-    <form onsubmit="event.preventDefault(); submitNewAdmin()">
-      <div class="modal-body">
-        <div class="form-grid" style="gap:12px">
-          <div class="form-group span-2">
-            <label>Username *</label>
-            <input type="text" id="adminUsername" placeholder="john" autocomplete="off">
-          </div>
-          <div class="form-group span-2">
-            <label>Full name</label>
-            <input type="text" id="adminFullName" placeholder="John Doe" autocomplete="off">
-          </div>
-          <div class="form-group span-2">
-            <label>Email</label>
-            <input type="email" id="adminEmail" placeholder="john@example.com" autocomplete="off">
-          </div>
-          <div class="form-group span-2">
-            <label>Initial password *</label>
-            <input type="password" id="adminPassword" placeholder="Minimum 8 characters" autocomplete="new-password">
-            <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">The new admin can change the password at any time.</span>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn" onclick="closeAdminModal()">Cancel</button>
-        <button type="submit" class="btn btn-primary">Create</button>
-      </div>
-    </form>
-  </div>
-</div>
-
-<!-- Admin invite modal -->
-<div class="modal-overlay" id="adminInviteModal">
-  <div class="modal" style="max-width:480px">
-    <div class="modal-header">
-      <h3>Invite administrator</h3>
-      <button class="close-btn" onclick="closeAdminInviteModal()">&times;</button>
-    </div>
-    <div id="adminInviteFormWrap">
-      <div class="modal-body">
-        <div class="form-grid" style="gap:12px">
-          <div class="form-group span-2">
-            <label>Email</label>
-            <input type="email" id="adminInviteEmail" placeholder="john@example.com (optional)" autocomplete="off">
-          </div>
-          <div class="form-group span-2">
-            <label>Full name</label>
-            <input type="text" id="adminInviteFullName" placeholder="John Doe (optional)" autocomplete="off">
-          </div>
-          <div class="form-group span-2">
-            <label>Note</label>
-            <input type="text" id="adminInviteNote" placeholder="e.g. replacement for John... (optional)" autocomplete="off">
-          </div>
-          <div class="form-group span-2">
-            <label>Expiration</label>
-            <select id="adminInviteExpires" style="width:100%;height:40px;padding:0 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;font-family:inherit;outline:none;cursor:pointer">
-              <option value="24">24 hours</option>
-              <option value="48">48 hours</option>
-              <option value="168" selected>7 days</option>
-              <option value="720">30 days</option>
-            </select>
-          </div>
-        </div>
-        <div id="adminInviteError" style="display:none;margin-top:12px;padding:10px 12px;border-radius:6px;background:var(--err-bg,rgba(220,38,38,.08));border:1px solid var(--err-bdr,rgba(220,38,38,.15));color:var(--err-text,#dc2626);font-size:13px"></div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn" onclick="closeAdminInviteModal()">Cancel</button>
-        <button type="button" class="btn btn-primary" onclick="submitAdminInvite()">Generate link</button>
-      </div>
-    </div>
-    <div id="adminInviteResult" style="display:none">
-      <div class="modal-body">
-        <p style="font-size:13px;color:var(--text2);margin-bottom:8px">Invite link generated. Share it with the user — it can only be used once.</p>
-        <p id="adminInviteEmailStatus" style="font-size:12.5px;margin:0 0 12px"></p>
-        <div style="display:flex;align-items:stretch;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden">
-          <input type="text" id="adminInviteUrl" readonly style="flex:1;padding:10px 12px;font-size:12px;border:none;background:var(--surface2);color:var(--text);font-family:monospace;outline:none">
-          <button onclick="copyAdminInviteUrl()" style="padding:0 14px;border:none;border-left:1px solid var(--border);background:var(--surface2);color:var(--text2);cursor:pointer;font-size:12px;white-space:nowrap;font-family:inherit" id="adminInviteCopyBtn">Copy</button>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-primary" onclick="closeAdminInviteModal()">Close</button>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- Audit detail modal -->
 <div id="auditDetailModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
@@ -1676,6 +1559,13 @@
               placeholder="e.g. john.doe" autocomplete="off"></div>
           <div class="form-group span-2"><label>Password * (min. 6 characters)</label><input type="password"
               id="npuPassword" placeholder="Password" autocomplete="new-password"></div>
+          <div class="form-group span-2" id="npuIsAdminGroup">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="npuIsAdmin" style="accent-color:var(--accent);cursor:pointer">
+              <span>Is administrator</span>
+            </label>
+            <span style="font-size:11px;color:var(--text3);margin-top:4px;display:block">Grants dashboard access. The new admin will be asked to set up 2FA on first dashboard login.</span>
+          </div>
           <div class="form-group span-2">
             <label>Assign to Proxies</label>
             <div id="npuProfileChecks"
@@ -1841,7 +1731,7 @@
 
 <!-- Create Invite Modal -->
 <div class="modal-overlay" id="createInviteModal">
-  <div class="modal" style="max-width:480px">
+  <div class="modal" style="max-width:min(720px, 95vw);width:100%">
     <div class="modal-header">
       <h3>Generate Invite Link</h3>
       <button class="close-btn" onclick="closeCreateInviteModal()">&times;</button>
@@ -1856,22 +1746,71 @@
           Link generated successfully
         </div>
         <p id="inviteEmailStatus" style="font-size:12.5px;margin:0 0 10px"></p>
-        <div style="display:flex;gap:6px;align-items:center">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           <input type="text" id="inviteLinkInput" readonly
-            style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:12px;font-family:monospace;outline:none">
+            style="flex:1;min-width:200px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:12px;font-family:monospace;outline:none">
           <button onclick="copyInviteLink()" id="copyInviteBtn"
             style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0">Copy</button>
+          <button onclick="resendInviteEmail()" id="resendInviteBtn"
+            style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0;display:none">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            Send by email
+          </button>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:6px">Share this link with the user. It can be used only once.</div>
       </div>
 
       <div class="form-grid" style="gap:12px" id="inviteGenForm">
         <div class="form-group span-2">
-          <label>Proxy <span style="color:var(--red)">*</span></label>
-          <select id="invProfileSelect" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px">
-            <option value="">Loading...</option>
-          </select>
-          <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">The signup page will use the name and logo of this proxy.</span>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="invAsAdmin" onchange="toggleInviteType()" style="accent-color:var(--accent);cursor:pointer">
+            <span>Invite as administrator (dashboard access)</span>
+          </label>
+          <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">If checked, resource selection below is ignored.</span>
+        </div>
+        <div class="form-group span-2" id="invResourcesGroup">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;gap:8px;flex-wrap:wrap">
+            <label style="margin:0">Resources to assign <span style="color:var(--red)">*</span></label>
+            <span id="invSelectedSummary" style="font-size:11px;color:var(--text3)">Nothing selected</span>
+          </div>
+
+          <div class="inv-picker-grid">
+            <!-- ── Proxies ─────────────────────────────────────────────────── -->
+            <div class="inv-picker">
+              <div class="inv-picker-head">
+                <div class="inv-picker-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                  <span>Proxies</span>
+                  <span class="inv-picker-badge" id="invProxyCount">0</span>
+                </div>
+                <button type="button" class="inv-picker-action" onclick="invToggleAll('proxy')">Select visible</button>
+              </div>
+              <div class="inv-picker-search">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" id="invProxySearch" oninput="invFilter('proxy')" placeholder="Search proxies...">
+              </div>
+              <div id="invProxyList" class="inv-picker-list"><span class="inv-picker-empty">Loading...</span></div>
+            </div>
+
+            <!-- ── OAuth clients ──────────────────────────────────────────── -->
+            <div class="inv-picker">
+              <div class="inv-picker-head">
+                <div class="inv-picker-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                  <span>OAuth clients</span>
+                  <span class="inv-picker-badge" id="invOauthCount">0</span>
+                </div>
+                <button type="button" class="inv-picker-action" onclick="invToggleAll('oauth')">Select visible</button>
+              </div>
+              <div class="inv-picker-search">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" id="invOauthSearch" oninput="invFilter('oauth')" placeholder="Search OAuth clients...">
+              </div>
+              <div id="invOauthList" class="inv-picker-list"><span class="inv-picker-empty">Loading...</span></div>
+            </div>
+          </div>
+
+          <p style="font-size:11px;color:var(--text3);margin:8px 0 0">The user will be granted access to every selected resource.</p>
         </div>
         <div class="form-group span-2">
           <label>Invitee email <span style="color:var(--red)">*</span></label>

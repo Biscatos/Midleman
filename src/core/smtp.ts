@@ -610,11 +610,18 @@ export interface ProxyInviteEmailParams {
 }
 
 export function renderProxyInviteEmail(p: ProxyInviteEmailParams): { subject: string; html: string; text: string } {
-    const subject = `Invitation to ${p.profileName} — Midleman`;
+    const hasProfile = !!p.profileName;
+    const subject = hasProfile ? `Invitation to ${p.profileName} — Midleman` : `Invitation — Midleman`;
     const hello = p.invitedName ? `Hi ${p.invitedName},` : 'Hi,';
     const noteHtml = p.note ? `<p style="margin:16px 0 0;padding:12px 14px;background:#f6f7fb;border-left:3px solid #0078d4;font-size:13px;color:#52525b;font-style:italic">${escHtml(p.note)}</p>` : '';
     const noteText = p.note ? `\n\nNote: ${p.note}` : '';
     const expHours = p.expiresInHours;
+    const accessLine = hasProfile
+        ? `You have been invited to access <strong>${escHtml(p.profileName)}</strong> on Midleman. Click the button below to set a username and password.`
+        : `You have been invited to Midleman. Click the button below to set a username and password.`;
+    const accessLineText = hasProfile
+        ? `You have been invited to access "${p.profileName}" on Midleman.`
+        : `You have been invited to Midleman.`;
     const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 16px">
 <tr><td align="center">
@@ -622,7 +629,7 @@ export function renderProxyInviteEmail(p: ProxyInviteEmailParams): { subject: st
 <tr><td>
 <h1 style="margin:0 0 16px;font-size:22px;font-weight:500;color:#0f1015">You're invited</h1>
 <p style="margin:0 0 14px;font-size:14px;color:#52525b;line-height:1.6">${escHtml(hello)}</p>
-<p style="margin:0 0 20px;font-size:14px;color:#52525b;line-height:1.6">You have been invited to access <strong>${escHtml(p.profileName)}</strong> on Midleman. Click the button below to set a username and password.</p>
+<p style="margin:0 0 20px;font-size:14px;color:#52525b;line-height:1.6">${accessLine}</p>
 <p style="margin:24px 0"><a href="${escHtml(p.inviteUrl)}" style="display:inline-block;background:#0078d4;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600">Accept invitation</a></p>
 <p style="margin:0 0 4px;font-size:12px;color:#71717a">Or copy this link:</p>
 <p style="margin:0;font-size:12px;color:#52525b;word-break:break-all"><a href="${escHtml(p.inviteUrl)}" style="color:#0078d4">${escHtml(p.inviteUrl)}</a></p>
@@ -633,7 +640,7 @@ ${noteHtml}
 </td></tr></table></body></html>`;
     const text = `${hello}
 
-You have been invited to access "${p.profileName}" on Midleman.
+${accessLineText}
 Accept the invitation at: ${p.inviteUrl}
 ${noteText}
 

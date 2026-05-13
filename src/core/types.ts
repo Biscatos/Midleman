@@ -168,6 +168,8 @@ export interface ProxyUser {
   ldapConfigId?: number | null;
   ldapDn?: string | null;
   ldapOrphan?: boolean;
+  /** True if 'admin' is present in the comma-separated `roles` column. */
+  isAdmin?: boolean;
 }
 
 /**

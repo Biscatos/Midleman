@@ -85,15 +85,16 @@ CREATE INDEX IF NOT EXISTS idx_proxy_user_profiles_profile ON proxy_user_profile
 CREATE INDEX IF NOT EXISTS idx_proxy_user_profiles_user ON proxy_user_profiles(user_id);
 
 CREATE TABLE IF NOT EXISTS invite_tokens (
-    token        TEXT PRIMARY KEY,
-    note         TEXT NOT NULL DEFAULT '',
-    profiles     TEXT NOT NULL DEFAULT '',
-    email        TEXT NOT NULL DEFAULT '',
-    invited_name TEXT NOT NULL DEFAULT '',
-    expires_at   TEXT NOT NULL,
-    used_at      TEXT,
-    used_by      TEXT,
-    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    token             TEXT PRIMARY KEY,
+    note              TEXT NOT NULL DEFAULT '',
+    profiles          TEXT NOT NULL DEFAULT '',
+    oauth_client_ids  TEXT NOT NULL DEFAULT '',
+    email             TEXT NOT NULL DEFAULT '',
+    invited_name      TEXT NOT NULL DEFAULT '',
+    expires_at        TEXT NOT NULL,
+    used_at           TEXT,
+    used_by           TEXT,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS admin_invites (
@@ -205,6 +206,7 @@ function runLegacyAdditiveMigrations(d: Database): void {
             const cols = info.map((c: any) => c.name);
             if (!cols.includes('email')) d.exec("ALTER TABLE invite_tokens ADD COLUMN email TEXT NOT NULL DEFAULT ''");
             if (!cols.includes('invited_name')) d.exec("ALTER TABLE invite_tokens ADD COLUMN invited_name TEXT NOT NULL DEFAULT ''");
+            if (!cols.includes('oauth_client_ids')) d.exec("ALTER TABLE invite_tokens ADD COLUMN oauth_client_ids TEXT NOT NULL DEFAULT ''");
         }
     } catch {}
 }
@@ -960,6 +962,7 @@ function rowToProxyUser(r: any): ProxyUser {
         ldapConfigId: r.ldap_config_id ?? null,
         ldapDn: r.ldap_dn ?? null,
         ldapOrphan: !!r.ldap_orphan,
+        isAdmin: typeof r.roles === 'string' && r.roles.split(',').map((s: string) => s.trim()).includes('admin'),
     };
 }
 
@@ -974,14 +977,41 @@ export async function createProxyUser(username: string, password: string, fullNa
 
 export function listAllProxyUsers(): ProxyUser[] {
     if (!db) return [];
-    const rows = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users ORDER BY username').all() as any[];
+    // Filter legacy 'admin_shadow' rows — they're remnants of the pre-merge era
+    // (admins lived in a separate table and had mirror rows here). After the
+    // migration any admin is just a regular row with 'admin' in `roles`.
+    const rows = db.prepare(
+        "SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, created_at FROM proxy_users WHERE auth_source != 'admin_shadow' ORDER BY username"
+    ).all() as any[];
     return rows.map(rowToProxyUser);
 }
 
 export function getProxyUser(id: number): ProxyUser | null {
     if (!db) return null;
-    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
+    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, created_at FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
     return row ? rowToProxyUser(row) : null;
+}
+
+/** Atomically add or remove the 'admin' role from a user, preserving any other
+ *  roles (e.g. 'proxy'). Returns true if a row was actually updated. */
+export function setProxyUserAdminRole(id: number, makeAdmin: boolean): boolean {
+    if (!db) return false;
+    const row = db.prepare('SELECT roles FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
+    if (!row) return false;
+    const current: string[] = String(row.roles || '')
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+    const has = current.includes('admin');
+    if (makeAdmin === has) return false; // no-op
+    const next = makeAdmin
+        ? [...current, 'admin']
+        : current.filter(r => r !== 'admin');
+    // Ensure at least 'proxy' is kept if nothing else remains.
+    if (next.length === 0) next.push('proxy');
+    db.prepare("UPDATE proxy_users SET roles = $r, updated_at = datetime('now') WHERE id = $id")
+        .run({ $r: next.join(','), $id: id });
+    return true;
 }
 
 export function deleteProxyUser(id: number): boolean {
@@ -1675,7 +1705,10 @@ export function clearSessionCookie(cookieName: string): string {
 export interface InviteToken {
     token: string;
     note: string;
+    /** Primary profile (first of profileNames). Kept for back-compat. */
     profileName: string;
+    profileNames: string[];
+    oauthClientIds: string[];
     email: string;
     invitedName: string;
     expiresAt: string;
@@ -1684,11 +1717,18 @@ export interface InviteToken {
     createdAt: string;
 }
 
+function _csvToArr(s: any): string[] {
+    return typeof s === 'string' ? s.split(',').map(x => x.trim()).filter(Boolean) : [];
+}
+
 function rowToInvite(row: any): InviteToken {
+    const profileNames = _csvToArr(row.profiles);
     return {
         token: row.token,
         note: row.note,
-        profileName: row.profiles || '',
+        profileName: profileNames[0] || '',
+        profileNames,
+        oauthClientIds: _csvToArr(row.oauth_client_ids),
         email: row.email || '',
         invitedName: row.invited_name || '',
         expiresAt: row.expires_at,
@@ -1698,13 +1738,24 @@ function rowToInvite(row: any): InviteToken {
     };
 }
 
-export function createInviteToken(profileName: string, email: string, invitedName: string, note: string, expiresInHours: number): InviteToken {
+export function createInviteToken(profileNames: string[], oauthClientIds: string[], email: string, invitedName: string, note: string, expiresInHours: number): InviteToken {
     if (!db) throw new Error('Auth not initialized');
     const token = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + expiresInHours * 3_600_000).toISOString();
-    db.prepare('INSERT INTO invite_tokens (token, note, profiles, email, invited_name, expires_at) VALUES ($t, $n, $p, $em, $in, $e)')
-        .run({ $t: token, $n: note, $p: profileName.toLowerCase(), $em: email.trim().toLowerCase(), $in: invitedName.trim(), $e: expiresAt });
-    return { token, note, profileName: profileName.toLowerCase(), email: email.trim().toLowerCase(), invitedName: invitedName.trim(), expiresAt, usedAt: null, usedBy: null, createdAt: new Date().toISOString() };
+    const profilesCsv = profileNames.map(p => p.toLowerCase().trim()).filter(Boolean).join(',');
+    const clientsCsv = oauthClientIds.map(c => c.trim()).filter(Boolean).join(',');
+    db.prepare('INSERT INTO invite_tokens (token, note, profiles, oauth_client_ids, email, invited_name, expires_at) VALUES ($t, $n, $p, $oc, $em, $in, $e)')
+        .run({ $t: token, $n: note, $p: profilesCsv, $oc: clientsCsv, $em: email.trim().toLowerCase(), $in: invitedName.trim(), $e: expiresAt });
+    return {
+        token, note,
+        profileName: profilesCsv.split(',')[0] || '',
+        profileNames: profilesCsv ? profilesCsv.split(',') : [],
+        oauthClientIds: clientsCsv ? clientsCsv.split(',') : [],
+        email: email.trim().toLowerCase(),
+        invitedName: invitedName.trim(),
+        expiresAt, usedAt: null, usedBy: null,
+        createdAt: new Date().toISOString(),
+    };
 }
 
 export function getInviteToken(token: string): InviteToken | null {

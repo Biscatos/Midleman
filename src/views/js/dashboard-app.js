@@ -268,7 +268,6 @@ const PAGE_TITLES = {
   proxyusers: 'Users',
   oauthclients: 'OAuth Clients',
   consentpages: 'Consent Pages',
-  admins: 'Admins',
   ldap: 'LDAP',
   email: 'Email (SMTP)',
   audit: 'Audit Log'
@@ -288,7 +287,6 @@ function navigate(page) {
   if (page === 'proxyusers') { fetchProxyUsers(); fetchInvites(); }
   if (page === 'oauthclients') { fetchOauthClients(); }
   if (page === 'consentpages') { fetchConsentPages(); }
-  if (page === 'admins') { fetchAdmins(); }
   if (page === 'ldap') { fetchLdapConfigs(); filterLdapAdoptions('pending'); }
   if (page === 'email') { fetchSmtpConfig(); }
   if (page === 'audit') { fetchAuditLogs(true); }

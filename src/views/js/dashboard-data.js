@@ -191,7 +191,7 @@ function showContextMenu(e, btn) {
 
 // ─── Data Fetch ──────────────────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchConsentPages(), fetchAdmins(), fetchLdapConfigs(), fetchLdapAdoptions()]);
+  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchConsentPages(), fetchLdapConfigs(), fetchLdapAdoptions()]);
 }
 
 async function fetchHealth() {
@@ -493,22 +493,55 @@ async function restartProfileAction(name) {
 // ─── Global Proxy Users ─────────────────────────────────────────────────────
 let _allProxyUsers = [];
 
+let _userRoleFilter = '';
+
 async function fetchProxyUsers() {
   try {
     const res = await api('/admin/proxy-users');
     if (!res.ok) return;
     const d = await res.json();
     _allProxyUsers = d.users || [];
+    if (typeof d.currentUserId === 'number') _currentUserId = d.currentUserId;
     document.getElementById('navProxyUserBadge').textContent = _allProxyUsers.length;
-    renderProxyUsers(_allProxyUsers);
+    renderProxyUsers(_filteredProxyUsers());
   } catch {}
+}
+
+function _filteredProxyUsers() {
+  switch (_userRoleFilter) {
+    case 'admin': return _allProxyUsers.filter(u => u.isAdmin);
+    case 'user':  return _allProxyUsers.filter(u => !u.isAdmin);
+    case 'ldap':  return _allProxyUsers.filter(u => u.authSource === 'ldap');
+    case 'local': return _allProxyUsers.filter(u => u.authSource !== 'ldap');
+    default:      return _allProxyUsers;
+  }
+}
+
+function filterProxyUsersByRole() {
+  _userRoleFilter = document.getElementById('userRoleFilter').value;
+  renderProxyUsers(_filteredProxyUsers());
+}
+
+function _roleBadge(u) {
+  const parts = [];
+  if (u.isAdmin) {
+    parts.push('<span style="display:inline-block;background:rgba(59,130,246,.15);color:#2563eb;border:1px solid rgba(59,130,246,.3);border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em">ADMIN</span>');
+  } else {
+    parts.push('<span style="display:inline-block;background:rgba(148,163,184,.15);color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em">USER</span>');
+  }
+  if (u.authSource === 'ldap') {
+    parts.push('<span style="display:inline-block;background:rgba(168,85,247,.12);color:#a855f7;border:1px solid rgba(168,85,247,.25);border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em" title="Account synced from LDAP">LDAP</span>');
+  }
+  return parts.join(' ');
 }
 
 function renderProxyUsers(users) {
   const c = document.getElementById('proxyUserListBody');
   if (!c) return;
+  const countEl = document.getElementById('userRoleFilterCount');
+  if (countEl) countEl.textContent = users.length + ' of ' + _allProxyUsers.length;
   if (users.length === 0) {
-    c.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No users yet. Click "+ New User" or "Invite".</td></tr>';
+    c.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No users match the current filter.</td></tr>';
     return;
   }
   c.innerHTML = users.map(u => {
@@ -516,24 +549,20 @@ function renderProxyUsers(users) {
       ? '<span style="color:var(--green)">Active</span>'
       : '<span style="color:var(--text3)">Off</span>';
     const profiles = (u.profiles || []).map(p => `<span style="background:var(--surface2);padding:1px 6px;border-radius:3px;font-size:11px;font-family:monospace">${esc(p)}</span>`).join(' ');
-    const ldapTag = u.authSource === 'ldap' ? ' <span class="badge-ldap" title="Account synced from LDAP">LDAP</span>' : '';
-    const adminTag = u.authSource === 'admin_shadow' ? ' <span class="badge-admin-shadow" title="Automatic mirror of an administrator — do not edit directly">ADMIN</span>' : '';
     const nameCell = u.fullName
-      ? `<div style="font-weight:600;color:var(--text)">${esc(u.fullName)}${ldapTag}${adminTag}</div><div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`
-      : `<div style="font-weight:600;color:var(--text)">${esc(u.username)}${ldapTag}${adminTag}</div>`;
+      ? `<div style="font-weight:600;color:var(--text)">${esc(u.fullName)}</div><div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`
+      : `<div style="font-weight:600;color:var(--text)">${esc(u.username)}</div>`;
     const emailCell = u.email
-      ? `<div style="font-size:12px;color:var(--text2)">${esc(u.email)}</div><div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`
-      : `<div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`;
-    const isShadow = u.authSource === 'admin_shadow';
-    const actionsCell = isShadow
-      ? `<span style="color:var(--text3);font-size:11px" title="This row is an automatic mirror of the administrator account — manage in Admins">—</span>`
-      : `<button onclick="openEditProxyUserModal(${u.id})" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Edit">Edit</button>
+      ? `<div style="font-size:12px;color:var(--text2)">${esc(u.email)}</div>`
+      : `<span style="color:var(--text3)">—</span>`;
+    const actionsCell = `<button onclick="openEditProxyUserModal(${u.id})" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Edit">Edit</button>
          <button onclick="openUserProfilesModal(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Manage proxies">Proxies</button>
          ${u.totpEnabled ? `<button onclick="reset2fa(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--orange);font-size:11px;margin-right:4px" title="Reset 2FA">Reset 2FA</button>` : ''}
          <button onclick="deleteProxyUserAction(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px" title="Delete">Delete</button>`;
     return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
       <td style="padding:8px 12px">${nameCell}</td>
       <td style="padding:8px">${emailCell}</td>
+      <td style="padding:8px">${_roleBadge(u)}</td>
       <td style="padding:8px">${twoFa}</td>
       <td style="padding:8px">${profiles || '<span style="color:var(--text3)">—</span>'}</td>
       <td style="padding:8px;color:var(--text3);font-size:12px">${u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-GB') : '-'}</td>
@@ -547,6 +576,8 @@ async function openNewProxyUserModal() {
   document.getElementById('npuEmail').value = '';
   document.getElementById('npuUsername').value = '';
   document.getElementById('npuPassword').value = '';
+  document.getElementById('npuIsAdmin').checked = false;
+  document.getElementById('npuIsAdminGroup').style.display = '';
   document.getElementById('npuError').style.display = 'none';
   document.getElementById('newProxyUserModal').classList.add('active');
   // Build profile checkboxes — fetch fresh
@@ -571,9 +602,11 @@ function closeNewProxyUserModal() {
   document.getElementById('newProxyUserModal').classList.remove('active');
   _editUserId = null;
   // Reset modal to "create" state
-  document.querySelector('#newProxyUserModal .modal-header h3').textContent = 'Novo Utilizador';
+  document.querySelector('#newProxyUserModal .modal-header h3').textContent = 'New User';
   document.querySelector('#newProxyUserModal .modal-footer button[type="submit"]').textContent = 'Create User';
   document.getElementById('npuProfileChecks').closest('.form-group').style.display = '';
+  document.getElementById('npuIsAdminGroup').style.display = '';
+  document.getElementById('npuIsAdmin').checked = false;
   document.getElementById('npuUsername').readOnly = false;
   document.getElementById('npuUsername').style.opacity = '';
 }
@@ -585,8 +618,9 @@ async function saveNewProxyUser() {
   const email = document.getElementById('npuEmail').value.trim();
   const username = document.getElementById('npuUsername').value.trim();
   const password = document.getElementById('npuPassword').value;
-  if (!username || username.length < 2) { errEl.textContent = 'Nome de utilizador deve ter pelo menos 2 caracteres.'; errEl.style.display = 'block'; return; }
-  if (!password || password.length < 6) { errEl.textContent = 'Palavra-passe deve ter pelo menos 6 caracteres.'; errEl.style.display = 'block'; return; }
+  const isAdmin = document.getElementById('npuIsAdmin').checked;
+  if (!username || username.length < 2) { errEl.textContent = 'Username must be at least 2 characters.'; errEl.style.display = 'block'; return; }
+  if (!password || password.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; errEl.style.display = 'block'; return; }
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = 'Invalid email.'; errEl.style.display = 'block'; return; }
   const profiles = [...document.querySelectorAll('#npuProfileChecks input:checked')].map(c => c.value);
   try {
@@ -595,7 +629,20 @@ async function saveNewProxyUser() {
     });
     const data = await res.json();
     if (!res.ok) { errEl.textContent = data.error || 'Error'; errEl.style.display = 'block'; return; }
-    toast('Utilizador "' + username + '" criado');
+    // Promote to admin in a follow-up PUT (create doesn't accept isAdmin).
+    if (isAdmin && data.user?.id) {
+      const promoteRes = await api('/admin/proxy-users/' + data.user.id, {
+        method: 'PUT', body: JSON.stringify({ isAdmin: true }),
+      });
+      if (!promoteRes.ok) {
+        const pd = await promoteRes.json().catch(() => ({}));
+        toast('User created, but failed to promote: ' + (pd.error || 'unknown'), 'error');
+        closeNewProxyUserModal();
+        fetchProxyUsers();
+        return;
+      }
+    }
+    toast('User "' + username + '" created' + (isAdmin ? ' (admin)' : ''));
     closeNewProxyUserModal();
     fetchProxyUsers();
   } catch (e) { errEl.textContent = 'Error: ' + e.message; errEl.style.display = 'block'; }
@@ -613,6 +660,11 @@ async function openEditProxyUserModal(id) {
   document.getElementById('npuEmail').value = user.email || '';
   document.getElementById('npuUsername').value = user.username;
   document.getElementById('npuPassword').value = '';
+  document.getElementById('npuIsAdmin').checked = !!user.isAdmin;
+  // Hide the admin toggle when editing yourself — the backend refuses
+  // self-demote anyway, and the checkbox would be misleading.
+  const isSelf = user.id === _currentUserId;
+  document.getElementById('npuIsAdminGroup').style.display = isSelf ? 'none' : '';
   document.getElementById('npuError').style.display = 'none';
   // Change modal title and footer
   document.querySelector('#newProxyUserModal .modal-header h3').textContent = 'Edit User';
@@ -633,14 +685,25 @@ async function saveEditProxyUser() {
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = 'Invalid email.'; errEl.style.display = 'block'; return; }
   const body = { fullName, email };
   if (password) {
-    if (password.length < 6) { errEl.textContent = 'Palavra-passe deve ter pelo menos 6 caracteres.'; errEl.style.display = 'block'; return; }
+    if (password.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; errEl.style.display = 'block'; return; }
     body.password = password;
+  }
+  // Send isAdmin only when the toggle is visible (i.e. not self-edit) AND the
+  // value actually changed — avoids no-op audit entries and accidental demotes.
+  const adminGroupVisible = document.getElementById('npuIsAdminGroup').style.display !== 'none';
+  if (adminGroupVisible) {
+    const desired = document.getElementById('npuIsAdmin').checked;
+    const current = !!_allProxyUsers.find(u => u.id === _editUserId)?.isAdmin;
+    if (desired !== current) {
+      if (!desired && !confirm('Remove admin role from this user? They will lose dashboard access.')) return;
+      body.isAdmin = desired;
+    }
   }
   try {
     const res = await api('/admin/proxy-users/' + _editUserId, { method: 'PUT', body: JSON.stringify(body) });
     const data = await res.json();
     if (!res.ok) { errEl.textContent = data.error || 'Error'; errEl.style.display = 'block'; return; }
-    toast('Utilizador atualizado');
+    toast('User updated');
     closeNewProxyUserModal();
     fetchProxyUsers();
   } catch (e) { errEl.textContent = 'Error: ' + e.message; errEl.style.display = 'block'; }
@@ -853,6 +916,103 @@ async function removeProfileFromCurrentUser(profileName) {
 
 // ─── Invite Tokens ──────────────────────────────────────────────────────────
 
+let _lastInviteToken = '';
+let _lastInviteIsAdmin = false;
+let _lastInviteEmail = '';
+
+function invToggleAll(kind) {
+  const rowSel = kind === 'proxy' ? '.inv-proxy-row' : '.inv-oauth-row';
+  const visible = Array.from(document.querySelectorAll(rowSel)).filter(el => el.style.display !== 'none');
+  const cbs = visible.map(el => el.querySelector('input[type=checkbox]')).filter(Boolean);
+  const anyUnchecked = cbs.some(b => !b.checked);
+  cbs.forEach(b => { b.checked = anyUnchecked; b.closest('.inv-row')?.classList.toggle('is-selected', b.checked); });
+  invUpdateCount(kind);
+}
+
+function invFilter(kind) {
+  const q = document.getElementById(kind === 'proxy' ? 'invProxySearch' : 'invOauthSearch').value.trim().toLowerCase();
+  const rows = document.querySelectorAll(kind === 'proxy' ? '.inv-proxy-row' : '.inv-oauth-row');
+  let shown = 0;
+  rows.forEach(r => {
+    const hay = (r.getAttribute('data-search') || '').toLowerCase();
+    const show = !q || hay.includes(q);
+    r.style.display = show ? '' : 'none';
+    if (show) shown++;
+  });
+  // Show "no results" hint when filter hides everything
+  const listId = kind === 'proxy' ? 'invProxyList' : 'invOauthList';
+  const list = document.getElementById(listId);
+  let empty = list.querySelector('.inv-picker-empty.is-filter');
+  if (rows.length && shown === 0) {
+    if (!empty) {
+      empty = document.createElement('span');
+      empty.className = 'inv-picker-empty is-filter';
+      empty.textContent = 'No matches';
+      list.appendChild(empty);
+    }
+  } else if (empty) {
+    empty.remove();
+  }
+}
+
+function invUpdateCount(kind) {
+  const cbSel = kind === 'proxy' ? '.inv-proxy-cb' : '.inv-oauth-cb';
+  const all = document.querySelectorAll(cbSel);
+  const checked = document.querySelectorAll(cbSel + ':checked').length;
+  const lbl = document.getElementById(kind === 'proxy' ? 'invProxyCount' : 'invOauthCount');
+  if (lbl) {
+    lbl.textContent = String(checked);
+    lbl.classList.toggle('has-selection', checked > 0);
+  }
+  // Reflect selected state on the row
+  document.querySelectorAll(cbSel).forEach(cb => {
+    cb.closest('.inv-row')?.classList.toggle('is-selected', cb.checked);
+  });
+  // Aggregate summary
+  const p = document.querySelectorAll('.inv-proxy-cb:checked').length;
+  const o = document.querySelectorAll('.inv-oauth-cb:checked').length;
+  const sum = document.getElementById('invSelectedSummary');
+  if (sum) {
+    if (p === 0 && o === 0) {
+      sum.textContent = 'Nothing selected';
+      sum.style.color = 'var(--text3)';
+    } else {
+      const parts = [];
+      if (p) parts.push(`${p} prox${p === 1 ? 'y' : 'ies'}`);
+      if (o) parts.push(`${o} OAuth client${o === 1 ? '' : 's'}`);
+      sum.textContent = parts.join(' · ');
+      sum.style.color = 'var(--accent)';
+    }
+  }
+}
+
+async function resendInviteEmail() {
+  if (!_lastInviteToken) return;
+  const btn = document.getElementById('resendInviteBtn');
+  const statusEl = document.getElementById('inviteEmailStatus');
+  const origHtml = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = 'Sending...';
+  try {
+    const endpoint = _lastInviteIsAdmin
+      ? '/admin/admins/invites/' + encodeURIComponent(_lastInviteToken) + '/resend'
+      : '/admin/invites/' + encodeURIComponent(_lastInviteToken) + '/resend';
+    const res = await api(endpoint, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      statusEl.textContent = '✔ Email sent to ' + _lastInviteEmail;
+      statusEl.style.color = 'var(--ok-text)';
+    } else {
+      statusEl.textContent = '⚠ ' + (data.error || 'Failed to send email');
+      statusEl.style.color = 'var(--err-text)';
+    }
+  } catch (e) {
+    statusEl.textContent = '⚠ ' + e.message;
+    statusEl.style.color = 'var(--err-text)';
+  } finally {
+    btn.disabled = false; btn.innerHTML = origHtml;
+  }
+}
+
 async function openCreateInviteModal() {
   document.getElementById('inviteGenError').style.display = 'none';
   document.getElementById('inviteGenResult').style.display = 'none';
@@ -862,22 +1022,65 @@ async function openCreateInviteModal() {
   document.getElementById('invNameInput').value = '';
   document.getElementById('invNoteInput').value = '';
   document.getElementById('invExpirySelect').value = '48';
+  document.getElementById('invAsAdmin').checked = false;
+  document.getElementById('invResourcesGroup').style.display = '';
+  const ps = document.getElementById('invProxySearch'); if (ps) ps.value = '';
+  const os = document.getElementById('invOauthSearch'); if (os) os.value = '';
+  const resendBtn = document.getElementById('resendInviteBtn');
+  if (resendBtn) resendBtn.style.display = 'none';
   document.getElementById('createInviteModal').classList.add('active');
-  // load login profiles into dropdown
-  const sel = document.getElementById('invProfileSelect');
-  sel.innerHTML = '<option value="">A carregar...</option>';
+
+  const proxyList = document.getElementById('invProxyList');
+  const oauthList = document.getElementById('invOauthList');
+  proxyList.innerHTML = '<span style="color:var(--text3)">Loading...</span>';
+  oauthList.innerHTML = '<span style="color:var(--text3)">Loading...</span>';
+
   try {
-    const res = await api('/admin/profiles');
-    const profiles = res.ok ? ((await res.json()).profiles || []) : _allProfiles;
+    const [profRes, oauthRes] = await Promise.all([
+      api('/admin/profiles'),
+      api('/admin/oauth-clients'),
+    ]);
+    const profiles = profRes.ok ? ((await profRes.json()).profiles || []) : _allProfiles;
     const loginProfiles = profiles.filter(p => (p.authMode || 'none') === 'login');
     if (loginProfiles.length === 0) {
-      sel.innerHTML = '<option value="" disabled>No proxy with "login" mode available</option>';
+      proxyList.innerHTML = '<span class="inv-picker-empty">No proxy with "login" mode available.</span>';
     } else {
-      sel.innerHTML = '<option value="">Select proxy...</option>' +
-        loginProfiles.map(p => `<option value="${esc(p.name)}">${esc(p.loginTitle || p.name)}</option>`).join('');
+      proxyList.innerHTML = loginProfiles.map(p => {
+        const title = p.loginTitle || p.name;
+        const search = (title + ' ' + p.name).toLowerCase();
+        return `<label class="inv-row inv-proxy-row" data-search="${esc(search)}">
+          <input type="checkbox" class="inv-proxy-cb" value="${esc(p.name)}" onchange="invUpdateCount('proxy')">
+          <div class="inv-row-main">
+            <span class="inv-row-label">${esc(title)}</span>
+            <span class="inv-row-sub">${esc(p.name)}</span>
+          </div>
+        </label>`;
+      }).join('');
     }
+    const clients = oauthRes.ok ? ((await oauthRes.json()).clients || []) : [];
+    if (clients.length === 0) {
+      oauthList.innerHTML = '<span class="inv-picker-empty">No OAuth clients configured.</span>';
+    } else {
+      oauthList.innerHTML = clients.map(c => {
+        const label = c.name || c.clientId;
+        const search = (label + ' ' + c.clientId).toLowerCase();
+        const tag = c.allowListEnabled
+          ? '<span class="inv-row-tag is-restricted" title="Allow-list enabled">Restricted</span>'
+          : '<span class="inv-row-tag" title="Any authenticated user">Open</span>';
+        return `<label class="inv-row inv-oauth-row" data-search="${esc(search)}">
+          <input type="checkbox" class="inv-oauth-cb" value="${esc(c.clientId)}" onchange="invUpdateCount('oauth')">
+          <div class="inv-row-main">
+            <span class="inv-row-label">${esc(label)}</span>
+            <span class="inv-row-sub">${esc(c.clientId)}</span>
+          </div>
+          ${tag}
+        </label>`;
+      }).join('');
+    }
+    invUpdateCount('proxy'); invUpdateCount('oauth');
   } catch {
-    sel.innerHTML = '<option value="" disabled>Failed to load proxies</option>';
+    proxyList.innerHTML = '<span style="color:var(--err-text)">Failed to load proxies.</span>';
+    oauthList.innerHTML = '<span style="color:var(--err-text)">Failed to load OAuth clients.</span>';
   }
 }
 
@@ -885,45 +1088,68 @@ function closeCreateInviteModal() {
   document.getElementById('createInviteModal').classList.remove('active');
 }
 
+function toggleInviteType() {
+  const asAdmin = document.getElementById('invAsAdmin').checked;
+  document.getElementById('invResourcesGroup').style.display = asAdmin ? 'none' : '';
+}
+
 async function generateInvite() {
   const errEl = document.getElementById('inviteGenError');
   errEl.style.display = 'none';
-  const profileName = document.getElementById('invProfileSelect').value;
-  if (!profileName) { errEl.textContent = 'Selecione um proxy para o convite.'; errEl.style.display = 'block'; return; }
+  const asAdmin = document.getElementById('invAsAdmin').checked;
+  const profileNames = Array.from(document.querySelectorAll('.inv-proxy-cb:checked')).map(el => el.value);
+  const oauthClientIds = Array.from(document.querySelectorAll('.inv-oauth-cb:checked')).map(el => el.value);
+  if (!asAdmin && profileNames.length === 0 && oauthClientIds.length === 0) {
+    errEl.textContent = 'Select at least one proxy or OAuth client (or check "Invite as administrator").';
+    errEl.style.display = 'block'; return;
+  }
   const email = document.getElementById('invEmailInput').value.trim();
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = 'Enter a valid email for the invitee.'; errEl.style.display = 'block'; return; }
   const invitedName = document.getElementById('invNameInput').value.trim();
-  if (!invitedName) { errEl.textContent = 'Introduza o nome do convidado.'; errEl.style.display = 'block'; return; }
+  if (!invitedName) { errEl.textContent = 'Enter the invitee\'s name.'; errEl.style.display = 'block'; return; }
   const note = document.getElementById('invNoteInput').value.trim();
   const expiresInHours = parseInt(document.getElementById('invExpirySelect').value, 10);
   const btn = document.getElementById('inviteGenBtn');
-  btn.disabled = true; btn.textContent = 'A gerar...';
+  btn.disabled = true; btn.textContent = 'Generating...';
   try {
-    const res = await api('/admin/invites', { method: 'POST', body: JSON.stringify({ profileName, email, invitedName, note, expiresInHours }) });
+    const endpoint = asAdmin ? '/admin/admins/invite' : '/admin/invites';
+    const payload = asAdmin
+      ? { email, fullName: invitedName, note, expiresInHours }
+      : { profileNames, oauthClientIds, email, invitedName, note, expiresInHours };
+    const res = await api(endpoint, { method: 'POST', body: JSON.stringify(payload) });
     const data = await res.json();
     if (!res.ok) { errEl.textContent = data.error || 'Failed to generate invite.'; errEl.style.display = 'block'; btn.disabled = false; btn.textContent = 'Generate Link'; return; }
-    const link = data.inviteUrl || (window.location.origin + '/invite/' + data.invite.token);
+    const inviteToken = data.invite?.token || '';
+    const link = data.inviteUrl || (window.location.origin + (asAdmin ? '/admin-invite/' : '/invite/') + inviteToken);
     document.getElementById('inviteLinkInput').value = link;
     document.getElementById('inviteGenResult').style.display = 'block';
     document.getElementById('inviteGenForm').style.display = 'none';
+    // Stash token + flavor so the "Send by email" button can resend later.
+    _lastInviteToken = inviteToken;
+    _lastInviteIsAdmin = !!asAdmin;
+    _lastInviteEmail = email;
     const statusEl = document.getElementById('inviteEmailStatus');
+    const resendBtn = document.getElementById('resendInviteBtn');
     if (statusEl) {
       if (data.emailSent) {
         statusEl.textContent = '✔ Email sent to ' + email;
         statusEl.style.color = 'var(--ok-text)';
+        if (resendBtn) { resendBtn.style.display = ''; resendBtn.firstChild.nextSibling.textContent = ' Resend email'; }
       } else if (data.emailError) {
-        statusEl.textContent = '⚠ Email not sent: ' + data.emailError + '. Copy the link below.';
+        statusEl.textContent = '⚠ Email not sent: ' + data.emailError;
         statusEl.style.color = 'var(--err-text)';
+        if (resendBtn) resendBtn.style.display = '';
       } else {
         statusEl.textContent = 'ℹ SMTP not configured — copy the link below.';
         statusEl.style.color = 'var(--text2)';
+        if (resendBtn) resendBtn.style.display = 'none';
       }
     }
     document.getElementById('inviteGenFooter').innerHTML = '<button class="btn" onclick="closeCreateInviteModal()">Close</button><button class="btn btn-primary" onclick="openCreateInviteModal()">Generate Another</button>';
     fetchInvites();
   } catch (e) {
     errEl.textContent = 'Error: ' + e.message; errEl.style.display = 'block';
-    btn.disabled = false; btn.textContent = 'Gerar Link';
+    btn.disabled = false; btn.textContent = 'Generate Link';
   }
 }
 
@@ -932,7 +1158,7 @@ function copyInviteLink() {
   navigator.clipboard.writeText(inp.value).then(() => {
     const btn = document.getElementById('copyInviteBtn');
     const orig = btn.textContent;
-    btn.textContent = 'Copiado!'; btn.style.background = 'var(--green)';
+    btn.textContent = 'Copied!'; btn.style.background = 'var(--green)';
     setTimeout(() => { btn.textContent = orig; btn.style.background = ''; }, 2000);
   });
 }
@@ -966,8 +1192,13 @@ function renderInvites(invites) {
     } else {
       badge = '<span style="background:var(--accent-bg);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">Active</span>';
     }
-    const profileTags = inv.profileName
-      ? `<span style="background:var(--surface2);padding:1px 6px;border-radius:3px;font-size:11px;font-family:monospace">${esc(inv.profileName)}</span>`
+    const profileTagsArr = (inv.profileNames && inv.profileNames.length ? inv.profileNames : (inv.profileName ? [inv.profileName] : []))
+      .map(p => `<span style="background:var(--surface2);padding:1px 6px;border-radius:3px;font-size:11px;font-family:monospace">${esc(p)}</span>`);
+    const oauthTagsArr = (inv.oauthClientIds || [])
+      .map(c => `<span style="background:var(--accent-bg);color:var(--accent);padding:1px 6px;border-radius:3px;font-size:11px;font-family:monospace">oauth:${esc(c)}</span>`);
+    const allTags = [...profileTagsArr, ...oauthTagsArr];
+    const profileTags = allTags.length
+      ? `<div style="display:flex;flex-wrap:wrap;gap:3px">${allTags.join('')}</div>`
       : '<span style="color:var(--text3)">—</span>';
     const expiresStr = expires.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
     const copyBtn = (!used && !expired)
@@ -2535,170 +2766,6 @@ async function removeLdapGroupFromClientUI(ruleId) {
 
 // ─── Admins ──────────────────────────────────────────────────────────────────
 let _currentUserId = null;
-
-async function fetchAdmins() {
-  try {
-    const res = await api('/admin/admins');
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    _currentUserId = data.currentUserId;
-    renderAdmins(data.admins || []);
-    const badge = document.getElementById('navAdminBadge');
-    if (badge) badge.textContent = String((data.admins || []).length);
-  } catch (e) {
-    document.getElementById('adminListBody').innerHTML =
-      '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
-  }
-}
-
-function renderAdmins(admins) {
-  const tbody = document.getElementById('adminListBody');
-  if (!admins.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">Sem admins.</td></tr>';
-    return;
-  }
-  tbody.innerHTML = admins.map(function(a) {
-    const isMe = a.id === _currentUserId;
-    const isLdap = a.authSource === 'ldap';
-    const meTag = isMe ? ' <span style="color:var(--accent2);font-size:11px;font-weight:600">(voce)</span>' : '';
-    const ldapTag = isLdap ? ' <span class="badge-ldap" title="Conta sincronizada de LDAP">LDAP</span>' : '';
-    const nameCell = a.fullName
-      ? '<div style="font-weight:500">' + esc(a.fullName) + meTag + ldapTag + '</div><div style="font-size:11px;color:var(--text3);font-family:monospace">' + esc(a.username) + '</div>'
-      : '<div style="font-weight:500">' + esc(a.username) + meTag + ldapTag + '</div>';
-    const twoFa = a.totpEnabled
-      ? '<span style="color:var(--green)">Active</span>'
-      : '<span style="color:var(--err-text);font-size:11.5px">Pending</span>';
-    const created = a.createdAt ? new Date(a.createdAt).toLocaleString() : '—';
-    const resetBtn = isLdap
-      ? ''
-      : '<button class="btn btn-sm btn-ghost" onclick="resetAdminPassword(' + a.id + ',&quot;' + esc(a.username) + '&quot;)">Reset password</button> ';
-    const actions = isMe
-      ? '<span style="color:var(--text3);font-size:11.5px">—</span>'
-      : resetBtn +
-        '<button class="btn btn-sm btn-ghost" onclick="deleteAdminUser(' + a.id + ',&quot;' + esc(a.username) + '&quot;)" style="color:var(--err-text)">Delete</button>';
-    return '<tr style="border-top:1px solid var(--border)">' +
-      '<td style="padding:10px 12px">' + nameCell + '</td>' +
-      '<td style="padding:10px 8px;color:var(--text2)">' + esc(a.email || '—') + '</td>' +
-      '<td style="padding:10px 8px">' + twoFa + '</td>' +
-      '<td style="padding:10px 8px;color:var(--text3);font-size:11.5px">' + esc(created) + '</td>' +
-      '<td style="padding:10px 12px;text-align:right">' + actions + '</td>' +
-      '</tr>';
-  }).join('');
-}
-
-function openCreateAdminModal() {
-  document.getElementById('adminUsername').value = '';
-  document.getElementById('adminFullName').value = '';
-  document.getElementById('adminEmail').value = '';
-  document.getElementById('adminPassword').value = '';
-  document.getElementById('adminModal').style.display = 'flex';
-}
-function closeAdminModal() { document.getElementById('adminModal').style.display = 'none'; }
-
-async function submitNewAdmin() {
-  const username = document.getElementById('adminUsername').value.trim();
-  const fullName = document.getElementById('adminFullName').value.trim();
-  const email = document.getElementById('adminEmail').value.trim();
-  const password = document.getElementById('adminPassword').value;
-  if (!username || username.length < 2) return toast('Username muito curto', 'error');
-  if (!password || password.length < 8) return toast('Password minimo 8 chars', 'error');
-  try {
-    const res = await api('/admin/admins', { method: 'POST', body: JSON.stringify({ username, fullName, email, password }) });
-    const data = await res.json();
-    if (!res.ok) return toast(data.error || 'Failed to create', 'error');
-    toast('Admin "' + username + '" criado');
-    closeAdminModal();
-    fetchAdmins();
-  } catch (e) { toast('Error: ' + e.message, 'error'); }
-}
-
-async function deleteAdminUser(id, username) {
-  if (!confirm('Delete admin "' + username + '"?')) return;
-  try {
-    const res = await api('/admin/admins/' + id, { method: 'DELETE' });
-    if (!res.ok) {
-      const data = await res.json().catch(function() { return {}; });
-      return toast(data.error || 'Failed to delete', 'error');
-    }
-    toast('Admin apagado'); fetchAdmins();
-  } catch (e) { toast('Error: ' + e.message, 'error'); }
-}
-
-async function resetAdminPassword(id, username) {
-  const newPass = prompt('Nova password para "' + username + '" (min 8 chars):');
-  if (!newPass) return;
-  if (newPass.length < 8) return toast('Password minimo 8 chars', 'error');
-  try {
-    const res = await api('/admin/admins/' + id + '/password', { method: 'PATCH', body: JSON.stringify({ password: newPass }) });
-    const data = await res.json();
-    if (!res.ok) return toast(data.error || 'Failed', 'error');
-    toast('Password atualizada');
-  } catch (e) { toast('Error: ' + e.message, 'error'); }
-}
-
-// ─── Admin Invites ────────────────────────────────────────────────────────────
-function openAdminInviteModal() {
-  document.getElementById('adminInviteEmail').value = '';
-  document.getElementById('adminInviteFullName').value = '';
-  document.getElementById('adminInviteNote').value = '';
-  document.getElementById('adminInviteExpires').value = '168';
-  document.getElementById('adminInviteError').style.display = 'none';
-  document.getElementById('adminInviteFormWrap').style.display = '';
-  document.getElementById('adminInviteResult').style.display = 'none';
-  document.getElementById('adminInviteModal').style.display = 'flex';
-}
-
-function closeAdminInviteModal() {
-  document.getElementById('adminInviteModal').style.display = 'none';
-}
-
-async function submitAdminInvite() {
-  const errEl = document.getElementById('adminInviteError');
-  errEl.style.display = 'none';
-  const email = document.getElementById('adminInviteEmail').value.trim();
-  const fullName = document.getElementById('adminInviteFullName').value.trim();
-  const note = document.getElementById('adminInviteNote').value.trim();
-  const expiresInHours = parseInt(document.getElementById('adminInviteExpires').value, 10);
-  try {
-    const res = await api('/admin/admins/invite', {
-      method: 'POST',
-      body: JSON.stringify({ email, fullName, note, expiresInHours }),
-    });
-    const data = await res.json();
-    if (!res.ok) { errEl.textContent = data.error || 'Failed to generate invite.'; errEl.style.display = 'block'; return; }
-    document.getElementById('adminInviteFormWrap').style.display = 'none';
-    document.getElementById('adminInviteUrl').value = data.inviteUrl || '';
-    document.getElementById('adminInviteResult').style.display = '';
-    const statusEl = document.getElementById('adminInviteEmailStatus');
-    if (statusEl) {
-      if (data.emailSent) {
-        statusEl.textContent = '✔ Email sent to ' + email;
-        statusEl.style.color = 'var(--ok-text)';
-      } else if (email && data.emailError) {
-        statusEl.textContent = '⚠ Email not sent: ' + data.emailError + '. Copy the link below.';
-        statusEl.style.color = 'var(--err-text)';
-      } else if (email) {
-        statusEl.textContent = 'ℹ SMTP not configured — copy the link below.';
-        statusEl.style.color = 'var(--text2)';
-      } else {
-        statusEl.textContent = '';
-      }
-    }
-  } catch (e) {
-    errEl.textContent = 'Network error: ' + e.message;
-    errEl.style.display = 'block';
-  }
-}
-
-function copyAdminInviteUrl() {
-  const inp = document.getElementById('adminInviteUrl');
-  inp.select();
-  document.execCommand('copy');
-  const btn = document.getElementById('adminInviteCopyBtn');
-  const orig = btn.textContent;
-  btn.textContent = 'Copiado!';
-  setTimeout(() => { btn.textContent = orig; }, 1500);
-}
 
 // ─── SMTP / Email ─────────────────────────────────────────────────────────────
 let _smtpHasPassword = false;
