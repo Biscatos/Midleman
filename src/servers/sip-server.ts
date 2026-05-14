@@ -16,6 +16,7 @@ import type { TcpUdpProfile } from '../core/types';
 import { isIpAllowed } from '../core/ip-filter';
 import { ensureCertificate } from '../sip/acme';
 import { logSipMessage, shouldLogSipMessage, buildSipLogEntry } from '../telemetry/sip-log';
+import { logConnection } from '../telemetry/tcpudp-conn-log';
 import { SipTcpParser, parseSipMessage } from '../sip/parser';
 import { TransactionTable } from '../sip/transaction';
 import type { SipTransaction, UdpReturn } from '../sip/transaction';
@@ -221,6 +222,17 @@ function handleTcpConnection(
 
 const connParsers = new WeakMap<BunSocket, SipTcpParser>();
 
+interface ConnMeta {
+    openedAt: number;
+    openedAtIso: string;
+    bytesIn: number;
+    // bytesOut read from socket.bytesWritten at finalize — no need to track here
+    peerAddr?: string;
+    closeReason?: string;
+    accepted: boolean; // false = rejected by allowlist, don't log on close
+}
+const connMeta = new WeakMap<BunSocket, ConnMeta>();
+
 function buildTcpListener(
     profile: TcpUdpProfile,
     port: number,
@@ -229,27 +241,81 @@ function buildTcpListener(
 ): BunTcpServer {
     const label = profile.name;
     const transport: 'tcp' | 'tls' = tls ? 'tls' : 'tcp';
+    const logConns = !!profile.logConnections;
+
+    const finalizeConn = (socket: BunSocket) => {
+        if (!logConns) return;
+        const m = connMeta.get(socket);
+        if (!m || !m.accepted) return;
+        const now = Date.now();
+        const bytesOut = (socket as unknown as { bytesWritten?: number }).bytesWritten ?? 0;
+        logConnection({
+            openedAt: m.openedAtIso,
+            closedAt: new Date(now).toISOString(),
+            profileName: profile.name,
+            transport,
+            peerAddr: m.peerAddr,
+            bytesIn: m.bytesIn,
+            bytesOut,
+            durationMs: now - m.openedAt,
+            closeReason: m.closeReason || 'eof',
+        });
+        connMeta.delete(socket);
+    };
 
     const socketHandlers = {
         open(socket: BunSocket) {
+            const remotePort = (socket as unknown as { remotePort?: number }).remotePort;
+            const peerAddr = socket.remoteAddress
+                ? (remotePort ? `${socket.remoteAddress}:${remotePort}` : socket.remoteAddress)
+                : undefined;
+
+            if (logConns) {
+                connMeta.set(socket, {
+                    openedAt: Date.now(),
+                    openedAtIso: new Date().toISOString(),
+                    bytesIn: 0,
+                    peerAddr,
+                    accepted: false,
+                });
+            }
+
             if (!isIpAllowed(socket.remoteAddress, profile.allowedIps)) {
                 console.warn(`[tcpudp:${label}] Rejected ${socket.remoteAddress} (allowlist)`);
+                if (logConns) {
+                    const m = connMeta.get(socket);
+                    if (m) { m.closeReason = 'rejected'; m.accepted = true; }
+                }
                 socket.end();
                 return;
+            }
+            if (logConns) {
+                const m = connMeta.get(socket);
+                if (m) m.accepted = true;
             }
             console.log(`[tcpudp:${label}] ${transport.toUpperCase()} from ${socket.remoteAddress}`);
             connParsers.set(socket, handleTcpConnection(socket, transport, inst));
         },
         data(socket: BunSocket, data: Buffer) {
+            if (logConns) {
+                const m = connMeta.get(socket);
+                if (m) m.bytesIn += data.length;
+            }
             connParsers.get(socket)?.feed(data);
         },
         close(socket: BunSocket) {
             connParsers.delete(socket);
             inst.txTable.evictForSocket(socket);
+            finalizeConn(socket);
         },
         error(socket: BunSocket, err: Error) {
             console.error(`[tcpudp:${label}] ${transport.toUpperCase()} error:`, err.message);
             connParsers.delete(socket);
+            if (logConns) {
+                const m = connMeta.get(socket);
+                if (m) m.closeReason = `error:${err.message}`;
+            }
+            finalizeConn(socket);
         },
     };
 

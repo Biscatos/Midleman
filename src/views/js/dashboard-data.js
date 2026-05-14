@@ -2216,8 +2216,8 @@ async function fetchSipProxies() {
     const res = await api('/admin/tcpudp'); if (!res.ok) return;
     const d = await res.json(); _allTcpUdpProxies = d.tcpUdpProxies || [];
     renderTcpUdpProxies(_allTcpUdpProxies);
-    const sec = document.getElementById('tcpUdpSection');
-    if (sec) sec.style.display = _allTcpUdpProxies.length ? '' : 'none';
+    const badge = document.getElementById('navTcpUdpBadge');
+    if (badge) badge.textContent = String(_allTcpUdpProxies.length);
   } catch (e) { console.error('fetchSipProxies:', e); }
 }
 
@@ -2291,6 +2291,7 @@ function openSipModal(proxy) {
   document.getElementById('sipAcmeStaging').checked = !!(proxy && proxy.acmeStaging);
   toggleSipTlsSection();
   toggleSipCertMode();
+  document.getElementById('sipLogConnections').checked = !!(proxy && proxy.logConnections);
   document.getElementById('sipLogMessages').checked = !!(proxy && proxy.logMessages);
   document.getElementById('sipLogMessageBody').checked = !!(proxy && proxy.logMessageBody);
   document.getElementById('sipLogNoise').checked = !!(proxy && proxy.logNoise);
@@ -2386,6 +2387,7 @@ async function saveSipProxy() {
     logMessages: document.getElementById('sipLogMessages').checked,
     logMessageBody: document.getElementById('sipLogMessageBody').checked,
     logNoise: document.getElementById('sipLogNoise').checked,
+    logConnections: document.getElementById('sipLogConnections').checked,
   };
 
   if (hasTls) {
@@ -3792,7 +3794,7 @@ function ensureSipAutoRefreshTimer() {
     if (!cb || !cb.checked) return;
     // Skip if a detail modal is open (avoid disrupting reads)
     if (document.getElementById('sipDetailModal')?.style.display === 'block') return;
-    fetchSipLogs();
+    refreshTcpUdpLogTab();
   }, 5000);
 }
 // Kick off once the script loads
@@ -3835,5 +3837,128 @@ async function openSipDetail(id) {
 
 function closeSipDetail() {
   document.getElementById('sipDetailModal').style.display = 'none';
+}
+
+// ─── TCP/UDP Logs: tabs (Messages / Connections) ───────────────────────────
+let _tcpUdpLogTab = 'messages';
+
+function switchTcpUdpLogTab(tab) {
+  _tcpUdpLogTab = tab;
+  const msgBtn = document.getElementById('tabBtnSipMessages');
+  const conBtn = document.getElementById('tabBtnSipConns');
+  const msgPane = document.getElementById('tabPaneSipMessages');
+  const conPane = document.getElementById('tabPaneSipConns');
+  if (tab === 'messages') {
+    msgPane.style.display = '';
+    conPane.style.display = 'none';
+    msgBtn.style.borderBottomColor = 'var(--accent)';
+    msgBtn.style.color = 'var(--text)';
+    conBtn.style.borderBottomColor = 'transparent';
+    conBtn.style.color = 'var(--text3)';
+    fetchSipLogs();
+  } else {
+    msgPane.style.display = 'none';
+    conPane.style.display = '';
+    msgBtn.style.borderBottomColor = 'transparent';
+    msgBtn.style.color = 'var(--text3)';
+    conBtn.style.borderBottomColor = 'var(--accent)';
+    conBtn.style.color = 'var(--text)';
+    populateConnProfileFilter();
+    fetchConnLogs();
+  }
+}
+
+function refreshTcpUdpLogTab() {
+  if (_tcpUdpLogTab === 'messages') fetchSipLogs();
+  else fetchConnLogs();
+}
+
+// ─── TCP/UDP raw connection logs ───────────────────────────────────────────
+let clPage = 1;
+const clPageSize = 50;
+let clTotal = 0;
+
+async function populateConnProfileFilter() {
+  const sel = document.getElementById('clProfile');
+  if (!sel || sel.dataset.loaded === '1') return;
+  try {
+    const res = await api('/admin/tcpudp');
+    if (!res.ok) return;
+    const data = await res.json();
+    const cur = sel.value;
+    const profiles = data.tcpUdpProxies || [];
+    sel.innerHTML = '<option value="">All profiles</option>' +
+      profiles.map(p => '<option value="' + esc(p.name) + '">' + esc(p.name) + '</option>').join('');
+    if (cur) sel.value = cur;
+    sel.dataset.loaded = '1';
+  } catch {}
+}
+
+async function fetchConnLogs() {
+  const body = document.getElementById('connLogBody');
+  if (!body) return;
+  const params = new URLSearchParams();
+  params.set('page', String(clPage));
+  params.set('pageSize', String(clPageSize));
+  const profile = document.getElementById('clProfile')?.value;
+  const transport = document.getElementById('clTransport')?.value;
+  if (profile) params.set('profile', profile);
+  if (transport) params.set('transport', transport);
+  try {
+    const res = await api('/admin/tcpudp-conns?' + params.toString());
+    if (!res.ok) {
+      body.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:var(--text3)">Failed to load.</td></tr>';
+      return;
+    }
+    const data = await res.json();
+    clTotal = data.total || 0;
+    const rows = data.rows || [];
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="8" style="padding:32px;text-align:center;color:var(--text3)">No connections logged. Enable <strong>Log connections</strong> on a TCP/UDP profile to populate.</td></tr>';
+    } else {
+      body.innerHTML = rows.map(renderConnLogRow).join('');
+    }
+    const start = clTotal === 0 ? 0 : (clPage - 1) * clPageSize + 1;
+    const end = Math.min(start + rows.length - 1, clTotal);
+    document.getElementById('connLogInfo').textContent = clTotal ? (start + '-' + end + ' of ' + clTotal) : '0';
+    document.getElementById('clPrev').disabled = clPage <= 1;
+    document.getElementById('clNext').disabled = end >= clTotal;
+  } catch (e) {
+    body.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:var(--text3)">' + esc(e.message) + '</td></tr>';
+  }
+}
+
+function renderConnLogRow(r) {
+  const opened = r.opened_at ? r.opened_at.replace('T', ' ').replace('Z', '') : '';
+  const closeColor = (r.close_reason || '').startsWith('error:') ? '#ef4444'
+    : r.close_reason === 'rejected' ? '#f59e0b' : 'var(--text3)';
+  const dur = r.duration_ms != null ? humanDuration(r.duration_ms) : '';
+  return '<tr style="border-top:1px solid var(--border)">'
+    + '<td style="padding:8px 12px;font-family:monospace;font-size:12px;white-space:nowrap">' + esc(opened) + '</td>'
+    + '<td style="padding:8px">' + esc(r.profile_name) + '</td>'
+    + '<td style="padding:8px;font-size:11px;color:var(--text2)">' + esc((r.transport || '').toUpperCase()) + '</td>'
+    + '<td style="padding:8px;font-family:monospace;font-size:12px">' + esc(r.peer_addr || '') + '</td>'
+    + '<td style="padding:8px;font-family:monospace;font-size:12px">' + humanBytes(r.bytes_in || 0) + '</td>'
+    + '<td style="padding:8px;font-family:monospace;font-size:12px">' + humanBytes(r.bytes_out || 0) + '</td>'
+    + '<td style="padding:8px;font-family:monospace;font-size:12px">' + esc(dur) + '</td>'
+    + '<td style="padding:8px;font-size:11px;color:' + closeColor + '">' + esc(r.close_reason || '') + '</td>'
+    + '</tr>';
+}
+
+function humanBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1024 / 1024).toFixed(2) + ' MB';
+}
+function humanDuration(ms) {
+  if (ms < 1000) return ms + ' ms';
+  if (ms < 60_000) return (ms / 1000).toFixed(1) + ' s';
+  return Math.floor(ms / 60_000) + 'm ' + Math.floor((ms % 60_000) / 1000) + 's';
+}
+
+function connLogPrevPage() { if (clPage > 1) { clPage--; fetchConnLogs(); } }
+function connLogNextPage() {
+  const maxPage = Math.max(1, Math.ceil(clTotal / clPageSize));
+  if (clPage < maxPage) { clPage++; fetchConnLogs(); }
 }
 

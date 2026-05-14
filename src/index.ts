@@ -9,6 +9,7 @@ import {
 import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry/telemetry';
 import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart } from './telemetry/request-log';
 import { initSipLog, shutdownSipLog, querySipLogs, getSipLogDetail, getSipLogStats } from './telemetry/sip-log';
+import { initConnLog, shutdownConnLog, queryConnLogs } from './telemetry/tcpudp-conn-log';
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort, isProxyServerRunning, setProxyLoginTemplate, setProxyLogo } from './servers/proxy-server';
 import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort, assignTcpUdpListenerPort, releaseProxyPort, releaseWebhookPort, releaseTcpUdpListenerPorts, getWebhookPort } from './servers/port-manager';
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync } from './servers/webhook-server';
@@ -57,6 +58,9 @@ initRequestLog(config.requestLog);
 
 // Initialize SIP message logging (separate SQLite db, shares dataDir/retention)
 initSipLog(config.requestLog);
+
+// Initialize raw TCP/TLS connection logging (separate SQLite db)
+initConnLog(config.requestLog);
 
 // Initialize auth
 initAuth(config.requestLog.dataDir, config.auth.sessionMaxAge);
@@ -993,6 +997,18 @@ const server = Bun.serve({
 
                 if (url.pathname === '/admin/sip-logs/stats' && req.method === 'GET') {
                     return jsonRes(200, getSipLogStats() as unknown as Record<string, unknown>);
+                }
+
+                if (url.pathname === '/admin/tcpudp-conns' && req.method === 'GET') {
+                    const result = queryConnLogs({
+                        page: parseInt(url.searchParams.get('page') || '1', 10),
+                        pageSize: parseInt(url.searchParams.get('pageSize') || '50', 10),
+                        profileName: url.searchParams.get('profile') || undefined,
+                        transport: (url.searchParams.get('transport') as 'tcp' | 'tls') || undefined,
+                        since: url.searchParams.get('since') || undefined,
+                        until: url.searchParams.get('until') || undefined,
+                    });
+                    return jsonRes(200, result as unknown as Record<string, unknown>);
                 }
 
                 if (url.pathname.match(/^\/admin\/sip-logs\/\d+$/) && req.method === 'GET') {
@@ -2051,6 +2067,7 @@ const server = Bun.serve({
                             logMessages: !!p.logMessages,
                             logMessageBody: !!p.logMessageBody,
                             logNoise: !!p.logNoise,
+                            logConnections: !!p.logConnections,
                             running: !!s?.running,
                         };
                     });
@@ -2130,6 +2147,7 @@ const server = Bun.serve({
                         logMessages: input.logMessages === true,
                         logMessageBody: input.logMessageBody === true,
                         logNoise: input.logNoise === true,
+                        logConnections: input.logConnections === true,
                     };
 
                     if (isUpdate) {
@@ -2370,6 +2388,7 @@ const shutdown = async (signal: string) => {
     await shutdownTelemetry();
     shutdownRequestLog();
     shutdownSipLog();
+    shutdownConnLog();
     shutdownLdap();
     shutdownAuth();
 
