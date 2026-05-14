@@ -2459,6 +2459,7 @@ function _populateConsentPageDropdown(selectId, selectedId) {
 function _resetOauthClientForm() {
   document.getElementById('oauthClientName').value = '';
   document.getElementById('oauthClientUris').value = '';
+  document.getElementById('oauthClientPkceRequired').checked = true;
   document.getElementById('oauthClientConsentEnabled').checked = false;
   _populateConsentPageDropdown('oauthClientConsentPageId', null);
   document.getElementById('oauthClientConsentFields').style.display = 'none';
@@ -2502,6 +2503,7 @@ async function openEditOauthClientModal(clientId) {
     const urisText = (client.redirectUris || []).join('\n');
     document.getElementById('oauthClientUris').value = urisText;
     _editingOauthClientOriginalUris = urisText;
+    document.getElementById('oauthClientPkceRequired').checked = client.pkceRequired !== false;
     document.getElementById('oauthClientConsentEnabled').checked = !!client.consentEnabled;
     _populateConsentPageDropdown('oauthClientConsentPageId', client.consentPageId);
     toggleOauthClientConsentFields();
@@ -2533,10 +2535,12 @@ async function submitOauthClient() {
     .split('\n').map(s => s.trim()).filter(Boolean);
   if (!name) return toast('Name is required', 'error');
   if (!redirectUris.length) return toast('At least one redirect URI', 'error');
+  const pkceRequired = document.getElementById('oauthClientPkceRequired').checked;
+  if (!pkceRequired && !confirm('Disable PKCE for this client?\n\nThis removes a security defense (auth-code interception protection). Only do this for legacy clients that cannot send a code_challenge.')) return;
   try {
     const res = await api('/admin/oauth-clients', {
       method: 'POST',
-      body: JSON.stringify({ name, redirectUris }),
+      body: JSON.stringify({ name, redirectUris, pkceRequired }),
     });
     const data = await res.json();
     if (!res.ok) return toast(data.error || 'Failed to create', 'error');
@@ -2569,11 +2573,14 @@ async function submitEditOauthClient() {
   if (consentEnabled && !consentPageId) {
     return toast('Choose a consent page or disable consent.', 'error');
   }
+  const pkceRequired = document.getElementById('oauthClientPkceRequired').checked;
+  if (!pkceRequired && !confirm('Disable PKCE for this client?\n\nThis removes a security defense (auth-code interception protection). Only do this for legacy clients that cannot send a code_challenge.')) return;
   const payload = {
     name,
     redirectUris,
     consentEnabled,
     consentPageId,
+    pkceRequired,
   };
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(_editingOauthClientId), {

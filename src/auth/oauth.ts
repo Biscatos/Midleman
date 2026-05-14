@@ -100,6 +100,10 @@ export function initOauth(): void {
     // The consent_title/consent_body columns above are kept for historical data
     // but are no longer read or written — replaced by the join to consent_pages.
     if (!cols.includes('consent_page_id'))       db.exec("ALTER TABLE oauth_clients ADD COLUMN consent_page_id INTEGER");
+    // PKCE is required by default. Some legacy OAuth clients (e.g. Portainer
+    // pre-2.20) cannot send code_challenge — admins can opt out per-client at
+    // their own risk. New clients should always keep this on.
+    if (!cols.includes('pkce_required'))         db.exec("ALTER TABLE oauth_clients ADD COLUMN pkce_required INTEGER NOT NULL DEFAULT 1");
     // Cleanup expired codes / refresh tokens / sessions once per hour.
     cleanupExpired();
     setInterval(cleanupExpired, 60 * 60 * 1000);
@@ -132,6 +136,10 @@ export interface OauthClient {
     /** Resolved from consent_pages via JOIN. Empty string when no page is linked. */
     consentBody: string;
     allowListEnabled: boolean;
+    /** When false, the authorize/token endpoints skip the PKCE checks for this
+     *  client. Default true. Only disable for legacy clients that cannot send a
+     *  code_challenge — it removes a defense against auth-code interception. */
+    pkceRequired: boolean;
 }
 
 function randomToken(byteLength: number): string {
@@ -144,18 +152,25 @@ function randomToken(byteLength: number): string {
 function validateRedirectUris(redirectUris: string[]): void {
     if (!Array.isArray(redirectUris) || redirectUris.length === 0) throw new Error('At least one redirect_uri required');
     for (const uri of redirectUris) {
+        let u: URL;
         try {
-            const u = new URL(uri);
-            if (u.protocol !== 'https:' && u.hostname !== 'localhost' && u.hostname !== '127.0.0.1') {
-                throw new Error(`redirect_uri must use https:// (got ${uri})`);
-            }
+            u = new URL(uri);
         } catch {
             throw new Error(`Invalid redirect_uri: ${uri}`);
+        }
+        if (u.protocol !== 'https:' && u.hostname !== 'localhost' && u.hostname !== '127.0.0.1') {
+            throw new Error(`redirect_uri must use https:// (got ${uri})`);
+        }
+        // RFC 6749 §3.1.2: redirect_uri MUST NOT include a fragment component.
+        // Browsers strip it before sending, so the server can never match it
+        // and the user gets a confusing 'Invalid redirect_uri' at runtime.
+        if (u.hash) {
+            throw new Error(`redirect_uri must not contain a fragment (#...). Remove "${u.hash}" from "${uri}". The client app can navigate to the fragment after the callback.`);
         }
     }
 }
 
-export async function createOauthClient(name: string, redirectUris: string[]): Promise<{ client: OauthClient; clientSecret: string }> {
+export async function createOauthClient(name: string, redirectUris: string[], opts?: { pkceRequired?: boolean }): Promise<{ client: OauthClient; clientSecret: string }> {
     const db = getAuthDb();
     if (!db) throw new Error('Auth not initialized');
     if (!name.trim()) throw new Error('Client name required');
@@ -163,10 +178,11 @@ export async function createOauthClient(name: string, redirectUris: string[]): P
     const clientId = randomToken(16);
     const clientSecret = randomToken(32);
     const secretHash = await Bun.password.hash(clientSecret, 'bcrypt');
-    db.prepare('INSERT INTO oauth_clients (client_id, name, secret_hash, redirect_uris) VALUES ($id, $n, $h, $r)')
-        .run({ $id: clientId, $n: name.trim(), $h: secretHash, $r: JSON.stringify(redirectUris) });
+    const pkceRequired = opts?.pkceRequired !== false; // default true
+    db.prepare('INSERT INTO oauth_clients (client_id, name, secret_hash, redirect_uris, pkce_required) VALUES ($id, $n, $h, $r, $pk)')
+        .run({ $id: clientId, $n: name.trim(), $h: secretHash, $r: JSON.stringify(redirectUris), $pk: pkceRequired ? 1 : 0 });
     return {
-        client: { clientId, name: name.trim(), redirectUris, createdAt: new Date().toISOString(), consentEnabled: false, consentTitle: '', consentBody: '' },
+        client: { clientId, name: name.trim(), redirectUris, createdAt: new Date().toISOString(), consentEnabled: false, consentPageId: null, consentTitle: '', consentBody: '', allowListEnabled: false, pkceRequired },
         clientSecret,
     };
 }
@@ -177,6 +193,8 @@ export interface UpdateOauthClientInput {
     consentEnabled?: boolean;
     /** Reference to a row in consent_pages. null clears the link. */
     consentPageId?: number | null;
+    /** Toggle PKCE enforcement for this client. */
+    pkceRequired?: boolean;
 }
 
 export interface UpdateOauthClientResult {
@@ -232,6 +250,13 @@ export function updateOauthClient(clientId: string, input: UpdateOauthClientInpu
             params.$cpid = v;
         }
     }
+    if (input.pkceRequired !== undefined) {
+        const v = input.pkceRequired ? 1 : 0;
+        if (v !== (existing.pkce_required ?? 1)) {
+            sets.push('pkce_required = $pk');
+            params.$pk = v;
+        }
+    }
 
     if (sets.length === 0) {
         return { updated: false, redirectUrisChanged: false, revokedRefreshTokens: 0 };
@@ -275,6 +300,8 @@ function rowToClient(r: any): OauthClient {
         consentTitle: r.cp_title || '',
         consentBody: r.cp_body || '',
         allowListEnabled: !!r.allow_list_enabled,
+        // Default true when the column is missing on very old rows.
+        pkceRequired: r.pkce_required === undefined || r.pkce_required === null ? true : !!r.pkce_required,
     };
 }
 
@@ -329,7 +356,8 @@ export interface IssueCodeParams {
     clientId: string;
     userId: number;
     redirectUri: string;
-    codeChallenge: string; // PKCE S256 base64url
+    /** PKCE S256 base64url. Empty string when the client has pkceRequired=false. */
+    codeChallenge: string;
     scope: string;
     nonce?: string;
 }
@@ -344,7 +372,7 @@ export function issueAuthCode(p: IssueCodeParams): string {
         VALUES ($code, $cid, $uid, $ru, $cc, $sc, $no, $exp)`)
         .run({
             $code: code, $cid: p.clientId, $uid: p.userId, $ru: p.redirectUri,
-            $cc: p.codeChallenge, $sc: p.scope, $no: p.nonce || null, $exp: expiresAt,
+            $cc: p.codeChallenge || '', $sc: p.scope, $no: p.nonce || null, $exp: expiresAt,
         });
     return code;
 }
@@ -355,10 +383,13 @@ export interface ConsumedCode {
     nonce: string | null;
 }
 
-/** Single-use consumption of an auth code. Validates client_id, redirect_uri, PKCE S256. */
+/** Single-use consumption of an auth code. Validates client_id, redirect_uri,
+ *  and PKCE S256 when the code was issued with a code_challenge. When the
+ *  client has pkceRequired=false and the code was issued without a challenge,
+ *  the code_verifier is ignored. */
 export function consumeAuthCode(code: string, clientId: string, redirectUri: string, codeVerifier: string): ConsumedCode | null {
     const db = getAuthDb();
-    if (!db || !code || !clientId || !codeVerifier) return null;
+    if (!db || !code || !clientId) return null;
 
     const row = db.prepare('SELECT * FROM oauth_codes WHERE code = $c').get({ $c: code }) as any;
     if (!row) return null;
@@ -373,9 +404,13 @@ export function consumeAuthCode(code: string, clientId: string, redirectUri: str
     if (row.redirect_uri !== redirectUri) return null;
     if (new Date(row.expires_at) < new Date()) return null;
 
-    // PKCE S256: BASE64URL(SHA256(code_verifier)) === code_challenge
-    const challenge = createHash('sha256').update(codeVerifier).digest().toString('base64url');
-    if (challenge !== row.code_challenge) return null;
+    // PKCE S256 when challenge was stored. If the code was issued without a
+    // challenge (pkceRequired=false at authorize time), skip verifier check.
+    if (row.code_challenge) {
+        if (!codeVerifier) return null;
+        const challenge = createHash('sha256').update(codeVerifier).digest().toString('base64url');
+        if (challenge !== row.code_challenge) return null;
+    }
 
     return { userId: row.user_id, scope: row.scope, nonce: row.nonce };
 }

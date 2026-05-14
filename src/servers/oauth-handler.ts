@@ -194,11 +194,26 @@ export async function handleAuthorize(req: Request, url: URL): Promise<Response>
     if (responseType !== 'code') {
         return redirectError(redirectUri, state, 'unsupported_response_type', 'Only response_type=code is supported');
     }
-    if (codeChallengeMethod !== 'S256') {
-        return redirectError(redirectUri, state, 'invalid_request', 'PKCE with code_challenge_method=S256 is required');
-    }
-    if (!codeChallenge || codeChallenge.length < 32) {
-        return redirectError(redirectUri, state, 'invalid_request', 'Missing or invalid code_challenge');
+    // PKCE: required by default. Admins can opt out per-client for legacy
+    // OAuth clients (e.g. Portainer pre-2.20) that cannot send a challenge.
+    // When opted out: if the client *did* send a challenge anyway, we still
+    // honor it (method must be S256 if present); otherwise we issue the code
+    // without binding it to a verifier.
+    if (client.pkceRequired) {
+        if (codeChallengeMethod !== 'S256') {
+            return redirectError(redirectUri, state, 'invalid_request', 'PKCE with code_challenge_method=S256 is required');
+        }
+        if (!codeChallenge || codeChallenge.length < 32) {
+            return redirectError(redirectUri, state, 'invalid_request', 'Missing or invalid code_challenge');
+        }
+    } else if (codeChallenge) {
+        // PKCE optional but client sent one — must still be S256 if present.
+        if (codeChallengeMethod !== 'S256') {
+            return redirectError(redirectUri, state, 'invalid_request', 'code_challenge_method must be S256 when code_challenge is provided');
+        }
+        if (codeChallenge.length < 32) {
+            return redirectError(redirectUri, state, 'invalid_request', 'Invalid code_challenge');
+        }
     }
 
     // Scope filtering — silently drop unknown scopes (don't fail the request)
@@ -623,9 +638,16 @@ export async function handleToken(req: Request): Promise<Response> {
 async function handleCodeGrant(clientId: string, body: Record<string, string>): Promise<Response> {
     const code = body.code;
     const redirectUri = body.redirect_uri;
-    const codeVerifier = body.code_verifier;
-    if (!code || !redirectUri || !codeVerifier) {
-        return jsonError(400, 'invalid_request', 'Missing code, redirect_uri or code_verifier');
+    const codeVerifier = body.code_verifier || '';
+    if (!code || !redirectUri) {
+        return jsonError(400, 'invalid_request', 'Missing code or redirect_uri');
+    }
+    // code_verifier is only required when the client has PKCE enforced (or
+    // when this specific code was issued with a code_challenge). The
+    // consumeAuthCode call below handles the actual binding check.
+    const client = getOauthClient(clientId);
+    if (client?.pkceRequired && !codeVerifier) {
+        return jsonError(400, 'invalid_request', 'Missing code_verifier');
     }
 
     const consumed = consumeAuthCode(code, clientId, redirectUri, codeVerifier);

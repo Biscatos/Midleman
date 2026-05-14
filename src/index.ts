@@ -1709,8 +1709,9 @@ const server = Bun.serve({
                     const redirectUris = Array.isArray(body.redirectUris) ? body.redirectUris.map((s: string) => s.trim()).filter(Boolean) : [];
                     if (!name) return jsonRes(400, { error: 'Client name required' });
                     if (redirectUris.length === 0) return jsonRes(400, { error: 'At least one redirect_uri required' });
+                    const pkceRequired = body.pkceRequired === undefined ? true : !!body.pkceRequired;
                     try {
-                        const { client, clientSecret } = await createOauthClient(name, redirectUris);
+                        const { client, clientSecret } = await createOauthClient(name, redirectUris, { pkceRequired });
                         console.log(`🪪 OAuth client created: ${client.name} (${client.clientId})`);
                         const me = getAuthedAdmin(req);
                         logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'oauth_client.create', targetType: 'oauth_client', targetId: client.clientId, details: { name, redirectUris }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
@@ -1734,6 +1735,7 @@ const server = Bun.serve({
                         input.redirectUris = body.redirectUris.map((s: string) => String(s).trim()).filter(Boolean);
                     }
                     if (typeof body.consentEnabled === 'boolean') input.consentEnabled = body.consentEnabled;
+                    if (typeof body.pkceRequired === 'boolean') input.pkceRequired = body.pkceRequired;
                     if (body.consentPageId === null) {
                         input.consentPageId = null;
                     } else if (typeof body.consentPageId === 'number') {
