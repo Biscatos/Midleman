@@ -135,10 +135,11 @@ type PendingCallback = (result: { portA: number; portB: number } | null) => void
 class WorkerInstance {
     private w: Worker;
     private pending = new Map<string, PendingCallback>();
+    private terminated = false;
 
     constructor(portStart: number, portEnd: number) {
         this.w = new Worker(new URL('./rtp-worker.ts', import.meta.url));
-        this.w.postMessage({ type: 'init', portStart, portEnd });
+        this.safePost({ type: 'init', portStart, portEnd });
         this.w.onmessage = (ev: MessageEvent) => {
             const msg = ev.data as Record<string, unknown>;
             if (msg.type === 'setup_ok') {
@@ -153,10 +154,19 @@ class WorkerInstance {
         };
     }
 
+    // postMessage on a terminated Worker throws synchronously in Bun. All calls
+    // here are best-effort (teardown, evict, etc.) — swallow so a late call
+    // doesn't bubble into the HTTP handler as a 500.
+    private safePost(msg: unknown): void {
+        if (this.terminated) return;
+        try { this.w.postMessage(msg); } catch { /* worker died between checks */ }
+    }
+
     setup(callId: string, meta: RtpEndpoint): Promise<{ portA: number; portB: number } | null> {
         return new Promise((resolve) => {
+            if (this.terminated) { resolve(null); return; }
             this.pending.set(callId, resolve);
-            this.w.postMessage({ type: 'setup', callId, metaIp: meta.ip, metaPort: meta.port });
+            this.safePost({ type: 'setup', callId, metaIp: meta.ip, metaPort: meta.port });
             // 5s timeout — prevents hang if worker crashes
             setTimeout(() => {
                 if (this.pending.has(callId)) {
@@ -168,16 +178,20 @@ class WorkerInstance {
     }
 
     update(callId: string, fbpx: RtpEndpoint): void {
-        this.w.postMessage({ type: 'update', callId, fbpxIp: fbpx.ip, fbpxPort: fbpx.port });
+        this.safePost({ type: 'update', callId, fbpxIp: fbpx.ip, fbpxPort: fbpx.port });
     }
 
     teardown(callId: string): void {
-        this.w.postMessage({ type: 'teardown', callId });
+        this.safePost({ type: 'teardown', callId });
     }
 
-    teardownAll(): void { this.w.postMessage({ type: 'teardown_all' }); }
-    evict(): void       { this.w.postMessage({ type: 'evict' }); }
-    terminate(): void   { this.w.terminate(); }
+    teardownAll(): void { this.safePost({ type: 'teardown_all' }); }
+    evict(): void       { this.safePost({ type: 'evict' }); }
+    terminate(): void   {
+        if (this.terminated) return;
+        this.terminated = true;
+        try { this.w.terminate(); } catch {}
+    }
 }
 
 class WorkerCoordinator {

@@ -41,14 +41,26 @@ function updateThemeIcon(theme) {
 initTheme();
 
 // ─── Sidebar collapse ─────────────────────────────────────────────────────────
+function syncSidebarTooltips(collapsed) {
+  document.querySelectorAll('.sidebar-link[data-tooltip]').forEach((link) => {
+    if (collapsed) {
+      link.setAttribute('title', link.dataset.tooltip || '');
+      return;
+    }
+
+    link.removeAttribute('title');
+  });
+}
+
 function initSidebar() {
-  if (localStorage.getItem(SIDEBAR_KEY) === 'true') {
-    document.body.classList.add('sidebar-collapsed');
-  }
+  const collapsed = localStorage.getItem(SIDEBAR_KEY) === 'true';
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  syncSidebarTooltips(collapsed);
 }
 function toggleSidebar() {
   const collapsed = document.body.classList.toggle('sidebar-collapsed');
   localStorage.setItem(SIDEBAR_KEY, String(collapsed));
+  syncSidebarTooltips(collapsed);
 }
 initSidebar();
 
