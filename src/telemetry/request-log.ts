@@ -66,6 +66,8 @@ CREATE INDEX IF NOT EXISTS idx_request_logs_target ON request_logs(target_name);
 const MIGRATIONS = [
     // Add target_name column for multi-target support
     `ALTER TABLE request_logs ADD COLUMN target_name TEXT`,
+    // Store per-attempt timeline for webhook-fanout retries (JSON array)
+    `ALTER TABLE request_logs ADD COLUMN attempts TEXT`,
 ];
 
 // ─── Initialization ─────────────────────────────────────────────────────────
@@ -137,6 +139,17 @@ export interface RequestLogEntry {
 
     durationMs?: number;
     error?: string;
+
+    attempts?: AttemptRecord[];
+}
+
+export interface AttemptRecord {
+    attempt: number;        // 1-based
+    status?: number;        // HTTP status (omitted if network error)
+    statusText?: string;
+    durationMs: number;
+    delayMs?: number;       // wait before this attempt (0 for the first)
+    error?: string;         // network/timeout error message
 }
 
 const insertStmt = () => db?.prepare(`
@@ -144,12 +157,12 @@ const insertStmt = () => db?.prepare(`
         request_id, type, profile_name, target_name, method, path, target_url, client_ip,
         req_headers, req_body, req_body_size,
         res_status, res_status_text, res_headers, res_body, res_body_size,
-        duration_ms, error
+        duration_ms, error, attempts
     ) VALUES (
         $requestId, $type, $profileName, $targetName, $method, $path, $targetUrl, $clientIp,
         $reqHeaders, $reqBody, $reqBodySize,
         $resStatus, $resStatusText, $resHeaders, $resBody, $resBodySize,
-        $durationMs, $error
+        $durationMs, $error, $attempts
     )
 `);
 
@@ -182,6 +195,7 @@ function buildParams(entry: RequestLogEntry) {
         $resBodySize: entry.resBodySize || 0,
         $durationMs: entry.durationMs || null,
         $error: entry.error || null,
+        $attempts: entry.attempts && entry.attempts.length > 0 ? JSON.stringify(entry.attempts) : null,
     };
 }
 
@@ -344,6 +358,7 @@ export interface RequestLogSummary {
     reqBodySize: number;
     resBodySize: number;
     error: string | null;
+    attemptCount: number | null;
 }
 
 export interface RequestLogDetail extends RequestLogSummary {
@@ -351,6 +366,7 @@ export interface RequestLogDetail extends RequestLogSummary {
     reqBody: string | null;
     resHeaders: string | null;
     resBody: string | null;
+    attempts: AttemptRecord[] | null;
 }
 
 export function queryRequestLogs(query: RequestLogQuery): RequestLogListResult {
@@ -405,32 +421,39 @@ export function queryRequestLogs(query: RequestLogQuery): RequestLogListResult {
 
     const rows = db.prepare(`
         SELECT id, request_id, timestamp, type, profile_name, target_name, method, path, target_url,
-               client_ip, req_body, res_status, res_status_text, duration_ms, req_body_size, res_body_size, error
+               client_ip, req_body, res_status, res_status_text, duration_ms, req_body_size, res_body_size, error, attempts
         FROM request_logs ${where}
         ORDER BY id DESC
         LIMIT $limit OFFSET $offset
     `).all({ ...params, $limit: limit, $offset: offset } as any) as any[];
 
     return {
-        requests: rows.map(r => ({
-            id: r.id,
-            requestId: r.request_id,
-            timestamp: r.timestamp,
-            type: r.type,
-            profileName: r.profile_name,
-            targetName: r.target_name,
-            method: r.method,
-            path: r.path,
-            targetUrl: r.target_url,
-            clientIp: r.client_ip,
-            reqBody: r.req_body,
-            resStatus: r.res_status,
-            resStatusText: r.res_status_text,
-            durationMs: r.duration_ms,
-            reqBodySize: r.req_body_size,
-            resBodySize: r.res_body_size,
-            error: r.error,
-        })),
+        requests: rows.map(r => {
+            let attemptCount: number | null = null;
+            if (r.attempts) {
+                try { const arr = JSON.parse(r.attempts); if (Array.isArray(arr)) attemptCount = arr.length; } catch {}
+            }
+            return {
+                id: r.id,
+                requestId: r.request_id,
+                timestamp: r.timestamp,
+                type: r.type,
+                profileName: r.profile_name,
+                targetName: r.target_name,
+                method: r.method,
+                path: r.path,
+                targetUrl: r.target_url,
+                clientIp: r.client_ip,
+                reqBody: r.req_body,
+                resStatus: r.res_status,
+                resStatusText: r.res_status_text,
+                durationMs: r.duration_ms,
+                reqBodySize: r.req_body_size,
+                resBodySize: r.res_body_size,
+                error: r.error,
+                attemptCount,
+            };
+        }),
         total,
         page,
         limit,
@@ -445,11 +468,16 @@ export function getRequestLogDetail(id: number): RequestLogDetail | null {
         SELECT id, request_id, timestamp, type, profile_name, target_name, method, path, target_url,
                client_ip, req_headers, req_body, req_body_size,
                res_status, res_status_text, res_headers, res_body, res_body_size,
-               duration_ms, error
+               duration_ms, error, attempts
         FROM request_logs WHERE id = $id
     `).get({ $id: id }) as any;
 
     if (!row) return null;
+
+    let attempts: AttemptRecord[] | null = null;
+    if (row.attempts) {
+        try { attempts = JSON.parse(row.attempts); } catch { attempts = null; }
+    }
 
     return {
         id: row.id,
@@ -472,6 +500,8 @@ export function getRequestLogDetail(id: number): RequestLogDetail | null {
         resBodySize: row.res_body_size,
         durationMs: row.duration_ms,
         error: row.error,
+        attempts,
+        attemptCount: attempts ? attempts.length : null,
     };
 }
 

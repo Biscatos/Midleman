@@ -169,7 +169,7 @@ async function fetchWithRetry(
     init: RequestInit,
     retry: WebhookRetryConfig | undefined,
     label: string,
-): Promise<{ res: Response; resText: string | null; attempts: number }> {
+): Promise<{ res: Response; resText: string | null; attempts: number; attemptLog: import('../telemetry/request-log').AttemptRecord[] }> {
     const maxRetries = retry?.maxRetries ?? 0;
     const baseDelay = retry?.retryDelayMs ?? 1000;
     const retryOn = retry?.retryOn ?? DEFAULT_RETRY_ON;
@@ -181,16 +181,19 @@ async function fetchWithRetry(
         return retryOn.includes(status);
     }
 
+    const attemptLog: import('../telemetry/request-log').AttemptRecord[] = [];
     let lastError: unknown;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        let delay = 0;
         if (attempt > 0) {
-            const delay = backoff === 'exponential'
+            delay = backoff === 'exponential'
                 ? baseDelay * Math.pow(2, attempt - 1)
                 : baseDelay;
             console.warn(`🔁 [${label}] Retry ${attempt}/${maxRetries} in ${delay}ms…`);
             await Bun.sleep(delay);
         }
 
+        const attemptStart = performance.now();
         try {
             const res = await fetch(url, { ...init, tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' } } as RequestInit);
             // Cap fanout response capture at 4KB for logging — skip for large/unknown-size responses.
@@ -198,6 +201,15 @@ async function fetchWithRetry(
             const resText = resContentLength < 0 || resContentLength <= 4096
                 ? await res.text().catch(() => null)
                 : `[response not captured: ${resContentLength} bytes]`;
+
+            const attemptDuration = performance.now() - attemptStart;
+            attemptLog.push({
+                attempt: attempt + 1,
+                status: res.status,
+                statusText: res.statusText,
+                durationMs: attemptDuration,
+                delayMs: delay,
+            });
 
             if (attempt < maxRetries && shouldRetry(res.status)) {
                 console.warn(`🔁 [${label}] Got ${res.status}${retryUntilSuccess ? ' (retryUntilSuccess)' : ''}, will retry (${attempt + 1}/${maxRetries})`);
@@ -210,13 +222,25 @@ async function fetchWithRetry(
                 console.error(`🚨 [${label}] All ${maxRetries + 1} attempt(s) failed — last status: ${res.status}`);
             }
 
-            return { res, resText, attempts: attempt + 1 };
+            return { res, resText, attempts: attempt + 1, attemptLog };
         } catch (err) {
+            const attemptDuration = performance.now() - attemptStart;
+            const errMsg = err instanceof Error ? err.message : String(err);
+            attemptLog.push({
+                attempt: attempt + 1,
+                durationMs: attemptDuration,
+                delayMs: delay,
+                error: errMsg,
+            });
             lastError = err;
-            if (attempt >= maxRetries) throw err;
+            if (attempt >= maxRetries) {
+                (err as any).__attemptLog = attemptLog;
+                throw err;
+            }
         }
     }
 
+    if (lastError && typeof lastError === 'object') (lastError as any).__attemptLog = attemptLog;
     throw lastError;
 }
 
@@ -359,7 +383,7 @@ async function handleWebhookFanout(
             : webhook.retry;
 
         try {
-            const { res, resText, attempts } = await fetchWithRetry(
+            const { res, resText, attempts, attemptLog } = await fetchWithRetry(
                 tUrl,
                 { method: tMethod, headers: tHeaders, body: tBody },
                 effectiveRetry,
@@ -388,11 +412,13 @@ async function handleWebhookFanout(
                 resBody: resText,
                 resBodySize: resText?.length || 0,
                 durationMs: fetchDuration,
+                attempts: attemptLog,
             });
 
         } catch (err) {
             const fetchDuration = performance.now() - fetchStart;
             const errorMsg = err instanceof Error ? err.message : String(err);
+            const attemptLog = (err && typeof err === 'object' && (err as any).__attemptLog) || undefined;
             console.error(`❌ [webhook:${webhook.name}] Action to ${tUrl} failed (all attempts exhausted):`, errorMsg);
 
             enqueueFailedFanout({
@@ -426,6 +452,7 @@ async function handleWebhookFanout(
                 resStatusText: 'Bad Gateway',
                 durationMs: fetchDuration,
                 error: errorMsg,
+                attempts: attemptLog,
             });
         }
     }));

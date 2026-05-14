@@ -2068,6 +2068,7 @@ ${d.error ? `<div class="rdm-error-banner"><div><div style="font-weight:600;marg
     <span style="color:${statusCls === 'rdm-st-ok' ? 'var(--green)' : statusCls === 'rdm-st-redirect' ? 'var(--blue)' : statusCls === 'rdm-st-client' ? 'var(--orange)' : statusCls === 'rdm-st-server' ? 'var(--red)' : 'var(--text3)'};font-weight:600">${sc || '\u2014'}</span> Response
     <span class="rdm-tab-badge">${fmtBytes(d.resBodySize || 0)}</span>
   </button>
+  ${d.attempts && d.attempts.length > 1 ? `<button class="rdm-tab" onclick="rdmSwitchTab(this,'rdmAttemptsPanel')"><span style="color:var(--orange);font-weight:600">Attempts</span><span class="rdm-tab-badge">${d.attempts.length}</span></button>` : ''}
   ${d.type === 'webhook' ? `<button class="rdm-tab" onclick="rdmSwitchTab(this,'rdmFanoutPanel');loadFanoutDeliveries('${esc(d.requestId)}')"><span style="color:var(--orange);font-weight:600">Fanouts</span></button>` : ''}
 </div>
 <div id="rdmReqPanel" class="rdm-tab-panel active">
@@ -2098,6 +2099,39 @@ ${d.error ? `<div class="rdm-error-banner"><div><div style="font-weight:600;marg
     <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="rdmCopyCode(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(fmtBody(d.resBody))}</pre></div></div>
   </div>
 </div>
+${d.attempts && d.attempts.length > 1 ? `
+<div id="rdmAttemptsPanel" class="rdm-tab-panel">
+  <div style="padding:0">
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin:12px 0">
+      <thead>
+        <tr style="text-align:left;border-bottom:1px solid var(--border)">
+          <th style="padding:8px 16px;color:var(--text2);font-weight:600">#</th>
+          <th style="padding:8px 16px;color:var(--text2);font-weight:600">Status</th>
+          <th style="padding:8px 16px;color:var(--text2);font-weight:600">Duration</th>
+          <th style="padding:8px 16px;color:var(--text2);font-weight:600">Delay before</th>
+          <th style="padding:8px 16px;color:var(--text2);font-weight:600">Error</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${d.attempts.map(a => {
+          const st = a.status;
+          const stText = a.statusText ? ' ' + esc(a.statusText) : '';
+          const statusHtml = !st
+            ? '<span style="color:var(--red);font-weight:600">Network err</span>'
+            : st < 300 ? `<span style="color:var(--green);font-weight:600">${st}${stText}</span>`
+            : `<span style="color:var(--red);font-weight:600">${st}${stText}</span>`;
+          return `<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:10px 16px;color:var(--text2);font-weight:600">${a.attempt}</td>
+            <td style="padding:10px 16px">${statusHtml}</td>
+            <td style="padding:10px 16px;color:var(--text2)">${fmtMs(a.durationMs)}</td>
+            <td style="padding:10px 16px;color:var(--text3)">${a.delayMs ? fmtMs(a.delayMs) : '—'}</td>
+            <td style="padding:10px 16px;color:var(--red);font-family:monospace;font-size:11px">${a.error ? esc(a.error) : '—'}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>
+</div>` : ''}
 ${d.type === 'webhook' ? `
 <div id="rdmFanoutPanel" class="rdm-tab-panel">
   <div style="padding:0">
@@ -2134,9 +2168,10 @@ async function loadFanoutDeliveries(reqId) {
       const st = f.resStatus;
       const stText = f.resStatusText ? ' ' + esc(f.resStatusText) : '';
       const statusHtml = !st ? '<span style="color:var(--text3)">Err</span>' : st < 300 ? `<span style="color:var(--green);font-weight:600">${st}${stText}</span>` : `<span style="color:var(--red);font-weight:600">${st}${stText}</span>`;
+      const attemptBadge = f.attemptCount && f.attemptCount > 1 ? ` <span style="background:var(--orange-bg);color:var(--orange);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px" title="${f.attemptCount} attempts">${f.attemptCount}×</span>` : '';
       return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
         <td style="padding:10px 16px;color:var(--text2)">${ts}</td>
-        <td style="padding:10px 16px">${statusHtml}</td>
+        <td style="padding:10px 16px">${statusHtml}${attemptBadge}</td>
         <td style="padding:10px 16px;font-family:monospace;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(f.targetUrl)}">${esc(f.targetUrl)}</td>
         <td style="padding:10px 16px;color:var(--text2)">${f.durationMs ? fmtMs(f.durationMs) : '-'}</td>
         <td style="padding:10px 16px"><button class="btn btn-sm" onclick="openReqDetail(${f.id})" style="font-size:11px;padding:3px 8px">Details</button></td>

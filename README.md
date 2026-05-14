@@ -32,6 +32,7 @@ Midleman is a self-hosted middleware layer that sits between your services and t
 - **Web Dashboard** — Full CRUD for HTTP proxies, TCP/UDP proxies, webhooks, users, and invites. Real-time request logs, charts, and DLQ management.
 - **Traffic Logging** — SQLite-backed request/response capture with configurable retention.
 - **TOTP 2FA** — First-run setup wizard with QR code. All admin routes are session-protected.
+- **OAuth 2.0 / OIDC Provider** — Built-in authorization server. Issue OAuth clients for third-party apps (Portainer, Supabase, Grafana, etc.) and have them authenticate users against Midleman.
 - **IP Allowlists** — Per-profile CIDR/wildcard allowlists for both HTTP and SIP listeners.
 - **OpenTelemetry** — Optional traces and metrics via OTLP. Compatible with Jaeger, Grafana, Prometheus.
 
@@ -349,6 +350,70 @@ src/
     └── css/
         └── dashboard.css
 ```
+
+---
+
+## OAuth 2.0 / OIDC Provider
+
+Midleman ships with an OAuth 2.0 + OIDC authorization server. Register a client in the dashboard (**Users → OAuth Clients**) and point any OAuth-aware application at the endpoints below to delegate authentication to Midleman.
+
+### Endpoints
+
+| Endpoint | Path |
+|---|---|
+| Authorization | `/oauth/authorize` |
+| Token | `/oauth/token` |
+| Userinfo | `/oauth/userinfo` |
+| Logout (RP-Initiated) | `/oauth/logout` |
+| JWKS | `/.well-known/jwks.json` |
+| OIDC Discovery | `/.well-known/openid-configuration` |
+
+### Supported scopes
+
+`openid` `profile` `email` `offline_access`
+
+Unknown scopes are silently dropped. Scopes are space-separated (RFC 6749) — **not** comma-separated. The `openid` scope is always added if missing.
+
+### Claims returned by `/oauth/userinfo`
+
+```json
+{
+  "sub": "<uuid>",                  // Stable opaque ID. Derived from the internal user ID.
+  "preferred_username": "<login>",  // The username the user logs in with. Human-readable.
+  "email": "<email>",
+  "email_verified": true,           // True if an email is set on the account.
+  "name": "<fullName or username>", // Display name. Falls back to username if no full name.
+  "midleman_uid": 42                // Midleman's internal integer user ID. Non-standard.
+}
+```
+
+> **Picking the right "user identifier" in your client app**
+> Most apps expose a "User identifier" field to choose which claim uniquely identifies a user. Use **`preferred_username`** unless you specifically want an opaque ID (`sub`). Do not change this after users have logged in — the client app stores the identifier and you will create orphans on the next login.
+
+### Security model
+
+- **PKCE S256 required by default.** Disable per-client only for legacy apps that cannot send a `code_challenge` (toggle in the OAuth Client modal). Disabling removes a defense against authorization-code interception.
+- **`redirect_uri` is matched exact-string.** No normalization, no wildcards.
+- **Fragments (`#...`) are rejected at save time.** Browsers strip the fragment before sending the request, so the server would never see it — registration would silently never match. The client app can navigate to the fragment client-side after the callback.
+- **Authorization codes:** single-use, 90-second TTL, bound to `(client_id, redirect_uri, code_challenge)`.
+- **Refresh tokens:** rotation + family revocation. Presenting a revoked token kills the entire family.
+- **`client_secret`** is stored as a bcrypt hash. It is shown **once** at client creation and cannot be retrieved later.
+- Changing a client's `redirect_uris` revokes every outstanding refresh token for that client.
+
+### Example: Portainer
+
+Settings → Authentication → Custom OAuth:
+
+| Field | Value |
+|---|---|
+| Authorization URL | `https://<midleman-host>/oauth/authorize` |
+| Access token URL | `https://<midleman-host>/oauth/token` |
+| Resource URL (userinfo) | `https://<midleman-host>/oauth/userinfo` |
+| Redirect URL | `https://<your-portainer-host>/` *(no fragment, no `#!/home`)* |
+| Logout URL | `https://<midleman-host>/oauth/logout` |
+| User identifier | `preferred_username` |
+| Scopes | `openid profile email` |
+| Use PKCE | ✓ (enable on Portainer 2.20+) |
 
 ---
 
