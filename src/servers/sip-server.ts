@@ -331,12 +331,12 @@ function buildTcpListener(
 
 // ─── UDP inbound listener builder ────────────────────────────────────────────
 
-function buildUdpListener(
+async function buildUdpListener(
     profile: TcpUdpProfile,
     port: number,
     inst: SipServerInstance,
-): BunUdpSocket {
-    return (Bun.udpSocket as Function)({
+): Promise<BunUdpSocket> {
+    return await (Bun.udpSocket as Function)({
         port,
         socket: {
             data(_sock: BunUdpSocket, buf: Buffer, remotePort: number, remoteAddr: string) {
@@ -365,8 +365,8 @@ function buildUdpListener(
 
 // ─── Upstream socket builders ─────────────────────────────────────────────────
 
-function buildUpstreamUdp(profile: TcpUdpProfile, inst: SipServerInstance): BunUdpSocket {
-    return (Bun.udpSocket as Function)({
+async function buildUpstreamUdp(profile: TcpUdpProfile, inst: SipServerInstance): Promise<BunUdpSocket> {
+    return await (Bun.udpSocket as Function)({
         port: 0, // OS assigns ephemeral port → inst.upstreamUdp.port
         socket: {
             data(_sock: BunUdpSocket, buf: Buffer) {
@@ -463,7 +463,7 @@ export async function startSipServer(profile: TcpUdpProfile): Promise<SipServerI
 
     // ── Upstream ─────────────────────────────────────────────────────────────
     if (profile.upstreamTransport === 'udp') {
-        inst.upstreamUdp = buildUpstreamUdp(profile, inst);
+        inst.upstreamUdp = await buildUpstreamUdp(profile, inst);
     } else {
         // tcp or tls — both use a persistent TCP connection (TLS adds cert negotiation)
         try {
@@ -480,7 +480,7 @@ export async function startSipServer(profile: TcpUdpProfile): Promise<SipServerI
         if (listener.transport === 'tcp') {
             inst.tcpListener = buildTcpListener(profile, listener.port, false, inst);
         } else if (listener.transport === 'udp') {
-            inst.udpListener = buildUdpListener(profile, listener.port, inst);
+            inst.udpListener = await buildUdpListener(profile, listener.port, inst);
         }
         // TLS deferred until cert is ready (see below)
     }
