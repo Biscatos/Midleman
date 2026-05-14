@@ -163,6 +163,8 @@ export interface ProxyUser {
   fullName: string;
   email: string;
   totpEnabled: boolean;
+  /** If true, user is forced to set up TOTP on their next login regardless of profile config. */
+  force2faSetup?: boolean;
   createdAt: string;
   authSource?: 'local' | 'ldap' | 'admin_shadow';
   ldapConfigId?: number | null;

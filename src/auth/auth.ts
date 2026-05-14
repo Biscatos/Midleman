@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS proxy_users (
     password     TEXT NOT NULL,
     totp_secret  TEXT,
     totp_enabled INTEGER NOT NULL DEFAULT 0,
+    force_2fa_setup INTEGER NOT NULL DEFAULT 0,
     roles        TEXT NOT NULL DEFAULT 'proxy',
     created_by_user_id INTEGER,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
@@ -219,6 +220,7 @@ function ensureProxyUsersColumns(d: Database): void {
         const cols = (d.prepare("PRAGMA table_info(proxy_users)").all() as any[]).map((c: any) => c.name);
         if (!cols.includes('roles')) d.exec("ALTER TABLE proxy_users ADD COLUMN roles TEXT NOT NULL DEFAULT 'proxy'");
         if (!cols.includes('created_by_user_id')) d.exec("ALTER TABLE proxy_users ADD COLUMN created_by_user_id INTEGER");
+        if (!cols.includes('force_2fa_setup')) d.exec("ALTER TABLE proxy_users ADD COLUMN force_2fa_setup INTEGER NOT NULL DEFAULT 0");
     } catch {}
 }
 
@@ -957,6 +959,7 @@ function rowToProxyUser(r: any): ProxyUser {
         fullName: r.full_name || '',
         email: r.email || '',
         totpEnabled: !!r.totp_enabled,
+        force2faSetup: !!r.force_2fa_setup,
         createdAt: r.created_at,
         authSource: (r.auth_source || 'local') as 'local' | 'ldap',
         ldapConfigId: r.ldap_config_id ?? null,
@@ -971,7 +974,7 @@ export async function createProxyUser(username: string, password: string, fullNa
     const hash = await Bun.password.hash(password, 'bcrypt');
     db.prepare('INSERT INTO proxy_users (username, full_name, email, password) VALUES ($u, $fn, $em, $p)')
         .run({ $u: username, $fn: fullName.trim(), $em: email.trim().toLowerCase(), $p: hash });
-    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
+    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
     return rowToProxyUser(row);
 }
 
@@ -981,14 +984,14 @@ export function listAllProxyUsers(): ProxyUser[] {
     // (admins lived in a separate table and had mirror rows here). After the
     // migration any admin is just a regular row with 'admin' in `roles`.
     const rows = db.prepare(
-        "SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, created_at FROM proxy_users WHERE auth_source != 'admin_shadow' ORDER BY username"
+        "SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, created_at FROM proxy_users WHERE auth_source != 'admin_shadow' ORDER BY username"
     ).all() as any[];
     return rows.map(rowToProxyUser);
 }
 
 export function getProxyUser(id: number): ProxyUser | null {
     if (!db) return null;
-    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, created_at FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
+    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, created_at FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
     return row ? rowToProxyUser(row) : null;
 }
 
@@ -1039,11 +1042,11 @@ export async function updateProxyUserPassword(id: number, newPassword: string): 
 export function findProxyUserByEmailOrUsername(email: string, username: string): ProxyUser | null {
     if (!db) return null;
     if (email) {
-        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE email = $e AND email != \'\'').get({ $e: email.toLowerCase() }) as any;
+        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE email = $e AND email != \'\'').get({ $e: email.toLowerCase() }) as any;
         if (row) return rowToProxyUser(row);
     }
     if (username) {
-        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
+        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
         if (row) return rowToProxyUser(row);
     }
     return null;
@@ -1063,9 +1066,9 @@ export function updateProxyUserInfo(id: number, fullName: string, email: string)
 export async function verifyProxyUserCredentials(login: string, password: string): Promise<{ user: ProxyUser; totpSecret: string | null } | null> {
     if (!db) return null;
     // Try username first, then email
-    let row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE username = $u').get({ $u: login }) as any;
+    let row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE username = $u').get({ $u: login }) as any;
     if (!row && login.includes('@')) {
-        row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE email = $e').get({ $e: login.toLowerCase() }) as any;
+        row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE email = $e').get({ $e: login.toLowerCase() }) as any;
     }
     if (!row) return null;
     // Shadow accounts have no usable local password.
@@ -1437,16 +1440,27 @@ export function markShadowProxyOrphan(userId: number, orphan: boolean): void {
 
 export function setupProxyUserTotp(userId: number, totpSecret: string): boolean {
     if (!db) return false;
-    const result = db.prepare("UPDATE proxy_users SET totp_secret = $t, totp_enabled = 1, updated_at = datetime('now') WHERE id = $id")
+    const result = db.prepare("UPDATE proxy_users SET totp_secret = $t, totp_enabled = 1, force_2fa_setup = 0, updated_at = datetime('now') WHERE id = $id")
         .run({ $t: totpSecret, $id: userId });
     return result.changes > 0;
 }
 
 export function disableProxyUserTotp(userId: number): boolean {
     if (!db) return false;
-    const result = db.prepare("UPDATE proxy_users SET totp_secret = NULL, totp_enabled = 0, updated_at = datetime('now') WHERE id = $id")
+    const result = db.prepare("UPDATE proxy_users SET totp_secret = NULL, totp_enabled = 0, force_2fa_setup = 0, updated_at = datetime('now') WHERE id = $id")
         .run({ $id: userId });
     return result.changes > 0;
+}
+
+/** Mark (or clear) the flag that forces a user to set up TOTP on next login.
+ *  When `force=true`, also clear any existing TOTP secret so the user goes
+ *  through a fresh setup flow (reconfigure). */
+export function setProxyUserForce2faSetup(userId: number, force: boolean): boolean {
+    if (!db) return false;
+    const sql = force
+        ? "UPDATE proxy_users SET force_2fa_setup = 1, totp_secret = NULL, totp_enabled = 0, updated_at = datetime('now') WHERE id = $id"
+        : "UPDATE proxy_users SET force_2fa_setup = 0, updated_at = datetime('now') WHERE id = $id";
+    return db.prepare(sql).run({ $id: userId }).changes > 0;
 }
 
 export function getProxyUserTotpSecret(userId: number): string | null {

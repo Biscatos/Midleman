@@ -182,7 +182,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                         return jsonRes(403, { error: 'You do not have access to this application' });
                     }
 
-                    const require2fa = !!profile.require2fa;
+                    const require2fa = !!profile.require2fa || !!cred.user.force2faSetup;
                     const totpEnabled = cred.user.totpEnabled;
 
                     // If no TOTP required and user hasn't set up TOTP, issue JWT directly

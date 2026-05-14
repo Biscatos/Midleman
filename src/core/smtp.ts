@@ -677,6 +677,7 @@ export function renderProxyInviteEmail(p: ProxyInviteEmailParams): { subject: st
 <h1 style="margin:0 0 16px;font-size:22px;font-weight:500;color:#0f1015">You're invited</h1>
 <p style="margin:0 0 14px;font-size:14px;color:#52525b;line-height:1.6">${escHtml(hello)}</p>
 <p style="margin:0 0 20px;font-size:14px;color:#52525b;line-height:1.6">${accessLine}</p>
+<p style="margin:0 0 20px;font-size:13px;color:#52525b;line-height:1.6;padding:10px 12px;background:#f6f7fb;border-left:3px solid #0078d4;border-radius:4px">🔐 For your security, you'll be asked to set up two-factor authentication (2FA) the first time you sign in. Have an authenticator app (Google Authenticator, Authy, 1Password, etc.) ready.</p>
 <p style="margin:24px 0"><a href="${escHtml(p.inviteUrl)}" style="display:inline-block;background:#0078d4;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600">Accept invitation</a></p>
 <p style="margin:0 0 4px;font-size:12px;color:#71717a">Or copy this link:</p>
 <p style="margin:0;font-size:12px;color:#52525b;word-break:break-all"><a href="${escHtml(p.inviteUrl)}" style="color:#0078d4">${escHtml(p.inviteUrl)}</a></p>
@@ -689,9 +690,84 @@ ${footerHtml}
 
 ${accessLineText}
 Accept the invitation at: ${p.inviteUrl}
+
+For your security, you'll be asked to set up two-factor authentication (2FA) the first time you sign in. Have an authenticator app ready.
 ${noteText}
 
 This invitation expires in ${expHours} hour${expHours === 1 ? '' : 's'}.
+${footerText}`.trim();
+    return { subject, html, text };
+}
+
+export interface TwoFactorChangeEmailParams {
+    fullName?: string;
+    loginUrl?: string;
+}
+
+export function renderForce2faEmail(p: TwoFactorChangeEmailParams): { subject: string; html: string; text: string } {
+    const brandName = getInviteBrandName();
+    const subject = appendBrand('Two-factor authentication setup required', brandName);
+    const hello = p.fullName ? `Hi ${p.fullName},` : 'Hi,';
+    const footerHtml = brandName ? `<p style="margin:16px 0 0;font-size:11px;color:#a1a1aa;text-align:center;letter-spacing:0.08em;text-transform:uppercase">${escHtml(brandName)}</p>` : '';
+    const footerText = brandName ? `\n— ${brandName}` : '';
+    const ctaHtml = p.loginUrl
+        ? `<p style="margin:24px 0"><a href="${escHtml(p.loginUrl)}" style="display:inline-block;background:#0078d4;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600">Sign in to set up 2FA</a></p>`
+        : '';
+    const ctaText = p.loginUrl ? `\nSign in here: ${p.loginUrl}` : '';
+    const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 16px">
+<tr><td align="center">
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border-radius:12px;padding:32px;box-shadow:0 2px 12px rgba(0,0,0,0.06)">
+<tr><td>
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:500;color:#0f1015">Two-factor authentication required</h1>
+<p style="margin:0 0 14px;font-size:14px;color:#52525b;line-height:1.6">${escHtml(hello)}</p>
+<p style="margin:0 0 14px;font-size:14px;color:#52525b;line-height:1.6">An administrator has required you to enable two-factor authentication (2FA) on your account. The next time you sign in you will be asked to scan a QR code with an authenticator app (Google Authenticator, Authy, 1Password, etc.) and enter a 6-digit code before you can continue.</p>
+<p style="margin:0 0 14px;font-size:14px;color:#52525b;line-height:1.6">This adds an extra layer of security to your account.</p>
+${ctaHtml}
+<p style="margin:24px 0 0;font-size:12px;color:#71717a">If you weren't expecting this email, please contact your administrator.</p>
+</td></tr></table>
+${footerHtml}
+</td></tr></table></body></html>`;
+    const text = `${hello}
+
+An administrator has required you to enable two-factor authentication (2FA) on your account. The next time you sign in, you will be asked to scan a QR code with an authenticator app and enter a 6-digit code before you can continue.${ctaText}
+
+If you weren't expecting this email, please contact your administrator.
+${footerText}`.trim();
+    return { subject, html, text };
+}
+
+export function render2faDisabledEmail(p: TwoFactorChangeEmailParams): { subject: string; html: string; text: string } {
+    const brandName = getInviteBrandName();
+    const subject = appendBrand('Two-factor authentication disabled', brandName);
+    const hello = p.fullName ? `Hi ${p.fullName},` : 'Hi,';
+    const footerHtml = brandName ? `<p style="margin:16px 0 0;font-size:11px;color:#a1a1aa;text-align:center;letter-spacing:0.08em;text-transform:uppercase">${escHtml(brandName)}</p>` : '';
+    const footerText = brandName ? `\n— ${brandName}` : '';
+    const ctaHtml = p.loginUrl
+        ? `<p style="margin:24px 0"><a href="${escHtml(p.loginUrl)}" style="display:inline-block;background:#0078d4;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600">Sign in to re-enable 2FA</a></p>`
+        : '';
+    const ctaText = p.loginUrl ? `\nYou can re-enable 2FA from your account settings: ${p.loginUrl}` : '';
+    const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 16px">
+<tr><td align="center">
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border-radius:12px;padding:32px;box-shadow:0 2px 12px rgba(0,0,0,0.06)">
+<tr><td>
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:500;color:#0f1015">Two-factor authentication disabled</h1>
+<p style="margin:0 0 14px;font-size:14px;color:#52525b;line-height:1.6">${escHtml(hello)}</p>
+<p style="margin:0 0 14px;font-size:14px;color:#52525b;line-height:1.6">An administrator has disabled two-factor authentication (2FA) on your account. Your account is now protected only by your password.</p>
+<p style="margin:0 0 14px;font-size:14px;color:#52525b;line-height:1.6">For your security, we recommend re-enabling 2FA from your account settings as soon as possible.</p>
+${ctaHtml}
+<p style="margin:24px 0 0;font-size:12px;color:#71717a">If you did not request this change, please contact your administrator immediately.</p>
+</td></tr></table>
+${footerHtml}
+</td></tr></table></body></html>`;
+    const text = `${hello}
+
+An administrator has disabled two-factor authentication (2FA) on your account. Your account is now protected only by your password.
+
+For your security, we recommend re-enabling 2FA from your account settings as soon as possible.${ctaText}
+
+If you did not request this change, please contact your administrator immediately.
 ${footerText}`.trim();
     return { subject, html, text };
 }

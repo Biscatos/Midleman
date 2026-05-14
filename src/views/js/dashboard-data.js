@@ -550,7 +550,9 @@ function renderProxyUsers(users) {
   c.innerHTML = users.map(u => {
     const twoFa = u.totpEnabled
       ? '<span style="color:var(--green)">Active</span>'
-      : '<span style="color:var(--text3)">Off</span>';
+      : (u.force2faSetup
+        ? '<span style="color:var(--orange)" title="User must configure 2FA on next login">Pending setup</span>'
+        : '<span style="color:var(--text3)">Off</span>');
     const profiles = (u.profiles || []).map(p => `<span style="background:var(--surface2);padding:1px 6px;border-radius:3px;font-size:11px;font-family:monospace">${esc(p)}</span>`).join(' ');
     const nameCell = u.fullName
       ? `<div style="font-weight:600;color:var(--text)">${esc(u.fullName)}</div><div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`
@@ -560,7 +562,11 @@ function renderProxyUsers(users) {
       : `<span style="color:var(--text3)">—</span>`;
     const actionsCell = `<button onclick="openEditProxyUserModal(${u.id})" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Edit">Edit</button>
          <button onclick="openUserProfilesModal(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Manage proxies">Proxies</button>
-         ${u.totpEnabled ? `<button onclick="reset2fa(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--orange);font-size:11px;margin-right:4px" title="Reset 2FA">Reset 2FA</button>` : ''}
+         ${u.totpEnabled
+           ? `<button onclick="disable2fa(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--orange);font-size:11px;margin-right:4px" title="Disable 2FA (user will be notified by email)">Disable 2FA</button>`
+           : (u.force2faSetup
+             ? ''
+             : `<button onclick="force2fa(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--orange);font-size:11px;margin-right:4px" title="Require user to set up 2FA on next login">Force 2FA</button>`)}
          <button onclick="deleteProxyUserAction(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px" title="Delete">Delete</button>`;
     return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
       <td style="padding:8px 12px">${nameCell}</td>
@@ -654,13 +660,24 @@ async function resetProxyUserPw(id) {
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
-async function reset2fa(id, username) {
-  if (!confirm('Reset 2FA for "' + username + '"? They will need to set it up again on next login.')) return;
+async function disable2fa(id, username) {
+  if (!confirm('Disable 2FA for "' + username + '"?\n\nTheir account will be protected only by password. The user will be notified by email.')) return;
   try {
     const res = await api('/admin/proxy-users/' + id, { method: 'PUT', body: JSON.stringify({ reset2fa: true }) });
-    if (res.ok) { toast('2FA reset'); fetchProxyUsers(); } else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
+    if (res.ok) { toast('2FA disabled — user notified by email'); fetchProxyUsers(); } else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
+
+async function force2fa(id, username) {
+  if (!confirm('Require "' + username + '" to set up 2FA on next login?\n\nIf they already have 2FA, it will be reset and they will be asked to configure it again. The user will be notified by email.')) return;
+  try {
+    const res = await api('/admin/proxy-users/' + id, { method: 'PUT', body: JSON.stringify({ force2fa: true }) });
+    if (res.ok) { toast('User will be required to set up 2FA on next login'); fetchProxyUsers(); } else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+// Backwards-compatible alias (in case any inline handler still references it).
+async function reset2fa(id, username) { return disable2fa(id, username); }
 
 // ─── Profile ↔ User Association ─────────────────────────────────────────────
 let _profileUsersProfile = null;

@@ -13,11 +13,11 @@ import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption } from './auth/auth';
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption } from './auth/auth';
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
 import { initConsentPages, listConsentPages, getConsentPage, createConsentPage, updateConsentPage, deleteConsentPage, findConsentPageOauthReferences } from './auth/consent-pages';
 import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin, runLdapSync, getLastLdapSyncReport } from './auth/ldap';
-import { initSmtp, getSmtpConfig, publicSmtpConfig, validateSmtpInput, saveSmtpConfig, deleteSmtpConfig, isSmtpConfigured, testSmtpConnection, sendMail, renderTestEmail, renderAdminInviteEmail, renderProxyInviteEmail } from './core/smtp';
+import { initSmtp, getSmtpConfig, publicSmtpConfig, validateSmtpInput, saveSmtpConfig, deleteSmtpConfig, isSmtpConfigured, testSmtpConnection, sendMail, renderTestEmail, renderAdminInviteEmail, renderProxyInviteEmail, renderForce2faEmail, render2faDisabledEmail } from './core/smtp';
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
@@ -832,6 +832,8 @@ const server = Bun.serve({
                     const user = await createProxyUser(derivedUsername, password, fullName, email);
                     for (const pn of invite.profileNames) assignProxyUserToProfile(user.id, pn);
                     for (const cid of invite.oauthClientIds) addUserToOauthClient(cid, user.id);
+                    // Invited users must configure 2FA on their first login.
+                    setProxyUserForce2faSetup(user.id, true);
                     useInviteToken(token, user.username);
                     console.log(`✅ Proxy user "${user.username}" created via invite (${invite.profileNames.length} proxy(ies) + ${invite.oauthClientIds.length} OAuth client(s))`);
                     return jsonRes(200, { status: 'created', username: user.username, profileName: invite.profileName });
@@ -1371,7 +1373,37 @@ const server = Bun.serve({
                         updateProxyUserInfo(userId, (body.fullName ?? current.fullName).trim(), email);
                     }
                     if (body.reset2fa) {
+                        const target = getProxyUser(userId);
                         disableProxyUserTotp(userId);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'proxy_user.2fa.disable', targetType: 'proxy_user', targetId: userId, details: { username: target?.username }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        if (target?.email && isSmtpConfigured()) {
+                            const reqHost = req.headers.get('host') || `localhost:${config.port}`;
+                            const protocol = req.headers.get('x-forwarded-proto') || 'http';
+                            const profiles = listProfilesForProxyUser(userId);
+                            const loginUrl = profiles.length > 0
+                                ? `${protocol}://${reqHost}/proxy/${encodeURIComponent(profiles[0])}/auth/login`
+                                : `${protocol}://${reqHost}/`;
+                            const tpl = render2faDisabledEmail({ fullName: target.fullName, loginUrl });
+                            sendMail({ to: target.email, subject: tpl.subject, html: tpl.html, text: tpl.text }).catch(() => { });
+                        }
+                    }
+                    if (body.force2fa) {
+                        const target = getProxyUser(userId);
+                        if (!target) return jsonRes(404, { error: 'User not found' });
+                        setProxyUserForce2faSetup(userId, true);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'proxy_user.2fa.force', targetType: 'proxy_user', targetId: userId, details: { username: target.username, hadTotp: target.totpEnabled }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        if (target.email && isSmtpConfigured()) {
+                            const reqHost = req.headers.get('host') || `localhost:${config.port}`;
+                            const protocol = req.headers.get('x-forwarded-proto') || 'http';
+                            const profiles = listProfilesForProxyUser(userId);
+                            const loginUrl = profiles.length > 0
+                                ? `${protocol}://${reqHost}/proxy/${encodeURIComponent(profiles[0])}/auth/login`
+                                : `${protocol}://${reqHost}/`;
+                            const tpl = renderForce2faEmail({ fullName: target.fullName, loginUrl });
+                            sendMail({ to: target.email, subject: tpl.subject, html: tpl.html, text: tpl.text }).catch(() => { });
+                        }
                     }
                     if (typeof body.isAdmin === 'boolean') {
                         const current = getProxyUser(userId);
