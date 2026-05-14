@@ -113,6 +113,11 @@ export interface TcpUdpProfile {
   rtpPortStart?: number;               // Start of UDP port range for RTP (default: 50000)
   rtpPortEnd?: number;                 // End of UDP port range for RTP (default: 51000)
   rtpWorkers?: number;                 // Worker threads for RTP relay (0 = main thread, default: auto = CPU cores - 1)
+
+  // -- SIP message logging --
+  logMessages?: boolean;               // Persist every SIP message to sip_logs (default: false)
+  logMessageBody?: boolean;            // Include full message body (SDP, etc.) — implies logMessages
+  logNoise?: boolean;                  // Include 100 Trying and OPTIONS keepalives (default: false)
 }
 
 export interface Config {

@@ -28,6 +28,12 @@
         <span class="sidebar-link-label">Requests</span>
         <span class="sidebar-badge" id="navReqBadge">0</span>
       </button>
+      <button class="sidebar-link" data-page="siplogs" data-tooltip="SIP Logs" onclick="navigate('siplogs')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+        </svg>
+        <span class="sidebar-link-label">SIP Logs</span>
+      </button>
 
       <div class="sidebar-section-label">Resources</div>
       <button class="sidebar-link" data-page="profiles" data-tooltip="Proxies" onclick="navigate('profiles')">
@@ -372,6 +378,112 @@
           <button onclick="closeReqDetail()" class="rdm-close">&times;</button>
         </div>
         <div id="reqDetailContent" class="rdm-body"></div>
+      </div>
+    </div>
+
+    <!-- ═══ SIP LOGS ═══ -->
+    <div class="page" id="pageSiplogs">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h2>SIP Message Log</h2>
+          <p>Per-message log for TCP/UDP SIP proxies. Enable <em>Log SIP messages</em> on each profile to populate.
+            <span id="sipLogStats" style="color:var(--text3)"></span></p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px">
+            <input type="checkbox" id="slAutoRefresh" checked style="accent-color:var(--accent)"> Auto-refresh
+          </label>
+          <button class="btn btn-sm" onclick="fetchSipLogs()">Refresh</button>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-body" style="padding:12px 16px">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <input type="text" id="slCallId" placeholder="Filter by Call-ID..."
+              style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
+              onkeydown="if(event.key==='Enter')fetchSipLogs()">
+            <select id="slProfile"
+              style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+              onchange="fetchSipLogs()">
+              <option value="">All profiles</option>
+            </select>
+            <select id="slDirection"
+              style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+              onchange="fetchSipLogs()">
+              <option value="">In + Out</option>
+              <option value="in">Inbound</option>
+              <option value="out">Outbound</option>
+            </select>
+            <select id="slTransport"
+              style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+              onchange="fetchSipLogs()">
+              <option value="">All transports</option>
+              <option value="udp">UDP</option>
+              <option value="tcp">TCP</option>
+              <option value="tls">TLS</option>
+            </select>
+            <select id="slMethod"
+              style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
+              onchange="fetchSipLogs()">
+              <option value="">All methods</option>
+              <option value="INVITE">INVITE</option>
+              <option value="ACK">ACK</option>
+              <option value="BYE">BYE</option>
+              <option value="CANCEL">CANCEL</option>
+              <option value="REGISTER">REGISTER</option>
+              <option value="OPTIONS">OPTIONS</option>
+              <option value="INFO">INFO</option>
+              <option value="NOTIFY">NOTIFY</option>
+              <option value="SUBSCRIBE">SUBSCRIBE</option>
+              <option value="MESSAGE">MESSAGE</option>
+            </select>
+            <button class="btn btn-sm btn-primary" onclick="fetchSipLogs()">Filter</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table id="sipLogTable" style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--surface2);text-align:left">
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Time</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Profile</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Dir</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Tx</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Method / Status</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">From → To</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Call-ID</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Peer</th>
+                <th style="padding:10px 12px"></th>
+              </tr>
+            </thead>
+            <tbody id="sipLogBody">
+              <tr><td colspan="9" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div id="sipLogPagination"
+        style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--text2)">
+        <span id="sipLogInfo"></span>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm" id="slPrev" onclick="sipLogPrevPage()" disabled>Prev</button>
+          <button class="btn btn-sm" id="slNext" onclick="sipLogNextPage()" disabled>Next</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIP Detail Modal -->
+    <div id="sipDetailModal"
+      style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);overflow-y:auto">
+      <div class="rdm-panel">
+        <div class="rdm-header">
+          <div class="rdm-header-left">
+            <h3 id="sipDetailTitle" class="rdm-title">SIP Message</h3>
+          </div>
+          <button onclick="closeSipDetail()" class="rdm-close">&times;</button>
+        </div>
+        <div id="sipDetailContent" class="rdm-body"></div>
       </div>
     </div>
 
@@ -1392,6 +1504,37 @@
         <div class="form-group span-2">
           <label>Allowed IPs <span style="color:var(--text3);font-weight:400;font-size:11px">— CIDR, wildcard or exact. Empty = allow all.</span></label>
           <input type="text" id="sipAllowedIps" placeholder="203.0.113.0/24, 198.51.100.*">
+        </div>
+      </div>
+
+      <div class="form-section">Logging</div>
+      <div class="form-grid">
+        <div class="form-group span-2">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
+            <input type="checkbox" id="sipLogMessages" style="accent-color:var(--accent)" onchange="toggleSipLogOptions()">
+            <span>Log SIP messages</span>
+          </label>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px;margin-left:24px">
+            Persist every SIP message (INVITE, BYE, REGISTER, …) to the SIP Log tab. Repeats within 2s are collapsed into a retransmit counter.
+          </span>
+        </div>
+        <div class="form-group span-2">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
+            <input type="checkbox" id="sipLogMessageBody" style="accent-color:var(--accent)">
+            <span>Include message body (SDP)</span>
+          </label>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px;margin-left:24px">
+            Capture the full body. Useful for SDP / codec debug. Truncated to 64 KB. <strong>Note:</strong> SIP From/To headers carry phone numbers (PII).
+          </span>
+        </div>
+        <div class="form-group span-2">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
+            <input type="checkbox" id="sipLogNoise" style="accent-color:var(--accent)">
+            <span>Include noise (100 Trying, OPTIONS keepalives)</span>
+          </label>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px;margin-left:24px">
+            By default these are skipped to keep the log readable.
+          </span>
         </div>
       </div>
 

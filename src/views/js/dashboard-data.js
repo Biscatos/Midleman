@@ -2291,8 +2291,26 @@ function openSipModal(proxy) {
   document.getElementById('sipAcmeStaging').checked = !!(proxy && proxy.acmeStaging);
   toggleSipTlsSection();
   toggleSipCertMode();
+  document.getElementById('sipLogMessages').checked = !!(proxy && proxy.logMessages);
+  document.getElementById('sipLogMessageBody').checked = !!(proxy && proxy.logMessageBody);
+  document.getElementById('sipLogNoise').checked = !!(proxy && proxy.logNoise);
+  toggleSipLogOptions();
   document.getElementById('sipModal').classList.add('active');
   document.getElementById('sipName').focus();
+}
+
+function toggleSipLogOptions() {
+  const on = document.getElementById('sipLogMessages').checked;
+  const body = document.getElementById('sipLogMessageBody');
+  const noise = document.getElementById('sipLogNoise');
+  body.disabled = !on;
+  noise.disabled = !on;
+  if (!on) {
+    body.checked = false;
+    noise.checked = false;
+  }
+  body.parentElement.style.opacity = on ? '1' : '0.5';
+  noise.parentElement.style.opacity = on ? '1' : '0.5';
 }
 
 function toggleSipTlsSection() {
@@ -2365,6 +2383,9 @@ async function saveSipProxy() {
     rtpPortEnd: parseInt(document.getElementById('sipRtpPortEnd').value) || undefined,
     rtpWorkers: document.getElementById('sipRtpWorkers').value !== '' ? parseInt(document.getElementById('sipRtpWorkers').value) : undefined,
     allowedIps: allowedIpsRaw ? allowedIpsRaw.split(',').map(s => s.trim()).filter(Boolean) : [],
+    logMessages: document.getElementById('sipLogMessages').checked,
+    logMessageBody: document.getElementById('sipLogMessageBody').checked,
+    logNoise: document.getElementById('sipLogNoise').checked,
   };
 
   if (hasTls) {
@@ -3643,5 +3664,176 @@ async function deleteConsentPage(id, name) {
     toast('Page deleted');
     fetchConsentPages();
   } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+// ─── SIP message logs ──────────────────────────────────────────────────────
+let slPage = 1;
+let slPageSize = 50;
+let slTotal = 0;
+let _slAutoRefreshTimer = null;
+
+function buildSipLogQuery() {
+  const params = new URLSearchParams();
+  params.set('page', String(slPage));
+  params.set('pageSize', String(slPageSize));
+  const callId = document.getElementById('slCallId')?.value.trim();
+  const profile = document.getElementById('slProfile')?.value;
+  const direction = document.getElementById('slDirection')?.value;
+  const transport = document.getElementById('slTransport')?.value;
+  const method = document.getElementById('slMethod')?.value;
+  if (callId) params.set('callId', callId);
+  if (profile) params.set('profile', profile);
+  if (direction) params.set('direction', direction);
+  if (transport) params.set('transport', transport);
+  if (method) params.set('method', method);
+  return params.toString();
+}
+
+async function populateSipProfileFilter() {
+  const sel = document.getElementById('slProfile');
+  if (!sel || sel.dataset.loaded === '1') return;
+  try {
+    const res = await api('/admin/tcpudp');
+    if (!res.ok) return;
+    const data = await res.json();
+    const cur = sel.value;
+    const profiles = data.tcpUdpProxies || [];
+    sel.innerHTML = '<option value="">All profiles</option>' +
+      profiles.map(p => '<option value="' + esc(p.name) + '">' + esc(p.name) + '</option>').join('');
+    if (cur) sel.value = cur;
+    sel.dataset.loaded = '1';
+  } catch {}
+}
+
+async function fetchSipLogs() {
+  const body = document.getElementById('sipLogBody');
+  if (!body) return;
+  try {
+    const res = await api('/admin/sip-logs?' + buildSipLogQuery());
+    if (!res.ok) {
+      body.innerHTML = '<tr><td colspan="9" style="padding:24px;text-align:center;color:var(--text3)">Failed to load.</td></tr>';
+      return;
+    }
+    const data = await res.json();
+    slTotal = data.total || 0;
+    const rows = data.rows || [];
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="9" style="padding:32px;text-align:center;color:var(--text3)">No SIP messages logged. Enable <strong>Log SIP messages</strong> on a TCP/UDP profile to populate.</td></tr>';
+    } else {
+      body.innerHTML = rows.map(renderSipLogRow).join('');
+    }
+    const total = slTotal;
+    const start = total === 0 ? 0 : (slPage - 1) * slPageSize + 1;
+    const end = Math.min(start + rows.length - 1, total);
+    document.getElementById('sipLogInfo').textContent = total ? (start + '-' + end + ' of ' + total) : '0';
+    document.getElementById('slPrev').disabled = slPage <= 1;
+    document.getElementById('slNext').disabled = end >= total;
+    // Stats
+    try {
+      const sres = await api('/admin/sip-logs/stats');
+      if (sres.ok) {
+        const s = await sres.json();
+        const kb = Math.round((s.sizeBytes || 0) / 1024);
+        document.getElementById('sipLogStats').textContent =
+          '· ' + (s.total || 0).toLocaleString() + ' rows · ' + kb.toLocaleString() + ' KB';
+      }
+    } catch {}
+  } catch (e) {
+    body.innerHTML = '<tr><td colspan="9" style="padding:24px;text-align:center;color:var(--text3)">' + esc(e.message) + '</td></tr>';
+  }
+}
+
+function renderSipLogRow(r) {
+  const time = r.timestamp ? r.timestamp.replace('T', ' ').replace('Z', '') : '';
+  const dirColor = r.direction === 'in' ? '#3b82f6' : '#10b981';
+  const dirLabel = r.direction === 'in' ? '◀ IN' : 'OUT ▶';
+  const methodOrStatus = r.is_request
+    ? '<span style="font-weight:600">' + esc(r.method || '?') + '</span>'
+    : '<span style="font-weight:600;color:' + statusColor(r.status_code) + '">' + (r.status_code || '?') + '</span> <span style="color:var(--text3);font-size:11px">' + esc(r.reason_phrase || '') + '</span>';
+  const fromTo = (r.from_uri ? esc(truncStr(r.from_uri, 28)) : '?') + ' <span style="color:var(--text3)">→</span> ' + (r.to_uri ? esc(truncStr(r.to_uri, 28)) : '?');
+  const callIdShort = r.call_id ? esc(truncStr(r.call_id, 24)) : '';
+  return '<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="openSipDetail(' + r.id + ')">'
+    + '<td style="padding:8px 12px;font-family:monospace;font-size:12px;white-space:nowrap">' + esc(time) + '</td>'
+    + '<td style="padding:8px">' + esc(r.profile_name) + '</td>'
+    + '<td style="padding:8px;color:' + dirColor + ';font-weight:600;font-size:11px">' + dirLabel + '</td>'
+    + '<td style="padding:8px;font-size:11px;color:var(--text2)">' + esc((r.transport || '').toUpperCase()) + '</td>'
+    + '<td style="padding:8px">' + methodOrStatus + '</td>'
+    + '<td style="padding:8px;font-family:monospace;font-size:11px">' + fromTo + '</td>'
+    + '<td style="padding:8px;font-family:monospace;font-size:11px">' + callIdShort + '</td>'
+    + '<td style="padding:8px;font-family:monospace;font-size:11px;color:var(--text3)">' + esc(r.peer_addr || '') + '</td>'
+    + '<td style="padding:8px 12px"><button class="btn btn-sm" onclick="event.stopPropagation();openSipDetail(' + r.id + ')">View</button></td>'
+    + '</tr>';
+}
+
+function statusColor(s) {
+  if (!s) return 'var(--text)';
+  if (s >= 200 && s < 300) return '#10b981';
+  if (s >= 300 && s < 400) return '#f59e0b';
+  if (s >= 400) return '#ef4444';
+  return 'var(--text)';
+}
+
+function truncStr(s, n) {
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+function sipLogPrevPage() { if (slPage > 1) { slPage--; fetchSipLogs(); } }
+function sipLogNextPage() {
+  const maxPage = Math.max(1, Math.ceil(slTotal / slPageSize));
+  if (slPage < maxPage) { slPage++; fetchSipLogs(); }
+}
+
+// Auto-refresh: poll every 5s while on the SIP logs page with the checkbox on
+function ensureSipAutoRefreshTimer() {
+  if (_slAutoRefreshTimer) return;
+  _slAutoRefreshTimer = setInterval(() => {
+    if (currentPage !== 'siplogs') return;
+    const cb = document.getElementById('slAutoRefresh');
+    if (!cb || !cb.checked) return;
+    // Skip if a detail modal is open (avoid disrupting reads)
+    if (document.getElementById('sipDetailModal')?.style.display === 'block') return;
+    fetchSipLogs();
+  }, 5000);
+}
+// Kick off once the script loads
+if (typeof window !== 'undefined') ensureSipAutoRefreshTimer();
+
+async function openSipDetail(id) {
+  try {
+    const res = await api('/admin/sip-logs/' + id);
+    if (!res.ok) return toast('Failed to load message', 'error');
+    const r = await res.json();
+    const titleParts = [r.is_request ? r.method : (r.status_code + ' ' + (r.reason_phrase || '')), r.direction === 'in' ? 'inbound' : 'outbound', (r.transport || '').toUpperCase()];
+    document.getElementById('sipDetailTitle').textContent = titleParts.filter(Boolean).join(' · ');
+    const rows = [
+      ['Timestamp', r.timestamp],
+      ['Profile', r.profile_name],
+      ['Direction', r.direction === 'in' ? 'Inbound (client → upstream)' : 'Outbound (upstream → client)'],
+      ['Transport', (r.transport || '').toUpperCase()],
+      ['Peer', r.peer_addr || ''],
+      ['Type', r.is_request ? 'Request' : 'Response'],
+      ['Method', r.method || ''],
+      ['Status', r.is_request ? '' : (r.status_code + ' ' + (r.reason_phrase || ''))],
+      ['Call-ID', r.call_id || ''],
+      ['CSeq', r.cseq || ''],
+      ['From', r.from_uri || ''],
+      ['To', r.to_uri || ''],
+      ['Branch', r.branch || ''],
+      ['Body size', (r.body_size || 0) + ' bytes'],
+    ];
+    const html =
+      '<div style="display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;font-size:13px;margin-bottom:16px">' +
+      rows.filter(([_, v]) => v !== '').map(([k, v]) => '<div style="color:var(--text3)">' + esc(k) + '</div><div style="font-family:monospace;word-break:break-all">' + esc(String(v)) + '</div>').join('') +
+      '</div>' +
+      (r.body
+        ? '<div style="color:var(--text3);font-size:11px;text-transform:uppercase;margin-bottom:6px">Body</div><pre style="background:var(--surface2);padding:12px;border-radius:6px;font-size:12px;overflow:auto;max-height:420px">' + esc(r.body) + '</pre>'
+        : '<div style="color:var(--text3);font-style:italic;font-size:12px">Body not captured (enable <em>Include message body</em> on the profile).</div>');
+    document.getElementById('sipDetailContent').innerHTML = html;
+    document.getElementById('sipDetailModal').style.display = 'block';
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+function closeSipDetail() {
+  document.getElementById('sipDetailModal').style.display = 'none';
 }
 

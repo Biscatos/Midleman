@@ -263,6 +263,7 @@ async function doLogout() {
 const PAGE_TITLES = {
   overview: 'Dashboard',
   requests: 'Request Log',
+  siplogs: 'SIP Logs',
   profiles: 'Proxies',
   webhooks: 'Webhooks',
   proxyusers: 'Users',
@@ -284,6 +285,7 @@ function navigate(page) {
     else n.classList.remove('active');
   });
   if (page === 'requests') { rlPage = 1; fetchRequestLogs(); }
+  if (page === 'siplogs') { slPage = 1; populateSipProfileFilter(); fetchSipLogs(); }
   if (page === 'proxyusers') { fetchProxyUsers(); fetchInvites(); }
   if (page === 'oauthclients') { fetchOauthClients(); }
   if (page === 'consentpages') { fetchConsentPages(); }

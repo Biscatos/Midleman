@@ -8,6 +8,7 @@ import {
 } from './core/store';
 import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry/telemetry';
 import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart } from './telemetry/request-log';
+import { initSipLog, shutdownSipLog, querySipLogs, getSipLogDetail, getSipLogStats } from './telemetry/sip-log';
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort, isProxyServerRunning, setProxyLoginTemplate, setProxyLogo } from './servers/proxy-server';
 import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort, assignTcpUdpListenerPort, releaseProxyPort, releaseWebhookPort, releaseTcpUdpListenerPorts, getWebhookPort } from './servers/port-manager';
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync } from './servers/webhook-server';
@@ -53,6 +54,9 @@ initTelemetry(config.otel);
 
 // Initialize request logging (SQLite)
 initRequestLog(config.requestLog);
+
+// Initialize SIP message logging (separate SQLite db, shares dataDir/retention)
+initSipLog(config.requestLog);
 
 // Initialize auth
 initAuth(config.requestLog.dataDir, config.auth.sessionMaxAge);
@@ -967,6 +971,34 @@ const server = Bun.serve({
                     const id = parseInt(url.pathname.split('/').pop()!, 10);
                     const detail = getRequestLogDetail(id);
                     if (!detail) return jsonRes(404, { error: 'Request log not found' });
+                    return jsonRes(200, detail as unknown as Record<string, unknown>);
+                }
+
+                // ── SIP message log endpoints ──
+                if (url.pathname === '/admin/sip-logs' && req.method === 'GET') {
+                    const result = querySipLogs({
+                        page: parseInt(url.searchParams.get('page') || '1', 10),
+                        pageSize: parseInt(url.searchParams.get('pageSize') || '50', 10),
+                        profileName: url.searchParams.get('profile') || undefined,
+                        callId: url.searchParams.get('callId') || undefined,
+                        method: url.searchParams.get('method') || undefined,
+                        direction: (url.searchParams.get('direction') as 'in' | 'out') || undefined,
+                        transport: (url.searchParams.get('transport') as 'udp' | 'tcp' | 'tls') || undefined,
+                        statusCode: url.searchParams.get('status') ? parseInt(url.searchParams.get('status')!, 10) : undefined,
+                        since: url.searchParams.get('since') || undefined,
+                        until: url.searchParams.get('until') || undefined,
+                    });
+                    return jsonRes(200, result as unknown as Record<string, unknown>);
+                }
+
+                if (url.pathname === '/admin/sip-logs/stats' && req.method === 'GET') {
+                    return jsonRes(200, getSipLogStats() as unknown as Record<string, unknown>);
+                }
+
+                if (url.pathname.match(/^\/admin\/sip-logs\/\d+$/) && req.method === 'GET') {
+                    const id = parseInt(url.pathname.split('/').pop()!, 10);
+                    const detail = getSipLogDetail(id);
+                    if (!detail) return jsonRes(404, { error: 'SIP log not found' });
                     return jsonRes(200, detail as unknown as Record<string, unknown>);
                 }
 
@@ -2016,6 +2048,9 @@ const server = Bun.serve({
                             rtpPortStart: p.rtpPortStart,
                             rtpPortEnd: p.rtpPortEnd,
                             rtpWorkers: p.rtpWorkers,
+                            logMessages: !!p.logMessages,
+                            logMessageBody: !!p.logMessageBody,
+                            logNoise: !!p.logNoise,
                             running: !!s?.running,
                         };
                     });
@@ -2092,6 +2127,9 @@ const server = Bun.serve({
                         rtpPortStart: input.rtpPortStart as number | undefined,
                         rtpPortEnd: input.rtpPortEnd as number | undefined,
                         rtpWorkers: input.rtpWorkers as number | undefined,
+                        logMessages: input.logMessages === true,
+                        logMessageBody: input.logMessageBody === true,
+                        logNoise: input.logNoise === true,
                     };
 
                     if (isUpdate) {
@@ -2331,6 +2369,7 @@ const shutdown = async (signal: string) => {
     flushDlqSync(); // persist any pending DLQ changes before exit
     await shutdownTelemetry();
     shutdownRequestLog();
+    shutdownSipLog();
     shutdownLdap();
     shutdownAuth();
 

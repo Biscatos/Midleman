@@ -15,6 +15,7 @@
 import type { TcpUdpProfile } from '../core/types';
 import { isIpAllowed } from '../core/ip-filter';
 import { ensureCertificate } from '../sip/acme';
+import { logSipMessage, shouldLogSipMessage, buildSipLogEntry } from '../telemetry/sip-log';
 import { SipTcpParser, parseSipMessage } from '../sip/parser';
 import { TransactionTable } from '../sip/transaction';
 import type { SipTransaction, UdpReturn } from '../sip/transaction';
@@ -93,6 +94,13 @@ function dispatchResponse(
 ): void {
     if (!isSipMode(inst.profile)) return;
 
+    if (shouldLogSipMessage(inst.profile, msg)) {
+        const transport = inst.profile.upstreamTransport === 'tls' ? 'tls'
+            : inst.profile.upstreamTransport === 'tcp' ? 'tcp' : 'udp';
+        const peerAddr = `${inst.profile.upstreamHost}:${inst.profile.upstreamPort}`;
+        logSipMessage(buildSipLogEntry(inst.profile, msg, 'out', transport, peerAddr));
+    }
+
     // BYE from upstream (FusionPBX initiates hang-up) — tear down RTP relay
     if (msg.isRequest && msg.method === 'BYE') {
         inst.rtpRelay?.teardown(msg.callId);
@@ -133,8 +141,13 @@ async function forwardRequest(
     inboundTransport: 'tcp' | 'udp' | 'tls',
     returnTarget: { tcpSocket?: BunSocket; udpReturn?: UdpReturn },
     onError: (buf: Buffer) => void,
+    peerAddr?: string,
 ): Promise<void> {
     const { profile, txTable } = inst;
+
+    if (shouldLogSipMessage(profile, msg)) {
+        logSipMessage(buildSipLogEntry(profile, msg, 'in', inboundTransport, peerAddr));
+    }
 
     if (msg.maxForwards <= 0) {
         onError(buildErrorResponse(msg, 483, 'Too Many Hops'));
@@ -189,11 +202,16 @@ function handleTcpConnection(
     inboundTransport: 'tcp' | 'tls',
     inst: SipServerInstance,
 ): SipTcpParser {
+    const remotePort = (socket as unknown as { remotePort?: number }).remotePort;
+    const peerAddr = socket.remoteAddress
+        ? (remotePort ? `${socket.remoteAddress}:${remotePort}` : socket.remoteAddress)
+        : undefined;
     const parser = new SipTcpParser((msg) => {
         if (!msg.isRequest) return; // stray response on inbound — ignore
         forwardRequest(msg, inst, inboundTransport,
             { tcpSocket: socket },
-            (errBuf) => { try { socket.write(errBuf); } catch {} }
+            (errBuf) => { try { socket.write(errBuf); } catch {} },
+            peerAddr,
         ).catch(err => console.error(`[tcpudp:${inst.profile.name}] forward error:`, err instanceof Error ? err.message : err));
     });
     return parser;
@@ -268,7 +286,8 @@ function buildUdpListener(
 
                 forwardRequest(msg, inst, 'udp',
                     { udpReturn: { addr: remoteAddr, port: remotePort } },
-                    (errBuf) => { _sock.send(errBuf, remotePort, remoteAddr); }
+                    (errBuf) => { _sock.send(errBuf, remotePort, remoteAddr); },
+                    `${remoteAddr}:${remotePort}`,
                 ).catch(err => console.error(`[tcpudp:${profile.name}] udp forward error:`, err instanceof Error ? err.message : err));
             },
             error(_sock: BunUdpSocket, err: Error) {
