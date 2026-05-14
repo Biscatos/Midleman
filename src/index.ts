@@ -220,18 +220,23 @@ for (const webhook of config.webhooks) {
     }
 }
 
+// TCP/UDP proxies are started AFTER the main HTTP server below — they may run
+// ACME HTTP-01 which needs the main server to be already listening on :80.
+// Also fire-and-forget so a slow/failing profile cannot block the rest.
 if (config.tcpUdpProfiles.length > 0) {
     console.log(`🔌 TCP/UDP Proxies: ${config.tcpUdpProfiles.map(p => p.name).join(', ')}`);
-}
-for (const tcpUdpProfile of config.tcpUdpProfiles) {
-    // Fill in the assigned port for each listener
-    for (const listener of tcpUdpProfile.listeners) {
-        listener.port = portAssignments.tcpUdp[`${tcpUdpProfile.name}:${listener.transport}`] ?? listener.port;
+    for (const tcpUdpProfile of config.tcpUdpProfiles) {
+        for (const listener of tcpUdpProfile.listeners) {
+            listener.port = portAssignments.tcpUdp[`${tcpUdpProfile.name}:${listener.transport}`] ?? listener.port;
+        }
     }
-    try {
-        await startSipServer(tcpUdpProfile);
-    } catch (err) {
-        console.error(`❌ Failed to start TCP/UDP proxy "${tcpUdpProfile.name}":`, err instanceof Error ? err.message : err);
+}
+
+function startAllTcpUdpProxies(): void {
+    for (const tcpUdpProfile of config.tcpUdpProfiles) {
+        startSipServer(tcpUdpProfile).catch(err =>
+            console.error(`❌ Failed to start TCP/UDP proxy "${tcpUdpProfile.name}":`, err instanceof Error ? err.message : err)
+        );
     }
 }
 
@@ -2295,6 +2300,11 @@ console.log(`\n✨ Admin server on http://localhost:${server.port}`);
 console.log(`💚 Health check: http://localhost:${server.port}/health`);
 console.log(`🖥️  Dashboard: http://localhost:${server.port}/dashboard`);
 console.log(`\n⚡ Ready!\n`);
+
+// Start TCP/UDP proxies now that the main HTTP server is listening — required
+// for ACME HTTP-01 challenges. Runs fire-and-forget so any single profile's
+// upstream/cert problems cannot delay or block the rest of the platform.
+startAllTcpUdpProxies();
 
 // Graceful shutdown
 const shutdown = async (signal: string) => {

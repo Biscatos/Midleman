@@ -389,37 +389,47 @@ export async function startSipServer(profile: TcpUdpProfile): Promise<SipServerI
         }
     }
 
-    // ── ACME cert (if any TLS listener) ──────────────────────────────────────
-    const hasTls = profile.listeners.some(l => l.transport === 'tls');
-    if (hasTls) {
-        await ensureCertificate(profile as never, async () => {
-            const existing = servers.get(profile.name);
-            if (!existing) return;
-            console.log(`[tcpudp:${profile.name}] Certificate renewed — restarting TLS listener...`);
-            const tlsL = profile.listeners.find(l => l.transport === 'tls');
-            if (tlsL) {
-                existing.tlsListener?.stop(true);
-                existing.tlsListener = buildTcpListener(profile, tlsL.port, true, existing);
-                console.log(`[tcpudp:${profile.name}] TLS listener restarted ✓`);
-            }
-        });
-    }
-
-    // ── Inbound listeners ─────────────────────────────────────────────────────
+    // ── Inbound listeners (non-TLS first; TLS waits for cert) ────────────────
+    const tlsListenerCfg = profile.listeners.find(l => l.transport === 'tls');
     for (const listener of profile.listeners) {
         if (listener.transport === 'tcp') {
             inst.tcpListener = buildTcpListener(profile, listener.port, false, inst);
-        } else if (listener.transport === 'tls') {
-            inst.tlsListener = buildTcpListener(profile, listener.port, true, inst);
         } else if (listener.transport === 'udp') {
             inst.udpListener = buildUdpListener(profile, listener.port, inst);
         }
+        // TLS deferred until cert is ready (see below)
     }
 
     servers.set(profile.name, inst);
 
+    // ── ACME cert (background — never blocks startup) ────────────────────────
+    if (tlsListenerCfg) {
+        const mountTls = () => {
+            const existing = servers.get(profile.name);
+            if (!existing) return;
+            existing.tlsListener?.stop(true);
+            try {
+                existing.tlsListener = buildTcpListener(profile, tlsListenerCfg.port, true, existing);
+                console.log(`🔌 TCP/UDP "${profile.name}" :${tlsListenerCfg.port}/TLS → ${profile.upstreamHost}:${profile.upstreamPort}/${profile.upstreamTransport.toUpperCase()}`);
+            } catch (err) {
+                console.error(`[tcpudp:${profile.name}] TLS listener failed:`, err instanceof Error ? err.message : err);
+            }
+        };
+
+        if (profile.acmeDomain) {
+            // ACME — run async; mount TLS only once cert is issued
+            ensureCertificate(profile as never, async () => { mountTls(); })
+                .then(() => mountTls())
+                .catch(err => console.error(`[tcpudp:${profile.name}] ACME failed (TLS listener disabled until resolved):`, err instanceof Error ? err.message : err));
+        } else {
+            // Manual cert — mount immediately
+            mountTls();
+        }
+    }
+
     const upstreamDesc = `${profile.upstreamHost}:${profile.upstreamPort}/${profile.upstreamTransport.toUpperCase()}`;
     for (const l of profile.listeners) {
+        if (l.transport === 'tls') continue; // logged when TLS actually mounts
         console.log(`🔌 TCP/UDP "${profile.name}" :${l.port}/${l.transport.toUpperCase()} → ${upstreamDesc}`);
     }
     return inst;
