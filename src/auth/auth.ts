@@ -454,8 +454,10 @@ function runUsersUnificationMigration(d: Database, dbPath: string): void {
                 d.exec('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)');
             }
 
-            // 2) audit_logs.actor_user_id
-            d.exec(`UPDATE audit_logs SET actor_user_id = CASE actor_user_id ${caseClauses} ELSE actor_user_id END WHERE actor_user_id IN (${inList})`);
+            // 2) audit_logs.actor_user_id — table may not exist on very old DBs
+            try {
+                d.exec(`UPDATE audit_logs SET actor_user_id = CASE actor_user_id ${caseClauses} ELSE actor_user_id END WHERE actor_user_id IN (${inList})`);
+            } catch {}
 
             // 3) admin_invites.created_by and used_by_id
             try {
@@ -464,7 +466,9 @@ function runUsersUnificationMigration(d: Database, dbPath: string): void {
             } catch {}
 
             // 4) proxy_users.created_by_user_id (self-referential to former admin ids)
-            d.exec(`UPDATE proxy_users SET created_by_user_id = CASE created_by_user_id ${caseClauses} ELSE created_by_user_id END WHERE created_by_user_id IN (${inList})`);
+            try {
+                d.exec(`UPDATE proxy_users SET created_by_user_id = CASE created_by_user_id ${caseClauses} ELSE created_by_user_id END WHERE created_by_user_id IN (${inList})`);
+            } catch {}
         }
 
         // Drop the legacy users table.
