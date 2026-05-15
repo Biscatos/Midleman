@@ -10,6 +10,9 @@ import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapsho
 import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart } from './telemetry/request-log';
 import { initSipLog, shutdownSipLog, querySipLogs, getSipLogDetail, getSipLogStats } from './telemetry/sip-log';
 import { initConnLog, shutdownConnLog, queryConnLogs } from './telemetry/tcpudp-conn-log';
+import { initCertStore, shutdownCertStore, listCerts, getCert, getCertByDomain, createCert, updateCertPem, deleteCert, listProfilesUsingCert, generateSelfSigned } from './core/cert-store';
+import { migrateProfileCerts } from './core/cert-migration';
+import { scheduleAcmeRenewal, shutdownAcme, requestCertificate } from './sip/acme';
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort, isProxyServerRunning, setProxyLoginTemplate, setProxyLogo } from './servers/proxy-server';
 import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort, assignTcpUdpListenerPort, releaseProxyPort, releaseWebhookPort, releaseTcpUdpListenerPorts, getWebhookPort } from './servers/port-manager';
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync } from './servers/webhook-server';
@@ -61,6 +64,36 @@ initSipLog(config.requestLog);
 
 // Initialize raw TCP/TLS connection logging (separate SQLite db)
 initConnLog(config.requestLog);
+
+// Initialize central certificate store (SQLite-backed). Must come BEFORE any
+// TCP/UDP server starts so the migration step can populate it from legacy
+// in-profile fields before listeners try to read certs.
+initCertStore(config.requestLog.dataDir);
+
+// One-time migration: move legacy tlsCert/acmeDomain on each profile into the
+// central store and set profile.certId. Idempotent — re-running is a no-op for
+// already-migrated profiles.
+{
+    const migrationReport = migrateProfileCerts(config.tcpUdpProfiles);
+    if (migrationReport.migrated > 0) {
+        persistTcpUdpProfiles(config.tcpUdpProfiles);
+        console.log(`🔐 Cert migration: ${migrationReport.migrated} profile(s) migrated, ${migrationReport.skipped} skipped`);
+    }
+    for (const err of migrationReport.errors) console.warn(`⚠️  Cert migration: ${err}`);
+}
+
+// ACME renewal scheduler is started AFTER the main Bun.serve below so that
+// the HTTP-01 challenge endpoint (/.well-known/acme-challenge/*) is already
+// listening when LE tries to validate. Without this, first-time issuance
+// deadlocks: ACME waits on a challenge the HTTP server hasn't started yet.
+function startAcmeSchedulers(): void {
+    for (const cert of listCerts()) {
+        if (cert.source !== 'acme') continue;
+        scheduleAcmeRenewal(cert).catch(err =>
+            console.error(`[acme] Failed to schedule renewal for #${cert.id}:`, err instanceof Error ? err.message : err)
+        );
+    }
+}
 
 // Initialize auth
 initAuth(config.requestLog.dataDir, config.auth.sessionMaxAge);
@@ -1016,6 +1049,109 @@ const server = Bun.serve({
                     const detail = getSipLogDetail(id);
                     if (!detail) return jsonRes(404, { error: 'SIP log not found' });
                     return jsonRes(200, detail as unknown as Record<string, unknown>);
+                }
+
+                // ── Certificate store endpoints ──
+                if (url.pathname === '/admin/certs' && req.method === 'GET') {
+                    const rows = listCerts().map(c => ({
+                        id: c.id,
+                        domain: c.domain,
+                        source: c.source,
+                        notBefore: c.notBefore,
+                        notAfter: c.notAfter,
+                        status: c.status,
+                        lastError: c.lastError,
+                        acmeEmail: c.acmeEmail,
+                        acmeStaging: c.acmeStaging,
+                        hasPem: !!c.certPem,
+                        usedBy: listProfilesUsingCert(c.id),
+                        createdAt: c.createdAt,
+                        updatedAt: c.updatedAt,
+                    }));
+                    return jsonRes(200, { certs: rows });
+                }
+
+                if (url.pathname === '/admin/certs' && req.method === 'POST') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const source = body.source as string;
+                    const domain = (body.domain || '').trim().toLowerCase();
+                    if (!domain) return jsonRes(400, { error: '"domain" is required' });
+                    if (getCertByDomain(domain)) return jsonRes(409, { error: `Certificate for "${domain}" already exists` });
+
+                    try {
+                        if (source === 'manual') {
+                            const certPem = (body.certPem || '').trim();
+                            const keyPem = (body.keyPem || '').trim();
+                            if (!certPem || !keyPem) return jsonRes(400, { error: 'certPem and keyPem are required for manual upload' });
+                            const created = createCert({ domain, source: 'manual', certPem, keyPem, chainPem: body.chainPem || null });
+                            return jsonRes(200, { cert: created });
+                        }
+                        if (source === 'self-signed') {
+                            const { certPem, keyPem } = await generateSelfSigned(domain);
+                            const created = createCert({ domain, source: 'self-signed', certPem, keyPem });
+                            return jsonRes(200, { cert: created });
+                        }
+                        if (source === 'acme') {
+                            const acmeEmail = (body.acmeEmail || '').trim();
+                            if (!acmeEmail) return jsonRes(400, { error: 'acmeEmail is required for ACME source' });
+                            const created = createCert({
+                                domain, source: 'acme',
+                                acmeEmail,
+                                acmeStaging: body.acmeStaging === true,
+                            });
+                            // Fire-and-forget issue + schedule renewal
+                            scheduleAcmeRenewal(created).catch(err =>
+                                console.error(`[acme] schedule failed for #${created.id}:`, err instanceof Error ? err.message : err)
+                            );
+                            return jsonRes(200, { cert: created });
+                        }
+                        return jsonRes(400, { error: 'source must be "manual", "self-signed", or "acme"' });
+                    } catch (err) {
+                        return jsonRes(500, { error: err instanceof Error ? err.message : String(err) });
+                    }
+                }
+
+                if (url.pathname.match(/^\/admin\/certs\/\d+$/) && req.method === 'GET') {
+                    const id = parseInt(url.pathname.split('/').pop()!, 10);
+                    const c = getCert(id);
+                    if (!c) return jsonRes(404, { error: 'Certificate not found' });
+                    return jsonRes(200, { cert: c, usedBy: listProfilesUsingCert(c.id) });
+                }
+
+                if (url.pathname.match(/^\/admin\/certs\/\d+$/) && req.method === 'PUT') {
+                    // Replace cert PEM (manual cert update)
+                    const id = parseInt(url.pathname.split('/').pop()!, 10);
+                    const c = getCert(id);
+                    if (!c) return jsonRes(404, { error: 'Certificate not found' });
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const certPem = (body.certPem || '').trim();
+                    const keyPem = (body.keyPem || '').trim();
+                    if (!certPem || !keyPem) return jsonRes(400, { error: 'certPem and keyPem are required' });
+                    const updated = updateCertPem(id, certPem, keyPem, body.chainPem || null);
+                    return jsonRes(200, { cert: updated });
+                }
+
+                if (url.pathname.match(/^\/admin\/certs\/\d+\/renew$/) && req.method === 'POST') {
+                    // Force ACME renewal now
+                    const id = parseInt(url.pathname.split('/')[3], 10);
+                    const c = getCert(id);
+                    if (!c) return jsonRes(404, { error: 'Certificate not found' });
+                    if (c.source !== 'acme') return jsonRes(400, { error: 'Only ACME certificates can be renewed via this endpoint' });
+                    try {
+                        await requestCertificate(c);
+                        return jsonRes(200, { cert: getCert(id) });
+                    } catch (err) {
+                        return jsonRes(500, { error: err instanceof Error ? err.message : String(err) });
+                    }
+                }
+
+                if (url.pathname.match(/^\/admin\/certs\/\d+$/) && req.method === 'DELETE') {
+                    const id = parseInt(url.pathname.split('/').pop()!, 10);
+                    const result = deleteCert(id);
+                    if (!result.deleted) return jsonRes(409, { error: `Certificate in use by: ${result.usedBy.join(', ')}` });
+                    return jsonRes(200, { status: 'deleted' });
                 }
 
 
@@ -2064,6 +2200,7 @@ const server = Bun.serve({
                             rtpPortStart: p.rtpPortStart,
                             rtpPortEnd: p.rtpPortEnd,
                             rtpWorkers: p.rtpWorkers,
+                            certId: p.certId,
                             logMessages: !!p.logMessages,
                             logMessageBody: !!p.logMessageBody,
                             logNoise: !!p.logNoise,
@@ -2116,13 +2253,14 @@ const server = Bun.serve({
                         }
                     }
 
-                    // Auto-fill ACME cert paths
-                    let tlsCert = (input.tlsCert as string | undefined) ?? '';
-                    let tlsKey = (input.tlsKey as string | undefined) ?? '';
-                    if (input.acmeDomain && !tlsCert) {
-                        const base = `${process.env.DATA_DIR ?? './data'}/acme/${name}`;
-                        tlsCert = `${base}/cert.pem`;
-                        tlsKey = `${base}/key.pem`;
+                    // certId references the central cert store. Legacy tlsCert/acmeDomain
+                    // are no longer accepted on new/edited profiles — only certId.
+                    const certId = typeof input.certId === 'number' ? input.certId : undefined;
+                    if (listeners.some(l => l.transport === 'tls') && !certId) {
+                        return jsonRes(400, { error: 'TLS listener requires "certId" — create or pick a certificate in Settings → Certificates first' });
+                    }
+                    if (certId && !getCert(certId)) {
+                        return jsonRes(400, { error: `certId ${certId} not found in certificate store` });
                     }
 
                     const profile: import('./core/types').TcpUdpProfile = {
@@ -2131,13 +2269,9 @@ const server = Bun.serve({
                         upstreamHost: input.upstreamHost as string,
                         upstreamPort: (input.upstreamPort as number) ?? 5060,
                         upstreamTransport: ((input.upstreamTransport as string) ?? 'udp') as 'tcp' | 'udp',
-                        tlsCert: tlsCert || undefined,
-                        tlsKey: tlsKey || undefined,
+                        certId,
                         allowedIps: Array.isArray(input.allowedIps) ? input.allowedIps as string[] : undefined,
                         authToken: input.authToken as string | undefined,
-                        acmeDomain: input.acmeDomain as string | undefined,
-                        acmeEmail: input.acmeEmail as string | undefined,
-                        acmeStaging: input.acmeStaging === true,
                         sipPublicHost: input.sipPublicHost as string | undefined,
                         allowSelfSignedUpstream: input.allowSelfSignedUpstream === true,
                         rtpRelay: input.rtpRelay === true,
@@ -2362,6 +2496,10 @@ console.log(`\n⚡ Ready!\n`);
 // upstream/cert problems cannot delay or block the rest of the platform.
 startAllTcpUdpProxies();
 
+// Same reason for ACME: the HTTP-01 challenge endpoint must be live before LE
+// validates. Each cert's first-issue/renewal runs in background.
+startAcmeSchedulers();
+
 // Graceful shutdown
 const shutdown = async (signal: string) => {
     console.log(`\n🛑 ${signal} received — shutting down...`);
@@ -2389,6 +2527,8 @@ const shutdown = async (signal: string) => {
     shutdownRequestLog();
     shutdownSipLog();
     shutdownConnLog();
+    shutdownAcme();
+    shutdownCertStore();
     shutdownLdap();
     shutdownAuth();
 

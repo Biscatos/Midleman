@@ -2282,15 +2282,8 @@ function openSipModal(proxy) {
   document.getElementById('sipListenerUdp').checked = listeners.some(l => l.transport === 'udp');
   document.getElementById('sipListenerTcp').checked = listeners.some(l => l.transport === 'tcp');
   document.getElementById('sipListenerTls').checked = listeners.some(l => l.transport === 'tls');
-  const isAcme = proxy && !!proxy.acmeDomain;
-  document.getElementById('sipCertMode').value = isAcme ? 'acme' : 'manual';
-  document.getElementById('sipTlsCert').value = (proxy && proxy.tlsCert) || '';
-  document.getElementById('sipTlsKey').value = (proxy && proxy.tlsKey) || '';
-  document.getElementById('sipAcmeDomain').value = (proxy && proxy.acmeDomain) || '';
-  document.getElementById('sipAcmeEmail').value = (proxy && proxy.acmeEmail) || '';
-  document.getElementById('sipAcmeStaging').checked = !!(proxy && proxy.acmeStaging);
+  populateSipCertDropdown(proxy && proxy.certId);
   toggleSipTlsSection();
-  toggleSipCertMode();
   document.getElementById('sipLogConnections').checked = !!(proxy && proxy.logConnections);
   document.getElementById('sipLogMessages').checked = !!(proxy && proxy.logMessages);
   document.getElementById('sipLogMessageBody').checked = !!(proxy && proxy.logMessageBody);
@@ -2337,13 +2330,20 @@ function toggleSipRtpRelay() {
   document.getElementById('sipRtpRelayGroup').style.display = enabled ? 'block' : 'none';
 }
 
-function toggleSipCertMode() {
-  const isAcme = document.getElementById('sipCertMode').value === 'acme';
-  document.getElementById('sipCertPathGroup').style.display = isAcme ? 'none' : '';
-  document.getElementById('sipKeyPathGroup').style.display = isAcme ? 'none' : '';
-  document.getElementById('sipAcmeDomainGroup').style.display = isAcme ? '' : 'none';
-  document.getElementById('sipAcmeEmailGroup').style.display = isAcme ? '' : 'none';
-  document.getElementById('sipAcmeStagingGroup').style.display = isAcme ? '' : 'none';
+async function populateSipCertDropdown(selectedId) {
+  const sel = document.getElementById('sipCertId');
+  if (!sel) return;
+  try {
+    const res = await api('/admin/certs');
+    if (!res.ok) return;
+    const data = await res.json();
+    const opts = (data.certs || []).map(c => {
+      const statusBadge = c.status === 'active' ? '' : ' [' + c.status + ']';
+      return '<option value="' + c.id + '">' + esc(c.domain) + ' (' + c.source + ')' + statusBadge + '</option>';
+    }).join('');
+    sel.innerHTML = '<option value="">— select a certificate —</option>' + opts;
+    if (selectedId) sel.value = String(selectedId);
+  } catch {}
 }
 
 function closeSipModal() {
@@ -2368,8 +2368,14 @@ async function saveSipProxy() {
   }
 
   const hasTls = listeners.some(l => l.transport === 'tls');
-  const isAcme = hasTls && document.getElementById('sipCertMode').value === 'acme';
   const allowedIpsRaw = document.getElementById('sipAllowedIps').value;
+  const certIdRaw = document.getElementById('sipCertId').value;
+  const certId = certIdRaw ? parseInt(certIdRaw, 10) : undefined;
+  if (hasTls && !certId) {
+    errEl.textContent = 'TLS listener requires a certificate. Pick one or create one under Settings → Certificates.';
+    errEl.style.display = 'block';
+    return;
+  }
 
   const body = {
     name: document.getElementById('sipName').value.trim().toLowerCase(),
@@ -2388,18 +2394,8 @@ async function saveSipProxy() {
     logMessageBody: document.getElementById('sipLogMessageBody').checked,
     logNoise: document.getElementById('sipLogNoise').checked,
     logConnections: document.getElementById('sipLogConnections').checked,
+    certId,
   };
-
-  if (hasTls) {
-    if (isAcme) {
-      body.acmeDomain = document.getElementById('sipAcmeDomain').value.trim();
-      body.acmeEmail = document.getElementById('sipAcmeEmail').value.trim();
-      body.acmeStaging = document.getElementById('sipAcmeStaging').checked;
-    } else {
-      body.tlsCert = document.getElementById('sipTlsCert').value.trim();
-      body.tlsKey = document.getElementById('sipTlsKey').value.trim();
-    }
-  }
 
   try {
     const res = await api('/admin/tcpudp', { method: 'POST', body: JSON.stringify(body) });
@@ -3960,5 +3956,228 @@ function connLogPrevPage() { if (clPage > 1) { clPage--; fetchConnLogs(); } }
 function connLogNextPage() {
   const maxPage = Math.max(1, Math.ceil(clTotal / clPageSize));
   if (clPage < maxPage) { clPage++; fetchConnLogs(); }
+}
+
+// ─── Certificates ──────────────────────────────────────────────────────────
+let _certSource = 'upload'; // upload | acme | self-signed
+
+async function fetchCerts() {
+  const body = document.getElementById('certsListBody');
+  if (!body) return;
+  try {
+    const res = await api('/admin/certs');
+    if (!res.ok) {
+      body.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text3)">Failed to load.</td></tr>';
+      return;
+    }
+    const data = await res.json();
+    const certs = data.certs || [];
+    const badge = document.getElementById('navCertsBadge');
+    if (badge) badge.textContent = String(certs.length);
+    if (!certs.length) {
+      body.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No certificates yet. Click <strong>+ New Certificate</strong> to add one.</td></tr>';
+      return;
+    }
+    body.innerHTML = certs.map(renderCertRow).join('');
+  } catch (e) {
+    body.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text3)">' + esc(e.message) + '</td></tr>';
+  }
+}
+
+function renderCertRow(c) {
+  const statusColors = { active: '#10b981', pending: '#f59e0b', expired: '#ef4444', error: '#ef4444' };
+  const statusDot = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + (statusColors[c.status] || 'var(--text3)') + ';margin-right:6px;vertical-align:middle"></span>';
+  const expiry = c.notAfter ? new Date(c.notAfter).toISOString().slice(0, 10) : '—';
+  const daysLeft = c.notAfter ? Math.floor((new Date(c.notAfter).getTime() - Date.now()) / (24 * 3600 * 1000)) : null;
+  const expiryLabel = daysLeft !== null
+    ? expiry + ' <span style="color:var(--text3);font-size:11px">(' + (daysLeft >= 0 ? daysLeft + 'd left' : Math.abs(daysLeft) + 'd ago') + ')</span>'
+    : expiry;
+  const usedBy = (c.usedBy || []).length
+    ? (c.usedBy || []).map(u => '<span style="background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:1px 6px;font-size:11px;margin-right:3px">' + esc(u) + '</span>').join('')
+    : '<span style="color:var(--text3);font-size:11px;font-style:italic">unused</span>';
+  const renewBtn = c.source === 'acme'
+    ? '<button onclick="renewCert(' + c.id + ')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px">Renew</button>'
+    : '';
+  const errorBadge = c.lastError
+    ? ' <span title="' + esc(c.lastError) + '" style="color:#ef4444;cursor:help">⚠</span>'
+    : '';
+  return '<tr style="border-bottom:1px solid var(--border)">'
+    + '<td style="padding:10px 12px;font-weight:600;font-family:monospace">' + esc(c.domain) + '</td>'
+    + '<td style="padding:10px 8px"><span style="background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:1px 6px;font-size:11px">' + esc(c.source) + '</span></td>'
+    + '<td style="padding:10px 8px;font-size:12px;text-transform:capitalize">' + statusDot + esc(c.status) + errorBadge + '</td>'
+    + '<td style="padding:10px 8px;font-family:monospace;font-size:12px">' + expiryLabel + '</td>'
+    + '<td style="padding:10px 8px">' + usedBy + '</td>'
+    + '<td style="padding:10px 12px;text-align:right">'
+    + renewBtn
+    + '<button onclick="deleteCertificate(' + c.id + ')" style="background:none;border:1px solid rgba(239,68,68,0.4);border-radius:4px;padding:2px 8px;cursor:pointer;color:#fca5a5;font-size:11px">Delete</button>'
+    + '</td></tr>';
+}
+
+// Reads the selected PEM file and pastes it into the matching textarea.
+// If the file is a bundle (cert + key + chain in one), auto-splits the
+// blocks into the three fields. `kind` ∈ 'cert' | 'key' | 'chain' tells us
+// which field the upload was triggered from — affects the auto-split policy.
+function onCertFileSelected(ev, targetId, kind) {
+  const input = ev.target;
+  const file = input.files && input.files[0];
+  if (!file) return;
+  // Reject obvious binary formats early — these need openssl pre-processing
+  const name = (file.name || '').toLowerCase();
+  if (name.endsWith('.p12') || name.endsWith('.pfx') || name.endsWith('.der')) {
+    toast('Binary cert format detected. Convert to PEM first: openssl pkcs12 -in ' + file.name + ' -out cert.pem -nodes', 'error');
+    input.value = '';
+    return;
+  }
+  // Soft size cap — a PEM bundle is text and rarely exceeds 64 KB
+  if (file.size > 256 * 1024) {
+    toast('File too large (' + Math.round(file.size / 1024) + ' KB). PEM files are usually under 64 KB.', 'error');
+    input.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const text = String(reader.result || '');
+    if (!text.includes('-----BEGIN')) {
+      toast('File does not look like PEM (no -----BEGIN- header). Convert binary formats with openssl first.', 'error');
+      input.value = '';
+      return;
+    }
+    distributePemBundle(text, targetId, kind);
+    toast('Loaded ' + esc(file.name));
+  };
+  reader.onerror = () => toast('Failed to read file: ' + reader.error?.message, 'error');
+  reader.readAsText(file);
+  input.value = ''; // reset so re-selecting same file fires change again
+}
+
+// Split a PEM bundle into cert / key / chain blocks. Heuristic: first
+// CERTIFICATE block → main cert; remaining CERTIFICATE blocks → chain;
+// any PRIVATE KEY block → key. If the user uploaded specifically to the
+// key or chain field, route the whole content there instead of splitting.
+function distributePemBundle(text, targetId, kind) {
+  const re = /-----BEGIN ([A-Z0-9 ]+)-----[\s\S]+?-----END \1-----/g;
+  const blocks = [];
+  let m;
+  while ((m = re.exec(text)) !== null) blocks.push({ type: m[1], pem: m[0] });
+
+  if (blocks.length === 0) {
+    document.getElementById(targetId).value = text.trim();
+    return;
+  }
+
+  // If targeting key or chain specifically, just paste the whole content
+  if (kind === 'key' || kind === 'chain') {
+    document.getElementById(targetId).value = text.trim();
+    return;
+  }
+
+  // kind === 'cert' — auto-split bundle
+  const certs = blocks.filter(b => b.type.includes('CERTIFICATE'));
+  const keys = blocks.filter(b => b.type.includes('PRIVATE KEY') || b.type === 'RSA PRIVATE KEY' || b.type === 'EC PRIVATE KEY');
+
+  if (certs.length > 0) {
+    document.getElementById('certPemInput').value = certs[0].pem + '\n';
+    if (certs.length > 1) {
+      document.getElementById('certChainInput').value = certs.slice(1).map(b => b.pem).join('\n') + '\n';
+    }
+  }
+  if (keys.length > 0 && !document.getElementById('certKeyInput').value.trim()) {
+    document.getElementById('certKeyInput').value = keys[0].pem + '\n';
+  }
+}
+
+function openCertModal() {
+  document.getElementById('certModalTitle').textContent = 'New Certificate';
+  document.getElementById('certModalError').style.display = 'none';
+  document.getElementById('certDomain').value = '';
+  document.getElementById('certPemInput').value = '';
+  document.getElementById('certKeyInput').value = '';
+  document.getElementById('certChainInput').value = '';
+  document.getElementById('certAcmeEmail').value = '';
+  document.getElementById('certAcmeStaging').checked = false;
+  switchCertTab('upload');
+  document.getElementById('certModal').classList.add('active');
+  document.getElementById('certDomain').focus();
+}
+
+function closeCertModal() {
+  document.getElementById('certModal').classList.remove('active');
+}
+
+function switchCertTab(source) {
+  _certSource = source;
+  const tabs = { upload: 'certTabUpload', acme: 'certTabAcme', 'self-signed': 'certTabSelfSigned' };
+  const panes = { upload: 'certPaneUpload', acme: 'certPaneAcme', 'self-signed': 'certPaneSelfSigned' };
+  for (const [k, btnId] of Object.entries(tabs)) {
+    const btn = document.getElementById(btnId);
+    const pane = document.getElementById(panes[k]);
+    if (k === source) {
+      btn.style.borderBottomColor = 'var(--accent)';
+      btn.style.color = 'var(--text)';
+      pane.style.display = '';
+    } else {
+      btn.style.borderBottomColor = 'transparent';
+      btn.style.color = 'var(--text3)';
+      pane.style.display = 'none';
+    }
+  }
+}
+
+async function saveCert() {
+  const errEl = document.getElementById('certModalError');
+  errEl.style.display = 'none';
+  const domain = document.getElementById('certDomain').value.trim().toLowerCase();
+  if (!domain) { errEl.textContent = 'Domain is required.'; errEl.style.display = 'block'; return; }
+
+  const body = { domain };
+  if (_certSource === 'upload') {
+    body.source = 'manual';
+    body.certPem = document.getElementById('certPemInput').value.trim();
+    body.keyPem = document.getElementById('certKeyInput').value.trim();
+    body.chainPem = document.getElementById('certChainInput').value.trim() || null;
+    if (!body.certPem || !body.keyPem) {
+      errEl.textContent = 'Both certificate and key PEM are required.'; errEl.style.display = 'block'; return;
+    }
+  } else if (_certSource === 'acme') {
+    body.source = 'acme';
+    body.acmeEmail = document.getElementById('certAcmeEmail').value.trim();
+    body.acmeStaging = document.getElementById('certAcmeStaging').checked;
+    if (!body.acmeEmail) {
+      errEl.textContent = 'Email is required for Let\'s Encrypt.'; errEl.style.display = 'block'; return;
+    }
+  } else {
+    body.source = 'self-signed';
+  }
+
+  try {
+    const res = await api('/admin/certs', { method: 'POST', body: JSON.stringify(body) });
+    const d = await res.json();
+    if (!res.ok) { errEl.textContent = d.error || 'Error saving'; errEl.style.display = 'block'; return; }
+    toast('Certificate saved' + (d.cert?.status === 'pending' ? ' (ACME issuing in background)' : ''));
+    closeCertModal();
+    await fetchCerts();
+  } catch (e) { errEl.textContent = 'Error: ' + e.message; errEl.style.display = 'block'; }
+}
+
+async function renewCert(id) {
+  if (!confirm('Force ACME renewal now? This contacts Let\'s Encrypt.')) return;
+  try {
+    const res = await api('/admin/certs/' + id + '/renew', { method: 'POST' });
+    const d = await res.json();
+    if (!res.ok) return toast(d.error || 'Renewal failed', 'error');
+    toast('Certificate renewed — listeners will hot-reload');
+    await fetchCerts();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteCertificate(id) {
+  if (!confirm('Delete this certificate? Profiles using it will lose TLS until reassigned.')) return;
+  try {
+    const res = await api('/admin/certs/' + id, { method: 'DELETE' });
+    const d = await res.json();
+    if (!res.ok) return toast(d.error || 'Delete failed', 'error');
+    toast('Certificate deleted');
+    await fetchCerts();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 

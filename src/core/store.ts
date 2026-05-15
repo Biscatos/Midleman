@@ -436,13 +436,13 @@ export function validateTcpUdpProfileInput(input: unknown): string | null {
         if (!validTransports.has(t)) return `Listener transport "${t}" must be "tcp", "udp" or "tls"`;
     }
 
-    // TLS cert required when there's a TLS listener and ACME is not configured
+    // TLS cert: must reference a cert in the central store via certId.
+    // Legacy tlsCert/acmeDomain are accepted on disk for migration but a new/
+    // edited profile from the API must have certId.
     const hasTls = (p.listeners as { transport: string }[]).some(l => l.transport === 'tls');
-    if (hasTls && !p.acmeDomain) {
-        if (!p.tlsCert || typeof p.tlsCert !== 'string') return '"tlsCert" is required when a TLS listener is configured without acmeDomain';
-        if (!p.tlsKey || typeof p.tlsKey !== 'string') return '"tlsKey" is required when a TLS listener is configured without acmeDomain';
+    if (hasTls && !p.certId && !p.acmeDomain && !p.tlsCert) {
+        return 'TLS listener requires "certId" — create a certificate first';
     }
-    if (p.acmeDomain && !p.acmeEmail) return '"acmeEmail" is required when "acmeDomain" is set';
     if (p.upstreamPort !== undefined && (typeof p.upstreamPort !== 'number' || p.upstreamPort < 1 || p.upstreamPort > 65535))
         return '"upstreamPort" must be 1–65535';
     if (p.upstreamTransport !== undefined &&

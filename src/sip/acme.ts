@@ -1,76 +1,65 @@
+/**
+ * ACME (Let's Encrypt) integration for the central certificate store.
+ *
+ * Old model (deprecated): per-profile ACME with files on disk.
+ * New model: per-cert ACME — each `CertRecord` with `source='acme'` is renewed
+ * by a single background timer (`scheduleRenewal`). PEMs live in the DB, not
+ * on disk. Renewal calls `updateCertPem` which fires `cert:changed` so all
+ * TLS listeners using the cert hot-reload.
+ *
+ * Account key is still a file (shared across all ACME certs) — there is only
+ * one Let's Encrypt account per Midleman instance.
+ */
+
 import acme from 'acme-client';
 import { mkdirSync, existsSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
-import type { TcpUdpProfile } from '../core/types';
+import { updateCertPem, setCertError, type CertRecord } from '../core/cert-store';
 
 // ─── HTTP-01 Challenge Token Store ───────────────────────────────────────────
-//
-// The main HTTP server reads this map to serve:
-//   GET /.well-known/acme-challenge/{token}  →  keyAuthorization string
-//
-// Access is synchronous from the HTTP handler — no lock needed (single-threaded JS).
 
 export const challengeStore = new Map<string, string>();
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-/** Renew when fewer than this many days remain */
 const RENEW_THRESHOLD_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// ─── Certificate validity check ───────────────────────────────────────────────
+// ─── Account key (shared across all ACME certs) ─────────────────────────────
 
-/**
- * Returns true if the PEM cert at `certPath` exists and expires in more than
- * `thresholdDays` days. Safe to call even if the file is missing.
- */
-async function isCertValid(certPath: string, thresholdDays: number): Promise<boolean> {
-    try {
-        const pem = await Bun.file(certPath).text();
-        const info = acme.crypto.readCertificateInfo(pem);
-        return info.notAfter.getTime() - Date.now() > thresholdDays * DAY_MS;
-    } catch {
-        return false;
-    }
+function accountKeyPath(): string {
+    const dir = join(process.env.DATA_DIR ?? './data', 'acme');
+    mkdirSync(dir, { recursive: true });
+    return join(dir, 'acme-account.key');
 }
 
-// ─── Account key management ───────────────────────────────────────────────────
-
-/**
- * Return the persisted ACME account private key, creating one if absent.
- * Uses ECDSA P-256: smaller keys, faster TLS handshakes, equivalent security
- * to RSA-3072 per NIST guidelines.
- */
-async function getOrCreateAccountKey(dataDir: string): Promise<Buffer> {
-    const keyPath = join(dataDir, 'acme-account.key');
-
+async function getOrCreateAccountKey(): Promise<Buffer> {
+    const keyPath = accountKeyPath();
     if (existsSync(keyPath)) {
         return Buffer.from(await Bun.file(keyPath).arrayBuffer());
     }
-
     const key = await acme.crypto.createPrivateEcdsaKey('P-256');
-
-    // Atomic write: write to *.tmp then rename — avoids a corrupt key file on crash
     const tmp = `${keyPath}.tmp`;
     await Bun.write(tmp, key);
     renameSync(tmp, keyPath);
-
     console.log(`[acme] Created new ECDSA P-256 account key at ${keyPath}`);
     return key;
 }
 
 // ─── Certificate request ──────────────────────────────────────────────────────
 
-async function requestCertificate(profile: TcpUdpProfile): Promise<void> {
-    const domain = profile.acmeDomain!;
-    const dataDir = resolveDataDir(profile);
+/**
+ * Request a fresh certificate from Let's Encrypt for the given cert record
+ * and persist the result via `updateCertPem` (which fires the change event).
+ */
+export async function requestCertificate(cert: CertRecord): Promise<void> {
+    if (cert.source !== 'acme') throw new Error(`Cert #${cert.id} is not source='acme'`);
+    if (!cert.acmeEmail) throw new Error(`Cert #${cert.id} missing acmeEmail`);
 
-    mkdirSync(dataDir, { recursive: true });
-
-    const accountKey = await getOrCreateAccountKey(dataDir);
+    const accountKey = await getOrCreateAccountKey();
 
     const client = new acme.Client({
-        directoryUrl: profile.acmeStaging
+        directoryUrl: cert.acmeStaging
             ? acme.directory.letsencrypt.staging
             : acme.directory.letsencrypt.production,
         accountKey,
@@ -79,17 +68,16 @@ async function requestCertificate(profile: TcpUdpProfile): Promise<void> {
         backoffMax: 30_000,
     });
 
-    // ECDSA P-256 cert key — fastest option for SIP TLS handshakes
     const [certKey, csr] = await acme.crypto.createCsr({
-        commonName: domain,
-        altNames: [domain],
+        commonName: cert.domain,
+        altNames: [cert.domain],
     });
 
-    console.log(`[acme:${profile.name}] Requesting certificate for ${domain} from Let's Encrypt${profile.acmeStaging ? ' (staging)' : ''}...`);
+    console.log(`[acme:#${cert.id}:${cert.domain}] Requesting certificate from Let's Encrypt${cert.acmeStaging ? ' (staging)' : ''}...`);
 
-    const cert = await client.auto({
+    const issuedPem = await client.auto({
         csr,
-        email: profile.acmeEmail,
+        email: cert.acmeEmail,
         termsOfServiceAgreed: true,
         challengePriority: ['http-01'],
         challengeCreateFn: async (_authz, challenge, keyAuthorization) => {
@@ -100,73 +88,93 @@ async function requestCertificate(profile: TcpUdpProfile): Promise<void> {
         },
     });
 
-    // Atomic writes for both cert and key — avoids serving a mismatched pair
-    const certPath = profile.tlsCert!;
-    const keyPath = profile.tlsKey!;
-    const certTmp = `${certPath}.tmp`;
-    const keyTmp = `${keyPath}.tmp`;
-    await Bun.write(certTmp, cert);
-    await Bun.write(keyTmp, certKey);
-    renameSync(certTmp, certPath);
-    renameSync(keyTmp, keyPath);
+    const certPem = String(issuedPem);
+    const keyPem = certKey instanceof Buffer ? certKey.toString('utf8') : String(certKey);
 
-    const info = acme.crypto.readCertificateInfo(cert);
-    console.log(`[acme:${profile.name}] Certificate issued ✓ — expires ${info.notAfter.toISOString().slice(0, 10)}`);
+    updateCertPem(cert.id, certPem, keyPem);
+    const info = acme.crypto.readCertificateInfo(certPem);
+    console.log(`[acme:#${cert.id}:${cert.domain}] Certificate issued ✓ — expires ${info.notAfter.toISOString().slice(0, 10)}`);
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+// ─── Renewal scheduling ──────────────────────────────────────────────────────
 
-function resolveDataDir(profile: TcpUdpProfile): string {
-    return profile.acmeDataDir ?? join(process.env.DATA_DIR ?? './data', 'acme', profile.name);
+const _renewalTimers = new Map<number, ReturnType<typeof setInterval>>();
+
+/** Check whether the cert PEM in the record expires beyond the threshold. */
+function isPemValid(pem: string, thresholdDays: number): boolean {
+    if (!pem) return false;
+    try {
+        const info = acme.crypto.readCertificateInfo(pem);
+        return info.notAfter.getTime() - Date.now() > thresholdDays * DAY_MS;
+    } catch {
+        return false;
+    }
 }
 
 /**
- * Ensure a valid TLS certificate exists for the given SIP profile.
+ * Ensure the cert is valid (issuing one if missing/expiring) and schedule
+ * background renewal. Idempotent — re-scheduling replaces any prior timer
+ * for the same cert id.
  *
- * - If `acmeDomain` is not set, this is a no-op (manual cert management).
- * - Requests a new cert from Let's Encrypt if missing or expiring within 30 days.
- * - Starts a background daily renewal timer with ±1 h jitter.
- *
- * `onRenewed` is called after a successful renewal so the caller can hot-reload
- * the TLS server with the new certificate.
+ * Returns when initial check/issue completes. Safe to call from background
+ * (fire-and-forget) — caller can ignore the promise.
  */
-export async function ensureCertificate(
-    profile: TcpUdpProfile,
-    onRenewed?: () => Promise<void>,
-): Promise<void> {
-    if (!profile.acmeDomain) return;
+export async function scheduleAcmeRenewal(cert: CertRecord): Promise<void> {
+    if (cert.source !== 'acme') return;
 
-    if (!profile.acmeEmail) {
-        throw new Error(`[acme:${profile.name}] acmeEmail is required when acmeDomain is set`);
+    // Replace any existing timer for this cert
+    const prev = _renewalTimers.get(cert.id);
+    if (prev) clearInterval(prev);
+
+    try {
+        if (isPemValid(cert.certPem, RENEW_THRESHOLD_DAYS)) {
+            const info = acme.crypto.readCertificateInfo(cert.certPem);
+            const daysLeft = Math.floor((info.notAfter.getTime() - Date.now()) / DAY_MS);
+            console.log(`[acme:#${cert.id}:${cert.domain}] Valid — ${daysLeft} days remaining`);
+        } else {
+            await requestCertificate(cert);
+        }
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setCertError(cert.id, msg);
+        console.error(`[acme:#${cert.id}:${cert.domain}] Initial issue failed:`, msg);
+        // Schedule retries via the renewal timer below
     }
 
-    // Ensure cert directories exist
-    const certPath = profile.tlsCert!;
-    const keyPath = profile.tlsKey!;
-    mkdirSync(join(certPath, '..'), { recursive: true });
-    mkdirSync(join(keyPath, '..'), { recursive: true });
-
-    if (await isCertValid(certPath, RENEW_THRESHOLD_DAYS)) {
-        const pem = await Bun.file(certPath).text();
-        const info = acme.crypto.readCertificateInfo(pem);
-        const daysLeft = Math.floor((info.notAfter.getTime() - Date.now()) / DAY_MS);
-        console.log(`[acme:${profile.name}] Certificate valid — ${daysLeft} days remaining`);
-    } else {
-        await requestCertificate(profile);
-    }
-
-    // Background daily renewal check — jitter avoids thundering herd on multi-profile setups
+    // Daily renewal check with ±1h jitter
     const jitterMs = Math.random() * 3600 * 1000;
-    setInterval(async () => {
-        if (await isCertValid(certPath, RENEW_THRESHOLD_DAYS)) return;
-
-        console.log(`[acme:${profile.name}] Certificate expiring soon — renewing...`);
+    const timer = setInterval(async () => {
+        // Re-read latest state from DB (cert may have been updated/replaced)
+        const { getCert } = await import('../core/cert-store');
+        const latest = getCert(cert.id);
+        if (!latest || latest.source !== 'acme') {
+            clearInterval(timer);
+            _renewalTimers.delete(cert.id);
+            return;
+        }
+        if (isPemValid(latest.certPem, RENEW_THRESHOLD_DAYS)) return;
+        console.log(`[acme:#${latest.id}:${latest.domain}] Expiring soon — renewing...`);
         try {
-            await requestCertificate(profile);
-            await onRenewed?.();
+            await requestCertificate(latest);
         } catch (err) {
-            console.error(`[acme:${profile.name}] Renewal failed:`, err instanceof Error ? err.message : err);
-            // Keep running with old cert — retry next day
+            const msg = err instanceof Error ? err.message : String(err);
+            setCertError(latest.id, msg);
+            console.error(`[acme:#${latest.id}:${latest.domain}] Renewal failed:`, msg);
         }
     }, DAY_MS + jitterMs);
+    _renewalTimers.set(cert.id, timer);
+}
+
+/** Cancel renewal timer for a cert (used when cert is deleted or switched away from ACME). */
+export function cancelAcmeRenewal(certId: number): void {
+    const t = _renewalTimers.get(certId);
+    if (t) {
+        clearInterval(t);
+        _renewalTimers.delete(certId);
+    }
+}
+
+export function shutdownAcme(): void {
+    for (const t of _renewalTimers.values()) clearInterval(t);
+    _renewalTimers.clear();
 }

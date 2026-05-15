@@ -89,17 +89,22 @@ export interface TcpUdpProfile {
   upstreamTransport: 'tcp' | 'udp' | 'tls'; // How to reach the upstream ('tls' = TCP+TLS)
   allowSelfSignedUpstream?: boolean;   // Skip TLS cert verification for upstream (only when upstreamTransport='tls')
 
-  // -- TLS fields — shared across all TLS listeners in this profile --
-  tlsCert?: string;                    // Path to TLS certificate PEM
-  tlsKey?: string;                     // Path to TLS private key PEM
+  // -- Certificate selection (TLS listeners) --
+  // Pick a cert from the central store (managed under Settings → Certificates).
+  // The legacy in-profile fields below are kept for backwards-compat read; new
+  // profiles use `certId`. Startup migration converts legacy to certId.
+  certId?: number;                     // Reference to certs.id
+
+  // -- DEPRECATED — kept for migration only. New code reads `certId`. --
+  tlsCert?: string;                    // [legacy] Path to TLS certificate PEM
+  tlsKey?: string;                     // [legacy] Path to TLS private key PEM
+  acmeDomain?: string;                 // [legacy] Domain for ACME
+  acmeEmail?: string;                  // [legacy] Let's Encrypt account email
+  acmeDataDir?: string;                // [legacy] Per-profile ACME dir
+  acmeStaging?: boolean;               // [legacy] LE staging endpoint
+
   allowedIps?: string[];               // IP allowlist — empty = unrestricted
   authToken?: string;                  // Optional token auth (TCP only, checked on first bytes)
-
-  // -- ACME / Let's Encrypt (auto-certificate for TLS listeners) --
-  acmeDomain?: string;                 // Domain for cert. Enables ACME when set.
-  acmeEmail?: string;                  // Let's Encrypt account email (required if acmeDomain set)
-  acmeDataDir?: string;                // Where to store account key + cert (default: DATA_DIR/acme/{name})
-  acmeStaging?: boolean;               // Use LE staging endpoint for testing (default: false)
 
   // -- SIP routing --
   // SIP Via/Record-Route rewriting is auto-activated when upstreamTransport='udp'.

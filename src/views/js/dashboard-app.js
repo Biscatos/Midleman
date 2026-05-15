@@ -277,6 +277,7 @@ const PAGE_TITLES = {
   requests: 'Request Log',
   siplogs: 'TCP/UDP Logs',
   tcpudp: 'TCP/UDP Proxies',
+  certs: 'Certificates',
   profiles: 'HTTP Proxies',
   webhooks: 'Webhooks',
   proxyusers: 'Users',
@@ -300,6 +301,7 @@ function navigate(page) {
   if (page === 'requests') { rlPage = 1; fetchRequestLogs(); }
   if (page === 'siplogs') { slPage = 1; populateSipProfileFilter(); fetchSipLogs(); }
   if (page === 'tcpudp') { fetchSipProxies(); }
+  if (page === 'certs') { fetchCerts(); }
   if (page === 'proxyusers') { fetchProxyUsers(); fetchInvites(); }
   if (page === 'oauthclients') { fetchOauthClients(); }
   if (page === 'consentpages') { fetchConsentPages(); }

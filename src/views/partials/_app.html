@@ -67,6 +67,16 @@
         <span class="sidebar-link-label">TCP/UDP Proxies</span>
         <span class="sidebar-badge" id="navTcpUdpBadge">0</span>
       </button>
+      <button class="sidebar-link" data-page="certs" data-tooltip="Certificates" onclick="navigate('certs')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="14" rx="2"/>
+          <path d="M7 9h10M7 13h6"/>
+          <circle cx="17" cy="15" r="2"/>
+          <path d="M17 17v3l-1-1-1 1v-3"/>
+        </svg>
+        <span class="sidebar-link-label">Certificates</span>
+        <span class="sidebar-badge" id="navCertsBadge">0</span>
+      </button>
       <button class="sidebar-link" data-page="webhooks" data-tooltip="Webhooks" onclick="navigate('webhooks')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="6" cy="6" r="2"/>
@@ -706,6 +716,145 @@
               <tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ CERTIFICATES ═══ -->
+    <div class="page" id="pageCerts">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h2>Certificates</h2>
+          <p>Central TLS certificate store used by TCP/UDP proxies. Add via upload, Let's Encrypt, or self-signed. ACME certs auto-renew 30 days before expiry; affected proxies hot-reload without restart.</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm" onclick="fetchCerts()">Reload</button>
+          <button class="btn btn-primary btn-sm" onclick="openCertModal()">+ New Certificate</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--surface2);text-align:left">
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Domain</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Source</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Status</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Expires</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Used by</th>
+                <th style="padding:10px 12px"></th>
+              </tr>
+            </thead>
+            <tbody id="certsListBody">
+              <tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- New / Edit Certificate Modal -->
+    <div class="modal-overlay" id="certModal">
+      <div class="modal" style="max-width:680px">
+        <div class="modal-header">
+          <h3 id="certModalTitle">New Certificate</h3>
+          <button class="close-btn" onclick="closeCertModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div id="certModalError" style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;padding:8px 12px;border-radius:6px;font-size:13px;margin-bottom:12px"></div>
+
+          <div style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:16px">
+            <button type="button" id="certTabUpload" class="btn btn-sm" style="border-radius:0;border:none;border-bottom:2px solid var(--accent);background:none;color:var(--text);padding:8px 16px;cursor:pointer" onclick="switchCertTab('upload')">Upload PEM</button>
+            <button type="button" id="certTabAcme" class="btn btn-sm" style="border-radius:0;border:none;border-bottom:2px solid transparent;background:none;color:var(--text3);padding:8px 16px;cursor:pointer" onclick="switchCertTab('acme')">Let's Encrypt</button>
+            <button type="button" id="certTabSelfSigned" class="btn btn-sm" style="border-radius:0;border:none;border-bottom:2px solid transparent;background:none;color:var(--text3);padding:8px 16px;cursor:pointer" onclick="switchCertTab('self-signed')">Self-signed</button>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group span-2">
+              <label>Domain (FQDN) <span style="color:var(--text3);font-weight:400;font-size:11px">— must match the cert's CN/SAN</span></label>
+              <input type="text" id="certDomain" placeholder="sip.example.com" autocomplete="off">
+            </div>
+          </div>
+
+          <div id="certPaneUpload">
+            <div class="form-grid">
+              <div class="form-group span-2">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                  <label style="margin:0">Certificate (PEM)</label>
+                  <label style="font-size:11px;color:var(--accent);cursor:pointer;display:inline-flex;align-items:center;gap:4px">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    Upload file
+                    <input type="file" accept=".pem,.crt,.cer,.cert,.txt,application/x-pem-file,application/x-x509-ca-cert" style="display:none" onchange="onCertFileSelected(event, 'certPemInput', 'cert')">
+                  </label>
+                </div>
+                <textarea id="certPemInput" rows="8" placeholder="Paste PEM here or click 'Upload file' above&#10;-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="font-family:monospace;font-size:11px"></textarea>
+              </div>
+              <div class="form-group span-2">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                  <label style="margin:0">Private Key (PEM)</label>
+                  <label style="font-size:11px;color:var(--accent);cursor:pointer;display:inline-flex;align-items:center;gap:4px">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    Upload file
+                    <input type="file" accept=".pem,.key,.txt,application/x-pem-file" style="display:none" onchange="onCertFileSelected(event, 'certKeyInput', 'key')">
+                  </label>
+                </div>
+                <textarea id="certKeyInput" rows="6" placeholder="Paste PEM here or click 'Upload file' above&#10;-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----" style="font-family:monospace;font-size:11px"></textarea>
+              </div>
+              <div class="form-group span-2">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                  <label style="margin:0">Chain / Intermediate (optional)</label>
+                  <label style="font-size:11px;color:var(--accent);cursor:pointer;display:inline-flex;align-items:center;gap:4px">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    Upload file
+                    <input type="file" accept=".pem,.crt,.cer,.txt,application/x-pem-file" style="display:none" onchange="onCertFileSelected(event, 'certChainInput', 'chain')">
+                  </label>
+                </div>
+                <textarea id="certChainInput" rows="4" placeholder="Intermediate cert(s) if separate from main cert" style="font-family:monospace;font-size:11px"></textarea>
+              </div>
+              <div class="form-group span-2">
+                <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:11px;color:var(--text3);line-height:1.5">
+                  💡 Accepts <code>.pem</code>, <code>.crt</code>, <code>.cer</code>, <code>.key</code>. For a single bundle file with multiple blocks, upload to <strong>Certificate</strong> — the parser auto-splits cert/key/chain. <strong>.p12 / .pfx</strong> not supported; convert with <code>openssl pkcs12 -in file.p12 -out file.pem -nodes</code> first.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="certPaneAcme" style="display:none">
+            <div class="form-grid">
+              <div class="form-group span-2">
+                <label>Email <span style="color:var(--text3);font-weight:400;font-size:11px">— used for Let's Encrypt account + expiry alerts</span></label>
+                <input type="email" id="certAcmeEmail" placeholder="admin@example.com" autocomplete="off">
+              </div>
+              <div class="form-group span-2">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
+                  <input type="checkbox" id="certAcmeStaging" style="accent-color:var(--accent)">
+                  <span>Use Let's Encrypt staging (testing only)</span>
+                </label>
+                <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px;margin-left:24px">
+                  Staging certs are untrusted but rate-limits are loose — use to validate setup before going live.
+                </span>
+              </div>
+              <div class="form-group span-2">
+                <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--text2)">
+                  ℹ️ HTTP-01 challenge requires this server to be reachable at <strong>http://&lt;domain&gt;/.well-known/acme-challenge/*</strong> from the internet. The main HTTP server already serves these.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="certPaneSelfSigned" style="display:none">
+            <div class="form-grid">
+              <div class="form-group span-2">
+                <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--text2)">
+                  ⚠️ Self-signed certificates are <strong>not trusted</strong> by browsers/clients by default. Use for lab/testing only. Valid for 365 days.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" onclick="closeCertModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveCert()">Save Certificate</button>
         </div>
       </div>
     </div>
@@ -1515,28 +1664,13 @@
         <div class="form-section">TLS Certificate</div>
         <div class="form-grid">
           <div class="form-group span-2">
-            <label>Certificate Mode</label>
-            <select id="sipCertMode" onchange="toggleSipCertMode()" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px">
-              <option value="manual">Manual — provide cert/key file paths</option>
-              <option value="acme">Auto — Let's Encrypt (ACME HTTP-01)</option>
+            <label>Certificate</label>
+            <select id="sipCertId" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px">
+              <option value="">— select a certificate —</option>
             </select>
-          </div>
-          <div class="form-group" id="sipCertPathGroup"><label>TLS Cert Path *</label><input type="text" id="sipTlsCert" placeholder="/etc/ssl/certs/proxy.pem"></div>
-          <div class="form-group" id="sipKeyPathGroup"><label>TLS Key Path *</label><input type="text" id="sipTlsKey" placeholder="/etc/ssl/private/proxy.key"></div>
-          <div class="form-group span-2" id="sipAcmeDomainGroup" style="display:none">
-            <label>ACME Domain *</label>
-            <input type="text" id="sipAcmeDomain" placeholder="sip.empresa.com">
-            <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px">
-              This domain must: (1) resolve in public DNS to this server's IP, (2) have port 80 accessible for the ACME HTTP-01 challenge.
-              Use the same value for <strong>Public Host</strong> above so SIP Via headers match the TLS certificate.
+            <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">
+              Manage certificates under <a href="#" onclick="navigate('certs');return false" style="color:var(--accent)">Settings → Certificates</a>. Upload, Let's Encrypt, or self-signed.
             </span>
-          </div>
-          <div class="form-group" id="sipAcmeEmailGroup" style="display:none"><label>Email *</label><input type="email" id="sipAcmeEmail" placeholder="admin@empresa.com"></div>
-          <div class="form-group" id="sipAcmeStagingGroup" style="display:none">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="sipAcmeStaging" style="cursor:pointer;accent-color:var(--accent)">
-              <span>Use Let's Encrypt staging (testing only)</span>
-            </label>
           </div>
         </div>
       </div>

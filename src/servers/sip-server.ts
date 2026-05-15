@@ -14,7 +14,8 @@
 
 import type { TcpUdpProfile } from '../core/types';
 import { isIpAllowed } from '../core/ip-filter';
-import { ensureCertificate } from '../sip/acme';
+import { scheduleAcmeRenewal, cancelAcmeRenewal } from '../sip/acme';
+import { getCert, onCertChange, setCertUsage, clearCertUsageForProfile, type CertRecord } from '../core/cert-store';
 import { logSipMessage, shouldLogSipMessage, buildSipLogEntry } from '../telemetry/sip-log';
 import { logConnection } from '../telemetry/tcpudp-conn-log';
 import { SipTcpParser, parseSipMessage } from '../sip/parser';
@@ -50,6 +51,7 @@ export interface SipServerInstance {
     txTable:      TransactionTable;
     rtpRelay:     RtpRelayManager | null; // RTP media relay (null if disabled)
     evictTimer:   ReturnType<typeof setInterval>;
+    certUnsub?:   () => void;             // unsubscribe from cert-change events
 }
 
 const servers = new Map<string, SipServerInstance>();
@@ -238,6 +240,7 @@ function buildTcpListener(
     port: number,
     tls: boolean,
     inst: SipServerInstance,
+    cert?: { certPem: string; keyPem: string } | null,
 ): BunTcpServer {
     const label = profile.name;
     const transport: 'tcp' | 'tls' = tls ? 'tls' : 'tcp';
@@ -320,9 +323,12 @@ function buildTcpListener(
     };
 
     if (tls) {
+        if (!cert || !cert.certPem || !cert.keyPem) {
+            throw new Error(`TLS listener for "${profile.name}" needs a cert (certId set + cert active)`);
+        }
         return Bun.listen({
             hostname: '0.0.0.0', port,
-            tls: { cert: Bun.file(profile.tlsCert!), key: Bun.file(profile.tlsKey!) },
+            tls: { cert: cert.certPem, key: cert.keyPem },
             socket: socketHandlers,
         }) as BunTcpServer;
     }
@@ -487,28 +493,46 @@ export async function startSipServer(profile: TcpUdpProfile): Promise<SipServerI
 
     servers.set(profile.name, inst);
 
-    // ── ACME cert (background — never blocks startup) ────────────────────────
+    // ── TLS listener via central cert store ──────────────────────────────────
     if (tlsListenerCfg) {
-        const mountTls = () => {
+        // Refresh cert usage tracking — index reverse so cert→profile lookups work
+        clearCertUsageForProfile(profile.name);
+        if (profile.certId) setCertUsage(profile.certId, profile.name);
+
+        const mountTls = (record: CertRecord) => {
             const existing = servers.get(profile.name);
             if (!existing) return;
             existing.tlsListener?.stop(true);
             try {
-                existing.tlsListener = buildTcpListener(profile, tlsListenerCfg.port, true, existing);
-                console.log(`🔌 TCP/UDP "${profile.name}" :${tlsListenerCfg.port}/TLS → ${profile.upstreamHost}:${profile.upstreamPort}/${profile.upstreamTransport.toUpperCase()}`);
+                existing.tlsListener = buildTcpListener(
+                    profile, tlsListenerCfg.port, true, existing,
+                    { certPem: record.certPem, keyPem: record.keyPem },
+                );
+                console.log(`🔌 TCP/UDP "${profile.name}" :${tlsListenerCfg.port}/TLS → ${profile.upstreamHost}:${profile.upstreamPort}/${profile.upstreamTransport.toUpperCase()} (cert #${record.id} ${record.domain})`);
             } catch (err) {
                 console.error(`[tcpudp:${profile.name}] TLS listener failed:`, err instanceof Error ? err.message : err);
             }
         };
 
-        if (profile.acmeDomain) {
-            // ACME — run async; mount TLS only once cert is issued
-            ensureCertificate(profile as never, async () => { mountTls(); })
-                .then(() => mountTls())
-                .catch(err => console.error(`[tcpudp:${profile.name}] ACME failed (TLS listener disabled until resolved):`, err instanceof Error ? err.message : err));
+        if (profile.certId) {
+            const record = getCert(profile.certId);
+            if (!record) {
+                console.error(`[tcpudp:${profile.name}] certId=${profile.certId} not found in cert store — TLS listener disabled`);
+            } else {
+                // Subscribe to cert changes for hot-reload (renewal / replace)
+                inst.certUnsub = onCertChange(record.id, (updated) => mountTls(updated));
+
+                if (record.status === 'active' && record.certPem) {
+                    mountTls(record);
+                } else if (record.source === 'acme') {
+                    console.log(`[tcpudp:${profile.name}] cert #${record.id} pending — TLS listener will mount when ACME issues`);
+                    // ACME renewal scheduler fires `cert:changed` once issued; nothing else to do here
+                } else {
+                    console.warn(`[tcpudp:${profile.name}] cert #${record.id} status=${record.status} — TLS listener disabled until cert active`);
+                }
+            }
         } else {
-            // Manual cert — mount immediately
-            mountTls();
+            console.warn(`[tcpudp:${profile.name}] TLS listener configured but no certId set — disabled`);
         }
     }
 
@@ -524,6 +548,8 @@ export async function stopSipServer(name: string): Promise<void> {
     const inst = servers.get(name);
     if (!inst) return;
     clearInterval(inst.evictTimer);
+    inst.certUnsub?.();
+    clearCertUsageForProfile(name);
     inst.rtpRelay?.teardownAll();
     inst.tcpListener?.stop(true);
     inst.tlsListener?.stop(true);
