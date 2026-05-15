@@ -1544,6 +1544,37 @@
             </div>
           </div>
         </div>
+
+        <!-- Silence Alert -->
+        <div class="form-group span-2">
+          <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
+            <label
+              style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface2);cursor:pointer;user-select:none"
+              onclick="toggleSilenceSection()">
+              <input type="checkbox" id="wSilenceEnabled" onclick="event.stopPropagation();toggleSilenceSection()"
+                style="cursor:pointer">
+              <span style="font-size:13px;font-weight:600">Silence alert</span>
+              <span style="font-size:11px;color:var(--text3);font-weight:400">email me if no payload arrives for N minutes</span>
+            </label>
+            <div id="wSilenceSection" style="display:none;padding:12px;flex-direction:column;gap:10px">
+              <div style="display:grid;grid-template-columns:1fr 2fr;gap:8px">
+                <div>
+                  <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Threshold (minutes)</label>
+                  <input type="number" id="wSilenceThreshold" min="1" max="100000" value="15"
+                    style="width:100%;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Notify email (SMTP must be configured)</label>
+                  <input type="email" id="wSilenceEmail" placeholder="alerts@example.com"
+                    style="width:100%;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
+                </div>
+              </div>
+              <div style="font-size:10px;color:var(--text3);line-height:1.5">
+                One alert per silence episode. The clock starts at the first payload received — a freshly created webhook never triggers.
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     <div

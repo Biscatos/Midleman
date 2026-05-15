@@ -69,6 +69,20 @@ export interface WebhookDestination {
  * Webhook Fan-out distributor: listens on a dedicated port
  * and duplicates or transforms incoming requests to multiple upstream URLs.
  */
+/**
+ * Silence alert: notify by email when the webhook hasn't received any payload
+ * for at least `thresholdMinutes`. Only fires once per silence episode; reset
+ * when a new payload arrives. Webhooks that never received a payload are not
+ * considered "silent" — the timer starts at the first real delivery.
+ */
+export interface WebhookSilenceAlert {
+  enabled: boolean;
+  /** Minutes of inactivity before firing the alert. */
+  thresholdMinutes: number;
+  /** Destination email address. SMTP must be configured. */
+  notifyEmail: string;
+}
+
 export interface WebhookDistributor {
   name: string;           // Unique identifier
   port: number;           // Dedicated listening port (0 = auto-assign)
@@ -76,6 +90,7 @@ export interface WebhookDistributor {
   authToken?: string;     // Optional auth token to restrict inbound requests
   retry?: WebhookRetryConfig; // Default retry config for all targets (can be overridden per-destination)
   allowedIps?: string[];  // Optional IP allowlist (exact, CIDR, wildcard). Empty = unrestricted.
+  silenceAlert?: WebhookSilenceAlert; // Optional inactivity notifier
 }
 
 /**

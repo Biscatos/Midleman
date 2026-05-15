@@ -547,6 +547,26 @@ export function getRequestLogStats(): { total: number; oldest: string | null; ne
     }
 }
 
+/**
+ * Returns the most recent timestamp (Unix ms) for a webhook by name, considering
+ * only inbound `webhook` records (fan-out attempts are excluded). Null when the
+ * webhook has never received a payload — used by the silence-alert scheduler.
+ */
+export function getLastWebhookActivity(webhookName: string): number | null {
+    if (!db) return null;
+    try {
+        const row = db.prepare(
+            `SELECT MAX(timestamp) AS ts FROM request_logs WHERE type = 'webhook' AND target_name = $name`
+        ).get({ $name: webhookName }) as { ts: string | null } | undefined;
+        if (!row || !row.ts) return null;
+        // request_logs timestamps are stored as ISO UTC without a trailing 'Z'
+        const ms = Date.parse(row.ts + 'Z');
+        return Number.isFinite(ms) ? ms : null;
+    } catch {
+        return null;
+    }
+}
+
 export function getRequestLogChart(): {
     timeline: { bucket: string; count: number; errors: number }[];
     methods: { method: string; count: number }[];

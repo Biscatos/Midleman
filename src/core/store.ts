@@ -250,6 +250,7 @@ interface StoredWebhook {
     authToken?: string;
     retry?: import('./types').WebhookRetryConfig;
     allowedIps?: string[];
+    silenceAlert?: import('./types').WebhookSilenceAlert;
 }
 
 /**
@@ -271,6 +272,7 @@ export function loadPersistedWebhooks(): WebhookDistributor[] {
                 authToken: w.authToken,
                 retry: w.retry,
                 allowedIps: w.allowedIps?.length ? w.allowedIps : undefined,
+                silenceAlert: w.silenceAlert,
             }));
     } catch (err) {
         console.warn('⚠️  Could not load webhooks.json:', err instanceof Error ? err.message : err);
@@ -291,6 +293,7 @@ export function persistWebhooks(webhooks: WebhookDistributor[]): void {
             authToken: w.authToken,
             retry: w.retry,
             allowedIps: w.allowedIps?.length ? w.allowedIps : undefined,
+            silenceAlert: w.silenceAlert,
         }));
         writeFileSync(WEBHOOKS_FILE, JSON.stringify(stored, null, 2), 'utf-8');
     } catch (err) {
@@ -411,6 +414,16 @@ export function validateWebhookInput(input: unknown): string | null {
 
     if (!Array.isArray(w.targets) || w.targets.length === 0) {
         return '"targets" must be a non-empty array of destinations';
+    }
+
+    if (w.silenceAlert !== undefined) {
+        if (typeof w.silenceAlert !== 'object' || w.silenceAlert === null) return '"silenceAlert" must be an object';
+        const s = w.silenceAlert as Record<string, unknown>;
+        if (typeof s.enabled !== 'boolean') return '"silenceAlert.enabled" must be a boolean';
+        if (s.enabled) {
+            if (typeof s.thresholdMinutes !== 'number' || s.thresholdMinutes < 1 || s.thresholdMinutes > 100000) return '"silenceAlert.thresholdMinutes" must be a positive number (1–100000)';
+            if (typeof s.notifyEmail !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.notifyEmail)) return '"silenceAlert.notifyEmail" must be a valid email';
+        }
     }
 
     for (const target of w.targets) {

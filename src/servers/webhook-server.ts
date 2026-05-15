@@ -1,5 +1,5 @@
 import type { WebhookDistributor, WebhookRetryConfig, WebhookPersistentRetry } from '../core/types';
-import { logRequest, headersToRecord } from '../telemetry/request-log';
+import { logRequest, headersToRecord, getLastWebhookActivity } from '../telemetry/request-log';
 import { isIpAllowed } from '../core/ip-filter';
 import {
     loadPersistedDlq, persistDlq, type StoredFailedFanout,
@@ -519,6 +519,101 @@ async function fetchWithRetry(
 
     if (lastError && typeof lastError === 'object') (lastError as any).__attemptLog = attemptLog;
     throw lastError;
+}
+
+// ─── Silence Alert Scheduler ────────────────────────────────────────────────
+//
+// Per-webhook inactivity watchdog. Every tick we ask the request log for the
+// latest inbound webhook timestamp and compare it to the configured threshold.
+// `alerted` lives only in memory: webhooks recover naturally on the next
+// payload and a process restart at worst re-sends one alert, which is fine.
+
+interface SilenceState {
+    /** True once we've sent the silence email for the current episode. */
+    alerted: boolean;
+    /** Timestamp (ms) of the activity that triggered the alert — used in the recovery email. */
+    silentSince: number | null;
+}
+const silenceStates = new Map<string, SilenceState>();
+
+async function sendSilenceNotification(webhookName: string, email: string, kind: 'silent' | 'recovered', lastActivity: number, thresholdMinutes: number): Promise<void> {
+    if (!isSmtpConfigured()) {
+        console.warn(`📧 [silence-alert] SMTP not configured — cannot notify ${email}`);
+        return;
+    }
+    const lastIso = new Date(lastActivity).toISOString();
+    const subject = kind === 'silent'
+        ? `[Midleman] Webhook silent — ${webhookName}`
+        : `[Midleman] Webhook resumed — ${webhookName}`;
+    const body = kind === 'silent'
+        ? [
+            `Webhook "${webhookName}" has not received any payload in the last ${thresholdMinutes} minute(s).`,
+            ``,
+            `Last activity: ${lastIso}`,
+            `Threshold:     ${thresholdMinutes} min`,
+            ``,
+            `You will not get another alert for this episode. Open the dashboard to inspect: /admin#webhooks`,
+        ].join('\n')
+        : [
+            `Webhook "${webhookName}" started receiving payloads again.`,
+            ``,
+            `Previous last activity: ${lastIso}`,
+        ].join('\n');
+    const html = `<pre style="font-family:ui-monospace,Menlo,monospace;font-size:13px;color:#111">${body.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]!))}</pre>`;
+    const r = await sendMail({ to: email, subject, html, text: body });
+    if (!r.ok) console.warn(`📧 [silence-alert] notify ${kind} failed: ${r.error}`);
+    else console.log(`📧 [silence-alert] notify ${kind} sent to ${email} (${webhookName})`);
+}
+
+async function silenceTick(): Promise<void> {
+    for (const ws of servers.values()) {
+        const cfg = ws.webhook.silenceAlert;
+        if (!cfg || !cfg.enabled || !cfg.notifyEmail) {
+            // If config was turned off, drop any in-flight state so the next
+            // enable starts fresh.
+            silenceStates.delete(ws.webhook.name);
+            continue;
+        }
+        const last = getLastWebhookActivity(ws.webhook.name);
+        // Never received a payload — don't alert until the first delivery arrives.
+        if (last === null) continue;
+
+        const ageMs = Date.now() - last;
+        const thresholdMs = Math.max(1, cfg.thresholdMinutes) * 60_000;
+        const state = silenceStates.get(ws.webhook.name) || { alerted: false, silentSince: null };
+
+        if (ageMs >= thresholdMs && !state.alerted) {
+            state.alerted = true;
+            state.silentSince = last;
+            silenceStates.set(ws.webhook.name, state);
+            try { await sendSilenceNotification(ws.webhook.name, cfg.notifyEmail, 'silent', last, cfg.thresholdMinutes); }
+            catch (e) { console.warn('silence notify err', e); }
+        } else if (ageMs < thresholdMs && state.alerted) {
+            // Recovered — fresh activity arrived since the alert.
+            const prevLast = state.silentSince ?? last;
+            silenceStates.delete(ws.webhook.name);
+            try { await sendSilenceNotification(ws.webhook.name, cfg.notifyEmail, 'recovered', prevLast, cfg.thresholdMinutes); }
+            catch (e) { console.warn('silence notify err', e); }
+        }
+    }
+}
+
+let _silenceInterval: ReturnType<typeof setInterval> | null = null;
+export function startSilenceAlertScheduler(): void {
+    if (_silenceInterval) return;
+    // 60s tick — minute granularity is the right resolution for "X minutes silent"
+    _silenceInterval = setInterval(() => { void silenceTick(); }, 60_000);
+    console.log(`👂 [silence-alert] Scheduler started`);
+}
+
+export function stopSilenceAlertScheduler(): void {
+    if (_silenceInterval) { clearInterval(_silenceInterval); _silenceInterval = null; }
+    silenceStates.clear();
+}
+
+/** Drop any silence state when a webhook is reconfigured or removed. */
+export function resetSilenceState(webhookName: string): void {
+    silenceStates.delete(webhookName);
 }
 
 // ─── Request Fan-out Logic ──────────────────────────────────────────────────

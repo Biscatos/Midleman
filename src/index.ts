@@ -15,7 +15,7 @@ import { migrateProfileCerts } from './core/cert-migration';
 import { scheduleAcmeRenewal, shutdownAcme, requestCertificate } from './sip/acme';
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort, isProxyServerRunning, setProxyLoginTemplate, setProxyLogo } from './servers/proxy-server';
 import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort, assignTcpUdpListenerPort, releaseProxyPort, releaseWebhookPort, releaseTcpUdpListenerPorts, getWebhookPort } from './servers/port-manager';
-import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler } from './servers/webhook-server';
+import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
 import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption } from './auth/auth';
@@ -263,6 +263,7 @@ for (const webhook of config.webhooks) {
 
 // Resume any persistent-retry entries left over from the previous run.
 startPendingRetryScheduler();
+startSilenceAlertScheduler();
 
 // TCP/UDP proxies are started AFTER the main HTTP server below — they may run
 // ACME HTTP-01 which needs the main server to be already listening on :80.
@@ -1291,6 +1292,7 @@ const server = Bun.serve({
                             authToken: webhook.authToken || '',
                             retry: webhook.retry,
                             allowedIps: webhook.allowedIps || [],
+                            silenceAlert: webhook.silenceAlert,
                             running: status?.running ?? false,
                             active: status?.active ?? 0,
                         },
@@ -1314,6 +1316,10 @@ const server = Bun.serve({
                     if (input.authToken) webhook.authToken = input.authToken as string;
                     if (input.retry && typeof input.retry === 'object') webhook.retry = input.retry as import('./core/types').WebhookRetryConfig;
                     if (Array.isArray(input.allowedIps) && input.allowedIps.length) webhook.allowedIps = input.allowedIps as string[];
+                    if (input.silenceAlert && typeof input.silenceAlert === 'object') webhook.silenceAlert = input.silenceAlert as import('./core/types').WebhookSilenceAlert;
+
+                    // Reset any pending silence state so the next tick starts fresh.
+                    resetSilenceState(webhook.name);
 
                     // Assign a port (auto or explicit)
                     const existingIdx = config.webhooks.findIndex(w => w.name === webhook.name);
@@ -2554,6 +2560,7 @@ const shutdown = async (signal: string) => {
     await stopAllProxyServers();
     await stopAllSipServers();
     stopPendingRetryScheduler();
+    stopSilenceAlertScheduler();
     await stopAllWebhooks();
 
     // Wait for main server requests

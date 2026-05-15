@@ -1993,7 +1993,20 @@ function openWebhookModal(webhook = null) {
   document.getElementById('wRetryOn').value = (r?.retryOn ?? [429, 502, 503, 504]).join(', ');
   document.getElementById('wRetryOnRow').style.display = r?.retryUntilSuccess ? 'none' : 'flex';
 
+  // Populate silence alert config
+  const sa = webhook?.silenceAlert;
+  const saEnabled = !!(sa && sa.enabled);
+  document.getElementById('wSilenceEnabled').checked = saEnabled;
+  document.getElementById('wSilenceSection').style.display = saEnabled ? 'flex' : 'none';
+  document.getElementById('wSilenceThreshold').value = sa?.thresholdMinutes ?? 15;
+  document.getElementById('wSilenceEmail').value = sa?.notifyEmail ?? '';
+
   document.getElementById('webhookModal').style.display = 'flex';
+}
+
+function toggleSilenceSection() {
+  const cb = document.getElementById('wSilenceEnabled');
+  document.getElementById('wSilenceSection').style.display = cb.checked ? 'flex' : 'none';
 }
 
 function closeWebhookModal() { document.getElementById('webhookModal').style.display = 'none'; editingWebhook = null; }
@@ -2046,6 +2059,16 @@ async function saveWebhook() {
   if (targetsRaw.length === 0) return toast('At least one valid destination is required', 'error');
   const at = document.getElementById('wAuthToken').value.trim(); if (at) body.authToken = at;
   const wIps = IpTagInput.getValue('wAllowedIps'); if (wIps.length) body.allowedIps = wIps;
+
+  if (document.getElementById('wSilenceEnabled').checked) {
+    const thr = parseInt(document.getElementById('wSilenceThreshold').value) || 0;
+    const email = document.getElementById('wSilenceEmail').value.trim();
+    if (!thr || thr < 1) return toast('Silence threshold must be at least 1 minute', 'error');
+    if (!email) return toast('Silence alert requires an email address', 'error');
+    body.silenceAlert = { enabled: true, thresholdMinutes: thr, notifyEmail: email };
+  } else {
+    body.silenceAlert = { enabled: false, thresholdMinutes: 15, notifyEmail: '' };
+  }
 
   if (document.getElementById('wRetryEnabled').checked) {
     const retryUntilSuccess = document.getElementById('wRetryUntilSuccess').checked;
