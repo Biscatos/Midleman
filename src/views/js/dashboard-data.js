@@ -1723,8 +1723,12 @@ function addWebhookTarget(target = "") {
             headersArr.push({ key: k, value: v });
         }
     }
+    // A destination is "basic" if it has no method override, no custom headers,
+    // no body template, and no forwardHeaders — only retry/persistent fields.
+    const isBasicShape = !target.method && headersArr.length === 0
+        && !target.bodyTemplate && target.forwardHeaders !== true;
     webhookTargetState.push({
-      type: 'custom',
+      type: isBasicShape ? 'basic' : 'custom',
       url: target.url || '',
       method: target.method || 'POST',
       bodyTemplate: target.bodyTemplate || '',
@@ -2015,9 +2019,20 @@ async function saveWebhook() {
   const targetsRaw = [];
   for (const t of webhookTargetState) {
       if (!t.url.trim()) continue;
-      if (t.type === 'basic') {
+      const hasRetryOverride = t.retryOpen && t.retry;
+      const hasPersistent = t.persistentRetryOpen && t.persistentRetry && t.persistentRetry.enabled;
+
+      // Basic forward with no retry override stays as a plain URL string.
+      if (t.type === 'basic' && !hasRetryOverride && !hasPersistent) {
           targetsRaw.push(t.url.trim());
-      } else {
+          continue;
+      }
+
+      // Otherwise promote to a WebhookDestination object. Custom-action fields
+      // are only emitted when this destination is actually in custom mode —
+      // a basic destination with just a retry override stays clean.
+      const dest = { url: t.url.trim() };
+      if (t.type === 'custom') {
           let headersObj = undefined;
           if (t.customHeaders && t.customHeaders.length > 0) {
               headersObj = {};
@@ -2026,24 +2041,21 @@ async function saveWebhook() {
               }
               if (Object.keys(headersObj).length === 0) headersObj = undefined;
           }
-          const dest = {
-              url: t.url.trim(),
-              method: t.method || 'POST',
-              customHeaders: headersObj,
-              forwardHeaders: t.forwardHeaders,
-              bodyTemplate: (t.customBody && t.bodyTemplate.trim()) ? t.bodyTemplate.trim() : undefined
-          };
-          if (t.retryOpen && t.retry) dest.retry = t.retry;
-          if (t.persistentRetryOpen && t.persistentRetry && t.persistentRetry.enabled) {
-            dest.persistentRetry = {
+          dest.method = t.method || 'POST';
+          dest.customHeaders = headersObj;
+          dest.forwardHeaders = t.forwardHeaders;
+          dest.bodyTemplate = (t.customBody && t.bodyTemplate.trim()) ? t.bodyTemplate.trim() : undefined;
+      }
+      if (hasRetryOverride) dest.retry = t.retry;
+      if (hasPersistent) {
+          dest.persistentRetry = {
               enabled: true,
               maxAttemptsPerMinute: t.persistentRetry.maxAttemptsPerMinute || 10,
               notifyAfterAttempts: t.persistentRetry.notifyAfterAttempts || 10,
               notifyEmail: (t.persistentRetry.notifyEmail || '').trim() || undefined,
-            };
-          }
-          targetsRaw.push(dest);
+          };
       }
+      targetsRaw.push(dest);
   }
 
   const wName = document.getElementById('wName').value.trim();
