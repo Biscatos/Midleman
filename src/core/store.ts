@@ -38,6 +38,7 @@ const PROFILES_FILE = resolve(DATA_DIR, 'profiles.json');
 const TARGETS_FILE = resolve(DATA_DIR, 'targets.json');
 const WEBHOOKS_FILE = resolve(DATA_DIR, 'webhooks.json');
 const DLQ_FILE = resolve(DATA_DIR, 'dlq.json');
+const PENDING_RETRY_FILE = resolve(DATA_DIR, 'pending-retry.json');
 const TCPUDP_FILE = resolve(DATA_DIR, 'tcpudp-profiles.json');
 
 /**
@@ -343,6 +344,55 @@ export function persistDlq(entries: StoredFailedFanout[]): void {
     }
 }
 
+// ─── Pending-Retry Persistence ──────────────────────────────────────────────
+//
+// Pending-retry holds fanouts whose destination has `persistentRetry.enabled`.
+// They are retried forever (or until manually dismissed) at a throttled rate,
+// separately from the DLQ (which holds non-persistent failures).
+
+export interface StoredPendingRetry {
+    id: string;
+    webhookName: string;
+    requestId: string;
+    targetUrl: string;
+    method: string;
+    headers: Record<string, string>;
+    body: string | null;
+    bodyEncoding: 'base64' | 'text' | 'none';
+    bodyPreview: string | null;
+    bodySize: number;
+    path: string;
+    clientIp: string;
+    retryConfig: unknown;
+    persistentRetry: unknown;
+    lastError: string;
+    attempts: number;
+    enqueuedAt: number;        // Unix ms
+    lastAttemptAt: number | null;
+    nextAttemptAt: number;     // Unix ms — scheduler picks the earliest
+    notified: boolean;         // true once the notify-email has been sent for this entry
+}
+
+export function loadPersistedPendingRetry(): StoredPendingRetry[] {
+    try {
+        if (!existsSync(PENDING_RETRY_FILE)) return [];
+        const raw = readFileSync(PENDING_RETRY_FILE, 'utf-8');
+        return JSON.parse(raw) as StoredPendingRetry[];
+    } catch (err) {
+        console.warn('⚠️  Could not load pending-retry.json:', err instanceof Error ? err.message : err);
+        return [];
+    }
+}
+
+export function persistPendingRetry(entries: StoredPendingRetry[]): void {
+    try {
+        ensureDataDir();
+        writeFileSync(PENDING_RETRY_FILE, JSON.stringify(entries, null, 2), 'utf-8');
+    } catch (err) {
+        console.error('❌ Could not save pending-retry.json:', err instanceof Error ? err.message : err);
+    }
+}
+
 /**
  * Validate a webhook object from API input.
  */
@@ -374,6 +424,14 @@ export function validateWebhookInput(input: unknown): string | null {
             if (dest.bodyTemplate && typeof dest.bodyTemplate !== 'string') return '"bodyTemplate" must be a string';
             if (dest.customHeaders && typeof dest.customHeaders !== 'object') return '"customHeaders" must be an object';
             if (dest.forwardHeaders !== undefined && typeof dest.forwardHeaders !== 'boolean') return '"forwardHeaders" must be a boolean';
+            if (dest.persistentRetry !== undefined) {
+                if (typeof dest.persistentRetry !== 'object' || dest.persistentRetry === null) return '"persistentRetry" must be an object';
+                const pr = dest.persistentRetry as Record<string, unknown>;
+                if (typeof pr.enabled !== 'boolean') return '"persistentRetry.enabled" must be a boolean';
+                if (pr.maxAttemptsPerMinute !== undefined && (typeof pr.maxAttemptsPerMinute !== 'number' || pr.maxAttemptsPerMinute < 1 || pr.maxAttemptsPerMinute > 600)) return '"persistentRetry.maxAttemptsPerMinute" must be 1–600';
+                if (pr.notifyAfterAttempts !== undefined && (typeof pr.notifyAfterAttempts !== 'number' || pr.notifyAfterAttempts < 1 || pr.notifyAfterAttempts > 100000)) return '"persistentRetry.notifyAfterAttempts" must be a positive integer';
+                if (pr.notifyEmail !== undefined && pr.notifyEmail !== '' && (typeof pr.notifyEmail !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(pr.notifyEmail))) return '"persistentRetry.notifyEmail" must be a valid email';
+            }
         } else {
             return 'Targets must be strings or valid WebhookDestination objects';
         }

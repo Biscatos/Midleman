@@ -164,8 +164,10 @@ function showContextMenu(e, btn) {
     const w = _allWebhooks.find(x => x.name === name);
     if (!w) return;
     const dlqCount = _dlqByWebhook[name] || 0;
+    const pendingCount = _pendingByWebhook[name] || 0;
     showActionMenu(btn, [
       dlqCount > 0 ? { label: `Failed deliveries (${dlqCount})`, fn: () => openDlqModal(name), danger: true } : null,
+      pendingCount > 0 ? { label: `Pending retries (${pendingCount})`, fn: () => openPendingRetryModal(name) } : null,
       { label: 'View Logs', fn: () => viewWebhookLogs(name) },
       { label: 'Restart', fn: () => restartWebhookAction(name) },
       { label: 'Edit', fn: () => editWebhook(name) },
@@ -1245,11 +1247,16 @@ function copyTargetCredential() {}
 // ─── Webhooks CRUD ───────────────────────────────────────────────────────────
 let _allWebhooks = [];
 let _dlqByWebhook = {}; // { [webhookName]: count }
+let _pendingByWebhook = {}; // { [webhookName]: count }
 let editingWebhook = null;
 
 async function fetchWebhooks() {
   try {
-    const [wRes, dlqRes] = await Promise.all([api('/admin/webhooks'), api('/admin/webhooks/dlq')]);
+    const [wRes, dlqRes, prRes] = await Promise.all([
+      api('/admin/webhooks'),
+      api('/admin/webhooks/dlq'),
+      api('/admin/webhooks/pending-retry'),
+    ]);
     if (!wRes.ok) return;
     const d = await wRes.json();
     _allWebhooks = d.webhooks || [];
@@ -1259,6 +1266,14 @@ async function fetchWebhooks() {
       _dlqByWebhook = {};
       for (const e of (dlqData.queue || [])) {
         _dlqByWebhook[e.webhookName] = (_dlqByWebhook[e.webhookName] || 0) + 1;
+      }
+    }
+
+    if (prRes.ok) {
+      const prData = await prRes.json();
+      _pendingByWebhook = {};
+      for (const e of (prData.queue || [])) {
+        _pendingByWebhook[e.webhookName] = (_pendingByWebhook[e.webhookName] || 0) + 1;
       }
     }
 
@@ -1291,9 +1306,12 @@ function renderWebhooks(webhooks) {
       : '';
     const numTargets = w.targets.length;
     const dlqCount = _dlqByWebhook[w.name] || 0;
+    const pendingCount = _pendingByWebhook[w.name] || 0;
     const dlqDot = dlqCount > 0
       ? `<span style="position:absolute;top:2px;right:2px;width:7px;height:7px;background:var(--red);border-radius:50%;display:block" title="${dlqCount} failed deliveries"></span>`
-      : '';
+      : (pendingCount > 0
+          ? `<span style="position:absolute;top:2px;right:2px;width:7px;height:7px;background:var(--orange);border-radius:50%;display:block" title="${pendingCount} pending persistent retries"></span>`
+          : '');
     return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
   <td style="padding:8px 12px;font-weight:600">${esc(w.name)}</td>
   <td style="padding:8px">${statusBadge}</td>
@@ -1386,6 +1404,88 @@ async function dlqRetryOne(id) {
     else toast('Retry failed: ' + (d.error || d.lastError || res.status), 'error');
     await refreshDlqModal();
     await fetchWebhooks();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+// ─── Pending Retry Modal ─────────────────────────────────────────────────────
+let _prModalWebhook = null;
+let _prEntries = [];
+
+async function openPendingRetryModal(webhookName) {
+  _prModalWebhook = webhookName || null;
+  document.getElementById('pendingRetryModalTitle').textContent = webhookName
+    ? `Pending Retries — ${webhookName}`
+    : 'Pending Retries';
+  document.getElementById('pendingRetryModal').style.display = 'block';
+  await refreshPendingRetryModal();
+}
+
+function closePendingRetryModal() {
+  document.getElementById('pendingRetryModal').style.display = 'none';
+  _prModalWebhook = null;
+  _prEntries = [];
+}
+
+async function refreshPendingRetryModal() {
+  try {
+    const url = '/admin/webhooks/pending-retry' + (_prModalWebhook ? '?webhook=' + encodeURIComponent(_prModalWebhook) : '');
+    const res = await api(url);
+    const d = await res.json();
+    _prEntries = d.queue || [];
+    renderPendingRetryEntries();
+  } catch (e) { toast('Error loading pending retries: ' + e.message, 'error'); }
+}
+
+function renderPendingRetryEntries() {
+  const c = document.getElementById('pendingRetryList');
+  if (_prEntries.length === 0) {
+    c.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3)">No pending retries.</div>';
+    return;
+  }
+  c.innerHTML = _prEntries.map(e => {
+    const nextIn = Math.max(0, e.nextAttemptAt - Date.now());
+    const nextLabel = e.running ? 'running…' : (nextIn < 1000 ? 'now' : `in ${Math.ceil(nextIn / 1000)}s`);
+    const notifyBadge = e.notified ? '<span style="background:var(--orange-bg);color:var(--orange);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px">notified</span>' : '';
+    return `
+    <div id="pr-${esc(e.id)}" style="border:1px solid rgba(245,158,11,0.3);border-radius:6px;padding:10px 14px;margin-bottom:8px;background:rgba(245,158,11,0.06)">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-family:'SF Mono',Monaco,monospace;font-size:12px;color:var(--accent2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.targetUrl)}">${esc(e.method)} ${esc(e.targetUrl)}</span>
+        <span style="font-size:11px;color:var(--text3);white-space:nowrap">next: ${nextLabel}</span>
+      </div>
+      <div style="margin-top:4px;font-size:11px;color:var(--red)">${esc(e.lastError || '')}</div>
+      <div style="margin-top:2px;font-size:11px;color:var(--text3)">
+        <strong style="color:var(--orange)">${e.attempts}</strong> attempts &middot; ${e.maxAttemptsPerMinute}/min &middot;
+        notify @ ${esc(e.notifyEmail || 'no email')} ${notifyBadge} &middot;
+        req: ${esc(e.requestId.slice(0,8))}…
+      </div>
+      <div style="margin-top:8px;display:flex;gap:6px">
+        <button class="btn btn-sm" onclick="prRetryOne('${esc(e.id)}')" ${e.running ? 'disabled' : ''}>${e.running ? 'Running…' : 'Retry now'}</button>
+        <button class="btn btn-sm btn-danger" onclick="prDismissOne('${esc(e.id)}')">Cancel</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function prRetryOne(id) {
+  const entry = _prEntries.find(e => e.id === id);
+  if (entry) entry.running = true;
+  renderPendingRetryEntries();
+  try {
+    const res = await api(`/admin/webhooks/pending-retry/${encodeURIComponent(id)}/retry-now`, { method: 'POST' });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) toast('Delivered ✔');
+    else toast('Still failing: ' + (d.error || res.status), 'error');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+  await refreshPendingRetryModal();
+  await fetchWebhooks();
+}
+
+async function prDismissOne(id) {
+  if (!confirm('Cancel this pending retry? The delivery will be abandoned.')) return;
+  try {
+    const res = await api(`/admin/webhooks/pending-retry/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (res.ok) { await refreshPendingRetryModal(); await fetchWebhooks(); }
+    else toast('Cancel failed', 'error');
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
@@ -1615,7 +1715,7 @@ function toggleRetrySection() {
 
 function addWebhookTarget(target = "") {
   if (typeof target === 'string') {
-    webhookTargetState.push({ type: 'basic', url: target, method: 'POST', bodyTemplate: '', customBody: false, customHeaders: [], forwardHeaders: false, retry: null, retryOpen: false });
+    webhookTargetState.push({ type: 'basic', url: target, method: 'POST', bodyTemplate: '', customBody: false, customHeaders: [], forwardHeaders: false, retry: null, retryOpen: false, persistentRetry: null, persistentRetryOpen: false });
   } else {
     const headersArr = [];
     if (target.customHeaders) {
@@ -1633,6 +1733,8 @@ function addWebhookTarget(target = "") {
       forwardHeaders: target.forwardHeaders === true,
       retry: target.retry || null,
       retryOpen: !!target.retry,
+      persistentRetry: target.persistentRetry || null,
+      persistentRetryOpen: !!(target.persistentRetry && target.persistentRetry.enabled),
     });
   }
   renderWebhookTargets();
@@ -1650,6 +1752,24 @@ function toggleTargetRetry(index) {
 function updateTargetRetry(index, field, value) {
   if (!webhookTargetState[index].retry) return;
   webhookTargetState[index].retry[field] = value;
+}
+
+function toggleTargetPersistentRetry(index) {
+  const t = webhookTargetState[index];
+  t.persistentRetryOpen = !t.persistentRetryOpen;
+  if (t.persistentRetryOpen && !t.persistentRetry) {
+    t.persistentRetry = { enabled: true, maxAttemptsPerMinute: 10, notifyAfterAttempts: 10, notifyEmail: '' };
+  } else if (!t.persistentRetryOpen && t.persistentRetry) {
+    t.persistentRetry.enabled = false;
+  }
+  renderWebhookTargets();
+}
+
+function updateTargetPersistentRetry(index, field, value) {
+  if (!webhookTargetState[index].persistentRetry) {
+    webhookTargetState[index].persistentRetry = { enabled: true, maxAttemptsPerMinute: 10, notifyAfterAttempts: 10, notifyEmail: '' };
+  }
+  webhookTargetState[index].persistentRetry[field] = value;
 }
 
 function removeWebhookTarget(index) {
@@ -1799,6 +1919,34 @@ function renderWebhookTargets() {
             </div>
           </div>` : ''}
         </div>
+
+        <!-- Per-destination PERSISTENT retry (never gives up) -->
+        <div class="destination-persistent-retry" style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);cursor:pointer" onclick="toggleTargetPersistentRetry(${i});return false">
+            <input type="checkbox" ${t.persistentRetryOpen ? 'checked' : ''} onclick="event.preventDefault()">
+            <strong style="color:var(--orange)">Persistent retry</strong> — never give up (for payments, etc.)
+          </label>
+          ${t.persistentRetryOpen ? `
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;padding:8px;background:rgba(245,158,11,0.06);border-radius:4px;border:1px solid rgba(245,158,11,0.3)">
+            <div style="font-size:10px;color:var(--text3);line-height:1.5">
+              Failures keep retrying forever at the rate below. Entries are persisted across restarts. Use the Pending Retries panel to inspect or cancel.
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+              <div>
+                <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">Max attempts per minute</label>
+                <input type="number" min="1" max="60" value="${t.persistentRetry?.maxAttemptsPerMinute ?? 10}" oninput="updateTargetPersistentRetry(${i},'maxAttemptsPerMinute',+this.value)" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px;outline:none">
+              </div>
+              <div>
+                <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">Notify after N failures</label>
+                <input type="number" min="1" max="10000" value="${t.persistentRetry?.notifyAfterAttempts ?? 10}" oninput="updateTargetPersistentRetry(${i},'notifyAfterAttempts',+this.value)" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px;outline:none">
+              </div>
+            </div>
+            <div>
+              <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">Notify email (SMTP must be configured)</label>
+              <input type="email" value="${esc(t.persistentRetry?.notifyEmail || '')}" placeholder="alerts@example.com" oninput="updateTargetPersistentRetry(${i},'notifyEmail',this.value)" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px;outline:none">
+            </div>
+          </div>` : ''}
+        </div>
       </div>
     </div>
   `}).join('');
@@ -1863,6 +2011,14 @@ async function saveWebhook() {
               bodyTemplate: (t.customBody && t.bodyTemplate.trim()) ? t.bodyTemplate.trim() : undefined
           };
           if (t.retryOpen && t.retry) dest.retry = t.retry;
+          if (t.persistentRetryOpen && t.persistentRetry && t.persistentRetry.enabled) {
+            dest.persistentRetry = {
+              enabled: true,
+              maxAttemptsPerMinute: t.persistentRetry.maxAttemptsPerMinute || 10,
+              notifyAfterAttempts: t.persistentRetry.notifyAfterAttempts || 10,
+              notifyEmail: (t.persistentRetry.notifyEmail || '').trim() || undefined,
+            };
+          }
           targetsRaw.push(dest);
       }
   }
@@ -2155,9 +2311,23 @@ ${d.type === 'webhook' ? `
 
 async function loadFanoutDeliveries(reqId) {
   try {
-    const res = await api('/admin/requests?limit=100&type=webhook-fanout&search=' + reqId);
-    if (!res.ok) throw new Error('Failed to load fanouts');
-    const data = await res.json();
+    const [fRes, dlqRes, prRes] = await Promise.all([
+      api('/admin/requests?limit=100&type=webhook-fanout&search=' + reqId),
+      api('/admin/webhooks/dlq'),
+      api('/admin/webhooks/pending-retry?requestId=' + encodeURIComponent(reqId)),
+    ]);
+    if (!fRes.ok) throw new Error('Failed to load fanouts');
+    const data = await fRes.json();
+    const dlqByTarget = {};
+    if (dlqRes.ok) {
+      const dq = (await dlqRes.json()).queue || [];
+      for (const e of dq) if (e.requestId === reqId) dlqByTarget[e.targetUrl] = e;
+    }
+    const pendingByTarget = {};
+    if (prRes.ok) {
+      const pq = (await prRes.json()).queue || [];
+      for (const e of pq) pendingByTarget[e.targetUrl] = e;
+    }
     const c = document.getElementById('fanoutDeliveriesList');
     if (!data.requests || data.requests.length === 0) {
       c.innerHTML = '<tr><td colspan="5" style="padding:30px;text-align:center;color:var(--text3)">No fanout deliveries found for this payload.</td></tr>';
@@ -2169,17 +2339,48 @@ async function loadFanoutDeliveries(reqId) {
       const stText = f.resStatusText ? ' ' + esc(f.resStatusText) : '';
       const statusHtml = !st ? '<span style="color:var(--text3)">Err</span>' : st < 300 ? `<span style="color:var(--green);font-weight:600">${st}${stText}</span>` : `<span style="color:var(--red);font-weight:600">${st}${stText}</span>`;
       const attemptBadge = f.attemptCount && f.attemptCount > 1 ? ` <span style="background:var(--orange-bg);color:var(--orange);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px" title="${f.attemptCount} attempts">${f.attemptCount}×</span>` : '';
+      const pending = pendingByTarget[f.targetUrl];
+      const dlq = dlqByTarget[f.targetUrl];
+      let retryBtn = '';
+      let extraBadge = '';
+      if (pending) {
+        extraBadge = ` <span style="background:rgba(245,158,11,0.18);color:var(--orange);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px" title="Persistent retry — ${pending.attempts} attempts so far">🔄 ${pending.attempts}</span>`;
+        retryBtn = `<button class="btn btn-sm" onclick="fanoutRetryPending('${esc(pending.id)}',this,'${esc(reqId)}')" style="font-size:11px;padding:3px 8px;margin-right:4px" title="Force an immediate retry attempt">Retry now</button>`;
+      } else if (dlq) {
+        extraBadge = ` <span style="background:var(--red-bg);color:var(--red);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px" title="In DLQ">DLQ</span>`;
+        retryBtn = `<button class="btn btn-sm" onclick="fanoutRetryDlq('${esc(dlq.id)}',this,'${esc(reqId)}')" style="font-size:11px;padding:3px 8px;margin-right:4px" title="Retry from the dead-letter queue">Retry</button>`;
+      }
       return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
         <td style="padding:10px 16px;color:var(--text2)">${ts}</td>
-        <td style="padding:10px 16px">${statusHtml}${attemptBadge}</td>
+        <td style="padding:10px 16px">${statusHtml}${attemptBadge}${extraBadge}</td>
         <td style="padding:10px 16px;font-family:monospace;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(f.targetUrl)}">${esc(f.targetUrl)}</td>
         <td style="padding:10px 16px;color:var(--text2)">${f.durationMs ? fmtMs(f.durationMs) : '-'}</td>
-        <td style="padding:10px 16px"><button class="btn btn-sm" onclick="openReqDetail(${f.id})" style="font-size:11px;padding:3px 8px">Details</button></td>
+        <td style="padding:10px 16px;text-align:right">${retryBtn}<button class="btn btn-sm" onclick="openReqDetail(${f.id})" style="font-size:11px;padding:3px 8px">Details</button></td>
       </tr>`;
     }).join('');
   } catch (e) {
     document.getElementById('fanoutDeliveriesList').innerHTML = `<tr><td colspan="5" style="padding:20px;color:var(--red);text-align:center">Error: ${esc(e.message)}</td></tr>`;
   }
+}
+
+async function fanoutRetryPending(id, btn, reqId) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Retrying…'; }
+  try {
+    const res = await api(`/admin/webhooks/pending-retry/${encodeURIComponent(id)}/retry-now`, { method: 'POST' });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) toast('Delivered ✔'); else toast('Retry failed: ' + (d.error || res.status), 'error');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+  await loadFanoutDeliveries(reqId);
+}
+
+async function fanoutRetryDlq(id, btn, reqId) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Retrying…'; }
+  try {
+    const res = await api(`/admin/webhooks/dlq/${encodeURIComponent(id)}/retry`, { method: 'POST' });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) toast('Delivered ✔'); else toast('Retry failed: ' + (d.error || res.status), 'error');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+  await loadFanoutDeliveries(reqId);
 }
 
 function rdmSwitchTab(btn, panelId) {

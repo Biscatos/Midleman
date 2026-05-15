@@ -1598,6 +1598,22 @@
   </div>
 </div>
 
+<!-- Pending Retry Modal (persistent retry queue) -->
+<div id="pendingRetryModal"
+  style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px)"
+  onclick="if(event.target===this)closePendingRetryModal()">
+  <div
+    style="max-width:680px;margin:60px auto;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);display:flex;flex-direction:column;max-height:80vh">
+    <div
+      style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0">
+      <h3 id="pendingRetryModalTitle" style="font-size:16px;font-weight:600">Pending Retries</h3>
+      <button onclick="closePendingRetryModal()"
+        style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
+    </div>
+    <div id="pendingRetryList" style="padding:16px;overflow-y:auto;flex:1"></div>
+  </div>
+</div>
+
 <!-- TCP/UDP Proxy Modal -->
 <div class="modal-overlay" id="sipModal">
   <div class="modal" style="max-width:680px">

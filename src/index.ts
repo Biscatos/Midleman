@@ -15,7 +15,7 @@ import { migrateProfileCerts } from './core/cert-migration';
 import { scheduleAcmeRenewal, shutdownAcme, requestCertificate } from './sip/acme';
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort, isProxyServerRunning, setProxyLoginTemplate, setProxyLogo } from './servers/proxy-server';
 import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort, assignTcpUdpListenerPort, releaseProxyPort, releaseWebhookPort, releaseTcpUdpListenerPorts, getWebhookPort } from './servers/port-manager';
-import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync } from './servers/webhook-server';
+import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
 import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption } from './auth/auth';
@@ -260,6 +260,9 @@ for (const webhook of config.webhooks) {
         console.error(`❌ Failed to start webhook "${webhook.name}":`, err instanceof Error ? err.message : err);
     }
 }
+
+// Resume any persistent-retry entries left over from the previous run.
+startPendingRetryScheduler();
 
 // TCP/UDP proxies are started AFTER the main HTTP server below — they may run
 // ACME HTTP-01 which needs the main server to be already listening on :80.
@@ -1229,6 +1232,48 @@ const server = Bun.serve({
                 if (url.pathname.match(/^\/admin\/webhooks\/dlq\/[^/]+$/) && req.method === 'DELETE') {
                     const id = url.pathname.split('/')[4];
                     const removed = dismissFailedFanout(id);
+                    return removed ? jsonRes(200, { status: 'dismissed' }) : jsonRes(404, { error: 'Not found' });
+                }
+
+                // ── Pending Retry Queue (persistent retries) ──
+                if (url.pathname === '/admin/webhooks/pending-retry' && req.method === 'GET') {
+                    const nameFilter = url.searchParams.get('webhook') || undefined;
+                    const requestIdFilter = url.searchParams.get('requestId') || undefined;
+                    let queue = getPendingRetryQueue();
+                    if (nameFilter) queue = queue.filter(e => e.webhookName === nameFilter);
+                    if (requestIdFilter) queue = queue.filter(e => e.requestId === requestIdFilter);
+                    const safeEntries = queue.map(e => ({
+                        id: e.id,
+                        webhookName: e.webhookName,
+                        requestId: e.requestId,
+                        targetUrl: e.targetUrl,
+                        method: e.method,
+                        bodyPreview: e.bodyPreview,
+                        bodySize: e.bodySize,
+                        path: e.path,
+                        clientIp: e.clientIp,
+                        lastError: e.lastError,
+                        attempts: e.attempts,
+                        enqueuedAt: e.enqueuedAt,
+                        lastAttemptAt: e.lastAttemptAt,
+                        nextAttemptAt: e.nextAttemptAt,
+                        notified: e.notified,
+                        running: e.running,
+                        notifyEmail: e.persistentRetry.notifyEmail || '',
+                        maxAttemptsPerMinute: e.persistentRetry.maxAttemptsPerMinute ?? 10,
+                    }));
+                    return jsonRes(200, { queue: safeEntries, total: safeEntries.length });
+                }
+
+                if (url.pathname.match(/^\/admin\/webhooks\/pending-retry\/[^/]+\/retry-now$/) && req.method === 'POST') {
+                    const id = url.pathname.split('/')[4];
+                    const r = await retryPendingNow(id);
+                    return r.ok ? jsonRes(200, r) : jsonRes(502, r);
+                }
+
+                if (url.pathname.match(/^\/admin\/webhooks\/pending-retry\/[^/]+$/) && req.method === 'DELETE') {
+                    const id = url.pathname.split('/')[4];
+                    const removed = dismissPendingRetry(id);
                     return removed ? jsonRes(200, { status: 'dismissed' }) : jsonRes(404, { error: 'Not found' });
                 }
 
@@ -2508,6 +2553,7 @@ const shutdown = async (signal: string) => {
     // Stop all proxy, SIP and target servers
     await stopAllProxyServers();
     await stopAllSipServers();
+    stopPendingRetryScheduler();
     await stopAllWebhooks();
 
     // Wait for main server requests

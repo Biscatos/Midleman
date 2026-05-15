@@ -38,6 +38,21 @@ export interface WebhookRetryConfig {
   retryUntilSuccess?: boolean;  // If true, retry on ANY non-2xx response until maxRetries is exhausted
 }
 
+/**
+ * Persistent retry configuration. When `enabled`, a target that fails all
+ * in-line retries is enqueued to the pending-retry queue and retried forever
+ * (or until manually dismissed) at a throttled rate.
+ */
+export interface WebhookPersistentRetry {
+  enabled: boolean;
+  /** Cap on attempts per minute. Default 10 ⇒ min interval ≈ 6s. */
+  maxAttemptsPerMinute?: number;
+  /** Address to alert when notifyAfterAttempts is crossed. Empty = no email. */
+  notifyEmail?: string;
+  /** Send an alert once this many persistent attempts have failed. Default 10. */
+  notifyAfterAttempts?: number;
+}
+
 export interface WebhookDestination {
   url: string;
   method?: string; // e.g. "POST", "GET"
@@ -45,6 +60,9 @@ export interface WebhookDestination {
   forwardHeaders?: boolean; // If true, inherit all incoming request headers
   bodyTemplate?: string; // uses {{field}} syntax
   retry?: WebhookRetryConfig; // Per-destination retry config (overrides distributor-level)
+  /** Per-destination persistent retry. When enabled, failures go to the
+   *  pending-retry queue (not the DLQ) and are retried indefinitely. */
+  persistentRetry?: WebhookPersistentRetry;
 }
 
 /**

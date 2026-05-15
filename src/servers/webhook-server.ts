@@ -1,7 +1,11 @@
-import type { WebhookDistributor, WebhookRetryConfig } from '../core/types';
+import type { WebhookDistributor, WebhookRetryConfig, WebhookPersistentRetry } from '../core/types';
 import { logRequest, headersToRecord } from '../telemetry/request-log';
 import { isIpAllowed } from '../core/ip-filter';
-import { loadPersistedDlq, persistDlq, type StoredFailedFanout } from '../core/store';
+import {
+    loadPersistedDlq, persistDlq, type StoredFailedFanout,
+    loadPersistedPendingRetry, persistPendingRetry, type StoredPendingRetry,
+} from '../core/store';
+import { sendMail, isSmtpConfigured } from '../core/smtp';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -141,6 +145,279 @@ export async function retryAllFailedFanouts(webhookName?: string): Promise<{ ret
     const results = await Promise.all(targets.map(e => retryFailedFanout(e.id)));
     const succeeded = results.filter(r => r.ok).length;
     return { retried: targets.length, succeeded, failed: targets.length - succeeded };
+}
+
+// ─── Pending-Retry Queue ────────────────────────────────────────────────────
+//
+// Persistent retry: destinations with persistentRetry.enabled go here when their
+// in-line retries are exhausted. They are retried forever at a throttled rate
+// until either a 2xx is received or the user dismisses them.
+
+export interface PendingRetry {
+    id: string;
+    webhookName: string;
+    requestId: string;
+    targetUrl: string;
+    method: string;
+    headers: Record<string, string>;
+    body: ArrayBuffer | string | null;
+    bodyPreview: string | null;
+    bodySize: number;
+    path: string;
+    clientIp: string;
+    retryConfig: WebhookRetryConfig | undefined;
+    persistentRetry: WebhookPersistentRetry;
+    lastError: string;
+    attempts: number;             // count of persistent attempts so far
+    enqueuedAt: number;
+    lastAttemptAt: number | null;
+    nextAttemptAt: number;
+    notified: boolean;
+    running: boolean;             // in-memory only — true while an attempt is in flight
+}
+
+function serializePending(e: PendingRetry): StoredPendingRetry {
+    let body: string | null = null;
+    let bodyEncoding: StoredPendingRetry['bodyEncoding'] = 'none';
+    if (e.body instanceof ArrayBuffer) {
+        body = Buffer.from(e.body).toString('base64');
+        bodyEncoding = 'base64';
+    } else if (typeof e.body === 'string') {
+        body = e.body;
+        bodyEncoding = 'text';
+    }
+    return {
+        id: e.id,
+        webhookName: e.webhookName,
+        requestId: e.requestId,
+        targetUrl: e.targetUrl,
+        method: e.method,
+        headers: e.headers,
+        body, bodyEncoding,
+        bodyPreview: e.bodyPreview,
+        bodySize: e.bodySize,
+        path: e.path,
+        clientIp: e.clientIp,
+        retryConfig: e.retryConfig,
+        persistentRetry: e.persistentRetry,
+        lastError: e.lastError,
+        attempts: e.attempts,
+        enqueuedAt: e.enqueuedAt,
+        lastAttemptAt: e.lastAttemptAt,
+        nextAttemptAt: e.nextAttemptAt,
+        notified: e.notified,
+    };
+}
+
+function deserializePending(s: StoredPendingRetry): PendingRetry {
+    let body: ArrayBuffer | string | null = null;
+    if (s.bodyEncoding === 'base64' && s.body !== null) {
+        body = Buffer.from(s.body, 'base64').buffer as ArrayBuffer;
+    } else if (s.bodyEncoding === 'text') {
+        body = s.body;
+    }
+    return {
+        ...s,
+        body,
+        retryConfig: s.retryConfig as WebhookRetryConfig | undefined,
+        persistentRetry: s.persistentRetry as WebhookPersistentRetry,
+        running: false,
+    };
+}
+
+const pendingRetryQueue: PendingRetry[] = loadPersistedPendingRetry().map(deserializePending);
+
+let _pendingFlushTimer: ReturnType<typeof setTimeout> | null = null;
+function schedulePendingFlush(): void {
+    if (_pendingFlushTimer) clearTimeout(_pendingFlushTimer);
+    _pendingFlushTimer = setTimeout(() => {
+        persistPendingRetry(pendingRetryQueue.map(serializePending));
+        _pendingFlushTimer = null;
+    }, 500);
+}
+function flushPendingSync(): void {
+    if (_pendingFlushTimer) { clearTimeout(_pendingFlushTimer); _pendingFlushTimer = null; }
+    persistPendingRetry(pendingRetryQueue.map(serializePending));
+}
+
+export function getPendingRetryQueue(): PendingRetry[] {
+    return pendingRetryQueue;
+}
+
+export function dismissPendingRetry(id: string): boolean {
+    const idx = pendingRetryQueue.findIndex(e => e.id === id);
+    if (idx === -1) return false;
+    pendingRetryQueue.splice(idx, 1);
+    flushPendingSync();
+    return true;
+}
+
+function pendingMinInterval(pr: WebhookPersistentRetry): number {
+    const perMin = Math.max(1, Math.min(600, pr.maxAttemptsPerMinute ?? 10));
+    return Math.ceil(60_000 / perMin); // ms between attempts
+}
+
+function enqueuePendingRetry(input: {
+    webhookName: string; requestId: string; targetUrl: string; method: string;
+    headers: Record<string, string>; body: ArrayBuffer | string | null;
+    bodyPreview: string | null; bodySize: number; path: string; clientIp: string;
+    retryConfig: WebhookRetryConfig | undefined; persistentRetry: WebhookPersistentRetry;
+    lastError: string; initialAttempts: number;
+}) {
+    const now = Date.now();
+    // Cap body size identically to the DLQ to avoid disk bloat
+    let body = input.body;
+    if (body instanceof ArrayBuffer && body.byteLength > DLQ_MAX_BODY_SIZE) {
+        body = body.slice(0, DLQ_MAX_BODY_SIZE);
+    } else if (typeof body === 'string' && body.length > DLQ_MAX_BODY_SIZE) {
+        body = body.slice(0, DLQ_MAX_BODY_SIZE);
+    }
+    const entry: PendingRetry = {
+        id: crypto.randomUUID(),
+        webhookName: input.webhookName,
+        requestId: input.requestId,
+        targetUrl: input.targetUrl,
+        method: input.method,
+        headers: input.headers,
+        body,
+        bodyPreview: input.bodyPreview,
+        bodySize: input.bodySize,
+        path: input.path,
+        clientIp: input.clientIp,
+        retryConfig: input.retryConfig,
+        persistentRetry: input.persistentRetry,
+        lastError: input.lastError,
+        attempts: input.initialAttempts,
+        enqueuedAt: now,
+        lastAttemptAt: now,
+        nextAttemptAt: now + pendingMinInterval(input.persistentRetry),
+        notified: false,
+        running: false,
+    };
+    pendingRetryQueue.push(entry);
+    flushPendingSync();
+    console.warn(`📌 [pending-retry] Enqueued ${input.targetUrl} (${input.webhookName}) — ${pendingRetryQueue.length} pending`);
+    // Kick the scheduler so it picks the new entry up promptly
+    runSchedulerSoon();
+}
+
+async function sendPendingNotification(entry: PendingRetry, kind: 'failure' | 'recovery'): Promise<void> {
+    const email = entry.persistentRetry.notifyEmail;
+    if (!email) return;
+    if (!isSmtpConfigured()) {
+        console.warn(`📧 [pending-retry] SMTP not configured — cannot notify ${email}`);
+        return;
+    }
+    const subject = kind === 'failure'
+        ? `[Midleman] Persistent fanout failing — ${entry.webhookName} → ${entry.targetUrl}`
+        : `[Midleman] Persistent fanout recovered — ${entry.webhookName} → ${entry.targetUrl}`;
+    const body = [
+        kind === 'failure'
+            ? `Webhook "${entry.webhookName}" has failed to deliver to ${entry.targetUrl} after ${entry.attempts} persistent attempt(s).`
+            : `Webhook "${entry.webhookName}" finally delivered to ${entry.targetUrl} after ${entry.attempts} persistent attempt(s).`,
+        ``,
+        `Request ID: ${entry.requestId}`,
+        `Method:     ${entry.method}`,
+        `Target:     ${entry.targetUrl}`,
+        `Last error: ${entry.lastError}`,
+        `Enqueued:   ${new Date(entry.enqueuedAt).toISOString()}`,
+        kind === 'failure'
+            ? `\nThe system will keep retrying. Open the dashboard to inspect or cancel: /admin#webhooks`
+            : `\nThe entry has been removed from the pending-retry queue.`,
+    ].join('\n');
+    const html = `<pre style="font-family:ui-monospace,Menlo,monospace;font-size:13px;color:#111">${body.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]!))}</pre>`;
+    const r = await sendMail({ to: email, subject, html, text: body });
+    if (!r.ok) console.warn(`📧 [pending-retry] notify ${kind} failed: ${r.error}`);
+    else console.log(`📧 [pending-retry] notify ${kind} sent to ${email}`);
+}
+
+async function attemptPendingRetry(entry: PendingRetry): Promise<void> {
+    if (entry.running) return;
+    entry.running = true;
+    try {
+        const headers = new Headers(entry.headers);
+        const body = entry.body ?? undefined;
+        const label = `pending:${entry.webhookName} → ${entry.targetUrl}`;
+        // Single-shot attempt — no inner retries, the scheduler IS the retry loop
+        const res = await fetch(entry.targetUrl, {
+            method: entry.method,
+            headers,
+            body: body as any,
+            tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' },
+        } as RequestInit);
+        entry.attempts += 1;
+        entry.lastAttemptAt = Date.now();
+        if (res.status >= 200 && res.status < 300) {
+            console.log(`✅ [${label}] Delivered (${res.status}) after ${entry.attempts} persistent attempt(s)`);
+            // Recovery notification (only if a failure notification was previously sent)
+            if (entry.notified) {
+                try { await sendPendingNotification(entry, 'recovery'); } catch (e) { console.warn('notify recovery err', e); }
+            }
+            dismissPendingRetry(entry.id);
+            return;
+        }
+        entry.lastError = `HTTP ${res.status}`;
+    } catch (err) {
+        entry.attempts += 1;
+        entry.lastAttemptAt = Date.now();
+        entry.lastError = err instanceof Error ? err.message : String(err);
+    } finally {
+        // schedule the next attempt
+        const interval = pendingMinInterval(entry.persistentRetry);
+        entry.nextAttemptAt = Date.now() + interval;
+        entry.running = false;
+    }
+
+    // Notification on first cross of the threshold
+    const threshold = Math.max(1, entry.persistentRetry.notifyAfterAttempts ?? 10);
+    if (!entry.notified && entry.attempts >= threshold) {
+        entry.notified = true;
+        try { await sendPendingNotification(entry, 'failure'); }
+        catch (e) { console.warn('notify failure err', e); }
+    }
+    schedulePendingFlush();
+}
+
+let _schedulerTimer: ReturnType<typeof setTimeout> | null = null;
+function runSchedulerSoon(): void {
+    if (_schedulerTimer) return;
+    _schedulerTimer = setTimeout(() => {
+        _schedulerTimer = null;
+        pendingRetryTick();
+    }, 100);
+}
+
+async function pendingRetryTick(): Promise<void> {
+    const now = Date.now();
+    const due = pendingRetryQueue.filter(e => !e.running && e.nextAttemptAt <= now);
+    // Limit parallel attempts to avoid swamping CPU/network
+    const batch = due.slice(0, 25);
+    await Promise.allSettled(batch.map(e => attemptPendingRetry(e)));
+}
+
+let _schedulerInterval: ReturnType<typeof setInterval> | null = null;
+export function startPendingRetryScheduler(): void {
+    if (_schedulerInterval) return;
+    _schedulerInterval = setInterval(() => { void pendingRetryTick(); }, 1000);
+    console.log(`📌 [pending-retry] Scheduler started — ${pendingRetryQueue.length} entries restored`);
+}
+
+export function stopPendingRetryScheduler(): void {
+    if (_schedulerInterval) { clearInterval(_schedulerInterval); _schedulerInterval = null; }
+    if (_schedulerTimer) { clearTimeout(_schedulerTimer); _schedulerTimer = null; }
+    flushPendingSync();
+}
+
+/** Force an immediate attempt on a specific entry (used by the "Retry now" UI). */
+export async function retryPendingNow(id: string): Promise<{ ok: boolean; status?: number; error?: string }> {
+    const entry = pendingRetryQueue.find(e => e.id === id);
+    if (!entry) return { ok: false, error: 'Not found' };
+    if (entry.running) return { ok: false, error: 'Already retrying' };
+    entry.nextAttemptAt = 0; // make it due
+    await attemptPendingRetry(entry);
+    // If still in queue, surface the last error; otherwise it succeeded.
+    const still = pendingRetryQueue.find(e => e.id === id);
+    return still ? { ok: false, error: still.lastError } : { ok: true };
 }
 
 const DLQ_MAX_BODY_SIZE = 256 * 1024; // 256KB per entry body
@@ -382,6 +659,10 @@ async function handleWebhookFanout(
             ? target.retry
             : webhook.retry;
 
+        const persistent = (typeof target !== 'string' && target.persistentRetry?.enabled)
+            ? target.persistentRetry
+            : null;
+
         try {
             const { res, resText, attempts, attemptLog } = await fetchWithRetry(
                 tUrl,
@@ -393,6 +674,27 @@ async function handleWebhookFanout(
             const fetchDuration = performance.now() - fetchStart;
             if (attempts > 1) {
                 console.log(`✅ [webhook:${webhook.name}] Delivered to ${tUrl} after ${attempts} attempt(s)`);
+            }
+
+            // If the inline retries finished without a 2xx and this destination
+            // is persistent, push it to the pending-retry queue so it keeps trying.
+            if (persistent && (res.status < 200 || res.status >= 300)) {
+                enqueuePendingRetry({
+                    webhookName: webhook.name,
+                    requestId,
+                    targetUrl: tUrl,
+                    method: tMethod,
+                    headers: headersToRecord(tHeaders),
+                    body: tBody ?? null,
+                    bodyPreview: tBodyStringPreview,
+                    bodySize: tBodySize,
+                    path: url.pathname + url.search,
+                    clientIp,
+                    retryConfig: effectiveRetry,
+                    persistentRetry: persistent,
+                    lastError: `HTTP ${res.status}`,
+                    initialAttempts: attempts,
+                });
             }
 
             logRequest({
@@ -421,21 +723,40 @@ async function handleWebhookFanout(
             const attemptLog = (err && typeof err === 'object' && (err as any).__attemptLog) || undefined;
             console.error(`❌ [webhook:${webhook.name}] Action to ${tUrl} failed (all attempts exhausted):`, errorMsg);
 
-            enqueueFailedFanout({
-                webhookName: webhook.name,
-                requestId,
-                targetUrl: tUrl,
-                method: tMethod,
-                headers: headersToRecord(tHeaders),
-                body: tBody ?? null,
-                bodyPreview: tBodyStringPreview,
-                bodySize: tBodySize,
-                path: url.pathname + url.search,
-                clientIp,
-                retryConfig: effectiveRetry,
-                lastError: errorMsg,
-                totalAttempts: (effectiveRetry?.maxRetries ?? 0) + 1,
-            });
+            if (persistent) {
+                enqueuePendingRetry({
+                    webhookName: webhook.name,
+                    requestId,
+                    targetUrl: tUrl,
+                    method: tMethod,
+                    headers: headersToRecord(tHeaders),
+                    body: tBody ?? null,
+                    bodyPreview: tBodyStringPreview,
+                    bodySize: tBodySize,
+                    path: url.pathname + url.search,
+                    clientIp,
+                    retryConfig: effectiveRetry,
+                    persistentRetry: persistent,
+                    lastError: errorMsg,
+                    initialAttempts: (effectiveRetry?.maxRetries ?? 0) + 1,
+                });
+            } else {
+                enqueueFailedFanout({
+                    webhookName: webhook.name,
+                    requestId,
+                    targetUrl: tUrl,
+                    method: tMethod,
+                    headers: headersToRecord(tHeaders),
+                    body: tBody ?? null,
+                    bodyPreview: tBodyStringPreview,
+                    bodySize: tBodySize,
+                    path: url.pathname + url.search,
+                    clientIp,
+                    retryConfig: effectiveRetry,
+                    lastError: errorMsg,
+                    totalAttempts: (effectiveRetry?.maxRetries ?? 0) + 1,
+                });
+            }
 
             logRequest({
                 requestId,
