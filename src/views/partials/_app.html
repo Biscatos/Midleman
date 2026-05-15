@@ -1475,12 +1475,16 @@
             style="display:none;margin-bottom:12px;padding:10px;background:var(--surface2);border:1px dashed var(--border);border-radius:4px">
             <label style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
               <span style="font-size:12px">Test Payload (JSON)</span>
-              <button class="btn btn-sm" onclick="fetchRecentWebhookPayload()" style="padding:2px 8px;font-size:10px"
-                tabindex="-1">Fetch recent request</button>
+              <span style="display:inline-flex;gap:6px">
+                <button class="btn btn-sm" onclick="fetchRecentWebhookPayload()" style="padding:2px 8px;font-size:10px"
+                  tabindex="-1">Fetch recent request</button>
+                <button class="btn btn-sm" onclick="fetchAndMergeWebhookPayloads()" style="padding:2px 8px;font-size:10px"
+                  tabindex="-1" title="Analisa os últimos 50 payloads e gera um schema unificado com todos os campos vistos">Fetch &amp; merge (50)</button>
+              </span>
             </label>
             <textarea id="wTestPayload" rows="3" placeholder='{"event":"order.created", "data": {"id": 123}}'
               style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;color:var(--text);font-family:monospace;font-size:11px;resize:vertical"
-              oninput="updateAllPreviews()"></textarea>
+              oninput="mergedSchemaStats=null;updateAllPreviews()"></textarea>
             <div style="font-size:10px;color:var(--text3);margin-top:4px">Evaluated template variables will be shown
               inline inside your Custom Actions.</div>
           </div>

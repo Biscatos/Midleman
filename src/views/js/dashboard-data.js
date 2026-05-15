@@ -1519,15 +1519,46 @@ function toggleTestPayload() {
 
 function renderTemplateJS(template, data) {
     if (!data || !template) return template || '';
-    return template.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_, path) => {
+    const resolve = (path) => {
         let val = data;
         for (const k of path.split('.')) {
-            if (val === undefined || val === null) break;
+            if (val === undefined || val === null) return undefined;
             val = val[k];
         }
-        if (val === undefined || val === null) return '';
-        return typeof val === 'object' ? JSON.stringify(val) : String(val);
+        return val;
+    };
+    return template.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_, expr) => {
+        const operands = String(expr).split(/\s*\|\|\s*/);
+        for (const raw of operands) {
+            const op = raw.trim();
+            if (!op) continue;
+            const lit = op.match(/^(['"])(.*)\1$/);
+            if (lit) return lit[2];
+            if (!/^[a-zA-Z0-9_.-]+$/.test(op)) continue;
+            const val = resolve(op);
+            if (val === undefined || val === null || val === '') continue;
+            return typeof val === 'object' ? JSON.stringify(val) : String(val);
+        }
+        return '';
     });
+}
+
+function stripEmptyDeepJS(value) {
+    if (Array.isArray(value)) {
+        return value.map(stripEmptyDeepJS).filter(v => v !== undefined && v !== null && v !== '');
+    }
+    if (value && typeof value === 'object') {
+        const out = {};
+        for (const [k, v] of Object.entries(value)) {
+            const c = stripEmptyDeepJS(v);
+            if (c === undefined || c === null || c === '') continue;
+            if (typeof c === 'object' && !Array.isArray(c) && Object.keys(c).length === 0) continue;
+            if (Array.isArray(c) && c.length === 0) continue;
+            out[k] = c;
+        }
+        return out;
+    }
+    return value;
 }
 
 let aceEditors = {};
@@ -1638,13 +1669,28 @@ function renderBodyEditorFieldsPanel() {
         if (kind === 'object' || kind === 'array') return 'var(--text3)';
         return 'var(--text2)';
     };
+    const stats = mergedSchemaStats;
     list.innerHTML = paths.map(p => {
         const safePath = p.path.replace(/"/g, '&quot;');
         const safeSample = String(p.sample).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        let freqBadge = '';
+        if (stats && stats.total > 0) {
+            // Normalise array-index segments to "0" since merged payload uses 0; counts were collected with 0.
+            const key = p.path.replace(/\.\d+/g, m => m); // already uses .0 for arrays, so same shape
+            const seen = stats.counts.get(key);
+            if (seen !== undefined) {
+                const pct = Math.round((seen / stats.total) * 100);
+                const color = pct === 100 ? 'var(--green, #4ade80)' : (pct >= 50 ? 'var(--orange, #fb923c)' : 'var(--red, #f87171)');
+                freqBadge = `<span title="Present in ${seen} of ${stats.total} sampled payloads" style="color:${color};font-size:10px;flex-shrink:0">${pct}%</span>`;
+            } else {
+                freqBadge = `<span title="Not seen in sampled payloads (synthesised)" style="color:var(--text3);font-size:10px;flex-shrink:0">—</span>`;
+            }
+        }
         return `<div class="bep-field" data-path="${safePath}" title="Click to insert {{${safePath}}}"
-            style="padding:4px 12px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid rgba(255,255,255,0.03)">
-            <span style="color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${safePath}</span>
-            <span style="color:${colorFor(p.kind)};opacity:.75;flex-shrink:0;max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${safeSample}</span>
+            style="padding:4px 12px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid rgba(255,255,255,0.03);align-items:center">
+            <span style="color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">${safePath}</span>
+            ${freqBadge}
+            <span style="color:${colorFor(p.kind)};opacity:.75;flex-shrink:0;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${safeSample}</span>
         </div>`;
     }).join('');
     list.querySelectorAll('.bep-field').forEach(el => {
@@ -1749,7 +1795,7 @@ function validateBodyTemplate(content) {
     if (payload) {
         rendered = renderTemplateJS(content, payload);
     } else {
-        rendered = content.replace(/\{\{\s*[a-zA-Z0-9_.-]+\s*\}\}/g, 'null');
+        rendered = content.replace(/\{\{\s*[^{}]+?\s*\}\}/g, 'null');
     }
     try {
         const parsed = JSON.parse(rendered);
@@ -1842,8 +1888,13 @@ function updateAllPreviews() {
               if (!outBody.trim()) {
                   pBody.textContent = 'Evaluates to: (Original Payload Placeholder)';
               } else {
-                  try { outBody = JSON.stringify(JSON.parse(outBody), null, 2); } catch {}
-                  pBody.textContent = 'Evaluates to:\n' + outBody;
+                  let stripped = false;
+                  try {
+                      let parsed = JSON.parse(outBody);
+                      if (t.dropEmpty) { parsed = stripEmptyDeepJS(parsed); stripped = true; }
+                      outBody = JSON.stringify(parsed, null, 2);
+                  } catch {}
+                  pBody.textContent = (stripped ? 'Evaluates to (after drop empty):\n' : 'Evaluates to:\n') + outBody;
               }
               pBody.style.display = 'block';
           } else {
@@ -1852,6 +1903,88 @@ function updateAllPreviews() {
       }
     }
   });
+}
+
+// Tracks how often each path appeared across the merged sample. Path -> { seen, total }.
+let mergedSchemaStats = null;
+
+function mergeShapes(a, b) {
+    // Merge `b` into `a`, recursively. Both are JS values.
+    if (a === undefined) return b;
+    if (b === undefined || b === null) return a;
+    if (a === null) return b;
+    const ta = Array.isArray(a) ? 'array' : typeof a;
+    const tb = Array.isArray(b) ? 'array' : typeof b;
+    if (ta !== tb) return a; // first-seen type wins for primitives mismatch
+    if (ta === 'object') {
+        for (const k of Object.keys(b)) {
+            a[k] = mergeShapes(a[k], b[k]);
+        }
+        return a;
+    }
+    if (ta === 'array') {
+        // Merge all elements into a single representative element at index 0,
+        // then keep the longest array seen (caps at 3 to stay readable).
+        let rep = a[0];
+        for (const item of b) rep = mergeShapes(rep, item);
+        const desiredLen = Math.min(Math.max(a.length, b.length), 3);
+        const out = [];
+        for (let i = 0; i < desiredLen; i++) out.push(rep);
+        return out;
+    }
+    return a; // primitives: keep first
+}
+
+function collectPathsFromObject(obj, prefix, set, depth = 0) {
+    if (depth > 6 || obj === null || obj === undefined) return;
+    if (Array.isArray(obj)) {
+        if (prefix) set.add(prefix);
+        if (obj.length > 0) collectPathsFromObject(obj[0], prefix ? `${prefix}.0` : '0', set, depth + 1);
+        return;
+    }
+    if (typeof obj === 'object') {
+        if (prefix) set.add(prefix);
+        for (const k of Object.keys(obj)) {
+            collectPathsFromObject(obj[k], prefix ? `${prefix}.${k}` : k, set, depth + 1);
+        }
+        return;
+    }
+    if (prefix) set.add(prefix);
+}
+
+async function fetchAndMergeWebhookPayloads() {
+    try {
+        let url = '/admin/requests?type=webhook&limit=50';
+        if (editingWebhook && editingWebhook.name) {
+            url += '&target=' + encodeURIComponent(editingWebhook.name);
+        }
+        const res = await api(url);
+        if (!res.ok) return toast('Could not fetch payloads', 'error');
+        const d = await res.json();
+        const items = (d.requests || []).filter(r => r.reqBody);
+        if (items.length === 0) return toast('No recent webhook payloads found', 'warning');
+
+        let merged;
+        const pathCounts = new Map();
+        let parsed = 0;
+        for (const r of items) {
+            let obj;
+            try { obj = JSON.parse(r.reqBody); } catch { continue; }
+            parsed++;
+            merged = merged === undefined ? obj : mergeShapes(merged, obj);
+            const seen = new Set();
+            collectPathsFromObject(obj, '', seen);
+            for (const p of seen) pathCounts.set(p, (pathCounts.get(p) || 0) + 1);
+        }
+        if (parsed === 0 || merged === undefined) return toast('No JSON payloads to merge', 'warning');
+
+        mergedSchemaStats = { total: parsed, counts: pathCounts };
+        const pretty = JSON.stringify(merged, null, 2);
+        document.getElementById('wTestPayload').value = pretty;
+        if (!showTestPayload) toggleTestPayload();
+        else updateAllPreviews();
+        toast(`Merged ${parsed} payloads — ${pathCounts.size} unique fields`);
+    } catch { toast('Error merging payloads', 'error'); }
 }
 
 async function fetchRecentWebhookPayload() {
@@ -1887,7 +2020,7 @@ function toggleRetrySection() {
 
 function addWebhookTarget(target = "") {
   if (typeof target === 'string') {
-    webhookTargetState.push({ type: 'basic', url: target, method: 'POST', bodyTemplate: '', customBody: false, customHeaders: [], forwardHeaders: false, retry: null, retryOpen: false, persistentRetry: null, persistentRetryOpen: false });
+    webhookTargetState.push({ type: 'basic', url: target, method: 'POST', bodyTemplate: '', customBody: false, dropEmpty: false, customHeaders: [], forwardHeaders: false, retry: null, retryOpen: false, persistentRetry: null, persistentRetryOpen: false });
   } else {
     const headersArr = [];
     if (target.customHeaders) {
@@ -1898,13 +2031,14 @@ function addWebhookTarget(target = "") {
     // A destination is "basic" if it has no method override, no custom headers,
     // no body template, and no forwardHeaders — only retry/persistent fields.
     const isBasicShape = !target.method && headersArr.length === 0
-        && !target.bodyTemplate && target.forwardHeaders !== true;
+        && !target.bodyTemplate && !target.dropEmpty && target.forwardHeaders !== true;
     webhookTargetState.push({
       type: isBasicShape ? 'basic' : 'custom',
       url: target.url || '',
       method: target.method || 'POST',
       bodyTemplate: target.bodyTemplate || '',
       customBody: !!target.bodyTemplate,
+      dropEmpty: target.dropEmpty === true,
       customHeaders: headersArr,
       forwardHeaders: target.forwardHeaders === true,
       retry: target.retry || null,
@@ -2061,7 +2195,12 @@ function renderWebhookTargets() {
                 </button>
               </div>
               <div id="aceBody_${i}" style="width:100%; min-height:100px; border-radius:4px; border:1px solid var(--border);"></div>
-              <div style="font-size:10px;color:var(--text3);margin-top:3px;margin-left:2px">Supports JSON + <code style="background:rgba(0,120,212,0.15);padding:1px 4px;border-radius:3px;color:var(--accent);font-size:10px">{{template.vars}}</code></div>
+              <div style="font-size:10px;color:var(--text3);margin-top:3px;margin-left:2px">Supports JSON + <code style="background:rgba(0,120,212,0.15);padding:1px 4px;border-radius:3px;color:var(--accent);font-size:10px">{{template.vars}}</code> + fallback <code style="background:rgba(0,120,212,0.15);padding:1px 4px;border-radius:3px;color:var(--accent);font-size:10px">{{a || b || "x"}}</code></div>
+              <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none;margin-top:6px">
+                <input type="checkbox" ${t.dropEmpty ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'dropEmpty', this.checked); updateAllPreviews()" style="cursor:pointer;accent-color:var(--accent)">
+                <span>Drop null/empty fields on delivery</span>
+                <span style="color:var(--text3);font-size:10px">— remove keys whose value renders to null or "" before sending</span>
+              </label>
               <div id="previewBody_${i}" style="display:none;font-size:10px;color:var(--accent);margin-top:2px;margin-left:4px;white-space:pre-wrap;font-family:monospace"></div>
               ` : `<div id="aceBody_${i}" style="display:none"></div><div id="previewBody_${i}" style="display:none"></div>`}
             </div>
@@ -2157,6 +2296,13 @@ function openWebhookModal(webhook = null) {
   document.getElementById('wAuthToken').value = webhook ? (webhook.authToken || '') : '';
   IpTagInput.setValue('wAllowedIps', webhook?.allowedIps || []);
 
+  // Restore persisted test payload (used by the body template editor preview)
+  const savedTp = webhook?.testPayload || '';
+  document.getElementById('wTestPayload').value = savedTp;
+  mergedSchemaStats = null;
+  showTestPayload = !!savedTp;
+  document.getElementById('wTestPayloadContainer').style.display = showTestPayload ? 'block' : 'none';
+
   // Populate retry config
   const r = webhook?.retry;
   const retryEnabled = !!r;
@@ -2217,6 +2363,7 @@ async function saveWebhook() {
           dest.customHeaders = headersObj;
           dest.forwardHeaders = t.forwardHeaders;
           dest.bodyTemplate = (t.customBody && t.bodyTemplate.trim()) ? t.bodyTemplate.trim() : undefined;
+          dest.dropEmpty = (t.customBody && t.dropEmpty) ? true : undefined;
       }
       if (hasRetryOverride) dest.retry = t.retry;
       if (hasPersistent) {
@@ -2243,6 +2390,9 @@ async function saveWebhook() {
   if (targetsRaw.length === 0) return toast('At least one valid destination is required', 'error');
   const at = document.getElementById('wAuthToken').value.trim(); if (at) body.authToken = at;
   const wIps = IpTagInput.getValue('wAllowedIps'); if (wIps.length) body.allowedIps = wIps;
+
+  const tp = (document.getElementById('wTestPayload').value || '').trim();
+  if (tp) body.testPayload = tp;
 
   if (document.getElementById('wSilenceEnabled').checked) {
     const thr = parseInt(document.getElementById('wSilenceThreshold').value) || 0;

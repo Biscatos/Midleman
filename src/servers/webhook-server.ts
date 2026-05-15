@@ -699,19 +699,55 @@ async function handleWebhookFanout(
     function renderTemplate(template: string, data: any): string {
         if (!data) return template;
         const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-        return template.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_, path) => {
+        const resolvePath = (path: string): any => {
             const parts = path.split('.');
-            if (parts.length > 5) return ''; // max depth
-            let val = data;
+            if (parts.length > 5) return undefined;
+            let val: any = data;
             for (const k of parts) {
-                if (BLOCKED_KEYS.has(k) || val === undefined || val === null) return '';
-                if (!Object.prototype.hasOwnProperty.call(val, k)) return '';
+                if (BLOCKED_KEYS.has(k) || val === undefined || val === null) return undefined;
+                if (!Object.prototype.hasOwnProperty.call(val, k)) return undefined;
                 val = val[k];
             }
-            if (val === undefined || val === null) return '';
-            if (typeof val === 'object') return JSON.stringify(val).slice(0, 4096);
-            return String(val).slice(0, 4096);
+            return val;
+        };
+        // Supports {{path}}, {{path || other.path}}, {{path || "literal"}} (chained).
+        return template.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_, expr) => {
+            const operands = String(expr).split(/\s*\|\|\s*/);
+            for (const raw of operands) {
+                const op = raw.trim();
+                if (!op) continue;
+                // String literal: "..." or '...'
+                const litMatch = op.match(/^(['"])(.*)\1$/);
+                if (litMatch) return litMatch[2].slice(0, 4096);
+                // Path lookup
+                if (!/^[a-zA-Z0-9_.-]+$/.test(op)) continue; // ignore malformed segments
+                const val = resolvePath(op);
+                if (val === undefined || val === null || val === '') continue;
+                if (typeof val === 'object') return JSON.stringify(val).slice(0, 4096);
+                return String(val).slice(0, 4096);
+            }
+            return '';
         });
+    }
+
+    function stripEmptyDeep(value: any): any {
+        if (Array.isArray(value)) {
+            return value
+                .map(stripEmptyDeep)
+                .filter(v => v !== undefined && v !== null && v !== '');
+        }
+        if (value && typeof value === 'object') {
+            const out: Record<string, any> = {};
+            for (const [k, v] of Object.entries(value)) {
+                const cleaned = stripEmptyDeep(v);
+                if (cleaned === undefined || cleaned === null || cleaned === '') continue;
+                if (typeof cleaned === 'object' && !Array.isArray(cleaned) && Object.keys(cleaned).length === 0) continue;
+                if (Array.isArray(cleaned) && cleaned.length === 0) continue;
+                out[k] = cleaned;
+            }
+            return out;
+        }
+        return value;
     }
 
     // Fire-and-forget background execution
@@ -742,9 +778,16 @@ async function handleWebhookFanout(
                 }
             }
             if (target.bodyTemplate) {
-                tBody = renderTemplate(target.bodyTemplate, payloadObj);
-                tBodyStringPreview = tBody;
-                tBodySize = new TextEncoder().encode(tBody).byteLength;
+                let rendered = renderTemplate(target.bodyTemplate, payloadObj);
+                if (target.dropEmpty) {
+                    try {
+                        const parsed = JSON.parse(rendered);
+                        rendered = JSON.stringify(stripEmptyDeep(parsed));
+                    } catch { /* not valid JSON — deliver as-is */ }
+                }
+                tBody = rendered;
+                tBodyStringPreview = rendered;
+                tBodySize = new TextEncoder().encode(rendered).byteLength;
                 tHeaders.set('content-type', 'application/json');
             }
         }

@@ -1294,6 +1294,7 @@ const server = Bun.serve({
                             retry: webhook.retry,
                             allowedIps: webhook.allowedIps || [],
                             silenceAlert: webhook.silenceAlert,
+                            testPayload: webhook.testPayload,
                             running: status?.running ?? false,
                             active: status?.active ?? 0,
                         },
@@ -1318,6 +1319,7 @@ const server = Bun.serve({
                     if (input.retry && typeof input.retry === 'object') webhook.retry = input.retry as import('./core/types').WebhookRetryConfig;
                     if (Array.isArray(input.allowedIps) && input.allowedIps.length) webhook.allowedIps = input.allowedIps as string[];
                     if (input.silenceAlert && typeof input.silenceAlert === 'object') webhook.silenceAlert = input.silenceAlert as import('./core/types').WebhookSilenceAlert;
+                    if (typeof input.testPayload === 'string' && input.testPayload.trim()) webhook.testPayload = input.testPayload;
 
                     // Reset any pending silence state so the next tick starts fresh.
                     resetSilenceState(webhook.name);

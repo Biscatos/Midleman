@@ -58,7 +58,10 @@ export interface WebhookDestination {
   method?: string; // e.g. "POST", "GET"
   customHeaders?: Record<string, string>;
   forwardHeaders?: boolean; // If true, inherit all incoming request headers
-  bodyTemplate?: string; // uses {{field}} syntax
+  bodyTemplate?: string; // uses {{field}} syntax, supports {{path || "fallback"}} and {{path || other.path}}
+  /** When true and a bodyTemplate produces valid JSON, recursively strip keys
+   *  whose value is null/undefined/"" before delivering. */
+  dropEmpty?: boolean;
   retry?: WebhookRetryConfig; // Per-destination retry config (overrides distributor-level)
   /** Per-destination persistent retry. When enabled, failures go to the
    *  pending-retry queue (not the DLQ) and are retried indefinitely. */
@@ -91,6 +94,9 @@ export interface WebhookDistributor {
   retry?: WebhookRetryConfig; // Default retry config for all targets (can be overridden per-destination)
   allowedIps?: string[];  // Optional IP allowlist (exact, CIDR, wildcard). Empty = unrestricted.
   silenceAlert?: WebhookSilenceAlert; // Optional inactivity notifier
+  /** Persisted JSON test payload used by the dashboard editor to preview
+   *  template interpolation. Has no runtime effect on delivery. */
+  testPayload?: string;
 }
 
 /**

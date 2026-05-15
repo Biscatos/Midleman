@@ -251,6 +251,7 @@ interface StoredWebhook {
     retry?: import('./types').WebhookRetryConfig;
     allowedIps?: string[];
     silenceAlert?: import('./types').WebhookSilenceAlert;
+    testPayload?: string;
 }
 
 /**
@@ -273,6 +274,7 @@ export function loadPersistedWebhooks(): WebhookDistributor[] {
                 retry: w.retry,
                 allowedIps: w.allowedIps?.length ? w.allowedIps : undefined,
                 silenceAlert: w.silenceAlert,
+                testPayload: w.testPayload,
             }));
     } catch (err) {
         console.warn('⚠️  Could not load webhooks.json:', err instanceof Error ? err.message : err);
@@ -294,6 +296,7 @@ export function persistWebhooks(webhooks: WebhookDistributor[]): void {
             retry: w.retry,
             allowedIps: w.allowedIps?.length ? w.allowedIps : undefined,
             silenceAlert: w.silenceAlert,
+            testPayload: w.testPayload,
         }));
         writeFileSync(WEBHOOKS_FILE, JSON.stringify(stored, null, 2), 'utf-8');
     } catch (err) {
@@ -416,6 +419,11 @@ export function validateWebhookInput(input: unknown): string | null {
         return '"targets" must be a non-empty array of destinations';
     }
 
+    if (w.testPayload !== undefined && w.testPayload !== null) {
+        if (typeof w.testPayload !== 'string') return '"testPayload" must be a string';
+        if (w.testPayload.length > 100_000) return '"testPayload" exceeds 100KB limit';
+    }
+
     if (w.silenceAlert !== undefined) {
         if (typeof w.silenceAlert !== 'object' || w.silenceAlert === null) return '"silenceAlert" must be an object';
         const s = w.silenceAlert as Record<string, unknown>;
@@ -435,6 +443,7 @@ export function validateWebhookInput(input: unknown): string | null {
             try { new URL(dest.url); } catch { return `"${dest.url}" is not a valid URL`; }
             if (dest.method && typeof dest.method !== 'string') return '"method" must be a string';
             if (dest.bodyTemplate && typeof dest.bodyTemplate !== 'string') return '"bodyTemplate" must be a string';
+            if (dest.dropEmpty !== undefined && typeof dest.dropEmpty !== 'boolean') return '"dropEmpty" must be a boolean';
             if (dest.customHeaders && typeof dest.customHeaders !== 'object') return '"customHeaders" must be an object';
             if (dest.forwardHeaders !== undefined && typeof dest.forwardHeaders !== 'boolean') return '"forwardHeaders" must be a boolean';
             if (dest.persistentRetry !== undefined) {
