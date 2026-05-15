@@ -994,6 +994,7 @@ const server = Bun.serve({
                         method: url.searchParams.get('method') || undefined,
                         status: url.searchParams.get('status') ? parseInt(url.searchParams.get('status')!, 10) : undefined,
                         search: url.searchParams.get('search') || undefined,
+                        searchBody: url.searchParams.get('searchBody') === '1',
                         from: url.searchParams.get('from') || undefined,
                         to: url.searchParams.get('to') || undefined,
                     });

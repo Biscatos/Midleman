@@ -328,7 +328,8 @@ export interface RequestLogQuery {
     targetName?: string;
     method?: string;
     status?: number;
-    search?: string;          // search in path, target_url, request_id
+    search?: string;          // search in path, target_url, request_id (+ body when searchBody)
+    searchBody?: boolean;     // also match req_body / res_body — slower (no index)
     from?: string;            // ISO date
     to?: string;              // ISO date
 }
@@ -402,7 +403,11 @@ export function queryRequestLogs(query: RequestLogQuery): RequestLogListResult {
         params.$status = query.status;
     }
     if (query.search) {
-        conditions.push('(path LIKE $search OR target_url LIKE $search OR request_id LIKE $search OR profile_name LIKE $search OR target_name LIKE $search)');
+        // Body search is opt-in because it forces a full scan over potentially
+        // large TEXT columns; the default search stays cheap (indexable cols).
+        const cols = ['path', 'target_url', 'request_id', 'profile_name', 'target_name'];
+        if (query.searchBody) cols.push('req_body', 'res_body');
+        conditions.push('(' + cols.map(c => `${c} LIKE $search`).join(' OR ') + ')');
         params.$search = `%${query.search}%`;
     }
     if (query.from) {

@@ -2136,6 +2136,7 @@ async function fetchRequestLogs() {
     const search = document.getElementById('rlSearch').value.trim();
     if (type) params.set('type', type); if (method) params.set('method', method);
     if (status) params.set('status', status); if (search) params.set('search', search);
+    if (search && document.getElementById('rlSearchBody')?.checked) params.set('searchBody', '1');
     const res = await api('/admin/requests?' + params.toString()); if (!res.ok) return;
     rlData = await res.json(); renderRequestLogs();
     const sres = await api('/admin/requests/stats'); if (sres.ok) {
