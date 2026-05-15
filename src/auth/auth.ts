@@ -284,6 +284,31 @@ function runUsersUnificationMigration(d: Database, dbPath: string): void {
     try {
         d.exec('BEGIN');
 
+        // Make sure proxy_users exists. On very old databases that pre-date
+        // proxy_users entirely, the table is missing — create a minimal version
+        // with the columns we touch below. CREATE_TABLES will later add any
+        // remaining indexes/constraints idempotently.
+        d.exec(`CREATE TABLE IF NOT EXISTS proxy_users (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            username     TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            full_name    TEXT NOT NULL DEFAULT '',
+            email        TEXT NOT NULL DEFAULT '' COLLATE NOCASE,
+            password     TEXT NOT NULL,
+            totp_secret  TEXT,
+            totp_enabled INTEGER NOT NULL DEFAULT 0,
+            force_2fa_setup INTEGER NOT NULL DEFAULT 0,
+            roles        TEXT NOT NULL DEFAULT 'proxy',
+            auth_source  TEXT NOT NULL DEFAULT 'local',
+            ldap_config_id INTEGER,
+            ldap_dn      TEXT,
+            ldap_groups_last_seen TEXT NOT NULL DEFAULT '[]',
+            ldap_last_sync_at TEXT,
+            ldap_orphan  INTEGER NOT NULL DEFAULT 0,
+            created_by_user_id INTEGER,
+            created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+        )`);
+
         // Make sure proxy_users has the new columns BEFORE we start writing to them.
         const pu = (d.prepare("PRAGMA table_info(proxy_users)").all() as any[]).map((c: any) => c.name);
         if (!pu.includes('roles')) d.exec("ALTER TABLE proxy_users ADD COLUMN roles TEXT NOT NULL DEFAULT 'proxy'");
