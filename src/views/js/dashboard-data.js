@@ -1743,8 +1743,13 @@ function addWebhookTarget(target = "") {
 function toggleTargetRetry(index) {
   const t = webhookTargetState[index];
   t.retryOpen = !t.retryOpen;
-  if (t.retryOpen && !t.retry) {
-    t.retry = { maxRetries: 3, retryDelayMs: 1000, backoff: 'exponential', retryUntilSuccess: false };
+  if (t.retryOpen) {
+    if (!t.retry) t.retry = { maxRetries: 3, retryDelayMs: 1000, backoff: 'exponential', retryUntilSuccess: false };
+    // Mutually exclusive with persistent retry
+    if (t.persistentRetryOpen) {
+      t.persistentRetryOpen = false;
+      if (t.persistentRetry) t.persistentRetry.enabled = false;
+    }
   }
   renderWebhookTargets();
 }
@@ -1757,9 +1762,14 @@ function updateTargetRetry(index, field, value) {
 function toggleTargetPersistentRetry(index) {
   const t = webhookTargetState[index];
   t.persistentRetryOpen = !t.persistentRetryOpen;
-  if (t.persistentRetryOpen && !t.persistentRetry) {
-    t.persistentRetry = { enabled: true, maxAttemptsPerMinute: 10, notifyAfterAttempts: 10, notifyEmail: '' };
-  } else if (!t.persistentRetryOpen && t.persistentRetry) {
+  if (t.persistentRetryOpen) {
+    if (!t.persistentRetry) t.persistentRetry = { enabled: true, maxAttemptsPerMinute: 10, notifyAfterAttempts: 10, notifyEmail: '' };
+    else t.persistentRetry.enabled = true;
+    // Mutually exclusive with the bounded retry override
+    if (t.retryOpen) {
+      t.retryOpen = false;
+    }
+  } else if (t.persistentRetry) {
     t.persistentRetry.enabled = false;
   }
   renderWebhookTargets();
@@ -1884,9 +1894,9 @@ function renderWebhookTargets() {
 
         <!-- Per-destination retry override -->
         <div class="destination-retry-override" style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px;${document.getElementById('wRetryEnabled')?.checked ? 'display:none' : ''}">
-          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);cursor:pointer" onclick="toggleTargetRetry(${i});return false">
-            <input type="checkbox" ${t.retryOpen ? 'checked' : ''} onclick="event.preventDefault()">
-            Override retry for this destination
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:${t.persistentRetryOpen ? 'var(--text3)' : 'var(--text2)'};cursor:${t.persistentRetryOpen ? 'not-allowed' : 'pointer'}" onclick="${t.persistentRetryOpen ? 'return false' : `toggleTargetRetry(${i});return false`}" title="${t.persistentRetryOpen ? 'Disabled — Persistent retry is enabled below' : ''}">
+            <input type="checkbox" ${t.retryOpen ? 'checked' : ''} ${t.persistentRetryOpen ? 'disabled' : ''} onclick="event.preventDefault()">
+            Override retry for this destination${t.persistentRetryOpen ? ' <span style="color:var(--text3);font-size:10px">(disabled — using persistent retry)</span>' : ''}
           </label>
           ${t.retryOpen ? `
           <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;padding:8px;background:var(--surface2);border-radius:4px;border:1px solid var(--border)">
@@ -1922,9 +1932,9 @@ function renderWebhookTargets() {
 
         <!-- Per-destination PERSISTENT retry (never gives up) -->
         <div class="destination-persistent-retry" style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
-          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);cursor:pointer" onclick="toggleTargetPersistentRetry(${i});return false">
-            <input type="checkbox" ${t.persistentRetryOpen ? 'checked' : ''} onclick="event.preventDefault()">
-            <strong style="color:var(--orange)">Persistent retry</strong> — never give up (for payments, etc.)
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:${t.retryOpen ? 'var(--text3)' : 'var(--text2)'};cursor:${t.retryOpen ? 'not-allowed' : 'pointer'}" onclick="${t.retryOpen ? 'return false' : `toggleTargetPersistentRetry(${i});return false`}" title="${t.retryOpen ? 'Disabled — Override retry is enabled above' : ''}">
+            <input type="checkbox" ${t.persistentRetryOpen ? 'checked' : ''} ${t.retryOpen ? 'disabled' : ''} onclick="event.preventDefault()">
+            <strong style="color:${t.retryOpen ? 'var(--text3)' : 'var(--orange)'}">Persistent retry</strong> — never give up (for payments, etc.)${t.retryOpen ? ' <span style="color:var(--text3);font-size:10px">(disabled — using bounded retry)</span>' : ''}
           </label>
           ${t.persistentRetryOpen ? `
           <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;padding:8px;background:rgba(245,158,11,0.06);border-radius:4px;border:1px solid rgba(245,158,11,0.3)">

@@ -654,14 +654,20 @@ async function handleWebhookFanout(
             }
         }
 
-        // Resolve effective retry config: per-destination overrides distributor-level default
-        const effectiveRetry = (typeof target !== 'string' && target.retry)
-            ? target.retry
-            : webhook.retry;
-
         const persistent = (typeof target !== 'string' && target.persistentRetry?.enabled)
             ? target.persistentRetry
             : null;
+
+        // Resolve effective in-line retry config. When persistent retry is on,
+        // we skip the bounded in-line retry loop entirely — the pending-retry
+        // queue IS the retry mechanism, and stacking the two would just delay
+        // the first persistent attempt (e.g. exponential backoff on a 10-retry
+        // distributor default can mean ~40min before the first queue attempt).
+        const effectiveRetry = persistent
+            ? undefined
+            : ((typeof target !== 'string' && target.retry)
+                ? target.retry
+                : webhook.retry);
 
         try {
             const { res, resText, attempts, attemptLog } = await fetchWithRetry(

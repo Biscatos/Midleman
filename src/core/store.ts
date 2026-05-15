@@ -431,6 +431,10 @@ export function validateWebhookInput(input: unknown): string | null {
                 if (pr.maxAttemptsPerMinute !== undefined && (typeof pr.maxAttemptsPerMinute !== 'number' || pr.maxAttemptsPerMinute < 1 || pr.maxAttemptsPerMinute > 600)) return '"persistentRetry.maxAttemptsPerMinute" must be 1–600';
                 if (pr.notifyAfterAttempts !== undefined && (typeof pr.notifyAfterAttempts !== 'number' || pr.notifyAfterAttempts < 1 || pr.notifyAfterAttempts > 100000)) return '"persistentRetry.notifyAfterAttempts" must be a positive integer';
                 if (pr.notifyEmail !== undefined && pr.notifyEmail !== '' && (typeof pr.notifyEmail !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(pr.notifyEmail))) return '"persistentRetry.notifyEmail" must be a valid email';
+                // Mutually exclusive with the bounded per-destination retry override
+                if (pr.enabled === true && dest.retry) {
+                    return 'A destination cannot have both "retry" override and "persistentRetry" enabled — pick one';
+                }
             }
         } else {
             return 'Targets must be strings or valid WebhookDestination objects';
