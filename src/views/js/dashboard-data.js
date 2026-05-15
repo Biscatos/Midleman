@@ -1583,12 +1583,118 @@ function initAceEditors() {
 let fullEditor = null;
 let currentFullEditorIndex = -1;
 
+function flattenPayloadPaths(obj, prefix = '', out = [], depth = 0) {
+    if (depth > 5) return out;
+    if (obj === null || obj === undefined) return out;
+    if (Array.isArray(obj)) {
+        // Expose array itself + first few indices
+        if (prefix) out.push({ path: prefix, kind: 'array', sample: `[${obj.length} items]` });
+        const limit = Math.min(obj.length, 5);
+        for (let i = 0; i < limit; i++) {
+            flattenPayloadPaths(obj[i], prefix ? `${prefix}.${i}` : `${i}`, out, depth + 1);
+        }
+        return out;
+    }
+    if (typeof obj === 'object') {
+        if (prefix) out.push({ path: prefix, kind: 'object', sample: '{…}' });
+        for (const k of Object.keys(obj)) {
+            const next = prefix ? `${prefix}.${k}` : k;
+            flattenPayloadPaths(obj[k], next, out, depth + 1);
+        }
+        return out;
+    }
+    // primitive
+    let sample = String(obj);
+    if (sample.length > 40) sample = sample.slice(0, 40) + '…';
+    out.push({ path: prefix, kind: typeof obj, sample });
+    return out;
+}
+
+function getCurrentTestPayloadObject() {
+    const raw = (document.getElementById('wTestPayload')?.value || '').trim();
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch { return null; }
+}
+
+function renderBodyEditorFieldsPanel() {
+    const list = document.getElementById('bodyEditorFieldsList');
+    if (!list) return;
+    const payload = getCurrentTestPayloadObject();
+    if (!payload) {
+        list.innerHTML = `<div style="padding:12px;color:var(--text3);font-size:11px;font-family:inherit">
+            Cole um Test Payload (JSON) válido na seção anterior para ver os campos disponíveis aqui.
+        </div>`;
+        return;
+    }
+    const paths = flattenPayloadPaths(payload);
+    if (paths.length === 0) {
+        list.innerHTML = `<div style="padding:12px;color:var(--text3);font-size:11px;font-family:inherit">No fields detected.</div>`;
+        return;
+    }
+    const colorFor = (kind) => {
+        if (kind === 'string') return 'var(--green, #4ade80)';
+        if (kind === 'number') return 'var(--accent, #3b82f6)';
+        if (kind === 'boolean') return 'var(--orange, #fb923c)';
+        if (kind === 'object' || kind === 'array') return 'var(--text3)';
+        return 'var(--text2)';
+    };
+    list.innerHTML = paths.map(p => {
+        const safePath = p.path.replace(/"/g, '&quot;');
+        const safeSample = String(p.sample).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return `<div class="bep-field" data-path="${safePath}" title="Click to insert {{${safePath}}}"
+            style="padding:4px 12px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid rgba(255,255,255,0.03)">
+            <span style="color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${safePath}</span>
+            <span style="color:${colorFor(p.kind)};opacity:.75;flex-shrink:0;max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${safeSample}</span>
+        </div>`;
+    }).join('');
+    list.querySelectorAll('.bep-field').forEach(el => {
+        el.addEventListener('mouseenter', () => { el.style.background = 'rgba(255,255,255,0.05)'; });
+        el.addEventListener('mouseleave', () => { el.style.background = ''; });
+        el.addEventListener('click', () => {
+            const path = el.getAttribute('data-path');
+            insertTemplateAtCursor(`{{${path}}}`);
+        });
+    });
+}
+
+function insertTemplateAtCursor(text) {
+    if (!fullEditor) return;
+    fullEditor.insert(text);
+    fullEditor.focus();
+}
+
+function buildBodyEditorCompleter() {
+    return {
+        getCompletions: function(editor, session, pos, prefix, callback) {
+            // Only suggest when cursor is inside an unclosed {{ ... }}
+            const line = session.getLine(pos.row).slice(0, pos.column);
+            const openIdx = line.lastIndexOf('{{');
+            const closeIdx = line.lastIndexOf('}}');
+            if (openIdx === -1 || closeIdx > openIdx) {
+                callback(null, []);
+                return;
+            }
+            const payload = getCurrentTestPayloadObject();
+            if (!payload) { callback(null, []); return; }
+            const paths = flattenPayloadPaths(payload);
+            const completions = paths.map(p => ({
+                caption: p.path,
+                value: p.path,
+                meta: p.kind === 'object' || p.kind === 'array' ? p.kind : `${p.kind}: ${p.sample}`,
+                score: 1000
+            }));
+            callback(null, completions);
+        },
+        identifierRegexps: [/[a-zA-Z_0-9.\-]/]
+    };
+}
+
 function openBodyEditor(index) {
     currentFullEditorIndex = index;
     const content = webhookTargetState[index].bodyTemplate || '';
-    
+
     document.getElementById('bodyEditorModal').style.display = 'block';
-    
+
     if (!fullEditor) {
         fullEditor = ace.edit('aceBodyFull', {
             mode: 'ace/mode/json',
@@ -1600,11 +1706,22 @@ function openBodyEditor(index) {
             tabSize: 2,
             useWorker: false,
             highlightActiveLine: true,
-            showGutter: true
+            showGutter: true,
+            enableBasicAutocompletion: true,
+            enableLiveAutocompletion: true,
+            enableSnippets: false
         });
+        try {
+            const langTools = ace.require('ace/ext/language_tools');
+            if (langTools) {
+                langTools.setCompleters([buildBodyEditorCompleter()]);
+            }
+        } catch (e) { /* language_tools unavailable — sidebar still works */ }
     }
-    
+
     fullEditor.setValue(content, -1);
+    renderBodyEditorFieldsPanel();
+    setBodyEditorStatus('', 'info');
     fullEditor.focus();
 }
 
@@ -1613,21 +1730,76 @@ function closeBodyEditor() {
     currentFullEditorIndex = -1;
 }
 
+function setBodyEditorStatus(msg, kind) {
+    const el = document.getElementById('bodyEditorStatus');
+    if (!el) return;
+    const colors = { ok: 'var(--green, #4ade80)', err: 'var(--red, #f87171)', info: 'var(--text3)' };
+    el.style.color = colors[kind] || colors.info;
+    el.textContent = msg || '';
+}
+
+function validateBodyTemplate(content) {
+    // Empty is allowed (means: forward original body)
+    if (!content.trim()) return { ok: true, empty: true };
+
+    const payload = getCurrentTestPayloadObject();
+    // If user has a test payload, validate the *interpolated* result.
+    // Otherwise, replace {{...}} with null so we can still check JSON shape.
+    let rendered;
+    if (payload) {
+        rendered = renderTemplateJS(content, payload);
+    } else {
+        rendered = content.replace(/\{\{\s*[a-zA-Z0-9_.-]+\s*\}\}/g, 'null');
+    }
+    try {
+        const parsed = JSON.parse(rendered);
+        return { ok: true, rendered, parsed, usedPayload: !!payload };
+    } catch (e) {
+        return { ok: false, error: e.message, rendered, usedPayload: !!payload };
+    }
+}
+
+function testBodyEditor() {
+    if (!fullEditor) return;
+    const content = fullEditor.getValue();
+    const result = validateBodyTemplate(content);
+    if (result.empty) {
+        setBodyEditorStatus('Empty template — original payload will be forwarded.', 'info');
+        return;
+    }
+    if (result.ok) {
+        const suffix = result.usedPayload ? ' (with test payload)' : ' (no test payload — placeholders treated as null)';
+        setBodyEditorStatus('Valid JSON' + suffix, 'ok');
+    } else {
+        const suffix = result.usedPayload ? ' after interpolation' : '';
+        setBodyEditorStatus('Invalid JSON' + suffix + ': ' + result.error, 'err');
+    }
+}
+
 function saveBodyEditor() {
     if (currentFullEditorIndex === -1) return;
     const content = fullEditor.getValue();
+    const result = validateBodyTemplate(content);
+    if (!result.ok) {
+        const suffix = result.usedPayload ? ' after interpolation' : '';
+        setBodyEditorStatus('Cannot apply — invalid JSON' + suffix + ': ' + result.error, 'err');
+        return;
+    }
     webhookTargetState[currentFullEditorIndex].bodyTemplate = content;
-    
+
     // Sync back to small editor
     if (aceEditors[currentFullEditorIndex]) {
         aceEditors[currentFullEditorIndex].setValue(content, -1);
     }
-    
+
     updateAllPreviews();
     closeBodyEditor();
 }
 
 function updateAllPreviews() {
+  if (document.getElementById('bodyEditorModal')?.style.display === 'block') {
+    renderBodyEditorFieldsPanel();
+  }
   const jsonStr = document.getElementById('wTestPayload').value.trim();
   let payloadObj = null;
   const tpEl = document.getElementById('wTestPayload');

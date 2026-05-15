@@ -1597,17 +1597,32 @@
     <div
       style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--surface2)">
       <span style="font-weight:600;font-size:14px">Body Template Editor</span>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="bodyEditorStatus" style="font-size:11px;color:var(--text3);margin-right:4px"></span>
+        <button class="btn btn-sm" onclick="testBodyEditor()" style="padding:4px 12px">Test</button>
         <button class="btn btn-sm" onclick="closeBodyEditor()" style="padding:4px 12px">Cancel</button>
         <button class="btn btn-primary btn-sm" onclick="saveBodyEditor()" style="padding:4px 12px">Apply</button>
       </div>
     </div>
-    <div id="aceBodyFull" style="flex:1;width:100%"></div>
+    <div style="flex:1;display:flex;min-height:0">
+      <div id="aceBodyFull" style="flex:1;height:100%"></div>
+      <div id="bodyEditorFieldsPanel"
+        style="width:280px;border-left:1px solid var(--border);background:var(--surface2);display:flex;flex-direction:column;min-height:0">
+        <div style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text2)">
+          Payload Fields
+        </div>
+        <div id="bodyEditorFieldsList" style="flex:1;overflow:auto;padding:6px 0;font-family:monospace;font-size:11px">
+          <div style="padding:12px;color:var(--text3);font-size:11px;font-family:inherit">
+            Cole um Test Payload (JSON) na seção anterior para ver os campos disponíveis aqui.
+          </div>
+        </div>
+      </div>
+    </div>
     <div
       style="padding:6px 16px;border-top:1px solid var(--border);background:var(--surface2);font-size:11px;color:var(--text3)">
       Use <code
         style="background:rgba(0,120,212,0.15);padding:1px 4px;border-radius:3px;color:var(--accent)">{{variable.path}}</code>
-      syntax to interpolate incoming payload values. Standard JSON syntax is highlighted automatically.
+      syntax to interpolate incoming payload values. Click a field on the right to insert, or type <code style="background:rgba(0,120,212,0.15);padding:1px 4px;border-radius:3px;color:var(--accent)">{{</code> for suggestions.
     </div>
   </div>
 </div>
