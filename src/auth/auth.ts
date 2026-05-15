@@ -85,6 +85,18 @@ CREATE TABLE IF NOT EXISTS proxy_user_profiles (
 CREATE INDEX IF NOT EXISTS idx_proxy_user_profiles_profile ON proxy_user_profiles(profile_name);
 CREATE INDEX IF NOT EXISTS idx_proxy_user_profiles_user ON proxy_user_profiles(user_id);
 
+CREATE TABLE IF NOT EXISTS proxy_profile_ldap_groups (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_name    TEXT NOT NULL COLLATE NOCASE,
+    ldap_config_id  INTEGER NOT NULL,
+    group_match     TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(profile_name, ldap_config_id, group_match)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pplg_profile ON proxy_profile_ldap_groups(profile_name);
+CREATE INDEX IF NOT EXISTS idx_pplg_config ON proxy_profile_ldap_groups(ldap_config_id);
+
 CREATE TABLE IF NOT EXISTS invite_tokens (
     token             TEXT PRIMARY KEY,
     note              TEXT NOT NULL DEFAULT '',
@@ -1110,12 +1122,15 @@ export async function verifyProxyUserCredentials(login: string, password: string
     };
 }
 
-/** Check if a proxy user has access to a specific profile. */
+/** Check if a proxy user has access to a specific profile. Considers both the
+ *  explicit proxy_user_profiles association AND any matching LDAP group rule
+ *  for shadow users (so LDAP-group access doesn't require pre-provisioning). */
 export function proxyUserHasProfile(userId: number, profileName: string): boolean {
     if (!db) return false;
     const row = db.prepare('SELECT 1 FROM proxy_user_profiles WHERE user_id = $uid AND profile_name = $pn')
         .get({ $uid: userId, $pn: profileName.toLowerCase() }) as any;
-    return !!row;
+    if (row) return true;
+    return shadowUserMatchesProfileLdapGroups(userId, profileName);
 }
 
 // ─── Proxy User ↔ Profile Association ───────────────────────────────────────
@@ -1159,6 +1174,131 @@ export function removeAllProfileAssociations(profileName: string): number {
     if (!db) return 0;
     const result = db.prepare('DELETE FROM proxy_user_profiles WHERE profile_name = $pn').run({ $pn: profileName.toLowerCase() });
     return result.changes;
+}
+
+// ─── Profile ↔ LDAP group rules ─────────────────────────────────────────────
+// Mirrors the oauth_client_ldap_groups model. A profile with authMode='login'
+// can grant access to anyone authenticated against an LDAP directory whose
+// cached groups match one of the configured rules for that profile.
+
+export interface ProfileLdapGroup {
+    id: number;
+    profileName: string;
+    ldapConfigId: number;
+    groupMatch: string;
+    createdAt: string;
+}
+
+function rowToProfileLdapGroup(r: any): ProfileLdapGroup {
+    return {
+        id: r.id,
+        profileName: r.profile_name,
+        ldapConfigId: r.ldap_config_id,
+        groupMatch: r.group_match,
+        createdAt: r.created_at,
+    };
+}
+
+export function listLdapGroupsForProfile(profileName: string): ProfileLdapGroup[] {
+    if (!db) return [];
+    const rows = db.prepare('SELECT * FROM proxy_profile_ldap_groups WHERE profile_name = $pn COLLATE NOCASE ORDER BY ldap_config_id, group_match')
+        .all({ $pn: profileName }) as any[];
+    return rows.map(rowToProfileLdapGroup);
+}
+
+export function addLdapGroupToProfile(profileName: string, ldapConfigId: number, groupMatch: string): ProfileLdapGroup | null {
+    if (!db) return null;
+    const match = (groupMatch || '').trim();
+    if (!match) return null;
+    try {
+        db.prepare('INSERT OR IGNORE INTO proxy_profile_ldap_groups (profile_name, ldap_config_id, group_match) VALUES ($pn, $lcid, $gm)')
+            .run({ $pn: profileName, $lcid: ldapConfigId, $gm: match });
+    } catch { return null; }
+    const row = db.prepare('SELECT * FROM proxy_profile_ldap_groups WHERE profile_name = $pn COLLATE NOCASE AND ldap_config_id = $lcid AND group_match = $gm COLLATE NOCASE')
+        .get({ $pn: profileName, $lcid: ldapConfigId, $gm: match }) as any;
+    return row ? rowToProfileLdapGroup(row) : null;
+}
+
+export function getProfileLdapGroupById(profileName: string, ruleId: number): ProfileLdapGroup | null {
+    if (!db) return null;
+    const row = db.prepare('SELECT * FROM proxy_profile_ldap_groups WHERE id = $id AND profile_name = $pn COLLATE NOCASE')
+        .get({ $id: ruleId, $pn: profileName }) as any;
+    return row ? rowToProfileLdapGroup(row) : null;
+}
+
+export function removeLdapGroupFromProfile(profileName: string, ruleId: number): boolean {
+    if (!db) return false;
+    const result = db.prepare('DELETE FROM proxy_profile_ldap_groups WHERE id = $id AND profile_name = $pn COLLATE NOCASE')
+        .run({ $id: ruleId, $pn: profileName });
+    return result.changes > 0;
+}
+
+export function removeAllProfileLdapGroups(profileName: string): number {
+    if (!db) return 0;
+    const result = db.prepare('DELETE FROM proxy_profile_ldap_groups WHERE profile_name = $pn COLLATE NOCASE')
+        .run({ $pn: profileName });
+    return result.changes;
+}
+
+/** Group-match strings configured for (profile_name, ldap_config_id). */
+export function getProfileLdapGroupMatches(profileName: string, ldapConfigId: number): string[] {
+    if (!db) return [];
+    const rows = db.prepare('SELECT group_match FROM proxy_profile_ldap_groups WHERE profile_name = $pn COLLATE NOCASE AND ldap_config_id = $lcid')
+        .all({ $pn: profileName, $lcid: ldapConfigId }) as any[];
+    return rows.map(r => r.group_match);
+}
+
+/** Extract the CN (first RDN value) from a DN, lowercased. */
+function profileCnOf(dn: string): string {
+    const m = dn.match(/^\s*cn\s*=\s*((?:[^,\\]|\\.)+)/i);
+    if (!m) return '';
+    return m[1].replace(/\\(.)/g, '$1').trim().toLowerCase();
+}
+
+/** Pure check: do these LDAP groups satisfy any of the configured rules? */
+export function profileLdapGroupsMatch(profileName: string, ldapConfigId: number, userGroups: string[]): boolean {
+    const rules = getProfileLdapGroupMatches(profileName, ldapConfigId);
+    if (rules.length === 0 || userGroups.length === 0) return false;
+    const wantDn = new Set<string>();
+    const wantCn = new Set<string>();
+    let wildcard = false;
+    for (const raw of rules) {
+        const v = raw.trim();
+        if (!v) continue;
+        if (v === '*') { wildcard = true; continue; }
+        if (/^cn\s*=/i.test(v) && v.includes(',')) wantDn.add(v.toLowerCase());
+        else wantCn.add(v.replace(/^cn\s*=\s*/i, '').toLowerCase());
+    }
+    if (wildcard) return true;
+    for (const g of userGroups) {
+        const dn = String(g);
+        if (wantDn.has(dn.toLowerCase())) return true;
+        const cn = profileCnOf(dn);
+        if (cn && wantCn.has(cn)) return true;
+    }
+    return false;
+}
+
+/** Returns true if any profile has at least one LDAP rule for this directory. */
+export function listProfilesWithLdapGroupsForConfig(ldapConfigId: number): string[] {
+    if (!db) return [];
+    const rows = db.prepare('SELECT DISTINCT profile_name FROM proxy_profile_ldap_groups WHERE ldap_config_id = $lcid')
+        .all({ $lcid: ldapConfigId }) as any[];
+    return rows.map(r => r.profile_name);
+}
+
+/** Checks LDAP-based access for a shadow user against a profile, using the
+ *  user's cached groups (proxy_users.ldap_groups_last_seen). Returns true if
+ *  the user is a non-orphan shadow account whose groups satisfy any rule for
+ *  the given profile. */
+export function shadowUserMatchesProfileLdapGroups(userId: number, profileName: string): boolean {
+    if (!db) return false;
+    const user = db.prepare('SELECT auth_source, ldap_config_id, ldap_orphan, ldap_groups_last_seen FROM proxy_users WHERE id = $uid')
+        .get({ $uid: userId }) as any;
+    if (!user || user.auth_source !== 'ldap' || user.ldap_orphan || !user.ldap_config_id) return false;
+    let groups: string[] = [];
+    try { groups = JSON.parse(user.ldap_groups_last_seen || '[]'); } catch {}
+    return profileLdapGroupsMatch(profileName, user.ldap_config_id, groups);
 }
 
 // ─── Proxy User TOTP Setup ─────────────────────────────────────────────────

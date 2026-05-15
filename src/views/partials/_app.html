@@ -904,14 +904,13 @@
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Email / Username</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Role</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">2FA</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Proxies</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Created</th>
                 <th style="padding:10px 12px"></th>
               </tr>
             </thead>
             <tbody id="proxyUserListBody">
               <tr>
-                <td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td>
+                <td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td>
               </tr>
             </tbody>
           </table>
@@ -1317,6 +1316,8 @@
                 <option value="oauth_client.user.remove">oauth_client.user.remove</option>
                 <option value="oauth_client.ldap_group.add">oauth_client.ldap_group.add</option>
                 <option value="oauth_client.ldap_group.remove">oauth_client.ldap_group.remove</option>
+                <option value="profile.ldap_group.add">profile.ldap_group.add</option>
+                <option value="profile.ldap_group.remove">profile.ldap_group.remove</option>
               </select>
             </div>
             <div class="form-group">
@@ -2131,43 +2132,104 @@
           </tr>
         </tbody>
       </table>
+
+      <!-- LDAP group rules for this profile -->
+      <div style="margin-top:22px;padding-top:18px;border-top:1px solid var(--border)">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:var(--text3)">Allowed LDAP groups</div>
+          <span style="font-size:11px;color:var(--text3)">additive to the user list above</span>
+        </div>
+        <p style="font-size:11.5px;color:var(--text3);margin:0 0 12px;line-height:1.5">
+          Any LDAP user whose <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">memberOf</code> contains one of these groups will be granted access on login. Accepts short CN (e.g. <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">DSI-DEVELOPMENT-INNOVATION</code>) or full DN. Use <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">*</code> to accept any group from this directory.
+        </p>
+        <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+          <select id="pflgConfigSelect"
+            style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px;min-width:140px">
+            <option value="">Directory…</option>
+          </select>
+          <input id="pflgGroupInput" type="text" placeholder="CN, DN or * (any group)"
+            style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px;font-family:'SF Mono',ui-monospace,monospace">
+          <button class="btn btn-primary btn-sm" onclick="addLdapGroupToProfileUI()" style="white-space:nowrap">Add</button>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:var(--surface2);text-align:left">
+              <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Directory</th>
+              <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Group</th>
+              <th style="padding:8px 12px"></th>
+            </tr>
+          </thead>
+          <tbody id="pflgListBody">
+            <tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">No group rules configured.</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
     <div class="modal-footer"><button class="btn" onclick="closeProfileUsersModal()">Close</button></div>
   </div>
 </div>
 
-<!-- Manage User Proxies Modal (assign/remove proxies from a user) -->
+<!-- Manage User Resources Modal (assign/remove HTTP proxies + OAuth clients) -->
 <div class="modal-overlay" id="userProfilesModal">
-  <div class="modal" style="max-width:520px">
+  <div class="modal" style="max-width:620px">
     <div class="modal-header">
-      <h3 id="userProfilesTitle">Proxies</h3><button class="close-btn"
-        onclick="closeUserProfilesModal()">&times;</button>
+      <h3 id="userProfilesTitle">Resources</h3><button class="close-btn"
+        onclick="closeUserResourcesModal()">&times;</button>
     </div>
     <div class="modal-body">
-      <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
-        <select id="upAddSelect"
-          style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
-          <option value="">Select proxy to assign...</option>
-        </select>
-        <button class="btn btn-primary btn-sm" onclick="assignProfileToCurrentUser()"
-          style="white-space:nowrap">Assign</button>
+
+      <!-- ── HTTP Proxies ─────────────────────────────────────────────── -->
+      <div style="margin-bottom:22px">
+        <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:var(--text3);margin-bottom:10px">HTTP Proxies</div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+          <select id="upAddSelect"
+            style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
+            <option value="">Select proxy to assign...</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="assignProfileToCurrentUser()"
+            style="white-space:nowrap">Assign</button>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:var(--surface2);text-align:left">
+              <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Proxy</th>
+              <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Source</th>
+              <th style="padding:8px 12px"></th>
+            </tr>
+          </thead>
+          <tbody id="upListBody">
+            <tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">Loading...</td></tr>
+          </tbody>
+        </table>
       </div>
-      <table style="width:100%;border-collapse:collapse;font-size:13px">
-        <thead>
-          <tr style="background:var(--surface2);text-align:left">
-            <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-              Proxy</th>
-            <th style="padding:8px 12px"></th>
-          </tr>
-        </thead>
-        <tbody id="upListBody">
-          <tr>
-            <td colspan="2" style="padding:20px;text-align:center;color:var(--text3)">Loading...</td>
-          </tr>
-        </tbody>
-      </table>
+
+      <!-- ── OAuth Clients ────────────────────────────────────────────── -->
+      <div style="padding-top:18px;border-top:1px solid var(--border)">
+        <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:var(--text3);margin-bottom:10px">OAuth Clients</div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+          <select id="urcOauthSelect"
+            style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
+            <option value="">Select OAuth client to assign...</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="assignOauthClientToCurrentUser()"
+            style="white-space:nowrap">Assign</button>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:var(--surface2);text-align:left">
+              <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Client</th>
+              <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Source</th>
+              <th style="padding:8px 12px"></th>
+            </tr>
+          </thead>
+          <tbody id="urcOauthListBody">
+            <tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
     </div>
-    <div class="modal-footer"><button class="btn" onclick="closeUserProfilesModal()">Close</button></div>
+    <div class="modal-footer"><button class="btn" onclick="closeUserResourcesModal()">Close</button></div>
   </div>
 </div>
 

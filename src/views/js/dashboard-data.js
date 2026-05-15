@@ -546,7 +546,7 @@ function renderProxyUsers(users) {
   const countEl = document.getElementById('userRoleFilterCount');
   if (countEl) countEl.textContent = users.length + ' of ' + _allProxyUsers.length;
   if (users.length === 0) {
-    c.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No users match the current filter.</td></tr>';
+    c.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No users match the current filter.</td></tr>';
     return;
   }
   c.innerHTML = users.map(u => {
@@ -555,7 +555,6 @@ function renderProxyUsers(users) {
       : (u.force2faSetup
         ? '<span style="color:var(--orange)" title="User must configure 2FA on next login">Pending setup</span>'
         : '<span style="color:var(--text3)">Off</span>');
-    const profiles = (u.profiles || []).map(p => `<span style="background:var(--surface2);padding:1px 6px;border-radius:3px;font-size:11px;font-family:monospace">${esc(p)}</span>`).join(' ');
     const nameCell = u.fullName
       ? `<div style="font-weight:600;color:var(--text)">${esc(u.fullName)}</div><div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`
       : `<div style="font-weight:600;color:var(--text)">${esc(u.username)}</div>`;
@@ -563,7 +562,7 @@ function renderProxyUsers(users) {
       ? `<div style="font-size:12px;color:var(--text2)">${esc(u.email)}</div>`
       : `<span style="color:var(--text3)">—</span>`;
     const actionsCell = `<button onclick="openEditProxyUserModal(${u.id})" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Edit">Edit</button>
-         <button onclick="openUserProfilesModal(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Manage proxies">Proxies</button>
+         <button onclick="openUserResourcesModal(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Manage resources">Resources</button>
          ${u.totpEnabled
            ? `<button onclick="disable2fa(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--orange);font-size:11px;margin-right:4px" title="Disable 2FA (user will be notified by email)">Disable 2FA</button>`
            : (u.force2faSetup
@@ -575,7 +574,6 @@ function renderProxyUsers(users) {
       <td style="padding:8px">${emailCell}</td>
       <td style="padding:8px">${_roleBadge(u)}</td>
       <td style="padding:8px">${twoFa}</td>
-      <td style="padding:8px">${profiles || '<span style="color:var(--text3)">—</span>'}</td>
       <td style="padding:8px;color:var(--text3);font-size:12px">${u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-GB') : '-'}</td>
       <td style="padding:8px 12px;text-align:right;white-space:nowrap">${actionsCell}</td>
     </tr>`;
@@ -689,10 +687,90 @@ function openProxyUsersModal(profileName) {
   document.getElementById('profileUsersTitle').textContent = 'Users — ' + profileName;
   document.getElementById('profileUsersModal').classList.add('active');
   refreshProfileUsers();
+  refreshProfileLdapGroups();
 }
 function closeProfileUsersModal() {
   document.getElementById('profileUsersModal').classList.remove('active');
   _profileUsersProfile = null;
+}
+
+// ─── Profile ↔ LDAP group rules ──────────────────────────────────────────────
+async function refreshProfileLdapGroups() {
+  if (!_profileUsersProfile) return;
+  const body = document.getElementById('pflgListBody');
+  if (!body) return;
+  body.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">Loading...</td></tr>';
+  try {
+    const res = await api('/admin/profiles/' + encodeURIComponent(_profileUsersProfile) + '/ldap-groups');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      body.innerHTML = `<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--red)">${esc(err.error || 'Failed to load')}</td></tr>`;
+      return;
+    }
+    const data = await res.json();
+    const groups = data.groups || [];
+    const directories = data.directories || [];
+
+    // Populate directory dropdown
+    const sel = document.getElementById('pflgConfigSelect');
+    if (sel) {
+      sel.innerHTML = '<option value="">Directory…</option>' + directories.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('');
+    }
+
+    if (groups.length === 0) {
+      body.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">No group rules configured.</td></tr>';
+      return;
+    }
+    const dirById = new Map(directories.map(d => [d.id, d.name]));
+    body.innerHTML = groups.map(g => `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px 12px">${esc(dirById.get(g.ldapConfigId) || ('#' + g.ldapConfigId))}</td>
+      <td style="padding:8px;font-family:'SF Mono',ui-monospace,monospace;font-size:12px">${esc(g.groupMatch)}</td>
+      <td style="padding:8px 12px;text-align:right">
+        <button onclick="removeLdapGroupFromProfileUI(${g.id})" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px">Remove</button>
+      </td>
+    </tr>`).join('');
+  } catch (e) {
+    body.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--red)">Error: ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+async function addLdapGroupToProfileUI() {
+  if (!_profileUsersProfile) return;
+  const sel = document.getElementById('pflgConfigSelect');
+  const input = document.getElementById('pflgGroupInput');
+  const ldapConfigId = parseInt(sel.value, 10);
+  const groupMatch = (input.value || '').trim();
+  if (!ldapConfigId) { toast('Select a directory', 'error'); return; }
+  if (!groupMatch) { toast('Enter a group (CN, DN or *)', 'error'); return; }
+  const btn = input.nextElementSibling;
+  if (btn) { btn.disabled = true; btn.textContent = 'Adding...'; }
+  try {
+    const res = await api('/admin/profiles/' + encodeURIComponent(_profileUsersProfile) + '/ldap-groups', {
+      method: 'POST', body: JSON.stringify({ ldapConfigId, groupMatch }),
+    });
+    if (res.ok) {
+      input.value = '';
+      toast('Rule added');
+      await refreshProfileLdapGroups();
+    } else {
+      const d = await res.json().catch(() => ({}));
+      toast(d.error || 'Failed', 'error');
+    }
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Add'; }
+  }
+}
+
+async function removeLdapGroupFromProfileUI(ruleId) {
+  if (!_profileUsersProfile) return;
+  if (!confirm('Remove this LDAP group rule?')) return;
+  try {
+    const res = await api('/admin/profiles/' + encodeURIComponent(_profileUsersProfile) + '/ldap-groups/' + ruleId, { method: 'DELETE' });
+    if (res.ok) { toast('Rule removed'); await refreshProfileLdapGroups(); }
+    else { const d = await res.json().catch(() => ({})); toast(d.error || 'Failed', 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function refreshProfileUsers() {
@@ -782,57 +860,112 @@ async function removeUserFromProfile(userId, username) {
   } catch (e) { toast('Error: ' + e.message, 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Remove'; } }
 }
 
-// ─── User ↔ Profile Association (from user side) ─────────────────────────────
+// ─── User ↔ Resources (HTTP proxies + OAuth clients) ─────────────────────────
 let _userProfilesUserId = null;
 let _userProfilesUsername = null;
 
-function openUserProfilesModal(userId, username) {
+function openUserResourcesModal(userId, username) {
   _userProfilesUserId = userId;
   _userProfilesUsername = username;
-  document.getElementById('userProfilesTitle').textContent = 'Proxies — ' + username;
+  document.getElementById('userProfilesTitle').textContent = 'Resources — ' + username;
   document.getElementById('userProfilesModal').classList.add('active');
-  refreshUserProfiles();
+  refreshUserResources();
 }
-function closeUserProfilesModal() {
+function closeUserResourcesModal() {
   document.getElementById('userProfilesModal').classList.remove('active');
   _userProfilesUserId = null;
   _userProfilesUsername = null;
 }
+// Back-compat aliases (in case anything else still calls these)
+function openUserProfilesModal(userId, username) { openUserResourcesModal(userId, username); }
+function closeUserProfilesModal() { closeUserResourcesModal(); }
 
-async function refreshUserProfiles() {
+function _sourceBadge(source) {
+  if (source === 'direct') return '<span style="color:var(--text2);font-size:11px">Direct</span>';
+  if (source === 'ldap_group') return '<span style="color:var(--primary);font-size:11px" title="Granted by LDAP group membership">LDAP group</span>';
+  if (source === 'open') return '<span style="color:var(--text3);font-size:11px" title="Allow-list disabled — open to all users">Open</span>';
+  return '<span style="color:var(--text3)">—</span>';
+}
+
+async function refreshUserResources() {
   if (!_userProfilesUserId) return;
-  const body = document.getElementById('upListBody');
+  const httpBody = document.getElementById('upListBody');
+  const oauthBody = document.getElementById('urcOauthListBody');
+  if (httpBody) httpBody.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">Loading...</td></tr>';
+  if (oauthBody) oauthBody.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">Loading...</td></tr>';
+
   try {
-    const [allProfilesRes, allUsersRes] = await Promise.all([
-      api('/admin/profiles'),
-      api('/admin/proxy-users'),
-    ]);
-    const allProfiles = allProfilesRes.ok ? (await allProfilesRes.json()).profiles || [] : _allProfiles;
-    const allUsers = allUsersRes.ok ? (await allUsersRes.json()).users || [] : _allProxyUsers;
-    const user = allUsers.find(u => u.id === _userProfilesUserId);
-    const assignedNames = new Set((user?.profiles || []).map(p => p.toLowerCase()));
-    const loginProfiles = allProfiles.filter(p => (p.authMode || 'none') === 'login');
-
-    // Dropdown: unassigned login profiles
-    const sel = document.getElementById('upAddSelect');
-    sel.innerHTML = '<option value="">Select proxy to assign...</option>';
-    loginProfiles.filter(p => !assignedNames.has(p.name.toLowerCase())).forEach(p => {
-      sel.innerHTML += `<option value="${esc(p.name)}">${esc(p.name)}</option>`;
-    });
-
-    const assigned = loginProfiles.filter(p => assignedNames.has(p.name.toLowerCase()));
-    if (assigned.length === 0) {
-      body.innerHTML = '<tr><td colspan="2" style="padding:20px;text-align:center;color:var(--text3)">No proxies assigned.</td></tr>';
+    const res = await api('/admin/proxy-users/' + _userProfilesUserId + '/resources');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      if (httpBody) httpBody.innerHTML = `<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--red)">${esc(err.error || 'Failed to load')}</td></tr>`;
+      if (oauthBody) oauthBody.innerHTML = `<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--red)">${esc(err.error || 'Failed to load')}</td></tr>`;
       return;
     }
-    body.innerHTML = assigned.map(p => `<tr style="border-bottom:1px solid var(--border)">
-      <td style="padding:8px 12px;font-weight:600;font-family:monospace">${esc(p.name)}</td>
-      <td style="padding:8px 12px;text-align:right">
-        <button onclick="removeProfileFromCurrentUser('${esc(p.name)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px">Remove</button>
-      </td>
-    </tr>`).join('');
+    const data = await res.json();
+    const httpProxies = data.httpProxies || [];
+    const oauthClients = data.oauthClients || [];
+
+    // ── HTTP proxies ──
+    const httpSel = document.getElementById('upAddSelect');
+    if (httpSel) {
+      httpSel.innerHTML = '<option value="">Select proxy to assign...</option>';
+      httpProxies.filter(p => !p.assigned || p.source === 'ldap_group').forEach(p => {
+        const suffix = p.source === 'ldap_group' ? ' (already via LDAP)' : '';
+        httpSel.innerHTML += `<option value="${esc(p.name)}">${esc(p.name)}${suffix}</option>`;
+      });
+    }
+    const httpAssigned = httpProxies.filter(p => p.assigned);
+    if (httpBody) {
+      if (httpAssigned.length === 0) {
+        httpBody.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">No HTTP proxies accessible.</td></tr>';
+      } else {
+        httpBody.innerHTML = httpAssigned.map(p => {
+          const canRemove = p.source === 'direct';
+          const action = canRemove
+            ? `<button onclick="removeProfileFromCurrentUser('${esc(p.name)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px">Remove</button>`
+            : '<span style="color:var(--text3);font-size:11px" title="Remove via the LDAP group rule">—</span>';
+          return `<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:8px 12px;font-weight:600;font-family:monospace">${esc(p.name)}</td>
+            <td style="padding:8px">${_sourceBadge(p.source)}</td>
+            <td style="padding:8px 12px;text-align:right">${action}</td>
+          </tr>`;
+        }).join('');
+      }
+    }
+
+    // ── OAuth clients ──
+    const oauthSel = document.getElementById('urcOauthSelect');
+    if (oauthSel) {
+      oauthSel.innerHTML = '<option value="">Select OAuth client to assign...</option>';
+      // Offerable: clients with allow_list_enabled and not yet directly assigned.
+      // Clients with allow-list disabled are "open" — no need to assign.
+      oauthClients.filter(c => c.allowListEnabled && c.source !== 'direct').forEach(c => {
+        const suffix = c.source === 'ldap_group' ? ' (already via LDAP)' : '';
+        oauthSel.innerHTML += `<option value="${esc(c.clientId)}">${esc(c.name || c.clientId)}${suffix}</option>`;
+      });
+    }
+    const oauthAssigned = oauthClients.filter(c => c.assigned);
+    if (oauthBody) {
+      if (oauthAssigned.length === 0) {
+        oauthBody.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">No OAuth clients accessible.</td></tr>';
+      } else {
+        oauthBody.innerHTML = oauthAssigned.map(c => {
+          const canRemove = c.source === 'direct';
+          const action = canRemove
+            ? `<button onclick="removeOauthClientFromCurrentUser('${esc(c.clientId)}','${esc(c.name || c.clientId)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px">Remove</button>`
+            : '<span style="color:var(--text3);font-size:11px" title="Granted by LDAP or open allow-list">—</span>';
+          return `<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:8px 12px;font-weight:600">${esc(c.name || c.clientId)}<div style="font-size:10px;color:var(--text3);font-family:monospace">${esc(c.clientId)}</div></td>
+            <td style="padding:8px">${_sourceBadge(c.source)}</td>
+            <td style="padding:8px 12px;text-align:right">${action}</td>
+          </tr>`;
+        }).join('');
+      }
+    }
   } catch (e) {
-    body.innerHTML = '<tr><td colspan="2" style="padding:20px;text-align:center;color:var(--red)">Error: ' + esc(e.message) + '</td></tr>';
+    if (httpBody) httpBody.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--red)">Error: ' + esc(e.message) + '</td></tr>';
+    if (oauthBody) oauthBody.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--red)">Error: ' + esc(e.message) + '</td></tr>';
   }
 }
 
@@ -844,7 +977,7 @@ async function assignProfileToCurrentUser() {
     const res = await api('/admin/profiles/' + encodeURIComponent(profileName) + '/users', {
       method: 'POST', body: JSON.stringify({ userId: _userProfilesUserId }),
     });
-    if (res.ok) { toast('Proxy assigned'); refreshUserProfiles(); fetchProxyUsers(); }
+    if (res.ok) { toast('Proxy assigned'); refreshUserResources(); fetchProxyUsers(); }
     else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -854,8 +987,31 @@ async function removeProfileFromCurrentUser(profileName) {
   if (!confirm('Remove access to "' + profileName + '"?')) return;
   try {
     const res = await api('/admin/profiles/' + encodeURIComponent(profileName) + '/users/' + _userProfilesUserId, { method: 'DELETE' });
-    if (res.ok) { toast('Access removed'); refreshUserProfiles(); fetchProxyUsers(); }
+    if (res.ok) { toast('Access removed'); refreshUserResources(); fetchProxyUsers(); }
     else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function assignOauthClientToCurrentUser() {
+  if (!_userProfilesUserId) return;
+  const clientId = document.getElementById('urcOauthSelect').value;
+  if (!clientId) { toast('Select an OAuth client first', 'error'); return; }
+  try {
+    const res = await api('/admin/oauth-clients/' + encodeURIComponent(clientId) + '/users', {
+      method: 'POST', body: JSON.stringify({ userId: _userProfilesUserId }),
+    });
+    if (res.ok) { toast('Client assigned'); refreshUserResources(); }
+    else { const d = await res.json().catch(() => ({})); toast(d.error || 'Failed', 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function removeOauthClientFromCurrentUser(clientId, clientName) {
+  if (!_userProfilesUserId) return;
+  if (!confirm('Remove access to "' + clientName + '"?')) return;
+  try {
+    const res = await api('/admin/oauth-clients/' + encodeURIComponent(clientId) + '/users/' + _userProfilesUserId, { method: 'DELETE' });
+    if (res.ok) { toast('Access removed'); refreshUserResources(); }
+    else { const d = await res.json().catch(() => ({})); toast(d.error || 'Failed', 'error'); }
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 

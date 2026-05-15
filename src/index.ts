@@ -18,7 +18,7 @@ import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption } from './auth/auth';
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption } from './auth/auth';
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
 import { initConsentPages, listConsentPages, getConsentPage, createConsentPage, updateConsentPage, deleteConsentPage, findConsentPageOauthReferences } from './auth/consent-pages';
 import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin, runLdapSync, getLastLdapSyncReport } from './auth/ldap';
@@ -1542,6 +1542,7 @@ const server = Bun.serve({
                     await stopProxyServer(name);
                     releaseProxyPort(name);
                     removeAllProfileAssociations(name);
+                    removeAllProfileLdapGroups(name);
                     console.log(`🗑️  Profile "${name}" deleted`);
                     const me = getAuthedAdmin(req);
                     logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'profile.delete', targetType: 'profile', targetId: name, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
@@ -1596,6 +1597,43 @@ const server = Bun.serve({
                     const user = getProxyUser(userId);
                     if (!user) return jsonRes(404, { error: 'User not found' });
                     return jsonRes(200, { user: { ...user, profiles: listProfilesForProxyUser(userId) } });
+                }
+
+                // GET /admin/proxy-users/:id/resources — list ALL resources the user can access
+                if (url.pathname.match(/^\/admin\/proxy-users\/\d+\/resources$/) && req.method === 'GET') {
+                    const userId = parseInt(url.pathname.split('/')[3]!, 10);
+                    const user = getProxyUser(userId);
+                    if (!user) return jsonRes(404, { error: 'User not found' });
+
+                    const assignedProfileNames = new Set(listProfilesForProxyUser(userId).map(n => n.toLowerCase()));
+                    const loginProfiles = config.proxyProfiles.filter(p => (p.authMode || 'none') === 'login');
+                    const httpProxies = loginProfiles.map(p => {
+                        const direct = assignedProfileNames.has(p.name.toLowerCase());
+                        const viaLdap = !direct && shadowUserMatchesProfileLdapGroups(userId, p.name);
+                        return {
+                            name: p.name,
+                            assigned: direct || viaLdap,
+                            source: direct ? 'direct' : (viaLdap ? 'ldap_group' : null),
+                        };
+                    });
+
+                    const allClients = listOauthClients();
+                    const oauthClients = allClients.map(c => {
+                        const allowed = isUserAllowedForClient(userId, c.clientId);
+                        // Determine if directly listed: query oauth_client_users via existing helper indirectly.
+                        // We don't have a single helper; check by listing users for this client.
+                        const direct = listUsersForOauthClient(c.clientId).some(u => u.id === userId);
+                        const viaLdap = allowed && !direct && c.allowListEnabled;
+                        return {
+                            clientId: c.clientId,
+                            name: c.name,
+                            allowListEnabled: c.allowListEnabled,
+                            assigned: allowed,
+                            source: !c.allowListEnabled ? 'open' : (direct ? 'direct' : (viaLdap ? 'ldap_group' : null)),
+                        };
+                    });
+
+                    return jsonRes(200, { httpProxies, oauthClients });
                 }
 
                 // PUT /admin/proxy-users/:id — update user (password, info, reset 2fa, admin role)
@@ -2406,6 +2444,53 @@ const server = Bun.serve({
                     const userId = parseInt(parts[5], 10);
                     removeProxyUserFromProfile(userId, name);
                     return jsonRes(200, { status: 'removed' });
+                }
+
+                // ── Profile ↔ LDAP group rules ──
+
+                // GET /admin/profiles/:name/ldap-groups — list rules + available directories
+                if (url.pathname.match(/^\/admin\/profiles\/[^/]+\/ldap-groups$/) && req.method === 'GET') {
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
+                    const profile = config.proxyProfiles.find(p => p.name === name);
+                    if (!profile) return jsonRes(404, { error: `Profile "${name}" not found` });
+                    if (profile.authMode !== 'login') return jsonRes(400, { error: 'LDAP group rules only apply to profiles with authMode=login' });
+                    const groups = listLdapGroupsForProfile(name);
+                    const directories = listLdapConfigs().map(c => ({ id: c.id, name: c.name }));
+                    return jsonRes(200, { groups, directories });
+                }
+
+                // POST /admin/profiles/:name/ldap-groups — add a rule
+                if (url.pathname.match(/^\/admin\/profiles\/[^/]+\/ldap-groups$/) && req.method === 'POST') {
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
+                    const profile = config.proxyProfiles.find(p => p.name === name);
+                    if (!profile) return jsonRes(404, { error: `Profile "${name}" not found` });
+                    if (profile.authMode !== 'login') return jsonRes(400, { error: 'LDAP group rules only apply to profiles with authMode=login' });
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const ldapConfigId = Number(body.ldapConfigId);
+                    const groupMatch = typeof body.groupMatch === 'string' ? body.groupMatch.trim() : '';
+                    if (!ldapConfigId || isNaN(ldapConfigId)) return jsonRes(400, { error: 'ldapConfigId required' });
+                    if (!groupMatch) return jsonRes(400, { error: 'groupMatch required (CN short form or full DN)' });
+                    if (!getLdapConfig(ldapConfigId)) return jsonRes(400, { error: 'Unknown ldapConfigId' });
+                    const rule = addLdapGroupToProfile(name, ldapConfigId, groupMatch);
+                    if (!rule) return jsonRes(409, { error: 'Rule already exists or could not be created' });
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'profile.ldap_group.add', targetType: 'profile', targetId: name, details: { ldapConfigId, groupMatch }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(201, { rule });
+                }
+
+                // DELETE /admin/profiles/:name/ldap-groups/:ruleId — remove a rule
+                if (url.pathname.match(/^\/admin\/profiles\/[^/]+\/ldap-groups\/\d+$/) && req.method === 'DELETE') {
+                    const parts = url.pathname.split('/');
+                    const name = decodeURIComponent(parts[3] || '').toLowerCase();
+                    const ruleId = Number(parts[5]);
+                    if (!ruleId || isNaN(ruleId)) return jsonRes(400, { error: 'Invalid rule id' });
+                    const ruleBefore = getProfileLdapGroupById(name, ruleId);
+                    const ok = removeLdapGroupFromProfile(name, ruleId);
+                    if (!ok) return jsonRes(404, { error: 'Rule not found' });
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'profile.ldap_group.remove', targetType: 'profile', targetId: name, details: { ruleId, ldapConfigId: ruleBefore?.ldapConfigId, groupMatch: ruleBefore?.groupMatch }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { status: 'ok' });
                 }
 
                 // ── Invite Tokens ──
