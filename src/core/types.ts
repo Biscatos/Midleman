@@ -26,6 +26,37 @@ export interface ProxyProfile {
   consentPageId?: number | null; // Reference to consent_pages.id (auth DB). null = no page linked.
   allowSelfSignedTls?: boolean; // If true, skip TLS certificate validation for this upstream (for internal services)
   supabaseMode?: boolean; // If true (with authMode='login'): keeps the static apiKey header (Supabase anon key) AND adds Authorization: Bearer <userJwt> from the login cookie, so Supabase RLS sees the authenticated user.
+
+  // -- Nginx Proxy Manager integration (optional addon) --
+  // Public hostnames to be served by NPM in front. Empty/undefined = profile is not synced to NPM.
+  publicHostnames?: string[];
+  tlsMode?: 'auto-acme' | 'manual' | 'none';
+  npmCertificateId?: number;   // NPM cert id once issued/associated
+  npmProxyHostId?: number;     // NPM proxy-host id once created/adopted
+  /** When set, this profile was created by adopting an existing NPM host.
+   *  These fields capture the original forward target so we can restore it on release. */
+  npmOriginalForwardHost?: string;
+  npmOriginalForwardPort?: number;
+  npmOriginalForwardScheme?: 'http' | 'https';
+  http2?: boolean;             // NPM toggle (default true)
+  hstsEnabled?: boolean;       // NPM toggle
+  sslForced?: boolean;         // NPM toggle: redirect 80→443
+  allowWebsocketUpgrade?: boolean; // NPM toggle: allow WebSocket upgrade headers
+  advancedConfig?: string;     // NPM advanced_config — raw nginx directives
+  /** Optional NPM custom locations — extra location blocks with their own upstream. */
+  npmLocations?: NpmCustomLocation[];
+}
+
+/**
+ * Custom location block synced to NPM's `locations` array.
+ * Lets you route specific paths to a different upstream than the profile default.
+ */
+export interface NpmCustomLocation {
+  path: string;                                // e.g. "/api"
+  forwardScheme?: 'http' | 'https';            // default "http"
+  forwardHost: string;                         // upstream host (e.g. "api.internal")
+  forwardPort: number;                         // upstream port
+  advancedConfig?: string;                     // raw nginx directives for this location
 }
 
 

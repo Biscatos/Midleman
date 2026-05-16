@@ -1,4 +1,4 @@
-import type { ProxyProfile, WebhookDistributor, TcpUdpProfile } from './types';
+import type { ProxyProfile, WebhookDistributor, TcpUdpProfile, NpmCustomLocation } from './types';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname, resolve } from 'path';
 
@@ -30,6 +30,20 @@ interface StoredProfile {
     consentEnabled?: boolean;
     /** Reference to a row in consent_pages (auth DB). null/undefined means no page linked. */
     consentPageId?: number | null;
+    // NPM integration (optional)
+    publicHostnames?: string[];
+    tlsMode?: 'auto-acme' | 'manual' | 'none';
+    npmCertificateId?: number;
+    npmProxyHostId?: number;
+    http2?: boolean;
+    hstsEnabled?: boolean;
+    sslForced?: boolean;
+    allowWebsocketUpgrade?: boolean;
+    advancedConfig?: string;
+    npmLocations?: NpmCustomLocation[];
+    npmOriginalForwardHost?: string;
+    npmOriginalForwardPort?: number;
+    npmOriginalForwardScheme?: 'http' | 'https';
 }
 
 // Default path — override with DATA_DIR env var for Docker volumes
@@ -84,6 +98,19 @@ function toRuntime(stored: StoredProfile): ProxyProfile {
     if (stored.supabaseMode !== undefined) profile.supabaseMode = stored.supabaseMode;
     if (stored.consentEnabled !== undefined) profile.consentEnabled = stored.consentEnabled;
     if (stored.consentPageId !== undefined) profile.consentPageId = stored.consentPageId;
+    if (stored.publicHostnames && stored.publicHostnames.length > 0) profile.publicHostnames = stored.publicHostnames;
+    if (stored.tlsMode) profile.tlsMode = stored.tlsMode;
+    if (stored.npmCertificateId !== undefined) profile.npmCertificateId = stored.npmCertificateId;
+    if (stored.npmProxyHostId !== undefined) profile.npmProxyHostId = stored.npmProxyHostId;
+    if (stored.http2 !== undefined) profile.http2 = stored.http2;
+    if (stored.hstsEnabled !== undefined) profile.hstsEnabled = stored.hstsEnabled;
+    if (stored.sslForced !== undefined) profile.sslForced = stored.sslForced;
+    if (stored.allowWebsocketUpgrade !== undefined) profile.allowWebsocketUpgrade = stored.allowWebsocketUpgrade;
+    if (stored.advancedConfig !== undefined) profile.advancedConfig = stored.advancedConfig;
+    if (Array.isArray(stored.npmLocations) && stored.npmLocations.length > 0) profile.npmLocations = stored.npmLocations;
+    if (stored.npmOriginalForwardHost) profile.npmOriginalForwardHost = stored.npmOriginalForwardHost;
+    if (typeof stored.npmOriginalForwardPort === 'number') profile.npmOriginalForwardPort = stored.npmOriginalForwardPort;
+    if (stored.npmOriginalForwardScheme === 'http' || stored.npmOriginalForwardScheme === 'https') profile.npmOriginalForwardScheme = stored.npmOriginalForwardScheme;
 
     return profile;
 }
@@ -121,6 +148,19 @@ function toStored(profile: ProxyProfile): StoredProfile {
     if (profile.consentEnabled !== undefined) stored.consentEnabled = profile.consentEnabled;
     // Persist null explicitly so an admin can clear a previously linked page.
     if (profile.consentPageId !== undefined) stored.consentPageId = profile.consentPageId;
+    if (profile.publicHostnames && profile.publicHostnames.length > 0) stored.publicHostnames = profile.publicHostnames;
+    if (profile.tlsMode) stored.tlsMode = profile.tlsMode;
+    if (profile.npmCertificateId !== undefined) stored.npmCertificateId = profile.npmCertificateId;
+    if (profile.npmProxyHostId !== undefined) stored.npmProxyHostId = profile.npmProxyHostId;
+    if (profile.http2 !== undefined) stored.http2 = profile.http2;
+    if (profile.hstsEnabled !== undefined) stored.hstsEnabled = profile.hstsEnabled;
+    if (profile.sslForced !== undefined) stored.sslForced = profile.sslForced;
+    if (profile.allowWebsocketUpgrade !== undefined) stored.allowWebsocketUpgrade = profile.allowWebsocketUpgrade;
+    if (profile.advancedConfig !== undefined) stored.advancedConfig = profile.advancedConfig;
+    if (profile.npmLocations && profile.npmLocations.length > 0) stored.npmLocations = profile.npmLocations;
+    if (profile.npmOriginalForwardHost) stored.npmOriginalForwardHost = profile.npmOriginalForwardHost;
+    if (profile.npmOriginalForwardPort !== undefined) stored.npmOriginalForwardPort = profile.npmOriginalForwardPort;
+    if (profile.npmOriginalForwardScheme) stored.npmOriginalForwardScheme = profile.npmOriginalForwardScheme;
 
     return stored;
 }
@@ -227,6 +267,40 @@ export function validateProfileInput(input: unknown): string | null {
     if (p.consentEnabled !== undefined && typeof p.consentEnabled !== 'boolean') return '"consentEnabled" must be a boolean';
     if (p.consentPageId !== undefined && p.consentPageId !== null && (typeof p.consentPageId !== 'number' || !Number.isInteger(p.consentPageId) || p.consentPageId < 1)) {
         return '"consentPageId" must be a positive integer or null';
+    }
+    // NPM integration fields (all optional)
+    if (p.publicHostnames !== undefined) {
+        if (!Array.isArray(p.publicHostnames)) return '"publicHostnames" must be an array of strings';
+        for (const h of p.publicHostnames) {
+            if (typeof h !== 'string' || !h.trim()) return '"publicHostnames" entries must be non-empty strings';
+            if ((h as string).length > 253) return '"publicHostnames" entries must be 253 characters or fewer';
+            if (!/^[a-zA-Z0-9*]([a-zA-Z0-9-_.]*[a-zA-Z0-9])?$/.test(h as string)) return `"publicHostnames" entry "${h}" is not a valid hostname`;
+        }
+    }
+    if (p.tlsMode !== undefined && p.tlsMode !== 'auto-acme' && p.tlsMode !== 'manual' && p.tlsMode !== 'none') {
+        return '"tlsMode" must be "auto-acme", "manual" or "none"';
+    }
+    if (p.http2 !== undefined && typeof p.http2 !== 'boolean') return '"http2" must be a boolean';
+    if (p.hstsEnabled !== undefined && typeof p.hstsEnabled !== 'boolean') return '"hstsEnabled" must be a boolean';
+    if (p.sslForced !== undefined && typeof p.sslForced !== 'boolean') return '"sslForced" must be a boolean';
+    if (p.allowWebsocketUpgrade !== undefined && typeof p.allowWebsocketUpgrade !== 'boolean') return '"allowWebsocketUpgrade" must be a boolean';
+    if (p.advancedConfig !== undefined && typeof p.advancedConfig !== 'string') return '"advancedConfig" must be a string';
+    if (typeof p.advancedConfig === 'string' && p.advancedConfig.length > 16384) return '"advancedConfig" exceeds maximum size (16KB)';
+    if (p.npmLocations !== undefined) {
+        if (!Array.isArray(p.npmLocations)) return '"npmLocations" must be an array';
+        if (p.npmLocations.length > 32) return '"npmLocations" cannot exceed 32 entries';
+        for (const loc of p.npmLocations as unknown[]) {
+            if (!loc || typeof loc !== 'object') return '"npmLocations" entries must be objects';
+            const l = loc as Record<string, unknown>;
+            if (typeof l.path !== 'string' || !l.path.trim() || !l.path.startsWith('/')) return '"npmLocations[].path" must be a non-empty string starting with "/"';
+            if ((l.path as string).length > 256) return '"npmLocations[].path" too long (max 256)';
+            if (typeof l.forwardHost !== 'string' || !l.forwardHost.trim()) return '"npmLocations[].forwardHost" is required';
+            if ((l.forwardHost as string).length > 253) return '"npmLocations[].forwardHost" too long';
+            if (typeof l.forwardPort !== 'number' || l.forwardPort < 1 || l.forwardPort > 65535) return '"npmLocations[].forwardPort" must be 1–65535';
+            if (l.forwardScheme !== undefined && l.forwardScheme !== 'http' && l.forwardScheme !== 'https') return '"npmLocations[].forwardScheme" must be "http" or "https"';
+            if (l.advancedConfig !== undefined && typeof l.advancedConfig !== 'string') return '"npmLocations[].advancedConfig" must be a string';
+            if (typeof l.advancedConfig === 'string' && (l.advancedConfig as string).length > 4096) return '"npmLocations[].advancedConfig" too long (max 4KB)';
+        }
     }
 
     // Validate URL

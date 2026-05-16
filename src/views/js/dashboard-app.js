@@ -285,6 +285,7 @@ const PAGE_TITLES = {
   consentpages: 'Consent Pages',
   ldap: 'LDAP',
   email: 'Email (SMTP)',
+  npm: 'Nginx Proxy Manager',
   audit: 'Audit Log'
 };
 
@@ -307,6 +308,7 @@ function navigate(page) {
   if (page === 'consentpages') { fetchConsentPages(); }
   if (page === 'ldap') { fetchLdapConfigs(); filterLdapAdoptions('pending'); }
   if (page === 'email') { fetchSmtpConfig(); }
+  if (page === 'npm') { fetchNpmConfig(); }
   if (page === 'audit') { fetchAuditLogs(true); }
   const titleEl = document.getElementById('topbarPageTitle');
   if (titleEl) titleEl.textContent = PAGE_TITLES[page] || page;

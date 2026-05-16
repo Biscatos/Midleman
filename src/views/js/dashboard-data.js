@@ -296,6 +296,15 @@ async function fetchProfiles() {
     if (_allInvites.length) renderInvites(_allInvites);
     document.getElementById('navProfileBadge').textContent = _allProfiles.length;
     document.getElementById('ovProfileNames').textContent = _allProfiles.map(p => p.name).join(', ') || 'none';
+    // Toggle "Import from NPM" button based on integration state
+    try {
+      const ns = await api('/admin/npm');
+      if (ns.ok) {
+        const data = await ns.json();
+        const importBtn = document.getElementById('npmImportBtn');
+        if (importBtn) importBtn.style.display = (data.npm && data.npm.enabled) ? '' : 'none';
+      }
+    } catch { /* ignore */ }
   } catch { }
 }
 
@@ -379,6 +388,32 @@ async function openProfileModal(profile = null) {
   updateLogoPreview();
   document.getElementById('pBlocked').value = profile?.blockedExtensions ? profile.blockedExtensions.join(', ') : '';
   IpTagInput.setValue('pAllowedIps', profile?.allowedIps || []);
+  // NPM fields
+  document.getElementById('pPublicHostnames').value = profile?.publicHostnames ? profile.publicHostnames.join(', ') : '';
+  document.getElementById('pTlsMode').value = profile?.tlsMode || 'none';
+  document.getElementById('pHttp2').checked = profile ? profile.http2 !== false : true;
+  document.getElementById('pHstsEnabled').checked = !!(profile && profile.hstsEnabled);
+  document.getElementById('pSslForced').checked = !!(profile && profile.sslForced);
+  document.getElementById('pAllowWebsocketUpgrade').checked = profile ? profile.allowWebsocketUpgrade !== false : true;
+  document.getElementById('pAdvancedConfig').value = (profile && profile.advancedConfig) || '';
+  renderNpmLocations((profile && profile.npmLocations) || []);
+  // Adopted-from-NPM banner
+  const banner = document.getElementById('pAdoptedBanner');
+  const info = document.getElementById('pAdoptedInfo');
+  if (banner && info) {
+    if (profile && profile.npmOriginalForwardHost && profile.npmProxyHostId) {
+      banner.style.display = 'flex';
+      info.textContent = '#' + profile.npmProxyHostId + ' — original forward ' + (profile.npmOriginalForwardScheme || 'http') + '://' + profile.npmOriginalForwardHost + ':' + profile.npmOriginalForwardPort;
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+  const npmStatusEl = document.getElementById('pNpmStatus');
+  if (npmStatusEl) {
+    if (profile && profile.npmProxyHostId) npmStatusEl.textContent = '✔ Synced — NPM proxy host #' + profile.npmProxyHostId + (profile.npmCertificateId ? ', cert #' + profile.npmCertificateId : '');
+    else if (profile && profile.publicHostnames && profile.publicHostnames.length) npmStatusEl.textContent = 'Hostnames configured but not yet synced — enable NPM integration in settings.';
+    else npmStatusEl.textContent = '';
+  }
   toggleProfileAuthMode();
   document.getElementById('profileModal').classList.add('active');
 }
@@ -454,9 +489,28 @@ async function saveProfile() {
   }
   const blocked = v('pBlocked'); if (blocked) body.blockedExtensions = blocked.split(',').map(s => s.trim()).filter(Boolean);
   const allowedIps = IpTagInput.getValue('pAllowedIps'); if (allowedIps.length) body.allowedIps = allowedIps;
+  // NPM fields
+  const hostnamesRaw = v('pPublicHostnames');
+  body.publicHostnames = hostnamesRaw ? hostnamesRaw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+  body.tlsMode = v('pTlsMode') || 'none';
+  body.http2 = document.getElementById('pHttp2').checked;
+  body.hstsEnabled = document.getElementById('pHstsEnabled').checked;
+  body.sslForced = document.getElementById('pSslForced').checked;
+  body.allowWebsocketUpgrade = document.getElementById('pAllowWebsocketUpgrade').checked;
+  const advanced = document.getElementById('pAdvancedConfig').value;
+  if (advanced.trim()) body.advancedConfig = advanced;
+  const locations = readNpmLocations();
+  if (locations.length) body.npmLocations = locations;
+  // Adoption payload (only on first save after Adopt from NPM)
+  if (_npmImportPreviewData && !editingProfile) {
+    body.npmProxyHostId = _npmImportPreviewData.npmProxyHostId;
+    body.npmOriginalForwardHost = _npmImportPreviewData.npmOriginalForwardHost;
+    body.npmOriginalForwardPort = _npmImportPreviewData.npmOriginalForwardPort;
+    body.npmOriginalForwardScheme = _npmImportPreviewData.npmOriginalForwardScheme;
+  }
   try {
     const res = await api('/admin/profiles', { method: 'POST', body: JSON.stringify(body) }); const d = await res.json();
-    if (res.ok) { toast('Proxy ' + (d.status || 'saved')); closeProfileModal(); await fetchProfiles(); }
+    if (res.ok) { _npmImportPreviewData = null; toast('Proxy ' + (d.status || 'saved')); closeProfileModal(); await fetchProfiles(); }
     else toast(d.error || 'Failed', 'error');
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -4904,5 +4958,389 @@ async function deleteCertificate(id) {
     toast('Certificate deleted');
     await fetchCerts();
   } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+// ─── Nginx Proxy Manager (NPM) integration ────────────────────────────────────
+
+let _npmHasPassword = false;
+
+function setNpmStatus(elId, msg, kind) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (!msg) { el.textContent = ''; el.style.color = ''; return; }
+  const colorMap = { ok: 'var(--ok-text)', err: 'var(--err-text)', info: 'var(--text2)' };
+  el.style.color = colorMap[kind] || colorMap.info;
+  el.textContent = msg;
+}
+
+async function fetchNpmConfig() {
+  try {
+    const res = await api('/admin/npm');
+    if (!res.ok) return;
+    const data = await res.json();
+    const cfg = data.npm;
+    const urlEl = document.getElementById('npmUrl');
+    const emailEl = document.getElementById('npmEmail');
+    const pwEl = document.getElementById('npmPassword');
+    const hostEl = document.getElementById('npmMidlemanHost');
+    const enabledEl = document.getElementById('npmEnabled');
+    const volEl = document.getElementById('npmVolumeStatus');
+    if (cfg) {
+      urlEl.value = cfg.url || '';
+      emailEl.value = cfg.email || '';
+      pwEl.value = '';
+      hostEl.value = cfg.midlemanPublicHost || '';
+      enabledEl.checked = !!cfg.enabled;
+      _npmHasPassword = !!cfg.hasPassword;
+      pwEl.placeholder = _npmHasPassword ? '(unchanged)' : '';
+      if (cfg.enabled && cfg.tokenValid) setNpmStatus('npmStatus', 'Integration active — token valid.', 'ok');
+      else if (cfg.enabled) setNpmStatus('npmStatus', 'Integration enabled — token will be acquired on next sync.', 'info');
+      else setNpmStatus('npmStatus', 'Integration is disabled.', 'info');
+      if (cfg.lastError) setNpmStatus('npmStatus', 'Last error: ' + cfg.lastError, 'err');
+    } else {
+      urlEl.value = '';
+      emailEl.value = '';
+      pwEl.value = '';
+      hostEl.value = '';
+      enabledEl.checked = false;
+      _npmHasPassword = false;
+      setNpmStatus('npmStatus', 'No NPM configuration active.', 'info');
+    }
+    if (volEl) {
+      volEl.textContent = data.certVolumeMounted
+        ? '✔ Shared Let\'s Encrypt volume mounted (NPM_LETSENCRYPT_DIR). Internal ACME is disabled.'
+        : 'Shared volume not detected. Set NPM_LETSENCRYPT_DIR and mount /etc/letsencrypt:ro in docker-compose to share certs.';
+      volEl.style.color = data.certVolumeMounted ? 'var(--ok-text)' : 'var(--text2)';
+    }
+  } catch (e) {
+    setNpmStatus('npmStatus', 'Failed to load: ' + e.message, 'err');
+  }
+}
+
+function _readNpmForm(passwordOnlyIfFilled) {
+  const pw = document.getElementById('npmPassword').value;
+  const body = {
+    url: document.getElementById('npmUrl').value.trim(),
+    email: document.getElementById('npmEmail').value.trim(),
+    midlemanPublicHost: document.getElementById('npmMidlemanHost').value.trim(),
+    enabled: document.getElementById('npmEnabled').checked,
+  };
+  if (!passwordOnlyIfFilled || pw) body.password = pw;
+  return body;
+}
+
+async function saveNpmConfig() {
+  const body = _readNpmForm(true);
+  if (!body.url) { setNpmStatus('npmStatus', 'URL is required.', 'err'); return; }
+  if (!body.email) { setNpmStatus('npmStatus', 'Email is required.', 'err'); return; }
+  if (body.enabled && !_npmHasPassword && !body.password) {
+    setNpmStatus('npmStatus', 'Password is required to enable the integration.', 'err');
+    return;
+  }
+  setNpmStatus('npmStatus', 'Saving…', 'info');
+  try {
+    const res = await api('/admin/npm', { method: 'PUT', body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) { setNpmStatus('npmStatus', data.error || 'Failed to save.', 'err'); return; }
+    toast('NPM configuration saved');
+    await fetchNpmConfig();
+  } catch (e) {
+    setNpmStatus('npmStatus', 'Network error: ' + e.message, 'err');
+  }
+}
+
+async function testNpmConnectionUi() {
+  const url = document.getElementById('npmUrl').value.trim();
+  const email = document.getElementById('npmEmail').value.trim();
+  const password = document.getElementById('npmPassword').value;
+  if (!url || !email) { setNpmStatus('npmStatus', 'URL and email are required.', 'err'); return; }
+  setNpmStatus('npmStatus', 'Testing connection…', 'info');
+  try {
+    const body = (password) ? { url, email, password } : {};
+    const res = await fetch('/admin/npm/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 401) { window.location.reload(); return; }
+    const data = await res.json();
+    if (data.ok) setNpmStatus('npmStatus', 'Connection OK ✔' + (data.version ? ' — NPM ' + data.version : ''), 'ok');
+    else setNpmStatus('npmStatus', 'Failed: ' + (data.error || 'unknown error'), 'err');
+  } catch (e) {
+    setNpmStatus('npmStatus', 'Network error: ' + e.message, 'err');
+  }
+}
+
+async function clearNpmConfig() {
+  if (!confirm('Remove the NPM integration configuration?')) return;
+  try {
+    const res = await api('/admin/npm', { method: 'DELETE' });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return setNpmStatus('npmStatus', d.error || 'Error', 'err'); }
+    toast('NPM configuration removed');
+    await fetchNpmConfig();
+  } catch (e) {
+    setNpmStatus('npmStatus', 'Network error: ' + e.message, 'err');
+  }
+}
+
+function _npmLocationRowHtml(loc, idx) {
+  const path = (loc && loc.path) || '';
+  const scheme = (loc && loc.forwardScheme) || 'http';
+  const host = (loc && loc.forwardHost) || '';
+  const port = (loc && (loc.forwardPort ?? '')) || '';
+  const adv = (loc && loc.advancedConfig) || '';
+  const optHttp = scheme === 'http' ? ' selected' : '';
+  const optHttps = scheme === 'https' ? ' selected' : '';
+  return '<div class="npm-loc-row" data-idx="' + idx + '" style="display:grid;grid-template-columns:1fr 90px 1.4fr 90px auto;gap:6px;align-items:start">' +
+    '<input type="text" class="npm-loc-path" value="' + _esc(path) + '" placeholder="/api" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 9px;color:var(--text);font-size:12.5px">' +
+    '<select class="npm-loc-scheme" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 9px;color:var(--text);font-size:12.5px"><option value="http"' + optHttp + '>http</option><option value="https"' + optHttps + '>https</option></select>' +
+    '<input type="text" class="npm-loc-host" value="' + _esc(host) + '" placeholder="upstream.host" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 9px;color:var(--text);font-size:12.5px">' +
+    '<input type="number" class="npm-loc-port" min="1" max="65535" value="' + _esc(String(port)) + '" placeholder="8080" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 9px;color:var(--text);font-size:12.5px">' +
+    '<button type="button" class="btn btn-sm" onclick="removeNpmLocation(' + idx + ')" style="color:var(--err-text);padding:6px 10px" title="Remove location">&times;</button>' +
+    '<textarea class="npm-loc-adv" rows="1" placeholder="# location-specific nginx directives" style="grid-column:1 / -1;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 9px;color:var(--text);font-size:12px;font-family:monospace">' + _esc(adv) + '</textarea>' +
+    '</div>';
+}
+
+function _esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function renderNpmLocations(locations) {
+  const container = document.getElementById('pNpmLocations');
+  if (!container) return;
+  container.innerHTML = '';
+  (locations || []).forEach((loc, idx) => {
+    container.insertAdjacentHTML('beforeend', _npmLocationRowHtml(loc, idx));
+  });
+}
+
+function addNpmLocation() {
+  const container = document.getElementById('pNpmLocations');
+  if (!container) return;
+  const idx = container.querySelectorAll('.npm-loc-row').length;
+  container.insertAdjacentHTML('beforeend', _npmLocationRowHtml({}, idx));
+}
+
+function removeNpmLocation(idx) {
+  const container = document.getElementById('pNpmLocations');
+  if (!container) return;
+  const row = container.querySelector('.npm-loc-row[data-idx="' + idx + '"]');
+  if (row) row.remove();
+}
+
+function readNpmLocations() {
+  const out = [];
+  document.querySelectorAll('#pNpmLocations .npm-loc-row').forEach(row => {
+    const path = row.querySelector('.npm-loc-path').value.trim();
+    const host = row.querySelector('.npm-loc-host').value.trim();
+    const port = parseInt(row.querySelector('.npm-loc-port').value, 10);
+    if (!path || !host || !port) return;
+    const loc = {
+      path: path.startsWith('/') ? path : '/' + path,
+      forwardScheme: row.querySelector('.npm-loc-scheme').value === 'https' ? 'https' : 'http',
+      forwardHost: host,
+      forwardPort: port,
+    };
+    const adv = row.querySelector('.npm-loc-adv').value.trim();
+    if (adv) loc.advancedConfig = adv;
+    out.push(loc);
+  });
+  return out;
+}
+
+// ─── NPM proxy host import (adopt) ────────────────────────────────────────────
+
+let _npmImportPreviewData = null; // payload from /preview-adopt awaiting profile save
+
+function openNpmImportModal() {
+  document.getElementById('npmImportModal').classList.add('active');
+  fetchNpmProxyHosts();
+}
+function closeNpmImportModal() {
+  document.getElementById('npmImportModal').classList.remove('active');
+}
+
+async function fetchNpmProxyHosts() {
+  const body = document.getElementById('npmImportBody');
+  const status = document.getElementById('npmImportStatus');
+  body.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text3)">Loading…</td></tr>';
+  status.textContent = '';
+  document.getElementById('npmSelectAll').checked = false;
+  try {
+    const res = await api('/admin/npm/proxy-hosts');
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      body.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--err-text)">' + _esc(d.error || 'Failed to load') + '</td></tr>';
+      return;
+    }
+    const data = await res.json();
+    const hosts = data.hosts || [];
+    if (!hosts.length) {
+      body.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text3)">No proxy hosts in NPM yet.</td></tr>';
+      updateNpmSelectionCount();
+      return;
+    }
+    body.innerHTML = hosts.map(h => {
+      const domains = (h.domain_names || []).join(', ');
+      const fwd = (h.forward_scheme || 'http') + '://' + (h.forward_host || '?') + ':' + (h.forward_port || '?');
+      const checkbox = (h.adopted && h.linkedProfile)
+        ? '<input type="checkbox" disabled>'
+        : '<input type="checkbox" class="npm-import-cb" data-host-id="' + h.id + '" onchange="updateNpmSelectionCount()">';
+      let badge, action;
+      if (h.adopted && h.linkedProfile) {
+        badge = '<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:10px;font-size:11px">Linked → ' + _esc(h.linkedProfile) + '</span>';
+        action = '<a href="javascript:void(0)" onclick="openLinkedProfile(\'' + _esc(h.linkedProfile) + '\')" style="color:var(--accent);font-size:12px">Open</a>';
+      } else {
+        badge = '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 8px;border-radius:10px;font-size:11px">Available</span>';
+        action = '<button class="btn btn-sm" onclick="adoptNpmHost(' + h.id + ')" title="Adopt with custom settings (opens form)">Customize…</button>';
+      }
+      return '<tr style="border-bottom:1px solid var(--border)">' +
+        '<td style="padding:8px 12px">' + checkbox + '</td>' +
+        '<td style="padding:8px 12px;color:var(--text3)">#' + h.id + '</td>' +
+        '<td style="padding:8px 12px">' + _esc(domains || '(no domains)') + '</td>' +
+        '<td style="padding:8px 12px;color:var(--text2);font-family:monospace;font-size:11.5px">' + _esc(fwd) + '</td>' +
+        '<td style="padding:8px 12px">' + badge + '</td>' +
+        '<td style="padding:8px 12px;text-align:right">' + action + '</td>' +
+        '</tr>';
+    }).join('');
+    updateNpmSelectionCount();
+  } catch (e) {
+    body.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--err-text)">' + _esc(e.message) + '</td></tr>';
+  }
+}
+
+function toggleNpmSelectAll(checked) {
+  document.querySelectorAll('#npmImportBody .npm-import-cb').forEach(cb => { cb.checked = checked; });
+  updateNpmSelectionCount();
+}
+
+function updateNpmSelectionCount() {
+  const checked = document.querySelectorAll('#npmImportBody .npm-import-cb:checked');
+  const count = checked.length;
+  const countEl = document.getElementById('npmSelectionCount');
+  const btn = document.getElementById('npmBulkImportBtn');
+  if (countEl) countEl.textContent = count ? (count + ' host' + (count === 1 ? '' : 's') + ' selected') : '';
+  if (btn) btn.disabled = count === 0;
+  // Sync the master "select all" indeterminate / checked state
+  const total = document.querySelectorAll('#npmImportBody .npm-import-cb').length;
+  const master = document.getElementById('npmSelectAll');
+  if (master) {
+    master.checked = count > 0 && count === total;
+    master.indeterminate = count > 0 && count < total;
+  }
+}
+
+function toggleNpmBulkAuthOpts() {
+  const mode = document.getElementById('npmBulkAuthMode').value;
+  document.getElementById('npmBulkAccessKeyGroup').style.display = mode === 'accessKey' ? '' : 'none';
+  document.getElementById('npmBulkLoginGroup').style.display = mode === 'login' ? '' : 'none';
+}
+
+async function bulkAdoptNpmHosts() {
+  const ids = Array.from(document.querySelectorAll('#npmImportBody .npm-import-cb:checked'))
+    .map(cb => Number(cb.getAttribute('data-host-id')))
+    .filter(n => n > 0);
+  if (!ids.length) return;
+  const authMode = document.getElementById('npmBulkAuthMode').value;
+  const body = { hostIds: ids, authMode };
+  if (authMode === 'accessKey') {
+    const k = document.getElementById('npmBulkAccessKey').value.trim();
+    if (k) body.accessKey = k;
+  } else if (authMode === 'login') {
+    body.require2fa = document.getElementById('npmBulkRequire2fa').checked;
+    body.isWebApp = document.getElementById('npmBulkIsWebApp').checked;
+  }
+  const btn = document.getElementById('npmBulkImportBtn');
+  btn.disabled = true;
+  const status = document.getElementById('npmImportStatus');
+  status.style.color = 'var(--text2)';
+  status.textContent = 'Importing ' + ids.length + ' host' + (ids.length === 1 ? '' : 's') + '…';
+  try {
+    const res = await api('/admin/npm/proxy-hosts/bulk-adopt', { method: 'POST', body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) {
+      status.style.color = 'var(--err-text)';
+      status.textContent = data.error || 'Bulk import failed';
+      btn.disabled = false;
+      return;
+    }
+    const okCount = data.ok || 0;
+    const failCount = data.failed || 0;
+    toast(okCount + ' imported' + (failCount ? ', ' + failCount + ' failed' : ''));
+    if (failCount > 0) {
+      status.style.color = 'var(--err-text)';
+      status.innerHTML = (data.results || []).filter(r => !r.ok).map(r => '#' + r.hostId + ': ' + _esc(r.error || 'unknown')).join('<br>');
+    } else {
+      status.style.color = 'var(--ok-text)';
+      status.textContent = 'Done.';
+    }
+    await fetchProfiles();
+    await fetchNpmProxyHosts();
+  } catch (e) {
+    status.style.color = 'var(--err-text)';
+    status.textContent = 'Network error: ' + e.message;
+    btn.disabled = false;
+  }
+}
+
+async function adoptNpmHost(id) {
+  try {
+    const res = await api('/admin/npm/proxy-hosts/' + id + '/preview-adopt');
+    const data = await res.json();
+    if (!res.ok) return toast(data.error || 'Cannot adopt', 'error');
+    _npmImportPreviewData = data.preview;
+    closeNpmImportModal();
+    // Open profile modal pre-filled with the host data; user picks a name and saves.
+    await openProfileModal(null);
+    const p = _npmImportPreviewData;
+    document.getElementById('pTargetUrl').value = p.targetUrl || '';
+    document.getElementById('pPublicHostnames').value = (p.publicHostnames || []).join(', ');
+    document.getElementById('pTlsMode').value = p.certificateId ? 'manual' : 'none';
+    document.getElementById('pHttp2').checked = !!p.http2;
+    document.getElementById('pHstsEnabled').checked = !!p.hstsEnabled;
+    document.getElementById('pSslForced').checked = !!p.sslForced;
+    document.getElementById('pAllowWebsocketUpgrade').checked = p.allowWebsocketUpgrade !== false;
+    document.getElementById('pAdvancedConfig').value = p.advancedConfig || '';
+    const banner = document.getElementById('pAdoptedBanner');
+    const info = document.getElementById('pAdoptedInfo');
+    banner.style.display = 'flex';
+    info.textContent = '#' + p.npmProxyHostId + ' — original forward ' + (p.npmOriginalForwardScheme || 'http') + '://' + p.npmOriginalForwardHost + ':' + p.npmOriginalForwardPort;
+    document.getElementById('pName').focus();
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+  }
+}
+
+function openLinkedProfile(name) {
+  closeNpmImportModal();
+  editProfile(name);
+}
+
+async function releaseProfileFromNpm() {
+  if (!editingProfile || !editingProfile.name) return;
+  if (!confirm('Release this profile from the NPM host? NPM will be restored to the original forward target.')) return;
+  try {
+    const res = await api('/admin/profiles/' + encodeURIComponent(editingProfile.name) + '/npm-release', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) return toast(data.error || 'Release failed', 'error');
+    toast('Released from NPM');
+    document.getElementById('pAdoptedBanner').style.display = 'none';
+    closeProfileModal();
+    await fetchProfiles();
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+  }
+}
+
+async function syncProfileToNpm(profileName) {
+  if (!profileName) return;
+  try {
+    const res = await api('/admin/npm/sync/' + encodeURIComponent(profileName), { method: 'POST' });
+    const data = await res.json();
+    if (res.ok && data.ok) toast('Synced "' + profileName + '" to NPM (' + (data.action || 'ok') + ')');
+    else toast('Sync failed: ' + (data.error || 'unknown error'), 'error');
+  } catch (e) {
+    toast('Sync error: ' + e.message, 'error');
+  }
 }
 

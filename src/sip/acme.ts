@@ -122,6 +122,14 @@ function isPemValid(pem: string, thresholdDays: number): boolean {
 export async function scheduleAcmeRenewal(cert: CertRecord): Promise<void> {
     if (cert.source !== 'acme') return;
 
+    // When NPM owns Let's Encrypt (volume mounted), skip internal ACME entirely
+    // — NPM's certbot handles issuance/renewal and we read PEMs from the shared
+    // volume via src/certs/npm-cert-loader.ts.
+    if (process.env.NPM_LETSENCRYPT_DIR) {
+        console.log(`[acme:#${cert.id}:${cert.domain}] Skipped — NPM_LETSENCRYPT_DIR set, NPM owns Let's Encrypt`);
+        return;
+    }
+
     // Replace any existing timer for this cert
     const prev = _renewalTimers.get(cert.id);
     if (prev) clearInterval(prev);

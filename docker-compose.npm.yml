@@ -1,0 +1,86 @@
+# Overlay for end-to-end testing of the Nginx Proxy Manager (NPM) integration.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.npm.yml up
+#
+# This file does three things:
+#   1. Stands up the full NPM stack (admin UI + MariaDB + certbot renewer).
+#   2. Wires Midleman to the same docker network so NPM can reach it as
+#      forward_host="midleman".
+#   3. Mounts the shared Let's Encrypt volume into Midleman read-only.
+#
+# After "up":
+#   - NPM admin UI:  http://localhost:81  (default: admin@example.com / changeme)
+#   - Midleman:      http://localhost:3000
+#   - Go to Midleman → Nginx PM, paste http://app:81 + the admin creds, enable.
+
+version: '3.7'
+
+services:
+  bun-forwarder:
+    environment:
+      - NPM_API_URL=http://app:81
+      - NPM_LETSENCRYPT_DIR=/etc/letsencrypt
+      - MIDLEMAN_PUBLIC_HOST=midleman
+    volumes:
+      - reverse_proxy_letsencrypt:/etc/letsencrypt:ro
+    networks:
+      - proxy-manager
+    depends_on:
+      - app
+
+  app:
+    image: 'jc21/nginx-proxy-manager:2.14.0'
+    container_name: reverse_proxy
+    restart: unless-stopped
+    ports:
+      - "81:81"
+      - "880:80"
+      - "453:443"
+    volumes:
+      - reverse_proxy_data:/data
+      - reverse_proxy_letsencrypt:/etc/letsencrypt
+    environment:
+      - DB_MYSQL_HOST=db
+      - DB_MYSQL_PORT=3306
+      - DB_MYSQL_USER=npm
+      - DB_MYSQL_PASSWORD=npm
+      - DB_MYSQL_NAME=npm
+      - DISABLE_IPV6=true
+    depends_on:
+      - db
+    networks:
+      - proxy-manager
+
+  db:
+    image: jc21/mariadb-aria:latest
+    container_name: reverse_proxy_db
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=npm
+      - MYSQL_DATABASE=npm
+      - MYSQL_USER=npm
+      - MYSQL_PASSWORD=npm
+      - MARIADB_AUTO_UPGRADE=1
+    volumes:
+      - reverse_proxy_mysql:/var/lib/mysql
+    networks:
+      - proxy-manager
+
+  certbot:
+    image: certbot/certbot
+    container_name: reverse_proxy_certbot
+    volumes:
+      - reverse_proxy_letsencrypt:/etc/letsencrypt
+    entrypoint: /bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'
+    networks:
+      - proxy-manager
+
+networks:
+  proxy-manager:
+    name: proxy-manager
+
+volumes:
+  reverse_proxy_data:
+  reverse_proxy_letsencrypt:
+  reverse_proxy_mysql:

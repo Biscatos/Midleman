@@ -23,6 +23,8 @@ import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, upda
 import { initConsentPages, listConsentPages, getConsentPage, createConsentPage, updateConsentPage, deleteConsentPage, findConsentPageOauthReferences } from './auth/consent-pages';
 import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin, runLdapSync, getLastLdapSyncReport } from './auth/ldap';
 import { initSmtp, getSmtpConfig, publicSmtpConfig, validateSmtpInput, saveSmtpConfig, deleteSmtpConfig, isSmtpConfigured, testSmtpConnection, sendMail, renderTestEmail, renderAdminInviteEmail, renderProxyInviteEmail, renderForce2faEmail, render2faDisabledEmail } from './core/smtp';
+import { initNpmSettings, getNpmSettings, publicNpmSettings, validateNpmInput, saveNpmSettings, deleteNpmSettings, isNpmEnabled, decryptNpmPassword } from './core/npm-settings';
+import { isNpmCertVolumePresent, startCertWatcher, onCertReloaded } from './certs/npm-cert-loader';
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
@@ -106,6 +108,16 @@ initLdap(config.requestLog.dataDir);
 
 // Initialize SMTP (depends on initJwt for password encryption key)
 initSmtp(config.requestLog.dataDir);
+
+// Initialize NPM integration settings (optional — depends on initJwt for password encryption)
+initNpmSettings(config.requestLog.dataDir);
+
+// Start watching shared Let's Encrypt volume if NPM mounted it
+if (isNpmCertVolumePresent()) {
+    startCertWatcher();
+    onCertReloaded(domain => console.log(`[npm-cert-loader] cert for "${domain}" reloaded from shared volume`));
+    console.log(`[npm-cert-loader] watching ${process.env.NPM_LETSENCRYPT_DIR}/live for cert renewals`);
+}
 
 function getInviteResourceNames(profileNames: string[], oauthClientIds: string[]): string[] {
     const proxyNames = profileNames
@@ -1430,6 +1442,19 @@ const server = Bun.serve({
                             allowedIps: profile.allowedIps || [],
                             port: getProxyServerPort(profile.name),
                             running: isProxyServerRunning(profile.name),
+                            publicHostnames: profile.publicHostnames || [],
+                            tlsMode: profile.tlsMode || 'none',
+                            http2: profile.http2 !== false,
+                            hstsEnabled: !!profile.hstsEnabled,
+                            sslForced: !!profile.sslForced,
+                            allowWebsocketUpgrade: profile.allowWebsocketUpgrade !== false,
+                            advancedConfig: profile.advancedConfig || '',
+                            npmLocations: profile.npmLocations || [],
+                            npmProxyHostId: profile.npmProxyHostId,
+                            npmCertificateId: profile.npmCertificateId,
+                            npmOriginalForwardHost: profile.npmOriginalForwardHost,
+                            npmOriginalForwardPort: profile.npmOriginalForwardPort,
+                            npmOriginalForwardScheme: profile.npmOriginalForwardScheme,
                         },
                     });
                 }
@@ -1455,6 +1480,16 @@ const server = Bun.serve({
                         consentPageId: p.consentPageId ?? null,
                         port: getProxyServerPort(p.name),
                         running: isProxyServerRunning(p.name),
+                        publicHostnames: p.publicHostnames || [],
+                        tlsMode: p.tlsMode || 'none',
+                        http2: p.http2 !== false,
+                        hstsEnabled: !!p.hstsEnabled,
+                        sslForced: !!p.sslForced,
+                        allowWebsocketUpgrade: p.allowWebsocketUpgrade !== false,
+                        advancedConfig: p.advancedConfig || '',
+                        npmLocations: p.npmLocations || [],
+                        npmProxyHostId: p.npmProxyHostId,
+                        npmCertificateId: p.npmCertificateId,
                     }));
                     return jsonRes(200, { profiles });
                 }
@@ -1500,12 +1535,63 @@ const server = Bun.serve({
                     }
                     if (Array.isArray(input.allowedIps) && input.allowedIps.length) profile.allowedIps = input.allowedIps as string[];
 
+                    // NPM integration fields (all optional)
+                    if (Array.isArray(input.publicHostnames)) {
+                        const hosts = (input.publicHostnames as string[]).map(h => String(h).trim().toLowerCase()).filter(Boolean);
+                        if (hosts.length > 0) profile.publicHostnames = hosts;
+                    }
+                    if (input.tlsMode === 'auto-acme' || input.tlsMode === 'manual' || input.tlsMode === 'none') {
+                        profile.tlsMode = input.tlsMode;
+                    }
+                    if (typeof input.http2 === 'boolean') profile.http2 = input.http2;
+                    if (typeof input.hstsEnabled === 'boolean') profile.hstsEnabled = input.hstsEnabled;
+                    if (typeof input.sslForced === 'boolean') profile.sslForced = input.sslForced;
+                    if (typeof input.allowWebsocketUpgrade === 'boolean') profile.allowWebsocketUpgrade = input.allowWebsocketUpgrade;
+                    if (typeof input.advancedConfig === 'string') profile.advancedConfig = input.advancedConfig;
+                    // Adoption fields — accepted on create only (preserved across updates via the merge below).
+                    if (typeof input.npmProxyHostId === 'number' && input.npmProxyHostId > 0) profile.npmProxyHostId = input.npmProxyHostId;
+                    if (typeof input.npmOriginalForwardHost === 'string' && input.npmOriginalForwardHost) profile.npmOriginalForwardHost = input.npmOriginalForwardHost;
+                    if (typeof input.npmOriginalForwardPort === 'number' && input.npmOriginalForwardPort > 0) profile.npmOriginalForwardPort = input.npmOriginalForwardPort;
+                    if (input.npmOriginalForwardScheme === 'http' || input.npmOriginalForwardScheme === 'https') profile.npmOriginalForwardScheme = input.npmOriginalForwardScheme;
+                    if (Array.isArray(input.npmLocations) && input.npmLocations.length > 0) {
+                        profile.npmLocations = (input.npmLocations as any[]).map(l => ({
+                            path: String(l.path).trim(),
+                            forwardScheme: l.forwardScheme === 'https' ? 'https' : 'http',
+                            forwardHost: String(l.forwardHost).trim(),
+                            forwardPort: Number(l.forwardPort),
+                            advancedConfig: typeof l.advancedConfig === 'string' ? l.advancedConfig : undefined,
+                        }));
+                    }
+
                     const idx = config.proxyProfiles.findIndex(p => p.name === profile.name);
-                    if (idx >= 0) config.proxyProfiles[idx] = profile;
+                    if (idx >= 0) {
+                        // Preserve NPM-managed ids across saves (the user can't edit these directly).
+                        const existing = config.proxyProfiles[idx];
+                        if (existing.npmProxyHostId !== undefined && profile.npmProxyHostId === undefined) profile.npmProxyHostId = existing.npmProxyHostId;
+                        if (existing.npmCertificateId !== undefined && profile.npmCertificateId === undefined) profile.npmCertificateId = existing.npmCertificateId;
+                        if (existing.npmOriginalForwardHost && !profile.npmOriginalForwardHost) profile.npmOriginalForwardHost = existing.npmOriginalForwardHost;
+                        if (existing.npmOriginalForwardPort !== undefined && profile.npmOriginalForwardPort === undefined) profile.npmOriginalForwardPort = existing.npmOriginalForwardPort;
+                        if (existing.npmOriginalForwardScheme && !profile.npmOriginalForwardScheme) profile.npmOriginalForwardScheme = existing.npmOriginalForwardScheme;
+                        config.proxyProfiles[idx] = profile;
+                    }
                     else config.proxyProfiles.push(profile);
 
                     persistProfiles(config.proxyProfiles);
                     invalidateProfileCache();
+
+                    // Fire-and-forget NPM sync; failures never block profile save.
+                    if (isNpmEnabled()) {
+                        (async () => {
+                            try {
+                                const { syncProfile } = await import('./npm/sync');
+                                const r = await syncProfile(profile, config.proxyProfiles);
+                                if (!r.ok) console.warn(`[npm] sync failed for "${profile.name}": ${r.error}`);
+                                else if (r.action && r.action !== 'noop') console.log(`[npm] ${r.action} proxy host #${r.proxyHostId ?? '?'} for "${profile.name}"`);
+                            } catch (e) {
+                                console.warn(`[npm] sync error for "${profile.name}":`, e instanceof Error ? e.message : e);
+                            }
+                        })();
+                    }
 
                     let proxyPort: number;
                     const me = getAuthedAdmin(req);
@@ -1536,6 +1622,16 @@ const server = Bun.serve({
                     if (!name) return jsonRes(400, { error: 'Profile name required' });
                     const idx = config.proxyProfiles.findIndex(p => p.name === name);
                     if (idx === -1) return jsonRes(404, { error: `Profile "${name}" not found` });
+                    const removed = config.proxyProfiles[idx];
+                    // Best-effort NPM unsync before we drop the profile from memory.
+                    if (isNpmEnabled() && removed.npmProxyHostId) {
+                        try {
+                            const { deleteSyncedHost } = await import('./npm/sync');
+                            await deleteSyncedHost(removed, config.proxyProfiles);
+                        } catch (e) {
+                            console.warn(`[npm] failed to unsync "${name}":`, e instanceof Error ? e.message : e);
+                        }
+                    }
                     config.proxyProfiles.splice(idx, 1);
                     persistProfiles(config.proxyProfiles);
                     invalidateProfileCache();
@@ -1891,6 +1987,282 @@ const server = Bun.serve({
                     const me = getAuthedAdmin(req);
                     logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'smtp.test_send', targetType: 'smtp', details: { to, ok: result.ok, error: result.error }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                     return jsonRes(result.ok ? 200 : 400, { ...result });
+                }
+
+                // ── NPM (Nginx Proxy Manager) integration ────────────────────────────────
+
+                if (url.pathname === '/admin/npm' && req.method === 'GET') {
+                    return jsonRes(200, {
+                        npm: publicNpmSettings(getNpmSettings()),
+                        certVolumeMounted: isNpmCertVolumePresent(),
+                    });
+                }
+
+                if (url.pathname === '/admin/npm' && req.method === 'PUT') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const err = validateNpmInput(body);
+                    if (err) return jsonRes(400, { error: err });
+                    try {
+                        const cfg = saveNpmSettings(body);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.update', targetType: 'npm', details: { url: cfg.url, email: cfg.email, enabled: cfg.enabled }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { npm: publicNpmSettings(cfg) });
+                    } catch (e) {
+                        return jsonRes(500, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
+                if (url.pathname === '/admin/npm' && req.method === 'DELETE') {
+                    deleteNpmSettings();
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.delete', targetType: 'npm', ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { status: 'deleted' });
+                }
+
+                if (url.pathname === '/admin/npm/test' && req.method === 'POST') {
+                    let body: any = undefined;
+                    if (req.headers.get('content-length') && req.headers.get('content-length') !== '0') {
+                        try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    }
+                    try {
+                        const { testConnection } = await import('./npm/client');
+                        let override: { url: string; email: string; password: string } | undefined;
+                        if (body && body.url && body.email && body.password) {
+                            override = { url: String(body.url).replace(/\/$/, ''), email: String(body.email), password: String(body.password) };
+                        }
+                        const result = await testConnection(override);
+                        return jsonRes(200, result);
+                    } catch (e) {
+                        const msg = e instanceof Error ? e.message : String(e);
+                        return jsonRes(400, { ok: false, error: msg });
+                    }
+                }
+
+                if (url.pathname === '/admin/npm/status' && req.method === 'GET') {
+                    if (!isNpmEnabled()) return jsonRes(200, { enabled: false });
+                    try {
+                        const { listProxyHosts, listCertificates } = await import('./npm/client');
+                        const [hosts, certs] = await Promise.all([listProxyHosts(), listCertificates()]);
+                        return jsonRes(200, {
+                            enabled: true,
+                            hostsCount: hosts.length,
+                            certsCount: certs.length,
+                            certVolumeMounted: isNpmCertVolumePresent(),
+                        });
+                    } catch (e) {
+                        return jsonRes(200, { enabled: true, error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
+                // List proxy hosts from NPM with adoption status.
+                if (url.pathname === '/admin/npm/proxy-hosts' && req.method === 'GET') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    try {
+                        const { listProxyHosts } = await import('./npm/client');
+                        const hosts = await listProxyHosts();
+                        const npmHost = (getNpmSettings()?.midlemanPublicHost || 'midleman').toLowerCase();
+                        const byId = new Map<number, string>();
+                        for (const p of config.proxyProfiles) if (p.npmProxyHostId) byId.set(p.npmProxyHostId, p.name);
+                        const out = hosts.map(h => {
+                            const linkedTo = byId.get(h.id);
+                            const looksAdopted = (h.forward_host || '').toLowerCase() === npmHost && !!linkedTo;
+                            return {
+                                id: h.id,
+                                domain_names: h.domain_names || [],
+                                forward_scheme: h.forward_scheme,
+                                forward_host: h.forward_host,
+                                forward_port: h.forward_port,
+                                certificate_id: typeof h.certificate_id === 'number' ? h.certificate_id : null,
+                                ssl_forced: !!h.ssl_forced,
+                                http2_support: !!h.http2_support,
+                                enabled: h.enabled !== false,
+                                linkedProfile: linkedTo || null,
+                                adopted: !!linkedTo,
+                                adoptedAndPointingHere: looksAdopted,
+                            };
+                        });
+                        return jsonRes(200, { hosts: out });
+                    } catch (e) {
+                        return jsonRes(502, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
+                // Adopt an NPM proxy host: read its current forward target, then ask client to
+                // open a profile form pre-filled with that target. The actual update of NPM
+                // (point forward_host to Midleman) happens when the user saves the profile.
+                const adoptMatch = url.pathname.match(/^\/admin\/npm\/proxy-hosts\/(\d+)\/preview-adopt$/);
+                if (adoptMatch && req.method === 'GET') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    const id = Number(adoptMatch[1]);
+                    try {
+                        const { getProxyHost } = await import('./npm/client');
+                        const host = await getProxyHost(id);
+                        const taken = config.proxyProfiles.find(p => p.npmProxyHostId === id);
+                        if (taken) return jsonRes(409, { error: `Already linked to profile "${taken.name}"` });
+                        const scheme = host.forward_scheme === 'https' ? 'https' : 'http';
+                        return jsonRes(200, {
+                            preview: {
+                                npmProxyHostId: host.id,
+                                publicHostnames: host.domain_names || [],
+                                targetUrl: `${scheme}://${host.forward_host}:${host.forward_port}`,
+                                npmOriginalForwardHost: host.forward_host,
+                                npmOriginalForwardPort: host.forward_port,
+                                npmOriginalForwardScheme: scheme,
+                                http2: !!host.http2_support,
+                                hstsEnabled: !!host.hsts_enabled,
+                                sslForced: !!host.ssl_forced,
+                                allowWebsocketUpgrade: host.allow_websocket_upgrade !== false,
+                                advancedConfig: host.advanced_config || '',
+                                certificateId: typeof host.certificate_id === 'number' ? host.certificate_id : null,
+                            },
+                        });
+                    } catch (e) {
+                        return jsonRes(502, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
+                // Release: restore the host's original forward target in NPM and clear the link.
+                const releaseMatch = url.pathname.match(/^\/admin\/profiles\/([^/]+)\/npm-release$/);
+                if (releaseMatch && req.method === 'POST') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    const name = decodeURIComponent(releaseMatch[1]).toLowerCase();
+                    const profile = config.proxyProfiles.find(p => p.name === name);
+                    if (!profile) return jsonRes(404, { error: 'Profile not found' });
+                    if (!profile.npmProxyHostId) return jsonRes(400, { error: 'Profile is not linked to an NPM host' });
+                    try {
+                        const { updateProxyHost } = await import('./npm/client');
+                        if (profile.npmOriginalForwardHost && profile.npmOriginalForwardPort) {
+                            await updateProxyHost(profile.npmProxyHostId, {
+                                forward_host: profile.npmOriginalForwardHost,
+                                forward_port: profile.npmOriginalForwardPort,
+                                forward_scheme: profile.npmOriginalForwardScheme || 'http',
+                                domain_names: profile.publicHostnames || [],
+                            });
+                        }
+                        profile.npmProxyHostId = undefined;
+                        profile.npmOriginalForwardHost = undefined;
+                        profile.npmOriginalForwardPort = undefined;
+                        profile.npmOriginalForwardScheme = undefined;
+                        persistProfiles(config.proxyProfiles);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.release', targetType: 'profile', targetId: name, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { ok: true });
+                    } catch (e) {
+                        return jsonRes(502, { ok: false, error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
+                // Bulk adopt: create profiles for several NPM hosts at once.
+                // Body: { hostIds: number[], authMode: 'none'|'accessKey'|'login', accessKey?, isWebApp?, require2fa? }
+                if (url.pathname === '/admin/npm/proxy-hosts/bulk-adopt' && req.method === 'POST') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const ids = Array.isArray(body?.hostIds) ? body.hostIds.filter((v: unknown) => typeof v === 'number' && v > 0) : [];
+                    if (ids.length === 0) return jsonRes(400, { error: 'No host ids supplied' });
+                    if (ids.length > 100) return jsonRes(400, { error: 'Too many hosts (max 100 per batch)' });
+                    const authMode = (body?.authMode === 'accessKey' || body?.authMode === 'login') ? body.authMode : 'none';
+                    const require2fa = !!body?.require2fa;
+                    const isWebApp = !!body?.isWebApp;
+                    const sharedAccessKey: string = typeof body?.accessKey === 'string' ? body.accessKey.trim() : '';
+
+                    // Helper: build a unique, valid profile name from hostnames.
+                    const slugify = (s: string) =>
+                        s.toLowerCase()
+                         .replace(/^\*\.?/, '')
+                         .replace(/[^a-z0-9._-]+/g, '-')
+                         .replace(/^[-.]+|[-.]+$/g, '')
+                         .slice(0, 64) || 'host';
+                    const existingNames = new Set(config.proxyProfiles.map(p => p.name));
+                    const uniqueName = (base: string) => {
+                        if (!existingNames.has(base)) { existingNames.add(base); return base; }
+                        for (let i = 2; i < 1000; i++) {
+                            const candidate = (base.length > 60 ? base.slice(0, 60) : base) + '-' + i;
+                            if (!existingNames.has(candidate)) { existingNames.add(candidate); return candidate; }
+                        }
+                        throw new Error('Could not derive a unique profile name');
+                    };
+
+                    const { getProxyHost } = await import('./npm/client');
+                    const { syncProfile } = await import('./npm/sync');
+
+                    const results: Array<{ hostId: number; ok: boolean; profile?: string; error?: string }> = [];
+                    for (const hostId of ids) {
+                        try {
+                            const taken = config.proxyProfiles.find(p => p.npmProxyHostId === hostId);
+                            if (taken) { results.push({ hostId, ok: false, error: `Already linked to "${taken.name}"` }); continue; }
+                            const host = await getProxyHost(hostId);
+                            const scheme = host.forward_scheme === 'https' ? 'https' : 'http';
+                            const domains = (host.domain_names || []).filter(Boolean);
+                            if (domains.length === 0) { results.push({ hostId, ok: false, error: 'Host has no domain_names' }); continue; }
+                            const name = uniqueName(slugify(domains[0]));
+                            const profile = {
+                                name,
+                                targetUrl: `${scheme}://${host.forward_host}:${host.forward_port}`,
+                                authMode,
+                                require2fa: authMode === 'login' ? require2fa : undefined,
+                                isWebApp: authMode === 'login' ? isWebApp : undefined,
+                                accessKey: authMode === 'accessKey' && sharedAccessKey ? sharedAccessKey : undefined,
+                                publicHostnames: domains.map(d => d.toLowerCase()),
+                                tlsMode: (typeof host.certificate_id === 'number' && host.certificate_id > 0) ? 'manual' as const : 'none' as const,
+                                http2: !!host.http2_support,
+                                hstsEnabled: !!host.hsts_enabled,
+                                sslForced: !!host.ssl_forced,
+                                allowWebsocketUpgrade: host.allow_websocket_upgrade !== false,
+                                advancedConfig: host.advanced_config || undefined,
+                                npmProxyHostId: host.id,
+                                npmCertificateId: (typeof host.certificate_id === 'number' && host.certificate_id > 0) ? host.certificate_id : undefined,
+                                npmOriginalForwardHost: host.forward_host,
+                                npmOriginalForwardPort: host.forward_port,
+                                npmOriginalForwardScheme: scheme,
+                                forwardPath: true,
+                            };
+                            config.proxyProfiles.push(profile as any);
+                            persistProfiles(config.proxyProfiles);
+
+                            // Start the proxy server for the new profile so /proxy/{name}/ routes through.
+                            try {
+                                const excludePorts = getProxyServerStatus().map(s => s.port).filter(Boolean);
+                                const port = await assignProxyPort(profile.name, config.port, excludePorts);
+                                startProxyServer(profile as any, port);
+                            } catch (e) {
+                                console.warn(`[npm:bulk] could not start proxy server for "${profile.name}":`, e instanceof Error ? e.message : e);
+                            }
+
+                            // Update NPM so it points at Midleman now.
+                            const syncRes = await syncProfile(profile as any, config.proxyProfiles);
+                            if (!syncRes.ok) {
+                                results.push({ hostId, ok: false, profile: profile.name, error: syncRes.error || 'sync failed' });
+                            } else {
+                                results.push({ hostId, ok: true, profile: profile.name });
+                            }
+                        } catch (e) {
+                            results.push({ hostId, ok: false, error: e instanceof Error ? e.message : String(e) });
+                        }
+                    }
+                    invalidateProfileCache();
+
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.bulk_adopt', targetType: 'npm', details: { count: ids.length, authMode, ok: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { results, total: ids.length, ok: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length });
+                }
+
+                const npmSyncMatch = url.pathname.match(/^\/admin\/npm\/sync\/([a-z0-9_-]+)$/i);
+                if (npmSyncMatch && req.method === 'POST') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    const profileName = npmSyncMatch[1].toLowerCase();
+                    const profile = config.proxyProfiles.find(p => p.name === profileName);
+                    if (!profile) return jsonRes(404, { error: 'Profile not found' });
+                    try {
+                        const { syncProfile } = await import('./npm/sync');
+                        const result = await syncProfile(profile, config.proxyProfiles);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.sync', targetType: 'profile', details: { profile: profileName, result }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(result.ok ? 200 : 502, { ...result });
+                    } catch (e) {
+                        return jsonRes(500, { ok: false, error: e instanceof Error ? e.message : String(e) });
+                    }
                 }
 
                 // ── Audit log ────────────────────────────────────────────────────────────
@@ -2638,6 +3010,19 @@ startAllTcpUdpProxies();
 // Same reason for ACME: the HTTP-01 challenge endpoint must be live before LE
 // validates. Each cert's first-issue/renewal runs in background.
 startAcmeSchedulers();
+
+// Reconcile NPM state on startup (fire-and-forget). No-op when disabled.
+if (isNpmEnabled()) {
+    (async () => {
+        try {
+            const { reconcileAll } = await import('./npm/sync');
+            const r = await reconcileAll(config.proxyProfiles);
+            console.log(`[npm] startup reconcile: ${r.synced} synced, ${r.failed} failed`);
+        } catch (e) {
+            console.warn('[npm] startup reconcile error:', e instanceof Error ? e.message : e);
+        }
+    })();
+}
 
 // Graceful shutdown
 const shutdown = async (signal: string) => {

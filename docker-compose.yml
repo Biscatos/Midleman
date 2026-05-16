@@ -23,9 +23,20 @@ services:
       - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-midleman}
       - OTEL_METRICS_INTERVAL=${OTEL_METRICS_INTERVAL:-15000}
       - PORT_RANGE_START=${PORT_RANGE_START:-4000}
+      # ─── NPM integration (optional addon) ───────────────────────────────
+      # Uncomment to bootstrap settings from env. Credentials are still managed
+      # in the dashboard (encrypted at rest). The cert volume below is also opt-in.
+      # - NPM_API_URL=http://app:81
+      # - NPM_LETSENCRYPT_DIR=/etc/letsencrypt
+      # - MIDLEMAN_PUBLIC_HOST=midleman
     volumes:
       - midleman-data:/app/data
       - ./.env:/app/.env:ro
+      # ─── NPM integration (optional) ─────────────────────────────────────
+      # Mount the same volume NPM uses for Let's Encrypt, read-only. When
+      # present, Midleman reads NPM-issued certs straight from disk and the
+      # internal ACME renewer is disabled (NPM owns Let's Encrypt).
+      # - reverse_proxy_letsencrypt:/etc/letsencrypt:ro
     restart: unless-stopped
     # depends_on:
       # otel-collector:
@@ -45,3 +56,16 @@ volumes:
     name: midleman-prometheus
   grafana-data:
     name: midleman-grafana
+  # Shared with the Nginx Proxy Manager stack. Mark as external so
+  # `docker compose down -v` here doesn't destroy NPM's certs.
+  # Enable by uncommenting both this entry and the matching volume mount above.
+  # reverse_proxy_letsencrypt:
+  #   external: true
+  #   name: reverse_proxy_letsencrypt
+
+# To use the NPM integration in the same network as the NPM stack, also add:
+#
+# networks:
+#   default:
+#     name: proxy-manager
+#     external: true
