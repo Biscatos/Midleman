@@ -2153,6 +2153,133 @@ const server = Bun.serve({
                     }
                 }
 
+                // ── NPM proxy host CRUD passthrough ───────────────────────────────────
+                // GET single host (raw NPM payload, used by the edit modal)
+                const hostGetMatch = url.pathname.match(/^\/admin\/npm\/proxy-hosts\/(\d+)$/);
+                if (hostGetMatch && req.method === 'GET') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    try {
+                        const { getProxyHost } = await import('./npm/client');
+                        const h = await getProxyHost(Number(hostGetMatch[1]));
+                        return jsonRes(200, { host: h });
+                    } catch (e) {
+                        const status = (e as any)?.status === 404 ? 404 : 502;
+                        return jsonRes(status, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
+                // Create new proxy host (passthrough — does NOT create a Midleman profile)
+                if (url.pathname === '/admin/npm/proxy-hosts' && req.method === 'POST') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    try {
+                        const { createProxyHost } = await import('./npm/client');
+                        const created = await createProxyHost(body);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.host.create', targetType: 'npm_host', targetId: created.id, details: { domains: created.domain_names }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(201, { host: created });
+                    } catch (e) {
+                        return jsonRes(502, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
+                // Update existing proxy host
+                if (hostGetMatch && req.method === 'PUT') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    const id = Number(hostGetMatch[1]);
+                    // Guard: if linked to a Midleman profile, refuse direct edits (they'd be overwritten on next sync).
+                    const linked = config.proxyProfiles.find(p => p.npmProxyHostId === id);
+                    if (linked) return jsonRes(409, { error: `Host #${id} is linked to profile "${linked.name}". Edit via the profile instead.` });
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    try {
+                        const { updateProxyHost } = await import('./npm/client');
+                        const updated = await updateProxyHost(id, body);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.host.update', targetType: 'npm_host', targetId: id, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { host: updated });
+                    } catch (e) {
+                        return jsonRes(502, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
+                // Delete proxy host
+                if (hostGetMatch && req.method === 'DELETE') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    const id = Number(hostGetMatch[1]);
+                    const linked = config.proxyProfiles.find(p => p.npmProxyHostId === id);
+                    if (linked) return jsonRes(409, { error: `Host #${id} is linked to profile "${linked.name}". Delete the profile (or Release it) first.` });
+                    try {
+                        const { deleteProxyHost } = await import('./npm/client');
+                        await deleteProxyHost(id);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.host.delete', targetType: 'npm_host', targetId: id, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { ok: true });
+                    } catch (e) {
+                        return jsonRes(502, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
+                // Enable / disable
+                const hostEnableMatch = url.pathname.match(/^\/admin\/npm\/proxy-hosts\/(\d+)\/(enable|disable)$/);
+                if (hostEnableMatch && req.method === 'POST') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    const id = Number(hostEnableMatch[1]);
+                    const op = hostEnableMatch[2] as 'enable' | 'disable';
+                    try {
+                        const mod = await import('./npm/client');
+                        if (op === 'enable') await mod.enableProxyHost(id); else await mod.disableProxyHost(id);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.host.' + op, targetType: 'npm_host', targetId: id, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { ok: true });
+                    } catch (e) {
+                        return jsonRes(502, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
+                // ── Certificates ──────────────────────────────────────────────────────
+                if (url.pathname === '/admin/npm/certificates' && req.method === 'GET') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    try {
+                        const { listCertificates } = await import('./npm/client');
+                        const certs = await listCertificates();
+                        return jsonRes(200, { certificates: certs });
+                    } catch (e) {
+                        return jsonRes(502, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
+                if (url.pathname === '/admin/npm/certificates' && req.method === 'POST') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    try {
+                        const { createLetsEncryptCert } = await import('./npm/client');
+                        const cert = await createLetsEncryptCert(body);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.cert.create', targetType: 'npm_cert', targetId: cert.id, details: { domains: cert.domain_names }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(201, { certificate: cert });
+                    } catch (e) {
+                        return jsonRes(502, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
+                const certDeleteMatch = url.pathname.match(/^\/admin\/npm\/certificates\/(\d+)$/);
+                if (certDeleteMatch && req.method === 'DELETE') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    const id = Number(certDeleteMatch[1]);
+                    try {
+                        const { deleteCertificate } = await import('./npm/client');
+                        await deleteCertificate(id);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.cert.delete', targetType: 'npm_cert', targetId: id, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { ok: true });
+                    } catch (e) {
+                        return jsonRes(502, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
                 // Bulk adopt: create profiles for several NPM hosts at once.
                 // Body: { hostIds: number[], authMode: 'none'|'accessKey'|'login', accessKey?, isWebApp?, require2fa? }
                 if (url.pathname === '/admin/npm/proxy-hosts/bulk-adopt' && req.method === 'POST') {

@@ -163,6 +163,14 @@ export async function deleteProxyHost(id: number): Promise<void> {
     await authedRequest<unknown>('DELETE', `/api/nginx/proxy-hosts/${id}`);
 }
 
+export async function enableProxyHost(id: number): Promise<void> {
+    await authedRequest<unknown>('POST', `/api/nginx/proxy-hosts/${id}/enable`);
+}
+
+export async function disableProxyHost(id: number): Promise<void> {
+    await authedRequest<unknown>('POST', `/api/nginx/proxy-hosts/${id}/disable`);
+}
+
 export async function listCertificates(): Promise<NpmCertificate[]> {
     return authedRequest<NpmCertificate[]>('GET', '/api/nginx/certificates');
 }

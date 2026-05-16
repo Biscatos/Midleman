@@ -1283,50 +1283,90 @@
 
     <!-- ═══ NGINX PROXY MANAGER ═══ -->
     <div class="page" id="pageNpm">
-      <div class="page-header">
-        <h2>Nginx Proxy Manager</h2>
-        <p>Optional addon — connect Midleman to an existing <a href="https://nginxproxymanager.com" target="_blank" rel="noopener" style="color:var(--accent)">Nginx Proxy Manager</a> instance to manage public HTTPS hostnames, Let's Encrypt certificates and HTTP/2/3 termination for your profiles. Midleman keeps working without this — it's purely additive.</p>
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+        <div>
+          <h2 style="margin:0">Nginx Proxy Manager</h2>
+          <p style="margin:6px 0 0">Manage proxy hosts, certificates and HTTPS termination from inside Midleman. Optional addon — Midleman keeps working without it.</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center" id="npmHeaderActions">
+          <span id="npmConnPill" style="display:none;font-size:11.5px;padding:4px 10px;border-radius:10px"></span>
+          <button class="btn btn-sm" id="npmRefreshBtn" onclick="fetchNpmHostsTable()" style="display:none" title="Refresh list">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          </button>
+          <button class="btn btn-sm" onclick="openNpmConfigModal()" title="Settings">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Settings
+          </button>
+          <button class="btn btn-sm btn-primary" id="npmAddHostBtn" onclick="openNpmHostModal(null)" style="display:none">+ Proxy Host</button>
+        </div>
       </div>
 
-      <div class="card">
-        <div class="card-header"><h3>Connection</h3></div>
-        <div class="card-body">
-          <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">URL of the NPM admin API (port 81 by default) and the admin credentials Midleman should use to call it. From inside the same Docker stack, this is usually <code style="background:var(--surface2);padding:1px 6px;border-radius:4px">http://app:81</code>.</p>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
-            <div>
-              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">API URL</label>
-              <input id="npmUrl" type="text" placeholder="http://app:81" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+      <!-- ── Empty state: not configured / disabled ── -->
+      <div id="npmEmptyState" class="card" style="margin-top:24px;text-align:center;padding:48px 24px;display:none">
+        <div style="max-width:520px;margin:0 auto">
+          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="var(--text3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6"><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          <h3 style="margin:18px 0 8px;font-size:18px;font-weight:500">No NPM instance connected</h3>
+          <p style="margin:0 0 20px;font-size:13.5px;color:var(--text2);line-height:1.6" id="npmEmptyHint">Connect Midleman to a running Nginx Proxy Manager instance to manage proxy hosts, certificates and HTTPS termination from this dashboard. Profiles created in Midleman can be linked to NPM hosts so all your routing lives in one place.</p>
+          <button class="btn btn-primary" onclick="openNpmConfigModal()">Configure connection</button>
+        </div>
+      </div>
+
+      <!-- ── Hosts table (visible when connected) ── -->
+      <div class="card" id="npmHostsCard" style="margin-top:18px;display:none">
+        <div class="card-body" style="padding:14px 16px;border-bottom:1px solid var(--border)">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <div style="flex:1;min-width:220px;position:relative">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" id="npmHostsSearch" oninput="renderNpmHostsTable()" placeholder="Search domains or forward host…" style="width:100%;padding:8px 10px 8px 32px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
             </div>
-            <div>
-              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Email</label>
-              <input id="npmEmail" type="email" autocomplete="off" placeholder="admin@example.com" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
-            </div>
-            <div>
-              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Password</label>
-              <input id="npmPassword" type="password" autocomplete="new-password" placeholder="(unchanged)" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
-            </div>
-            <div>
-              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Midleman host (as seen by NPM)</label>
-              <input id="npmMidlemanHost" type="text" placeholder="bun-forwarder" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
-              <p style="font-size:11px;color:var(--text3);margin-top:6px">Hostname or IP only — no scheme, no port (NPM adds those). E.g. <code>bun-forwarder</code> or <code>192.168.1.10</code>.</p>
-            </div>
+            <select id="npmHostsFilter" onchange="renderNpmHostsTable()" style="padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+              <option value="all">All hosts</option>
+              <option value="enabled">Enabled only</option>
+              <option value="disabled">Disabled only</option>
+              <option value="ssl">With SSL</option>
+              <option value="nossl">Without SSL</option>
+              <option value="linked">Linked to profile</option>
+              <option value="unlinked">Not linked</option>
+            </select>
+            <span id="npmHostsCount" style="font-size:12px;color:var(--text2)"></span>
           </div>
-          <div style="margin-top:14px">
-            <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text2)">
-              <input id="npmEnabled" type="checkbox"> Enable integration (sync profiles with NPM on save)
-            </label>
+        </div>
+        <div style="overflow:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+            <thead style="background:var(--surface)">
+              <tr style="text-align:left">
+                <th style="padding:10px 14px;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">#</th>
+                <th style="padding:10px 14px;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Domains</th>
+                <th style="padding:10px 14px;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Forward</th>
+                <th style="padding:10px 14px;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">SSL</th>
+                <th style="padding:10px 14px;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Status</th>
+                <th style="padding:10px 14px;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2);text-align:right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="npmHostsTableBody">
+              <tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text3)">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-top:1px solid var(--border);font-size:12.5px;color:var(--text2);gap:10px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span>Page size</span>
+            <select id="npmHostsPageSize" onchange="onNpmPageSizeChange()" style="padding:4px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">
+              <option value="10">10</option>
+              <option value="25" selected>25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <button class="btn btn-sm" id="npmHostsPrev" onclick="changeNpmPage(-1)">Prev</button>
+            <span id="npmHostsPageInfo" style="padding:0 8px"></span>
+            <button class="btn btn-sm" id="npmHostsNext" onclick="changeNpmPage(1)">Next</button>
           </div>
         </div>
       </div>
 
-      <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;align-items:center">
-        <button class="btn btn-primary btn-sm" onclick="saveNpmConfig()">Save</button>
-        <button class="btn btn-sm" onclick="testNpmConnectionUi()">Test connection</button>
-        <button class="btn btn-sm" onclick="clearNpmConfig()" id="npmClearBtn" style="margin-left:auto;color:var(--err-text)">Remove configuration</button>
-      </div>
-      <div id="npmStatus" style="margin-top:14px;font-size:12.5px"></div>
-
-      <div class="card" style="margin-top:24px">
+      <div class="card" style="margin-top:18px" id="npmVolumeCard">
         <div class="card-header"><h3>Shared Let's Encrypt volume</h3></div>
         <div class="card-body">
           <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">When the NPM <code>/etc/letsencrypt</code> volume is mounted into Midleman read-only, Midleman reads certificates issued by NPM's <code>certbot</code> directly from disk (for SIP TLS and other listeners). The internal ACME client is disabled when this is active — only one party should renew at a time.</p>
@@ -1334,6 +1374,176 @@
         </div>
       </div>
     </div>
+
+<!-- ═══ NPM CONNECTION SETTINGS MODAL ═══ -->
+<div class="modal-overlay" id="npmConfigModal">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <h3>NPM Connection</h3>
+      <button class="close-btn" onclick="closeNpmConfigModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">URL of the NPM admin API (port 81 by default) and the credentials Midleman uses to call it. From inside the same Docker stack, this is usually <code style="background:var(--surface2);padding:1px 6px;border-radius:4px">http://app:81</code>.</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">API URL</label>
+          <input id="npmUrl" type="text" placeholder="http://app:81" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Email</label>
+          <input id="npmEmail" type="email" autocomplete="off" placeholder="admin@example.com" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Password</label>
+          <input id="npmPassword" type="password" autocomplete="new-password" placeholder="(unchanged)" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Midleman host (as seen by NPM)</label>
+          <input id="npmMidlemanHost" type="text" placeholder="bun-forwarder" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+          <p style="font-size:11px;color:var(--text3);margin-top:6px">Hostname or IP only — no scheme, no port (NPM adds those).</p>
+        </div>
+      </div>
+      <div style="margin-top:14px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text2)">
+          <input id="npmEnabled" type="checkbox"> Enable integration (sync profiles with NPM on save)
+        </label>
+      </div>
+      <div id="npmStatus" style="margin-top:14px;font-size:12.5px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" onclick="clearNpmConfig()" id="npmClearBtn" style="margin-right:auto;color:var(--err-text);display:none">Remove configuration</button>
+      <button class="btn" onclick="closeNpmConfigModal()">Cancel</button>
+      <button class="btn btn-sm" onclick="testNpmConnectionUi()">Test connection</button>
+      <button class="btn btn-primary" onclick="saveNpmConfig(true)">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ NPM PROXY HOST EDIT MODAL ═══ -->
+<div class="modal-overlay" id="npmHostModal">
+  <div class="modal" style="max-width:780px">
+    <div class="modal-header">
+      <h3 id="npmHostModalTitle">Add Proxy Host</h3>
+      <button class="close-btn" onclick="closeNpmHostModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:16px">
+        <button type="button" class="npm-host-tab" data-tab="details" onclick="switchNpmHostTab('details')" style="background:none;border:none;border-bottom:2px solid var(--accent);padding:8px 14px;color:var(--text);font-size:13px;font-weight:500;cursor:pointer">Details</button>
+        <button type="button" class="npm-host-tab" data-tab="locations" onclick="switchNpmHostTab('locations')" style="background:none;border:none;border-bottom:2px solid transparent;padding:8px 14px;color:var(--text2);font-size:13px;cursor:pointer">Custom Locations</button>
+        <button type="button" class="npm-host-tab" data-tab="ssl" onclick="switchNpmHostTab('ssl')" style="background:none;border:none;border-bottom:2px solid transparent;padding:8px 14px;color:var(--text2);font-size:13px;cursor:pointer">SSL</button>
+      </div>
+
+      <!-- ─── DETAILS ─── -->
+      <div class="npm-host-pane" data-pane="details">
+        <div class="form-grid">
+          <div class="form-group span-2">
+            <label>Domain Names <span style="color:var(--err-text)">*</span></label>
+            <input type="text" id="nhDomains" placeholder="example.com, www.example.com">
+            <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Comma-separated.</span>
+          </div>
+          <div class="form-group">
+            <label>Scheme</label>
+            <select id="nhScheme" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px">
+              <option value="http">http</option>
+              <option value="https">https</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Forward Hostname / IP <span style="color:var(--err-text)">*</span></label>
+            <input type="text" id="nhForwardHost" placeholder="example.com">
+          </div>
+          <div class="form-group">
+            <label>Forward Port <span style="color:var(--err-text)">*</span></label>
+            <input type="number" id="nhForwardPort" min="1" max="65535" placeholder="8081">
+          </div>
+        </div>
+        <div class="form-section">Options</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="nhCacheAssets" style="cursor:pointer;accent-color:var(--accent)">
+              <span>Cache Assets</span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="nhBlockExploits" style="cursor:pointer;accent-color:var(--accent)" checked>
+              <span>Block Common Exploits</span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="nhWebsocket" style="cursor:pointer;accent-color:var(--accent)">
+              <span>Websockets Support</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── CUSTOM LOCATIONS ─── -->
+      <div class="npm-host-pane" data-pane="locations" style="display:none">
+        <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">Extra <code>location</code> blocks. Use them to route specific paths to a different upstream.</p>
+        <div id="nhLocations" style="display:flex;flex-direction:column;gap:10px"></div>
+        <button type="button" class="btn btn-sm" onclick="addNhLocation()" style="margin-top:10px">+ Add Location</button>
+      </div>
+
+      <!-- ─── SSL ─── -->
+      <div class="npm-host-pane" data-pane="ssl" style="display:none">
+        <div class="form-grid">
+          <div class="form-group span-2">
+            <label>SSL Certificate</label>
+            <select id="nhCertId" onchange="onNhCertChange()" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px">
+              <option value="">None</option>
+              <option value="new">Request a new SSL Certificate</option>
+            </select>
+          </div>
+          <div class="form-group span-2" id="nhCertNewGroup" style="display:none">
+            <label>Let's Encrypt Email</label>
+            <input type="email" id="nhCertEmail" placeholder="you@example.com">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px">
+              <input type="checkbox" id="nhCertAgree" style="cursor:pointer;accent-color:var(--accent)">
+              <span style="font-size:12.5px">I agree to the <a href="https://letsencrypt.org/repository/" target="_blank" rel="noopener" style="color:var(--accent)">Let's Encrypt Terms of Service</a></span>
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px">
+              <input type="checkbox" id="nhCertDns" style="cursor:pointer;accent-color:var(--accent)">
+              <span style="font-size:12.5px">Use DNS Challenge (requires DNS provider setup in NPM)</span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="nhSslForced" style="cursor:pointer;accent-color:var(--accent)">
+              <span>Force SSL</span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="nhHttp2" style="cursor:pointer;accent-color:var(--accent)">
+              <span>HTTP/2 Support</span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="nhHsts" style="cursor:pointer;accent-color:var(--accent)">
+              <span>HSTS Enabled</span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="nhHstsSub" style="cursor:pointer;accent-color:var(--accent)">
+              <span>HSTS Sub-domains</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div id="nhStatus" style="margin-top:14px;font-size:12.5px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeNpmHostModal()">Cancel</button>
+      <button class="btn btn-primary" id="nhSaveBtn" onclick="saveNpmHost()">Save</button>
+    </div>
+  </div>
+</div>
 
     <!-- ═══ AUDIT LOG ═══ -->
     <div class="page" id="pageAudit">
@@ -1916,7 +2126,7 @@
 
 <!-- Profile Modal -->
 <div class="modal-overlay" id="profileModal">
-  <div class="modal" style="max-width:780px">
+  <div class="modal" style="max-width:780px;min-width:min(620px,90vw);min-height:min(560px,85vh)">
     <div class="modal-header">
       <h3 id="modalTitle">New Proxy</h3><button class="close-btn" onclick="closeProfileModal()">&times;</button>
     </div>
@@ -1935,14 +2145,23 @@
         <div class="form-group span-2"><label>Target URL *</label><input type="url" id="pTargetUrl"
             placeholder="https://api.example.com"></div>
       </div>
-      <div class="form-section">Authentication (optional)</div>
-      <div class="form-grid">
-        <div class="form-group"><label>Auth Header</label><input type="text" id="pAuthHeader"
-            placeholder="e.g. Authorization"></div>
-        <div class="form-group"><label>Auth Prefix</label><input type="text" id="pAuthPrefix"
-            placeholder="e.g. Bearer, App"></div>
-        <div class="form-group span-2"><label>Auth Value</label><input type="text" id="pApiKey"
-            placeholder="e.g. your API key or token"></div>
+      <div class="form-section" style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <span>Upstream credentials bypass <span style="color:var(--text3);font-weight:400;font-size:11px">— optional</span></span>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer;font-weight:400;text-transform:none;letter-spacing:0">
+          <input type="checkbox" id="pUpstreamAuthToggle" onchange="toggleUpstreamAuthSection()" style="cursor:pointer;accent-color:var(--accent)">
+          <span>Enable</span>
+        </label>
+      </div>
+      <div id="pUpstreamAuthSection" style="display:none">
+        <p style="font-size:11.5px;color:var(--text3);margin:0 0 10px;line-height:1.5">Midleman will inject this header into every request forwarded to the target — useful when your upstream requires a key/token and you want to keep it out of clients.</p>
+        <div class="form-grid">
+          <div class="form-group"><label>Auth Header</label><input type="text" id="pAuthHeader"
+              placeholder="e.g. Authorization"></div>
+          <div class="form-group"><label>Auth Prefix</label><input type="text" id="pAuthPrefix"
+              placeholder="e.g. Bearer, App"></div>
+          <div class="form-group span-2"><label>Auth Value</label><input type="text" id="pApiKey"
+              placeholder="e.g. your API key or token"></div>
+        </div>
       </div>
       <div class="form-section">Access Control</div>
       <div class="form-grid">
@@ -2043,60 +2262,16 @@
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Skip certificate validation for this upstream. Use only for internal services.</span>
         </div>
       </div>
-      <div class="form-section">Public hostnames (Nginx Proxy Manager) <span style="color:var(--text3);font-weight:400;font-size:11px">— optional, requires <a href="#" onclick="navigate('npm');return false" style="color:var(--accent)">NPM integration</a></span></div>
-      <div class="form-grid">
-        <div class="form-group span-2">
-          <label>Hostnames <span style="color:var(--text3);font-weight:400;font-size:11px">— comma-separated, e.g. api.example.com</span></label>
-          <input type="text" id="pPublicHostnames" placeholder="api.example.com, www.example.com">
-          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Leave empty to skip NPM sync. When set, Midleman creates/updates a Proxy Host in NPM pointing at this profile.</span>
-        </div>
-        <div class="form-group">
-          <label>TLS mode</label>
-          <select id="pTlsMode" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px">
-            <option value="none">None (HTTP only)</option>
-            <option value="auto-acme">Auto (Let's Encrypt via NPM)</option>
-            <option value="manual">Manual (cert managed in NPM UI)</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input type="checkbox" id="pHttp2" style="cursor:pointer;accent-color:var(--accent)" checked>
-            <span>HTTP/2</span>
-          </label>
-        </div>
-        <div class="form-group">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input type="checkbox" id="pSslForced" style="cursor:pointer;accent-color:var(--accent)">
-            <span>Force HTTPS (redirect 80→443)</span>
-          </label>
-        </div>
-        <div class="form-group">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input type="checkbox" id="pHstsEnabled" style="cursor:pointer;accent-color:var(--accent)">
-            <span>HSTS</span>
-          </label>
-        </div>
-        <div class="form-group">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input type="checkbox" id="pAllowWebsocketUpgrade" style="cursor:pointer;accent-color:var(--accent)" checked>
-            <span>Allow WebSocket upgrade</span>
-          </label>
-          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Adds the <code>Upgrade</code> / <code>Connection</code> headers so wss:// flows through NPM.</span>
-        </div>
-        <div class="form-group span-2">
-          <label style="display:flex;justify-content:space-between;align-items:baseline">
-            Custom locations
-            <a href="javascript:void(0)" onclick="addNpmLocation()" style="font-size:11px;font-weight:400;color:var(--accent)">+ add location</a>
-          </label>
-          <div id="pNpmLocations" style="display:flex;flex-direction:column;gap:8px"></div>
-          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Extra <code>location</code> blocks in the NPM proxy host — useful to route specific paths (e.g. <code>/api</code>) to a different upstream than this profile's default.</span>
-        </div>
-        <div class="form-group span-2">
-          <label>Advanced nginx config <span style="color:var(--text3);font-weight:400;font-size:11px">— raw directives appended to the NPM server block</span></label>
-          <textarea id="pAdvancedConfig" rows="3" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:12.5px;font-family:monospace" placeholder="# e.g. client_max_body_size 50m;"></textarea>
-        </div>
-        <div class="form-group span-2" id="pNpmStatus" style="font-size:12px;color:var(--text2)"></div>
-      </div>
+      <!-- Hidden NPM-bound inputs: populated by Adopt flow, edited via the Nginx PM page for new hosts. -->
+      <input type="hidden" id="pPublicHostnames" value="">
+      <input type="hidden" id="pTlsMode" value="none">
+      <input type="hidden" id="pHttp2" value="true">
+      <input type="hidden" id="pSslForced" value="false">
+      <input type="hidden" id="pHstsEnabled" value="false">
+      <input type="hidden" id="pAllowWebsocketUpgrade" value="true">
+      <input type="hidden" id="pAdvancedConfig" value="">
+      <div id="pNpmLocations" style="display:none"></div>
+      <div id="pNpmStatus" style="display:none"></div>
     </div>
     <div class="modal-footer"><button class="btn" onclick="closeProfileModal()">Cancel</button><button
         class="btn btn-primary" onclick="saveProfile()">Save Proxy</button></div>

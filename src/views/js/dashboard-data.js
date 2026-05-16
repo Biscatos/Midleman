@@ -372,6 +372,10 @@ async function openProfileModal(profile = null) {
   document.getElementById('pApiKey').value = profile ? (profile.apiKey || '') : '';
   document.getElementById('pAuthHeader').value = profile ? (profile.authHeader || '') : '';
   document.getElementById('pAuthPrefix').value = profile ? (profile.authPrefix || '') : '';
+  // Auto-open the upstream-auth section if any of those fields has a value.
+  const hasUpstreamAuth = !!(profile && (profile.apiKey || profile.authHeader || profile.authPrefix));
+  document.getElementById('pUpstreamAuthToggle').checked = hasUpstreamAuth;
+  toggleUpstreamAuthSection();
   document.getElementById('pAccessKey').value = profile ? (profile.accessKey || '') : '';
   document.getElementById('pAuthMode').value = profile ? (profile.authMode || 'none') : 'none';
   document.getElementById('pRequire2fa').checked = profile ? !!profile.require2fa : false;
@@ -388,13 +392,13 @@ async function openProfileModal(profile = null) {
   updateLogoPreview();
   document.getElementById('pBlocked').value = profile?.blockedExtensions ? profile.blockedExtensions.join(', ') : '';
   IpTagInput.setValue('pAllowedIps', profile?.allowedIps || []);
-  // NPM fields
+  // NPM fields (hidden inputs — populated by Adopt flow; managed via the Nginx PM page otherwise)
   document.getElementById('pPublicHostnames').value = profile?.publicHostnames ? profile.publicHostnames.join(', ') : '';
   document.getElementById('pTlsMode').value = profile?.tlsMode || 'none';
-  document.getElementById('pHttp2').checked = profile ? profile.http2 !== false : true;
-  document.getElementById('pHstsEnabled').checked = !!(profile && profile.hstsEnabled);
-  document.getElementById('pSslForced').checked = !!(profile && profile.sslForced);
-  document.getElementById('pAllowWebsocketUpgrade').checked = profile ? profile.allowWebsocketUpgrade !== false : true;
+  document.getElementById('pHttp2').value = String(profile ? profile.http2 !== false : true);
+  document.getElementById('pHstsEnabled').value = String(!!(profile && profile.hstsEnabled));
+  document.getElementById('pSslForced').value = String(!!(profile && profile.sslForced));
+  document.getElementById('pAllowWebsocketUpgrade').value = String(profile ? profile.allowWebsocketUpgrade !== false : true);
   document.getElementById('pAdvancedConfig').value = (profile && profile.advancedConfig) || '';
   renderNpmLocations((profile && profile.npmLocations) || []);
   // Adopted-from-NPM banner
@@ -425,6 +429,16 @@ function toggleProfileAuthMode() {
   document.getElementById('pLoginTitleGroup').style.display = mode === 'login' ? '' : 'none';
   document.getElementById('pLoginLogoGroup').style.display = mode === 'login' ? '' : 'none';
   document.getElementById('pConsentGroup').style.display = mode === 'login' ? '' : 'none';
+}
+function toggleUpstreamAuthSection() {
+  const on = document.getElementById('pUpstreamAuthToggle').checked;
+  document.getElementById('pUpstreamAuthSection').style.display = on ? '' : 'none';
+  if (!on) {
+    // Clear the values so a "Save" doesn't accidentally persist stale credentials.
+    document.getElementById('pApiKey').value = '';
+    document.getElementById('pAuthHeader').value = '';
+    document.getElementById('pAuthPrefix').value = '';
+  }
 }
 function toggleConsentFields() {
   const on = document.getElementById('pConsentEnabled').checked;
@@ -489,14 +503,15 @@ async function saveProfile() {
   }
   const blocked = v('pBlocked'); if (blocked) body.blockedExtensions = blocked.split(',').map(s => s.trim()).filter(Boolean);
   const allowedIps = IpTagInput.getValue('pAllowedIps'); if (allowedIps.length) body.allowedIps = allowedIps;
-  // NPM fields
+  // NPM fields (hidden — only meaningful for adopted profiles; preserved across saves)
   const hostnamesRaw = v('pPublicHostnames');
-  body.publicHostnames = hostnamesRaw ? hostnamesRaw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
-  body.tlsMode = v('pTlsMode') || 'none';
-  body.http2 = document.getElementById('pHttp2').checked;
-  body.hstsEnabled = document.getElementById('pHstsEnabled').checked;
-  body.sslForced = document.getElementById('pSslForced').checked;
-  body.allowWebsocketUpgrade = document.getElementById('pAllowWebsocketUpgrade').checked;
+  if (hostnamesRaw) body.publicHostnames = hostnamesRaw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  const tlsMode = v('pTlsMode');
+  if (tlsMode && tlsMode !== 'none') body.tlsMode = tlsMode;
+  body.http2 = document.getElementById('pHttp2').value === 'true';
+  body.hstsEnabled = document.getElementById('pHstsEnabled').value === 'true';
+  body.sslForced = document.getElementById('pSslForced').value === 'true';
+  body.allowWebsocketUpgrade = document.getElementById('pAllowWebsocketUpgrade').value === 'true';
   const advanced = document.getElementById('pAdvancedConfig').value;
   if (advanced.trim()) body.advancedConfig = advanced;
   const locations = readNpmLocations();
@@ -4973,12 +4988,50 @@ function setNpmStatus(elId, msg, kind) {
   el.textContent = msg;
 }
 
+function _updateNpmPageVisibility(cfg, certVolumeMounted) {
+  const empty = document.getElementById('npmEmptyState');
+  const hostsCard = document.getElementById('npmHostsCard');
+  const addBtn = document.getElementById('npmAddHostBtn');
+  const refreshBtn = document.getElementById('npmRefreshBtn');
+  const pill = document.getElementById('npmConnPill');
+  const isReady = !!(cfg && cfg.enabled && cfg.url && cfg.email);
+  if (empty) empty.style.display = isReady ? 'none' : '';
+  if (hostsCard) hostsCard.style.display = isReady ? '' : 'none';
+  if (addBtn) addBtn.style.display = isReady ? '' : 'none';
+  if (refreshBtn) refreshBtn.style.display = isReady ? '' : 'none';
+  if (pill) {
+    if (!cfg || !cfg.url) {
+      pill.style.display = 'none';
+    } else if (cfg.enabled && cfg.tokenValid) {
+      pill.style.display = '';
+      pill.textContent = '● Connected';
+      pill.style.background = 'rgba(34,197,94,0.15)';
+      pill.style.color = '#22c55e';
+    } else if (cfg.enabled) {
+      pill.style.display = '';
+      pill.textContent = '● Pending';
+      pill.style.background = 'rgba(234,179,8,0.15)';
+      pill.style.color = '#eab308';
+    } else {
+      pill.style.display = '';
+      pill.textContent = '○ Disabled';
+      pill.style.background = 'var(--surface2)';
+      pill.style.color = 'var(--text2)';
+    }
+  }
+}
+
 async function fetchNpmConfig() {
   try {
     const res = await api('/admin/npm');
     if (!res.ok) return;
     const data = await res.json();
     const cfg = data.npm;
+    _updateNpmPageVisibility(cfg, data.certVolumeMounted);
+    // If integration is enabled and we're on the NPM page, refresh the hosts table.
+    if (cfg && cfg.enabled && document.getElementById('npmHostsTableBody')) {
+      fetchNpmHostsTable();
+    }
     const urlEl = document.getElementById('npmUrl');
     const emailEl = document.getElementById('npmEmail');
     const pwEl = document.getElementById('npmPassword');
@@ -4993,6 +5046,8 @@ async function fetchNpmConfig() {
       enabledEl.checked = !!cfg.enabled;
       _npmHasPassword = !!cfg.hasPassword;
       pwEl.placeholder = _npmHasPassword ? '(unchanged)' : '';
+      const clearBtn = document.getElementById('npmClearBtn');
+      if (clearBtn) clearBtn.style.display = (cfg.url || cfg.email) ? '' : 'none';
       if (cfg.enabled && cfg.tokenValid) setNpmStatus('npmStatus', 'Integration active — token valid.', 'ok');
       else if (cfg.enabled) setNpmStatus('npmStatus', 'Integration enabled — token will be acquired on next sync.', 'info');
       else setNpmStatus('npmStatus', 'Integration is disabled.', 'info');
@@ -5004,6 +5059,8 @@ async function fetchNpmConfig() {
       hostEl.value = '';
       enabledEl.checked = false;
       _npmHasPassword = false;
+      const clearBtn = document.getElementById('npmClearBtn');
+      if (clearBtn) clearBtn.style.display = 'none';
       setNpmStatus('npmStatus', 'No NPM configuration active.', 'info');
     }
     if (volEl) {
@@ -5029,7 +5086,17 @@ function _readNpmForm(passwordOnlyIfFilled) {
   return body;
 }
 
-async function saveNpmConfig() {
+function openNpmConfigModal() {
+  // Refresh form fields from server state before showing
+  fetchNpmConfig().finally(() => {
+    document.getElementById('npmConfigModal').classList.add('active');
+  });
+}
+function closeNpmConfigModal() {
+  document.getElementById('npmConfigModal').classList.remove('active');
+}
+
+async function saveNpmConfig(closeModalOnSuccess) {
   const body = _readNpmForm(true);
   if (!body.url) { setNpmStatus('npmStatus', 'URL is required.', 'err'); return; }
   if (!body.email) { setNpmStatus('npmStatus', 'Email is required.', 'err'); return; }
@@ -5044,6 +5111,7 @@ async function saveNpmConfig() {
     if (!res.ok) { setNpmStatus('npmStatus', data.error || 'Failed to save.', 'err'); return; }
     toast('NPM configuration saved');
     await fetchNpmConfig();
+    if (closeModalOnSuccess) closeNpmConfigModal();
   } catch (e) {
     setNpmStatus('npmStatus', 'Network error: ' + e.message, 'err');
   }
@@ -5296,10 +5364,10 @@ async function adoptNpmHost(id) {
     document.getElementById('pTargetUrl').value = p.targetUrl || '';
     document.getElementById('pPublicHostnames').value = (p.publicHostnames || []).join(', ');
     document.getElementById('pTlsMode').value = p.certificateId ? 'manual' : 'none';
-    document.getElementById('pHttp2').checked = !!p.http2;
-    document.getElementById('pHstsEnabled').checked = !!p.hstsEnabled;
-    document.getElementById('pSslForced').checked = !!p.sslForced;
-    document.getElementById('pAllowWebsocketUpgrade').checked = p.allowWebsocketUpgrade !== false;
+    document.getElementById('pHttp2').value = String(!!p.http2);
+    document.getElementById('pHstsEnabled').value = String(!!p.hstsEnabled);
+    document.getElementById('pSslForced').value = String(!!p.sslForced);
+    document.getElementById('pAllowWebsocketUpgrade').value = String(p.allowWebsocketUpgrade !== false);
     document.getElementById('pAdvancedConfig').value = p.advancedConfig || '';
     const banner = document.getElementById('pAdoptedBanner');
     const info = document.getElementById('pAdoptedInfo');
@@ -5329,6 +5397,366 @@ async function releaseProfileFromNpm() {
     await fetchProfiles();
   } catch (e) {
     toast('Error: ' + e.message, 'error');
+  }
+}
+
+// ─── NPM Proxy Host management (direct CRUD on NPM) ──────────────────────────
+
+let _nhEditingId = null;
+let _nhCertCache = [];
+let _npmHostsAll = [];          // last full list from server
+let _npmHostsPage = 1;
+let _npmHostsPageSize = 25;
+
+async function fetchNpmHostsTable() {
+  const body = document.getElementById('npmHostsTableBody');
+  if (!body) return;
+  body.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text3)">Loading…</td></tr>';
+  try {
+    const res = await api('/admin/npm/proxy-hosts');
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      body.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--err-text)">' + _esc(d.error || 'Failed to load') + '</td></tr>';
+      return;
+    }
+    const data = await res.json();
+    _npmHostsAll = data.hosts || [];
+    _npmHostsPage = 1;
+    renderNpmHostsTable();
+  } catch (e) {
+    body.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--err-text)">' + _esc(e.message) + '</td></tr>';
+  }
+}
+
+function _filterNpmHosts() {
+  const q = (document.getElementById('npmHostsSearch')?.value || '').trim().toLowerCase();
+  const f = document.getElementById('npmHostsFilter')?.value || 'all';
+  return _npmHostsAll.filter(h => {
+    if (q) {
+      const hay = ((h.domain_names || []).join(' ') + ' ' + (h.forward_host || '')).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    switch (f) {
+      case 'enabled': return !!h.enabled;
+      case 'disabled': return !h.enabled;
+      case 'ssl': return h.certificate_id && Number(h.certificate_id) > 0;
+      case 'nossl': return !h.certificate_id || Number(h.certificate_id) <= 0;
+      case 'linked': return !!h.linkedProfile;
+      case 'unlinked': return !h.linkedProfile;
+      default: return true;
+    }
+  });
+}
+
+function renderNpmHostsTable() {
+  const body = document.getElementById('npmHostsTableBody');
+  if (!body) return;
+  const filtered = _filterNpmHosts();
+  const total = filtered.length;
+  const pageSize = _npmHostsPageSize;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (_npmHostsPage > totalPages) _npmHostsPage = totalPages;
+  const start = (_npmHostsPage - 1) * pageSize;
+  const slice = filtered.slice(start, start + pageSize);
+
+  document.getElementById('npmHostsCount').textContent = total
+    ? (total + ' host' + (total === 1 ? '' : 's'))
+    : (_npmHostsAll.length ? '0 of ' + _npmHostsAll.length + ' (filtered)' : '');
+
+  const info = document.getElementById('npmHostsPageInfo');
+  if (info) info.textContent = total ? ('Page ' + _npmHostsPage + ' of ' + totalPages) : 'No results';
+  const prev = document.getElementById('npmHostsPrev');
+  const next = document.getElementById('npmHostsNext');
+  if (prev) prev.disabled = _npmHostsPage <= 1;
+  if (next) next.disabled = _npmHostsPage >= totalPages;
+
+  if (!total) {
+    body.innerHTML = '<tr><td colspan="6" style="padding:32px;text-align:center;color:var(--text3)">'
+      + (_npmHostsAll.length ? 'No hosts match the current filter.' : 'No proxy hosts yet. Click <strong>+ Proxy Host</strong> to add one.')
+      + '</td></tr>';
+    return;
+  }
+
+  body.innerHTML = slice.map(h => {
+    const domains = (h.domain_names || []).join(', ');
+    const fwd = (h.forward_scheme || 'http') + '://' + (h.forward_host || '?') + ':' + (h.forward_port || '?');
+    const sslBadge = (h.certificate_id && Number(h.certificate_id) > 0)
+      ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 7px;border-radius:10px;font-size:11px">SSL</span>'
+      : '<span style="color:var(--text3);font-size:11px">—</span>';
+    const enabledBadge = h.enabled
+      ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 7px;border-radius:10px;font-size:11px">Enabled</span>'
+      : '<span style="background:var(--surface2);color:var(--text2);padding:2px 7px;border-radius:10px;font-size:11px">Disabled</span>';
+    const linkedTag = h.linkedProfile
+      ? ' <span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 7px;border-radius:10px;font-size:11px">Linked → ' + _esc(h.linkedProfile) + '</span>'
+      : '';
+    const isLinked = !!h.linkedProfile;
+    const toggleAction = h.enabled
+      ? '<button type="button" class="btn btn-sm" onclick="toggleNpmHost(' + h.id + ', false)" title="Disable">Disable</button>'
+      : '<button type="button" class="btn btn-sm" onclick="toggleNpmHost(' + h.id + ', true)" title="Enable">Enable</button>';
+    const editBtn = isLinked
+      ? '<button type="button" class="btn btn-sm" onclick="openLinkedProfile(\'' + _esc(h.linkedProfile) + '\')" title="Open linked profile">Open profile</button>'
+      : '<button type="button" class="btn btn-sm" onclick="openNpmHostModal(' + h.id + ')">Edit</button>';
+    const delBtn = isLinked
+      ? '<button type="button" class="btn btn-sm" disabled title="Release the linked profile first">Delete</button>'
+      : '<button type="button" class="btn btn-sm" onclick="deleteNpmHost(' + h.id + ')" style="color:var(--err-text)">Delete</button>';
+    return '<tr style="border-bottom:1px solid var(--border)">' +
+      '<td style="padding:10px 14px;color:var(--text3)">#' + h.id + '</td>' +
+      '<td style="padding:10px 14px">' + _esc(domains || '(no domains)') + linkedTag + '</td>' +
+      '<td style="padding:10px 14px;color:var(--text2);font-family:monospace;font-size:11.5px">' + _esc(fwd) + '</td>' +
+      '<td style="padding:10px 14px">' + sslBadge + '</td>' +
+      '<td style="padding:10px 14px">' + enabledBadge + '</td>' +
+      '<td style="padding:10px 14px;text-align:right;white-space:nowrap"><div style="display:inline-flex;gap:6px">' + toggleAction + editBtn + delBtn + '</div></td>' +
+      '</tr>';
+  }).join('');
+}
+
+function changeNpmPage(delta) {
+  const total = _filterNpmHosts().length;
+  const totalPages = Math.max(1, Math.ceil(total / _npmHostsPageSize));
+  _npmHostsPage = Math.min(totalPages, Math.max(1, _npmHostsPage + delta));
+  renderNpmHostsTable();
+}
+
+function onNpmPageSizeChange() {
+  _npmHostsPageSize = parseInt(document.getElementById('npmHostsPageSize').value, 10) || 25;
+  _npmHostsPage = 1;
+  renderNpmHostsTable();
+}
+
+async function toggleNpmHost(id, enable) {
+  if (!enable && !confirm('Disable proxy host #' + id + '? It will stop serving requests until re-enabled.')) return;
+  try {
+    const path = '/admin/npm/proxy-hosts/' + id + '/' + (enable ? 'enable' : 'disable');
+    const res = await api(path, { method: 'POST' });
+    const d = await res.json();
+    if (!res.ok) return toast(d.error || 'Failed', 'error');
+    toast('Host ' + (enable ? 'enabled' : 'disabled'));
+    await fetchNpmHostsTable();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteNpmHost(id) {
+  const host = _npmHostsAll.find(h => h.id === id);
+  const domains = host ? (host.domain_names || []).join(', ') : '#' + id;
+  if (!confirm('Delete proxy host "' + domains + '"?\n\nThis removes it from NPM permanently. The associated certificate (if any) is not deleted.')) return;
+  try {
+    const res = await api('/admin/npm/proxy-hosts/' + id, { method: 'DELETE' });
+    const d = await res.json();
+    if (!res.ok) return toast(d.error || 'Delete failed', 'error');
+    toast('Host deleted');
+    await fetchNpmHostsTable();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+// Modal
+function switchNpmHostTab(tab) {
+  document.querySelectorAll('.npm-host-tab').forEach(btn => {
+    const active = btn.getAttribute('data-tab') === tab;
+    btn.style.borderBottomColor = active ? 'var(--accent)' : 'transparent';
+    btn.style.color = active ? 'var(--text)' : 'var(--text2)';
+    btn.style.fontWeight = active ? '500' : '400';
+  });
+  document.querySelectorAll('.npm-host-pane').forEach(p => {
+    p.style.display = p.getAttribute('data-pane') === tab ? '' : 'none';
+  });
+}
+
+async function openNpmHostModal(id) {
+  _nhEditingId = id;
+  document.getElementById('npmHostModalTitle').textContent = id ? ('Edit Proxy Host #' + id) : 'Add Proxy Host';
+  setNpmStatus('nhStatus', '', 'info');
+  switchNpmHostTab('details');
+  // Reset form
+  document.getElementById('nhDomains').value = '';
+  document.getElementById('nhScheme').value = 'http';
+  document.getElementById('nhForwardHost').value = '';
+  document.getElementById('nhForwardPort').value = '';
+  document.getElementById('nhCacheAssets').checked = false;
+  document.getElementById('nhBlockExploits').checked = true;
+  document.getElementById('nhWebsocket').checked = false;
+  document.getElementById('nhSslForced').checked = false;
+  document.getElementById('nhHttp2').checked = false;
+  document.getElementById('nhHsts').checked = false;
+  document.getElementById('nhHstsSub').checked = false;
+  document.getElementById('nhLocations').innerHTML = '';
+
+  // Load certificates for the SSL dropdown
+  await reloadNhCerts(null);
+
+  if (id) {
+    try {
+      const res = await api('/admin/npm/proxy-hosts/' + id);
+      const data = await res.json();
+      if (!res.ok) { setNpmStatus('nhStatus', data.error || 'Failed to load', 'err'); return; }
+      const h = data.host;
+      document.getElementById('nhDomains').value = (h.domain_names || []).join(', ');
+      document.getElementById('nhScheme').value = h.forward_scheme || 'http';
+      document.getElementById('nhForwardHost').value = h.forward_host || '';
+      document.getElementById('nhForwardPort').value = h.forward_port || '';
+      document.getElementById('nhCacheAssets').checked = !!h.caching_enabled;
+      document.getElementById('nhBlockExploits').checked = !!h.block_exploits;
+      document.getElementById('nhWebsocket').checked = !!h.allow_websocket_upgrade;
+      document.getElementById('nhSslForced').checked = !!h.ssl_forced;
+      document.getElementById('nhHttp2').checked = !!h.http2_support;
+      document.getElementById('nhHsts').checked = !!h.hsts_enabled;
+      document.getElementById('nhHstsSub').checked = !!h.hsts_subdomains;
+      const certSel = document.getElementById('nhCertId');
+      const certIdStr = (typeof h.certificate_id === 'number' && h.certificate_id > 0) ? String(h.certificate_id) : '';
+      certSel.value = certIdStr;
+      onNhCertChange();
+      // Locations
+      const locs = (h.locations || []);
+      const cont = document.getElementById('nhLocations');
+      cont.innerHTML = '';
+      locs.forEach(l => cont.insertAdjacentHTML('beforeend', _nhLocRowHtml({
+        path: l.path || '',
+        forward_scheme: l.forward_scheme || 'http',
+        forward_host: l.forward_host || '',
+        forward_port: l.forward_port || '',
+        advanced_config: l.advanced_config || '',
+      }, cont.querySelectorAll('.nh-loc-row').length)));
+    } catch (e) {
+      setNpmStatus('nhStatus', 'Error: ' + e.message, 'err');
+      return;
+    }
+  }
+  document.getElementById('npmHostModal').classList.add('active');
+}
+
+function closeNpmHostModal() {
+  document.getElementById('npmHostModal').classList.remove('active');
+  _nhEditingId = null;
+}
+
+async function reloadNhCerts(selectedId) {
+  try {
+    const res = await api('/admin/npm/certificates');
+    if (!res.ok) return;
+    const data = await res.json();
+    _nhCertCache = data.certificates || [];
+    const sel = document.getElementById('nhCertId');
+    const cur = selectedId != null ? String(selectedId) : sel.value;
+    sel.innerHTML = '<option value="">None</option><option value="new">Request a new SSL Certificate</option>' +
+      _nhCertCache.map(c => '<option value="' + c.id + '">#' + c.id + ' — ' + _esc((c.domain_names || []).join(', ') || c.nice_name || 'cert') + '</option>').join('');
+    sel.value = cur;
+    onNhCertChange();
+  } catch { /* ignore */ }
+}
+
+function onNhCertChange() {
+  const v = document.getElementById('nhCertId').value;
+  document.getElementById('nhCertNewGroup').style.display = v === 'new' ? '' : 'none';
+  // Toggle SSL-related options visibility-wise: leave them all visible but they're only meaningful with a cert.
+}
+
+function _nhLocRowHtml(loc, idx) {
+  loc = loc || {};
+  return '<div class="nh-loc-row" data-idx="' + idx + '" style="display:grid;grid-template-columns:1fr 90px 1.4fr 90px auto;gap:6px;align-items:start;padding:8px;background:var(--surface2);border-radius:6px">' +
+    '<input type="text" class="nh-loc-path" value="' + _esc(loc.path || '') + '" placeholder="/path" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:7px 9px;color:var(--text);font-size:12.5px">' +
+    '<select class="nh-loc-scheme" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:7px 9px;color:var(--text);font-size:12.5px"><option value="http"' + (loc.forward_scheme === 'http' ? ' selected' : '') + '>http</option><option value="https"' + (loc.forward_scheme === 'https' ? ' selected' : '') + '>https</option></select>' +
+    '<input type="text" class="nh-loc-host" value="' + _esc(loc.forward_host || '') + '" placeholder="eg: 10.0.0.1" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:7px 9px;color:var(--text);font-size:12.5px">' +
+    '<input type="number" class="nh-loc-port" min="1" max="65535" value="' + _esc(String(loc.forward_port ?? '')) + '" placeholder="80" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:7px 9px;color:var(--text);font-size:12.5px">' +
+    '<button type="button" class="btn btn-sm" onclick="removeNhLocation(' + idx + ')" style="color:var(--err-text);padding:6px 10px" title="Delete">&times;</button>' +
+    '<textarea class="nh-loc-adv" rows="1" placeholder="# advanced config (optional)" style="grid-column:1 / -1;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 9px;color:var(--text);font-size:12px;font-family:monospace">' + _esc(loc.advanced_config || '') + '</textarea>' +
+    '</div>';
+}
+
+function addNhLocation() {
+  const cont = document.getElementById('nhLocations');
+  const idx = cont.querySelectorAll('.nh-loc-row').length;
+  cont.insertAdjacentHTML('beforeend', _nhLocRowHtml({ forward_scheme: 'http', forward_port: 80 }, idx));
+}
+
+function removeNhLocation(idx) {
+  const cont = document.getElementById('nhLocations');
+  const row = cont.querySelector('.nh-loc-row[data-idx="' + idx + '"]');
+  if (row) row.remove();
+}
+
+function readNhLocations() {
+  const out = [];
+  document.querySelectorAll('#nhLocations .nh-loc-row').forEach(row => {
+    const path = row.querySelector('.nh-loc-path').value.trim();
+    const host = row.querySelector('.nh-loc-host').value.trim();
+    const port = parseInt(row.querySelector('.nh-loc-port').value, 10);
+    if (!path || !host || !port) return;
+    out.push({
+      path,
+      forward_scheme: row.querySelector('.nh-loc-scheme').value === 'https' ? 'https' : 'http',
+      forward_host: host,
+      forward_port: port,
+      advanced_config: row.querySelector('.nh-loc-adv').value || '',
+    });
+  });
+  return out;
+}
+
+async function saveNpmHost() {
+  const domains = document.getElementById('nhDomains').value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  const forwardHost = document.getElementById('nhForwardHost').value.trim();
+  const forwardPort = parseInt(document.getElementById('nhForwardPort').value, 10);
+  if (!domains.length) { setNpmStatus('nhStatus', 'At least one domain is required.', 'err'); return; }
+  if (!forwardHost) { setNpmStatus('nhStatus', 'Forward host is required.', 'err'); return; }
+  if (!forwardPort) { setNpmStatus('nhStatus', 'Forward port is required.', 'err'); return; }
+
+  const certSelVal = document.getElementById('nhCertId').value;
+  let certificateId = null;
+  if (certSelVal && certSelVal !== 'new') certificateId = Number(certSelVal);
+
+  const btn = document.getElementById('nhSaveBtn');
+  btn.disabled = true;
+  setNpmStatus('nhStatus', 'Saving…', 'info');
+
+  try {
+    // Step 1: if user picked "Request new cert", create it first.
+    if (certSelVal === 'new') {
+      const email = document.getElementById('nhCertEmail').value.trim();
+      const agree = document.getElementById('nhCertAgree').checked;
+      const dns = document.getElementById('nhCertDns').checked;
+      if (!email) { setNpmStatus('nhStatus', 'Email is required to request a Let\'s Encrypt certificate.', 'err'); btn.disabled = false; return; }
+      if (!agree) { setNpmStatus('nhStatus', 'You must agree to the Let\'s Encrypt Terms of Service.', 'err'); btn.disabled = false; return; }
+      setNpmStatus('nhStatus', 'Requesting Let\'s Encrypt certificate…', 'info');
+      const certRes = await api('/admin/npm/certificates', {
+        method: 'POST',
+        body: JSON.stringify({
+          provider: 'letsencrypt',
+          domain_names: domains,
+          meta: { letsencrypt_agree: true, letsencrypt_email: email, dns_challenge: dns },
+        }),
+      });
+      const certData = await certRes.json();
+      if (!certRes.ok) { setNpmStatus('nhStatus', 'Cert request failed: ' + (certData.error || 'unknown'), 'err'); btn.disabled = false; return; }
+      certificateId = certData.certificate.id;
+    }
+
+    const payload = {
+      domain_names: domains,
+      forward_scheme: document.getElementById('nhScheme').value,
+      forward_host: forwardHost,
+      forward_port: forwardPort,
+      certificate_id: certificateId,
+      ssl_forced: document.getElementById('nhSslForced').checked && !!certificateId,
+      http2_support: document.getElementById('nhHttp2').checked && !!certificateId,
+      hsts_enabled: document.getElementById('nhHsts').checked && !!certificateId,
+      hsts_subdomains: document.getElementById('nhHstsSub').checked && !!certificateId,
+      caching_enabled: document.getElementById('nhCacheAssets').checked,
+      block_exploits: document.getElementById('nhBlockExploits').checked,
+      allow_websocket_upgrade: document.getElementById('nhWebsocket').checked,
+      locations: readNhLocations(),
+    };
+
+    const path = _nhEditingId ? ('/admin/npm/proxy-hosts/' + _nhEditingId) : '/admin/npm/proxy-hosts';
+    const method = _nhEditingId ? 'PUT' : 'POST';
+    const res = await api(path, { method, body: JSON.stringify(payload) });
+    const data = await res.json();
+    if (!res.ok) { setNpmStatus('nhStatus', data.error || 'Save failed', 'err'); btn.disabled = false; return; }
+    toast(_nhEditingId ? 'Proxy host updated' : 'Proxy host created');
+    closeNpmHostModal();
+    await fetchNpmHostsTable();
+  } catch (e) {
+    setNpmStatus('nhStatus', 'Error: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
   }
 }
 
