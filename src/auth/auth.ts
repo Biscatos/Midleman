@@ -546,15 +546,20 @@ export async function createUser(username: string, password: string, totpSecret:
     return { id: row.id, username: row.username, createdAt: row.created_at };
 }
 
-/** Verify dashboard-admin credentials (username + password).
+/** Verify dashboard-admin credentials (username-or-email + password).
  *  After unification, admins are rows in `proxy_users` with `roles` containing
  *  'admin'. LDAP-sourced rows have no usable local password — those are
  *  verified by the LDAP bind path instead. */
-export async function verifyCredentials(username: string, password: string): Promise<{ user: AuthUser; totpSecret: string } | null> {
+export async function verifyCredentials(login: string, password: string): Promise<{ user: AuthUser; totpSecret: string } | null> {
     if (!db) return null;
-    const row = db.prepare(`SELECT id, username, password, totp_secret, totp_enabled, full_name, email,
-            created_by_user_id, auth_source, ldap_config_id, ldap_dn, roles, created_at
-        FROM proxy_users WHERE username = $u AND roles LIKE '%admin%'`).get({ $u: username }) as any;
+    const cols = `id, username, password, totp_secret, totp_enabled, full_name, email,
+            created_by_user_id, auth_source, ldap_config_id, ldap_dn, roles, created_at`;
+    let row = db.prepare(`SELECT ${cols}
+        FROM proxy_users WHERE username = $u AND roles LIKE '%admin%'`).get({ $u: login }) as any;
+    if (!row && login.includes('@')) {
+        row = db.prepare(`SELECT ${cols}
+            FROM proxy_users WHERE email = $e AND email != '' AND roles LIKE '%admin%'`).get({ $e: login.toLowerCase() }) as any;
+    }
     if (!row) return null;
     if (row.auth_source === 'ldap') return null;
     const valid = await Bun.password.verify(password, row.password);
