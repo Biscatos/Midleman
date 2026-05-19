@@ -1,12 +1,14 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sign in — Entrar</title>
+  <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='system';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
+    :root,
+    [data-theme="dark"] {
       --bg: #080a0f; --text: #fafafa; --text2: #71717a;
       --input-bg: rgba(255,255,255,0.04); --input-bdr: rgba(255,255,255,0.09);
       --input-text: #d4d4d8; --input-ph: #3f3f46;
@@ -15,14 +17,13 @@
       --card-bg: #0e1014; --card-bdr: #1f2128;
       --back-bdr: #27272a; --back-hover: #18181b;
     }
-    @media (prefers-color-scheme: light) {
-      :root {
-        --bg: #f4f5f7; --text: #0f1015; --text2: #52525b;
-        --input-bg: rgba(0,0,0,0.04); --input-bdr: rgba(0,0,0,0.12); --input-text: #0f1015; --input-ph: #a1a1aa;
-        --card-bg: #ffffff; --card-bdr: #e4e4e7;
-        --err-bg: rgba(220,38,38,0.06); --err-bdr: rgba(220,38,38,0.2); --err-text: #dc2626;
-        --back-bdr: #d4d4d8; --back-hover: #ebebee;
-      }
+    [data-theme="light"] {
+      --bg: #f4f5f7; --text: #0f1015; --text2: #52525b;
+      --input-bg: rgba(0,0,0,0.04); --input-bdr: rgba(0,0,0,0.12); --input-text: #0f1015; --input-ph: #a1a1aa;
+      --btn: #0078d4; --btn-hover: #005ea6;
+      --card-bg: #ffffff; --card-bdr: #e4e4e7;
+      --err-bg: rgba(220,38,38,0.06); --err-bdr: rgba(220,38,38,0.2); --err-text: #dc2626;
+      --back-bdr: #d4d4d8; --back-hover: #ebebee;
     }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;

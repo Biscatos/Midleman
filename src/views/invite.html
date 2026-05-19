@@ -1,17 +1,19 @@
 <!DOCTYPE html>
-<html lang="pt">
+<html lang="pt" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Criar Conta — {{LOGIN_TITLE}}</title>
   <link rel="icon" href="{{LOGIN_LOGO_URL}}" type="image/x-icon">
   <link rel="shortcut icon" href="{{LOGIN_LOGO_URL}}">
+  <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='system';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: #3a3d55; border-radius: 99px; }
-    * { scrollbar-width: thin; scrollbar-color: #3a3d55 transparent; }
-    :root {
+    ::-webkit-scrollbar-thumb { background: var(--scrollbar, #3a3d55); border-radius: 99px; }
+    * { scrollbar-width: thin; scrollbar-color: var(--scrollbar, #3a3d55) transparent; }
+    :root,
+    [data-theme="dark"] {
       --bg: #080a0f; --text: #fafafa; --text2: #52525b; --text3: #71717a;
       --input-bg: rgba(255,255,255,0.04); --input-bdr: rgba(255,255,255,0.09);
       --input-text: #d4d4d8; --input-ph: #3f3f46;
@@ -19,19 +21,17 @@
       --err-bg: rgba(220,38,38,0.08); --err-bdr: rgba(220,38,38,0.15); --err-text: #dc2626;
       --ok-bg: rgba(0,184,92,0.08); --ok-bdr: rgba(0,184,92,0.2); --ok-text: #00b85c;
       --footer: #27272a; --info-bg: rgba(255,255,255,0.03); --info-bdr: rgba(255,255,255,0.07);
+      --scrollbar: #3a3d55;
     }
-    @media (prefers-color-scheme: light) {
-      :root {
-        --bg: #f4f5f7; --text: #0f1015; --text2: #52525b; --text3: #71717a;
-        --input-bg: rgba(0,0,0,0.04); --input-bdr: rgba(0,0,0,0.12);
-        --input-text: #0f1015; --input-ph: #a1a1aa;
-        --focus: #0078d4; --btn: #0078d4; --btn-hover: #005ea6; --btn-active: #004c8a;
-        --err-bg: rgba(220,38,38,0.06); --err-bdr: rgba(220,38,38,0.15); --err-text: #dc2626;
-        --ok-bg: rgba(0,184,92,0.06); --ok-bdr: rgba(0,184,92,0.15); --ok-text: #008a44;
-        --footer: #c4c4cc; --info-bg: rgba(0,0,0,0.03); --info-bdr: rgba(0,0,0,0.08);
-      }
-      ::-webkit-scrollbar-thumb { background: #c4c9d8; }
-      * { scrollbar-color: #c4c9d8 transparent; }
+    [data-theme="light"] {
+      --bg: #f4f5f7; --text: #0f1015; --text2: #52525b; --text3: #71717a;
+      --input-bg: rgba(0,0,0,0.04); --input-bdr: rgba(0,0,0,0.12);
+      --input-text: #0f1015; --input-ph: #a1a1aa;
+      --focus: #0078d4; --btn: #0078d4; --btn-hover: #005ea6; --btn-active: #004c8a;
+      --err-bg: rgba(220,38,38,0.06); --err-bdr: rgba(220,38,38,0.15); --err-text: #dc2626;
+      --ok-bg: rgba(0,184,92,0.06); --ok-bdr: rgba(0,184,92,0.15); --ok-text: #008a44;
+      --footer: #c4c4cc; --info-bg: rgba(0,0,0,0.03); --info-bdr: rgba(0,0,0,0.08);
+      --scrollbar: #c4c9d8;
     }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; }
     canvas#bg { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
@@ -60,12 +60,12 @@
       box-shadow: inset 0 0 0 1000px rgba(12,14,20,0.97), 0 0 0 1px rgba(255,255,255,0.09);
       -webkit-text-fill-color: var(--input-text); caret-color: var(--input-text);
     }
-    @media (prefers-color-scheme: light) {
-      .form-group input:-webkit-autofill, .form-group input:-webkit-autofill:hover, .form-group input:-webkit-autofill:focus {
-        -webkit-box-shadow: inset 0 0 0 1000px rgba(234,236,242,0.97), 0 0 0 1px rgba(0,0,0,0.12);
-        box-shadow: inset 0 0 0 1000px rgba(234,236,242,0.97), 0 0 0 1px rgba(0,0,0,0.12);
-        -webkit-text-fill-color: var(--input-text);
-      }
+    [data-theme="light"] .form-group input:-webkit-autofill,
+    [data-theme="light"] .form-group input:-webkit-autofill:hover,
+    [data-theme="light"] .form-group input:-webkit-autofill:focus {
+      -webkit-box-shadow: inset 0 0 0 1000px rgba(234,236,242,0.97), 0 0 0 1px rgba(0,0,0,0.12);
+      box-shadow: inset 0 0 0 1000px rgba(234,236,242,0.97), 0 0 0 1px rgba(0,0,0,0.12);
+      -webkit-text-fill-color: var(--input-text);
     }
     .pw-row { position: relative; }
     .pw-row input { padding-right: 42px; }
@@ -155,13 +155,13 @@
     (function () {
       const canvas = document.getElementById('bg'), ctx = canvas.getContext('2d');
       const N = 38, D = 160, S = 0.28; let W, H, nodes;
-      const light = window.matchMedia('(prefers-color-scheme: light)');
+      const isLight = () => document.documentElement.getAttribute('data-theme') === 'light';
       function resize() { W = canvas.width = innerWidth; H = canvas.height = innerHeight; }
       function mk() { return { x: Math.random()*W, y: Math.random()*H, vx: (Math.random()-.5)*S, vy: (Math.random()-.5)*S, r: Math.random()*1.5+1 }; }
       function init() { resize(); nodes = Array.from({length:N}, mk); }
       function draw() {
         ctx.clearRect(0,0,W,H);
-        const lm = light.matches ? 0.10 : 0.18, dc = light.matches ? 'rgba(59,91,219,0.18)' : 'rgba(99,125,255,0.35)';
+        const _l = isLight(); const lm = _l ? 0.10 : 0.18, dc = _l ? 'rgba(59,91,219,0.18)' : 'rgba(99,125,255,0.35)';
         for (let i=0;i<nodes.length;i++) for (let j=i+1;j<nodes.length;j++) {
           const dx=nodes[i].x-nodes[j].x, dy=nodes[i].y-nodes[j].y, d=Math.sqrt(dx*dx+dy*dy);
           if (d<D) { ctx.strokeStyle=`rgba(59,91,219,${(1-d/D)*lm})`; ctx.lineWidth=0.8; ctx.beginPath(); ctx.moveTo(nodes[i].x,nodes[i].y); ctx.lineTo(nodes[j].x,nodes[j].y); ctx.stroke(); }

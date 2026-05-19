@@ -330,9 +330,20 @@ function renderProfiles(profiles) {
     const statusBadge = p.running
       ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px">Running</span>'
       : '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>';
-    const npmBadge = (p.npmProxyHostId)
-      ? `<span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help" title="Linked to NPM proxy host #${p.npmProxyHostId}${(p.publicHostnames && p.publicHostnames.length) ? ' — ' + esc(p.publicHostnames.join(', ')) : ''}">NPM #${p.npmProxyHostId}</span>`
-      : '';
+    const npmBadge = (() => {
+      if (!p.npmProxyHostId) return '';
+      const hosts = (p.publicHostnames || []).filter(Boolean);
+      const tip = `NPM #${p.npmProxyHostId}` + (hosts.length ? ` — ${esc(hosts.join(', '))}` : '');
+      const shown = hosts.length === 0
+        ? `NPM #${p.npmProxyHostId}`
+        : (hosts.length === 1
+            ? esc(hosts[0])
+            : `${esc(hosts[0])} <span style="color:var(--text3);font-weight:400">+${hosts.length - 1}</span>`);
+      return `<span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle" title="${tip}">
+        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shown}</span>
+      </span>`;
+    })();
     const hasAuth = p.authHeader;
     const authVal = hasAuth
       ? esc(p.authHeader) + (p.authPrefix ? ` <span style="color:var(--text3)">(${esc(p.authPrefix)})</span>` : '')
@@ -1540,9 +1551,20 @@ function renderWebhooks(webhooks) {
       : (pendingCount > 0
           ? `<span style="position:absolute;top:2px;right:2px;width:7px;height:7px;background:var(--orange);border-radius:50%;display:block" title="${pendingCount} pending persistent retries"></span>`
           : '');
-    const wNpmBadge = (w.npmProxyHostId)
-      ? `<span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help" title="Linked to NPM proxy host #${w.npmProxyHostId}${(w.publicHostnames && w.publicHostnames.length) ? ' — ' + esc(w.publicHostnames.join(', ')) : ''}">NPM #${w.npmProxyHostId}</span>`
-      : '';
+    const wNpmBadge = (() => {
+      if (!w.npmProxyHostId) return '';
+      const hosts = (w.publicHostnames || []).filter(Boolean);
+      const tip = `NPM #${w.npmProxyHostId}` + (hosts.length ? ` — ${esc(hosts.join(', '))}` : '');
+      const shown = hosts.length === 0
+        ? `NPM #${w.npmProxyHostId}`
+        : (hosts.length === 1
+            ? esc(hosts[0])
+            : `${esc(hosts[0])} <span style="color:var(--text3);font-weight:400">+${hosts.length - 1}</span>`);
+      return `<span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle" title="${tip}">
+        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shown}</span>
+      </span>`;
+    })();
     return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
   <td style="padding:8px 12px;font-weight:600">${esc(w.name)}</td>
   <td style="padding:8px">${statusBadge}${wNpmBadge}</td>

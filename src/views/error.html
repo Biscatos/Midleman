@@ -1,13 +1,15 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/png" href="/logo.png">
   <title>{{STATUS}} — Midleman</title>
+  <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='system';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
   <style>
-    :root {
+    :root,
+    [data-theme="dark"] {
       --bg: #0f1117;
       --surface: #1c1e2b;
       --border: #2e3148;
@@ -19,6 +21,22 @@
       --green: #00b894;
       --red: #e17055;
       --orange: #fdcb6e;
+      --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    [data-theme="light"] {
+      --bg: #f7f7f9;
+      --surface: #ffffff;
+      --border: #e4e4e7;
+      --text: #18181b;
+      --text2: #52525b;
+      --text3: #a1a1aa;
+      --accent: #0064b3;
+      --accent2: #0078d4;
+      --green: #15803d;
+      --red: #b91c1c;
+      --orange: #c2410c;
+      --shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
     }
 
     * {
@@ -45,7 +63,7 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 16px;
-      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+      box-shadow: var(--shadow);
     }
 
     .error-code {
@@ -117,14 +135,14 @@
     }
 
     .btn:hover {
-      background: #242736;
-      border-color: #3a3d55;
+      background: var(--border);
+      border-color: var(--text3);
     }
 
     .btn-primary {
       background: var(--accent);
       border-color: var(--accent);
-      color: #fff;
+      color: #ffffff;
     }
 
     .btn-primary:hover {
