@@ -19,6 +19,7 @@ interface StoredProfile {
     disableLogs?: boolean;
     blockedExtensions?: string[];
     allowedIps?: string[];
+    allowedPaths?: string[];
     port?: number;
     forwardPath?: boolean;
     passthrough?: boolean;
@@ -87,6 +88,7 @@ function toRuntime(stored: StoredProfile): ProxyProfile {
         );
     }
     if (stored.allowedIps && stored.allowedIps.length > 0) profile.allowedIps = stored.allowedIps;
+    if (stored.allowedPaths && stored.allowedPaths.length > 0) profile.allowedPaths = stored.allowedPaths;
     
     if (stored.port !== undefined) profile.port = stored.port;
     if (stored.forwardPath !== undefined) profile.forwardPath = stored.forwardPath;
@@ -136,6 +138,7 @@ function toStored(profile: ProxyProfile): StoredProfile {
         stored.blockedExtensions = Array.from(profile.blockedExtensions);
     }
     if (profile.allowedIps && profile.allowedIps.length > 0) stored.allowedIps = profile.allowedIps;
+    if (profile.allowedPaths && profile.allowedPaths.length > 0) stored.allowedPaths = profile.allowedPaths;
     
     if (profile.port !== undefined) stored.port = profile.port;
     if (profile.forwardPath !== undefined) stored.forwardPath = profile.forwardPath;
@@ -300,6 +303,16 @@ export function validateProfileInput(input: unknown): string | null {
             if (l.forwardScheme !== undefined && l.forwardScheme !== 'http' && l.forwardScheme !== 'https') return '"npmLocations[].forwardScheme" must be "http" or "https"';
             if (l.advancedConfig !== undefined && typeof l.advancedConfig !== 'string') return '"npmLocations[].advancedConfig" must be a string';
             if (typeof l.advancedConfig === 'string' && (l.advancedConfig as string).length > 4096) return '"npmLocations[].advancedConfig" too long (max 4KB)';
+        }
+    }
+
+    if (p.allowedPaths !== undefined) {
+        if (!Array.isArray(p.allowedPaths)) return '"allowedPaths" must be an array of strings';
+        if (p.allowedPaths.length > 64) return '"allowedPaths" cannot exceed 64 entries';
+        for (const pat of p.allowedPaths) {
+            if (typeof pat !== 'string' || !pat.trim()) return '"allowedPaths" entries must be non-empty strings';
+            if (!(pat as string).startsWith('/')) return `"allowedPaths" entry "${pat}" must start with "/"`;
+            if ((pat as string).length > 512) return '"allowedPaths" entries must be 512 characters or fewer';
         }
     }
 

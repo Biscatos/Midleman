@@ -19,6 +19,21 @@ function getClientIP(req: Request): string {
         || 'unknown';
 }
 
+/** Path allowlist matcher. Each pattern is either an exact path or a prefix
+ *  ending with "*" (e.g. "/api/v1/users*" matches "/api/v1/users" and
+ *  "/api/v1/users/42"). Patterns are matched against the path only (no query). */
+function isPathAllowed(pathname: string, patterns: string[]): boolean {
+    for (const pat of patterns) {
+        if (pat.endsWith('*')) {
+            const prefix = pat.slice(0, -1);
+            if (pathname === prefix || pathname.startsWith(prefix)) return true;
+        } else if (pathname === pat) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /** Lightweight MIME → extension map (common types only, zero dependency) */
 const MIME_TO_EXT: Record<string, string> = {
     // Images
@@ -222,6 +237,21 @@ export async function handleProxyRequest(
     // ── Auth: login mode (JWT-based user authentication) ──
     const effectiveAuthMode = profile.authMode || (profile.accessKey ? 'accessKey' : 'none');
     let loginJwtToken: string | null = null;
+
+    // ── Path allowlist (applied before auth so disallowed paths never see the login page) ──
+    if (profile.allowedPaths && profile.allowedPaths.length > 0) {
+        const isAuthRoute = effectiveAuthMode === 'login' && remainingPath.startsWith('/auth/');
+        if (!isAuthRoute && !isPathAllowed(remainingPath, profile.allowedPaths)) {
+            logAudit({
+                action: 'proxy.path.blocked',
+                actorUsername: '',
+                details: { profile: profileName, path: remainingPath },
+                ip: getClientIP(req),
+                userAgent: req.headers.get('user-agent'),
+            });
+            return jsonResponse(403, { error: 'Forbidden', message: 'Path not allowed' });
+        }
+    }
 
     if (effectiveAuthMode === 'login') {
         // /auth/* routes should not be forwarded to upstream
@@ -719,6 +749,21 @@ export async function handleDirectProxy(
     // ── Auth: login mode (JWT-based user authentication) ──
     const effectiveAuthMode = profile.authMode || (profile.accessKey ? 'accessKey' : 'none');
     let loginJwtToken: string | null = null;
+
+    // ── Path allowlist (applied before auth so disallowed paths never see the login page) ──
+    if (profile.allowedPaths && profile.allowedPaths.length > 0) {
+        const isAuthRoute = effectiveAuthMode === 'login' && url.pathname.startsWith('/auth/');
+        if (!isAuthRoute && !isPathAllowed(url.pathname, profile.allowedPaths)) {
+            logAudit({
+                action: 'proxy.path.blocked',
+                actorUsername: '',
+                details: { profile: profileName, path: url.pathname },
+                ip: getClientIP(req),
+                userAgent: req.headers.get('user-agent'),
+            });
+            return jsonResponse(403, { error: 'Forbidden', message: 'Path not allowed' });
+        }
+    }
 
     if (effectiveAuthMode === 'login') {
         // /auth/* routes are handled by proxy-server.ts — never forward to upstream

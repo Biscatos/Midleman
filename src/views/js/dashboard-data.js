@@ -410,6 +410,7 @@ async function openProfileModal(profile = null) {
   updateLogoPreview();
   document.getElementById('pBlocked').value = profile?.blockedExtensions ? profile.blockedExtensions.join(', ') : '';
   IpTagInput.setValue('pAllowedIps', profile?.allowedIps || []);
+  document.getElementById('pAllowedPaths').value = profile?.allowedPaths ? profile.allowedPaths.join('\n') : '';
   // NPM fields (hidden inputs — populated by Adopt flow; managed via the Nginx PM page otherwise)
   document.getElementById('pPublicHostnames').value = profile?.publicHostnames ? profile.publicHostnames.join(', ') : '';
   document.getElementById('pTlsMode').value = profile?.tlsMode || 'none';
@@ -521,6 +522,11 @@ async function saveProfile() {
   }
   const blocked = v('pBlocked'); if (blocked) body.blockedExtensions = blocked.split(',').map(s => s.trim()).filter(Boolean);
   const allowedIps = IpTagInput.getValue('pAllowedIps'); if (allowedIps.length) body.allowedIps = allowedIps;
+  const allowedPathsRaw = v('pAllowedPaths');
+  if (allowedPathsRaw) {
+    const paths = allowedPathsRaw.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+    if (paths.length) body.allowedPaths = paths;
+  }
   // NPM fields (hidden — only meaningful for adopted profiles; preserved across saves)
   const hostnamesRaw = v('pPublicHostnames');
   if (hostnamesRaw) body.publicHostnames = hostnamesRaw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
@@ -3908,7 +3914,9 @@ function renderAuditLogs(logs, total) {
     tbody.innerHTML = logs.map(function(l, idx) {
       const when = new Date(l.createdAt).toLocaleString();
       const actor = l.actorUsername || '<system>';
-      const target = (l.targetType || '') + (l.targetId ? ' #' + l.targetId : '');
+      const target = l.targetType === 'midleman'
+        ? 'Midleman'
+        : (l.targetType || '') + (l.targetId ? ' #' + l.targetId : '');
       const failed = l.action.endsWith('.failed') || l.action.indexOf('error') !== -1;
       const actionStyle = failed ? 'color:var(--err-text);font-weight:500' : '';
       return '<tr style="border-top:1px solid var(--border)">' +
@@ -3952,7 +3960,7 @@ function showAuditDetail(idx) {
       '<div><span style="color:var(--text3)">When:</span> ' + esc(new Date(l.createdAt).toLocaleString()) + '</div>' +
       '<div><span style="color:var(--text3)">Actor:</span> ' + esc(l.actorUsername || '<system>') + (l.actorUserId ? ' (#' + l.actorUserId + ')' : '') + '</div>' +
       '<div><span style="color:var(--text3)">Action:</span> <code>' + esc(l.action) + '</code></div>' +
-      '<div><span style="color:var(--text3)">Target:</span> ' + esc(l.targetType || '—') + (l.targetId ? ' #' + esc(l.targetId) : '') + '</div>' +
+      '<div><span style="color:var(--text3)">Target:</span> ' + (l.targetType === 'midleman' ? 'Midleman' : esc(l.targetType || '—') + (l.targetId ? ' #' + esc(l.targetId) : '')) + '</div>' +
       '<div><span style="color:var(--text3)">IP:</span> <code>' + esc(l.ipAddress || '—') + '</code></div>' +
       '<div><span style="color:var(--text3)">User-Agent:</span> <span style="font-size:11px">' + esc(l.userAgent || '—') + '</span></div>' +
       (l.details ? '<div style="margin-top:10px"><span style="color:var(--text3)">Details:</span><pre style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px;margin-top:4px;font-size:11px;overflow-x:auto">' + esc(JSON.stringify(l.details, null, 2)) + '</pre></div>' : '') +

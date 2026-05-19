@@ -1660,6 +1660,7 @@
                 <option value="proxy.logout">proxy.logout</option>
                 <option value="proxy.accesskey.success">proxy.accesskey.success</option>
                 <option value="proxy.accesskey.failed">proxy.accesskey.failed</option>
+                <option value="proxy.path.blocked">proxy.path.blocked</option>
                 <option value="ldap.access.revoked">ldap.access.revoked</option>
                 <option value="ldap.user.orphaned">ldap.user.orphaned</option>
                 <option value="ldap.sync.forced">ldap.sync.forced</option>
@@ -2332,6 +2333,10 @@
               style="color:var(--text3);font-weight:400;font-size:11px">— CIDR, wildcard, or exact. Leave empty to allow
               all.</span></label>
           <div id="pAllowedIps" class="ip-tag-wrap"></div>
+        </div>
+        <div class="form-group span-2"><label>Allowed Paths <span
+              style="color:var(--text3);font-weight:400;font-size:11px">— exact path (e.g. <code>/api/v1/status</code>) or prefix ending with <code>*</code> (e.g. <code>/api/v1/users*</code>). One per line. Leave empty to allow all paths.</span></label>
+          <textarea id="pAllowedPaths" rows="3" placeholder="/api/v1/users&#10;/api/v1/users/*" style="width:100%;font-family:monospace;font-size:12px"></textarea>
         </div>
       </div>
       <div class="form-section">Options</div>

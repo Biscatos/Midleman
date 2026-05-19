@@ -14,6 +14,7 @@ export interface ProxyProfile {
   disableLogs?: boolean;  // If true, skip request/response logging for this profile
   blockedExtensions?: Set<string>; // Optional set of blocked file extensions
   allowedIps?: string[];  // Optional IP allowlist (exact, CIDR, wildcard). Empty = unrestricted.
+  allowedPaths?: string[]; // Optional path allowlist. Exact path or prefix ending with "*". Empty/undefined = all paths allowed.
   
   // -- Target/Standalone Proxy Features --
   port?: number;          // Dedicated listening port. If 0, auto-assigns. If omitted, uses the main proxy root prefix (/proxy/{name}/).

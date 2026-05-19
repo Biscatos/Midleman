@@ -480,6 +480,7 @@ const server = Bun.serve({
                             logAudit({
                                 action: 'admin.login.failed',
                                 actorUsername: username,
+                                targetType: 'midleman',
                                 details: {
                                     reason: 'ldap_no_admin_group',
                                     dn: ldap.auth.dn,
@@ -498,23 +499,23 @@ const server = Bun.serve({
                                 email: ldap.auth.email,
                             });
                             if (!shadow) {
-                                logAudit({ action: 'admin.login.failed', actorUsername: username, details: { reason: 'ldap_username_collision', dn: ldap.auth.dn }, ip: clientIp, userAgent: req.headers.get('user-agent') });
+                                logAudit({ action: 'admin.login.failed', actorUsername: username, targetType: 'midleman', details: { reason: 'ldap_username_collision', dn: ldap.auth.dn }, ip: clientIp, userAgent: req.headers.get('user-agent') });
                                 // Same 401 below — admins resolve collision via audit + manual cleanup.
                             } else {
-                                logAudit({ action: 'ldap.login.success', actorUserId: shadow.id, actorUsername: shadow.username, details: { directory: ldap.auth.configName, role: 'admin', dn: ldap.auth.dn, matchedGroup: ldap.matchedAdminGroup }, ip: clientIp, userAgent: req.headers.get('user-agent') });
+                                logAudit({ action: 'ldap.login.success', actorUserId: shadow.id, actorUsername: shadow.username, targetType: 'midleman', details: { directory: ldap.auth.configName, role: 'admin', dn: ldap.auth.dn, matchedGroup: ldap.matchedAdminGroup }, ip: clientIp, userAgent: req.headers.get('user-agent') });
                                 // Pull the stored TOTP secret so subsequent logins skip the setup flow.
                                 cred = { user: shadow, totpSecret: getAdminTotpSecret(shadow.id) };
                             }
                         }
                     } else if (ldap.reason === 'server_error') {
-                        logAudit({ action: 'admin.login.failed', actorUsername: username, details: { reason: 'ldap_server_error', detail: ldap.detail }, ip: clientIp, userAgent: req.headers.get('user-agent') });
+                        logAudit({ action: 'admin.login.failed', actorUsername: username, targetType: 'midleman', details: { reason: 'ldap_server_error', detail: ldap.detail }, ip: clientIp, userAgent: req.headers.get('user-agent') });
                         // Same 401 below — error detail stays in audit only.
                     }
                     // invalid_credentials | no_directory → fall through to generic failure below
                 }
 
                 if (!cred) {
-                    logAudit({ action: 'admin.login.failed', actorUsername: username, ip: clientIp, userAgent: req.headers.get('user-agent') });
+                    logAudit({ action: 'admin.login.failed', actorUsername: username, targetType: 'midleman', ip: clientIp, userAgent: req.headers.get('user-agent') });
                     return jsonRes(401, { error: 'Invalid username or password' });
                 }
                 // First-time login for an admin without TOTP set up yet → enrol TOTP now.
@@ -540,7 +541,7 @@ const server = Bun.serve({
                 const challenge = consumeLoginChallenge(challengeToken);
                 if (!challenge) return jsonRes(401, { error: 'Session expired. Please start login again.' });
                 if (!verifyTotp(challenge.totpSecret, totpCode)) {
-                    logAudit({ action: 'admin.login.failed', actorUserId: challenge.userId, actorUsername: challenge.username, details: { reason: 'bad_totp' }, ip: clientIp, userAgent: req.headers.get('user-agent') });
+                    logAudit({ action: 'admin.login.failed', actorUserId: challenge.userId, actorUsername: challenge.username, targetType: 'midleman', details: { reason: 'bad_totp' }, ip: clientIp, userAgent: req.headers.get('user-agent') });
                     return jsonRes(401, { error: 'Invalid authenticator code' });
                 }
                 // First-login flow: persist the freshly-set TOTP secret
@@ -548,7 +549,7 @@ const server = Bun.serve({
                     setAdminTotp(challenge.userId, challenge.totpSecret);
                 }
                 const sid = createSession(challenge.userId, clientIp, req.headers.get('user-agent') || '');
-                logAudit({ action: 'admin.login', actorUserId: challenge.userId, actorUsername: challenge.username, details: challenge.needsSetup ? { firstLogin: true } : undefined, ip: clientIp, userAgent: req.headers.get('user-agent') });
+                logAudit({ action: 'admin.login', actorUserId: challenge.userId, actorUsername: challenge.username, targetType: 'midleman', details: challenge.needsSetup ? { firstLogin: true } : undefined, ip: clientIp, userAgent: req.headers.get('user-agent') });
                 return new Response(JSON.stringify({ status: 'ok', username: challenge.username }), {
                     status: 200,
                     headers: {
@@ -563,7 +564,7 @@ const server = Bun.serve({
                 const cookies = parseCookies(req);
                 const sessionId = cookies[config.auth.cookieName];
                 if (sessionId) destroySession(sessionId);
-                if (me) logAudit({ action: 'admin.logout', actorUserId: me.id, actorUsername: me.username, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                if (me) logAudit({ action: 'admin.logout', actorUserId: me.id, actorUsername: me.username, targetType: 'midleman', ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                 return new Response(JSON.stringify({ status: 'ok' }), {
                     status: 200,
                     headers: {
@@ -1460,6 +1461,7 @@ const server = Bun.serve({
                             consentPageId: profile.consentPageId ?? null,
                             blockedExtensions: profile.blockedExtensions ? Array.from(profile.blockedExtensions) : [],
                             allowedIps: profile.allowedIps || [],
+                            allowedPaths: profile.allowedPaths || [],
                             port: getProxyServerPort(profile.name),
                             running: isProxyServerRunning(profile.name),
                             publicHostnames: profile.publicHostnames || [],
@@ -1492,6 +1494,7 @@ const server = Bun.serve({
                         disableLogs: !!p.disableLogs,
                         blockedExtensions: p.blockedExtensions ? Array.from(p.blockedExtensions) : [],
                         allowedIps: p.allowedIps || [],
+                        allowedPaths: p.allowedPaths || [],
                         forwardPath: p.forwardPath !== false,
                         loginTitle: p.loginTitle || '',
                         loginLogo: p.loginLogo || '',
@@ -1554,6 +1557,9 @@ const server = Bun.serve({
                         );
                     }
                     if (Array.isArray(input.allowedIps) && input.allowedIps.length) profile.allowedIps = input.allowedIps as string[];
+                    if (Array.isArray(input.allowedPaths) && input.allowedPaths.length) {
+                        profile.allowedPaths = (input.allowedPaths as string[]).map(s => s.trim()).filter(Boolean);
+                    }
 
                     // NPM integration fields (all optional)
                     if (Array.isArray(input.publicHostnames)) {
@@ -1918,7 +1924,7 @@ const server = Bun.serve({
                         emailSent = r.ok;
                         emailError = r.error;
                     }
-                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'admin.invite.create', targetType: 'admin', details: { email, fullName, expiresInHours, emailSent: emailSent ?? null, emailError: emailError ?? null }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'admin.invite.create', targetType: 'midleman', details: { email, fullName, expiresInHours, emailSent: emailSent ?? null, emailError: emailError ?? null }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                     return jsonRes(200, { invite, inviteUrl, emailSent: emailSent ?? false, emailError: emailError ?? null });
                 }
 
@@ -2839,7 +2845,7 @@ const server = Bun.serve({
                     // Fire-and-await — small directories finish fast; large ones may take a while.
                     const report = await runLdapSync();
                     const me = getAuthedAdmin(req);
-                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'ldap.sync.forced', details: { durationMs: report.durationMs, configs: report.configs.length }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'ldap.sync.forced', targetType: 'midleman', details: { durationMs: report.durationMs, configs: report.configs.length }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                     return jsonRes(200, { report } as unknown as Record<string, unknown>);
                 }
 
