@@ -330,6 +330,9 @@ function renderProfiles(profiles) {
     const statusBadge = p.running
       ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px">Running</span>'
       : '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>';
+    const npmBadge = (p.npmProxyHostId)
+      ? `<span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help" title="Linked to NPM proxy host #${p.npmProxyHostId}${(p.publicHostnames && p.publicHostnames.length) ? ' — ' + esc(p.publicHostnames.join(', ')) : ''}">NPM #${p.npmProxyHostId}</span>`
+      : '';
     const hasAuth = p.authHeader;
     const authVal = hasAuth
       ? esc(p.authHeader) + (p.authPrefix ? ` <span style="color:var(--text3)">(${esc(p.authPrefix)})</span>` : '')
@@ -348,7 +351,7 @@ function renderProfiles(profiles) {
       : '<span style="color:var(--text3)">None</span>';
     return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
   <td style="padding:8px 12px;font-weight:600">${esc(p.name)}</td>
-  <td style="padding:8px">${statusBadge}</td>
+  <td style="padding:8px">${statusBadge}${npmBadge}</td>
   <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${p.port || '<span style="color:var(--text3)">N/A</span>'}</td>
   <td style="padding:8px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'SF Mono',Monaco,monospace;color:var(--text2)" title="${esc(p.targetUrl)}">${esc(p.targetUrl)}</td>
   <td style="padding:8px">${authVal}</td>
@@ -1537,9 +1540,12 @@ function renderWebhooks(webhooks) {
       : (pendingCount > 0
           ? `<span style="position:absolute;top:2px;right:2px;width:7px;height:7px;background:var(--orange);border-radius:50%;display:block" title="${pendingCount} pending persistent retries"></span>`
           : '');
+    const wNpmBadge = (w.npmProxyHostId)
+      ? `<span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help" title="Linked to NPM proxy host #${w.npmProxyHostId}${(w.publicHostnames && w.publicHostnames.length) ? ' — ' + esc(w.publicHostnames.join(', ')) : ''}">NPM #${w.npmProxyHostId}</span>`
+      : '';
     return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
   <td style="padding:8px 12px;font-weight:600">${esc(w.name)}</td>
-  <td style="padding:8px">${statusBadge}</td>
+  <td style="padding:8px">${statusBadge}${wNpmBadge}</td>
   <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${w.port}</td>
   <td style="padding:8px;color:var(--text2)">${numTargets} destinations</td>
   <td style="padding:8px">${authBadge}${wIpBadge}</td>
@@ -2548,7 +2554,35 @@ function openWebhookModal(webhook = null) {
   document.getElementById('wSilenceThreshold').value = sa?.thresholdMinutes ?? 15;
   document.getElementById('wSilenceEmail').value = sa?.notifyEmail ?? '';
 
+  // Adopted-from-NPM banner
+  const banner = document.getElementById('wAdoptedBanner');
+  const info = document.getElementById('wAdoptedInfo');
+  if (banner && info) {
+    if (webhook && webhook.npmProxyHostId && webhook.npmOriginalForwardHost) {
+      banner.style.display = 'flex';
+      info.textContent = '#' + webhook.npmProxyHostId + ' — original forward ' + (webhook.npmOriginalForwardScheme || 'http') + '://' + webhook.npmOriginalForwardHost + ':' + webhook.npmOriginalForwardPort;
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+
   document.getElementById('webhookModal').style.display = 'flex';
+}
+
+async function releaseWebhookFromNpm() {
+  if (!editingWebhook || !editingWebhook.name) return;
+  if (!confirm('Release this webhook from the NPM host? NPM will be restored to the original forward target.')) return;
+  try {
+    const res = await api('/admin/webhooks/' + encodeURIComponent(editingWebhook.name) + '/npm-release', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) return toast(data.error || 'Release failed', 'error');
+    toast('Released from NPM');
+    document.getElementById('wAdoptedBanner').style.display = 'none';
+    closeWebhookModal();
+    await fetchWebhooks();
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+  }
 }
 
 function toggleSilenceSection() {
@@ -5251,16 +5285,20 @@ async function fetchNpmProxyHosts() {
     body.innerHTML = hosts.map(h => {
       const domains = (h.domain_names || []).join(', ');
       const fwd = (h.forward_scheme || 'http') + '://' + (h.forward_host || '?') + ':' + (h.forward_port || '?');
-      const checkbox = (h.adopted && h.linkedProfile)
+      const isLinked = h.adopted && (h.linkedProfile || h.linkedWebhook);
+      const checkbox = isLinked
         ? '<input type="checkbox" disabled>'
         : '<input type="checkbox" class="npm-import-cb" data-host-id="' + h.id + '" onchange="updateNpmSelectionCount()">';
       let badge, action;
-      if (h.adopted && h.linkedProfile) {
-        badge = '<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:10px;font-size:11px">Linked → ' + _esc(h.linkedProfile) + '</span>';
+      if (h.linkedProfile) {
+        badge = '<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:10px;font-size:11px">Linked → profile "' + _esc(h.linkedProfile) + '"</span>';
         action = '<a href="javascript:void(0)" onclick="openLinkedProfile(\'' + _esc(h.linkedProfile) + '\')" style="color:var(--accent);font-size:12px">Open</a>';
+      } else if (h.linkedWebhook) {
+        badge = '<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:10px;font-size:11px">Linked → webhook "' + _esc(h.linkedWebhook) + '"</span>';
+        action = '<a href="javascript:void(0)" onclick="openLinkedWebhook(\'' + _esc(h.linkedWebhook) + '\')" style="color:var(--accent);font-size:12px">Open</a>';
       } else {
         badge = '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 8px;border-radius:10px;font-size:11px">Available</span>';
-        action = '<button class="btn btn-sm" onclick="adoptNpmHost(' + h.id + ')" title="Adopt with custom settings (opens form)">Customize…</button>';
+        action = '<button class="btn btn-sm" onclick="adoptNpmHost(' + h.id + ')" title="Adopt as proxy with custom settings">Customize…</button>';
       }
       return '<tr style="border-bottom:1px solid var(--border)">' +
         '<td style="padding:8px 12px">' + checkbox + '</td>' +
@@ -5304,19 +5342,48 @@ function toggleNpmBulkAuthOpts() {
   document.getElementById('npmBulkLoginGroup').style.display = mode === 'login' ? '' : 'none';
 }
 
+function toggleNpmBulkImportAs() {
+  const as = document.getElementById('npmBulkImportAs').value;
+  const isProxy = as === 'proxy';
+  document.getElementById('npmBulkAuthModeGroup').style.display = isProxy ? '' : 'none';
+  document.getElementById('npmBulkWebhookAuthGroup').style.display = isProxy ? 'none' : '';
+  // Hide proxy-specific sub-groups when switching to webhook.
+  if (!isProxy) {
+    document.getElementById('npmBulkAccessKeyGroup').style.display = 'none';
+    document.getElementById('npmBulkLoginGroup').style.display = 'none';
+  } else {
+    toggleNpmBulkAuthOpts();
+  }
+}
+
+function openLinkedWebhook(name) {
+  closeNpmImportModal();
+  if (typeof navigate === 'function') navigate('webhooks');
+  if (typeof editWebhook === 'function') {
+    setTimeout(() => { try { editWebhook(name); } catch { /* ignore */ } }, 30);
+  }
+}
+
 async function bulkAdoptNpmHosts() {
   const ids = Array.from(document.querySelectorAll('#npmImportBody .npm-import-cb:checked'))
     .map(cb => Number(cb.getAttribute('data-host-id')))
     .filter(n => n > 0);
   if (!ids.length) return;
-  const authMode = document.getElementById('npmBulkAuthMode').value;
-  const body = { hostIds: ids, authMode };
-  if (authMode === 'accessKey') {
-    const k = document.getElementById('npmBulkAccessKey').value.trim();
-    if (k) body.accessKey = k;
-  } else if (authMode === 'login') {
-    body.require2fa = document.getElementById('npmBulkRequire2fa').checked;
-    body.isWebApp = document.getElementById('npmBulkIsWebApp').checked;
+  const importAs = document.getElementById('npmBulkImportAs').value === 'webhook' ? 'webhook' : 'proxy';
+  const body = { hostIds: ids, importAs };
+  if (importAs === 'proxy') {
+    const authMode = document.getElementById('npmBulkAuthMode').value;
+    body.authMode = authMode;
+    if (authMode === 'accessKey') {
+      const k = document.getElementById('npmBulkAccessKey').value.trim();
+      if (k) body.accessKey = k;
+    } else if (authMode === 'login') {
+      body.require2fa = document.getElementById('npmBulkRequire2fa').checked;
+      body.isWebApp = document.getElementById('npmBulkIsWebApp').checked;
+    }
+  } else {
+    const tok = document.getElementById('npmBulkWebhookAuthToken').value.trim();
+    if (tok) body.authToken = tok;
   }
   const btn = document.getElementById('npmBulkImportBtn');
   btn.disabled = true;
@@ -5342,7 +5409,11 @@ async function bulkAdoptNpmHosts() {
       status.style.color = 'var(--ok-text)';
       status.textContent = 'Done.';
     }
-    await fetchProfiles();
+    if (importAs === 'webhook' && typeof fetchWebhooks === 'function') {
+      await fetchWebhooks();
+    } else {
+      await fetchProfiles();
+    }
     await fetchNpmProxyHosts();
   } catch (e) {
     status.style.color = 'var(--err-text)';

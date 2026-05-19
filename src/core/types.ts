@@ -128,6 +128,13 @@ export interface WebhookDistributor {
   /** Persisted JSON test payload used by the dashboard editor to preview
    *  template interpolation. Has no runtime effect on delivery. */
   testPayload?: string;
+
+  // -- Nginx Proxy Manager adoption (optional addon) --
+  npmProxyHostId?: number;
+  npmOriginalForwardHost?: string;
+  npmOriginalForwardPort?: number;
+  npmOriginalForwardScheme?: 'http' | 'https';
+  publicHostnames?: string[];
 }
 
 /**

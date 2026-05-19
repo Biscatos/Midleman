@@ -326,6 +326,11 @@ interface StoredWebhook {
     allowedIps?: string[];
     silenceAlert?: import('./types').WebhookSilenceAlert;
     testPayload?: string;
+    npmProxyHostId?: number;
+    npmOriginalForwardHost?: string;
+    npmOriginalForwardPort?: number;
+    npmOriginalForwardScheme?: 'http' | 'https';
+    publicHostnames?: string[];
 }
 
 /**
@@ -339,7 +344,7 @@ export function loadPersistedWebhooks(): WebhookDistributor[] {
         const stored: StoredWebhook[] = JSON.parse(raw);
 
         return stored
-            .filter(w => w.name && Array.isArray(w.targets) && w.targets.length > 0)
+            .filter(w => w.name && Array.isArray(w.targets))
             .map(w => ({
                 name: w.name.toLowerCase(),
                 port: w.port,
@@ -349,6 +354,11 @@ export function loadPersistedWebhooks(): WebhookDistributor[] {
                 allowedIps: w.allowedIps?.length ? w.allowedIps : undefined,
                 silenceAlert: w.silenceAlert,
                 testPayload: w.testPayload,
+                npmProxyHostId: w.npmProxyHostId,
+                npmOriginalForwardHost: w.npmOriginalForwardHost,
+                npmOriginalForwardPort: w.npmOriginalForwardPort,
+                npmOriginalForwardScheme: w.npmOriginalForwardScheme,
+                publicHostnames: w.publicHostnames && w.publicHostnames.length ? w.publicHostnames : undefined,
             }));
     } catch (err) {
         console.warn('⚠️  Could not load webhooks.json:', err instanceof Error ? err.message : err);
@@ -371,6 +381,11 @@ export function persistWebhooks(webhooks: WebhookDistributor[]): void {
             allowedIps: w.allowedIps?.length ? w.allowedIps : undefined,
             silenceAlert: w.silenceAlert,
             testPayload: w.testPayload,
+            npmProxyHostId: w.npmProxyHostId,
+            npmOriginalForwardHost: w.npmOriginalForwardHost,
+            npmOriginalForwardPort: w.npmOriginalForwardPort,
+            npmOriginalForwardScheme: w.npmOriginalForwardScheme,
+            publicHostnames: w.publicHostnames && w.publicHostnames.length ? w.publicHostnames : undefined,
         }));
         writeFileSync(WEBHOOKS_FILE, JSON.stringify(stored, null, 2), 'utf-8');
     } catch (err) {

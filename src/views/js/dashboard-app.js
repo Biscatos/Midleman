@@ -9,34 +9,62 @@ let loggedInUser = null;
 let _allProfiles = [];
 
 // ─── Theme ───────────────────────────────────────────────────────────────────
-function initTheme() {
-  const saved = localStorage.getItem(THEME_KEY) || 'dark';
-  document.documentElement.setAttribute('data-theme', saved);
-  updateThemeIcon(saved);
+// Three modes: 'dark' | 'light' | 'system'.
+// `data-theme` on <html> is always concrete (dark/light); the preference is what's stored.
+const THEME_MODES = ['dark', 'light', 'system'];
+const _prefersDark = (typeof window !== 'undefined' && window.matchMedia)
+  ? window.matchMedia('(prefers-color-scheme: dark)')
+  : null;
+
+function getThemePref() {
+  const v = localStorage.getItem(THEME_KEY);
+  return THEME_MODES.includes(v) ? v : 'dark';
+}
+function resolveTheme(pref) {
+  if (pref === 'system') return _prefersDark && _prefersDark.matches ? 'dark' : 'light';
+  return pref === 'light' ? 'light' : 'dark';
+}
+function applyTheme() {
+  const pref = getThemePref();
+  const effective = resolveTheme(pref);
+  document.documentElement.setAttribute('data-theme', effective);
+  updateThemeIcon(pref);
   if (typeof updateAceThemes === 'function') updateAceThemes();
 }
+function initTheme() {
+  applyTheme();
+  // Follow the OS only while in 'system' mode.
+  if (_prefersDark) {
+    const onChange = () => { if (getThemePref() === 'system') applyTheme(); };
+    if (_prefersDark.addEventListener) _prefersDark.addEventListener('change', onChange);
+    else if (_prefersDark.addListener) _prefersDark.addListener(onChange); // Safari <14
+  }
+}
 function toggleTheme() {
-  const current = document.documentElement.getAttribute('data-theme');
-  const next = current === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', next);
+  // Cycle dark → light → system → dark
+  const pref = getThemePref();
+  const idx = THEME_MODES.indexOf(pref);
+  const next = THEME_MODES[(idx + 1) % THEME_MODES.length];
   localStorage.setItem(THEME_KEY, next);
-  updateThemeIcon(next);
-  if (typeof updateAceThemes === 'function') updateAceThemes();
+  applyTheme();
 }
 const THEME_ICONS = {
   dark: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>`,
-  light: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`
+  light: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`,
+  system: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>`
 };
+const THEME_LABEL = { dark: 'Dark', light: 'Light', system: 'System' };
 
-function updateThemeIcon(theme) {
+function updateThemeIcon(pref) {
   const btn = document.getElementById('themeBtn');
   if (!btn) return;
-  const label = document.getElementById('themeBtnLabel');
-  // dark theme → show "Light" action (switch to light); light → show "Dark"
-  const next = theme === 'dark' ? 'light' : 'dark';
-  const nextLabel = theme === 'dark' ? 'Light' : 'Dark';
-  btn.querySelector('svg').outerHTML; // noop ref
-  btn.innerHTML = THEME_ICONS[next] + `<span id="themeBtnLabel">${nextLabel}</span>`;
+  // Show the *current* mode's icon and label; tooltip explains what clicking does.
+  const icon = THEME_ICONS[pref] || THEME_ICONS.dark;
+  const label = THEME_LABEL[pref] || 'Dark';
+  const idx = THEME_MODES.indexOf(pref);
+  const next = THEME_MODES[(idx + 1) % THEME_MODES.length];
+  btn.setAttribute('title', 'Theme: ' + label + ' (click for ' + THEME_LABEL[next] + ')');
+  btn.innerHTML = icon + `<span id="themeBtnLabel">${label}</span>`;
 }
 initTheme();
 
@@ -79,7 +107,7 @@ async function startApp(username) {
   document.querySelector('.app').style.display = 'grid';
   
   // Re-apply theme icon now that the topbar button is in the DOM
-  updateThemeIcon(document.documentElement.getAttribute('data-theme') || 'dark');
+  updateThemeIcon(getThemePref());
   
   // Hide auth panels if visible
   document.getElementById('authLogin').classList.remove('active');

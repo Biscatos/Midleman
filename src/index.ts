@@ -1187,6 +1187,8 @@ const server = Bun.serve({
                             allowedIps: w.allowedIps || [],
                             running: s?.running ?? false,
                             active: s?.active ?? 0,
+                            npmProxyHostId: w.npmProxyHostId,
+                            publicHostnames: w.publicHostnames || [],
                         };
                     });
                     return jsonRes(200, { webhooks });
@@ -1309,6 +1311,11 @@ const server = Bun.serve({
                             testPayload: webhook.testPayload,
                             running: status?.running ?? false,
                             active: status?.active ?? 0,
+                            npmProxyHostId: webhook.npmProxyHostId,
+                            npmOriginalForwardHost: webhook.npmOriginalForwardHost,
+                            npmOriginalForwardPort: webhook.npmOriginalForwardPort,
+                            npmOriginalForwardScheme: webhook.npmOriginalForwardScheme,
+                            publicHostnames: webhook.publicHostnames || [],
                         },
                     });
                 }
@@ -1350,6 +1357,13 @@ const server = Bun.serve({
 
                     // Update or add config entry (always save with assigned port)
                     if (existingIdx >= 0) {
+                        // Preserve NPM adoption fields across edits — they're not exposed in the form.
+                        const prev = config.webhooks[existingIdx];
+                        if (prev.npmProxyHostId !== undefined) webhookWithPort.npmProxyHostId = prev.npmProxyHostId;
+                        if (prev.npmOriginalForwardHost) webhookWithPort.npmOriginalForwardHost = prev.npmOriginalForwardHost;
+                        if (prev.npmOriginalForwardPort !== undefined) webhookWithPort.npmOriginalForwardPort = prev.npmOriginalForwardPort;
+                        if (prev.npmOriginalForwardScheme) webhookWithPort.npmOriginalForwardScheme = prev.npmOriginalForwardScheme;
+                        if (prev.publicHostnames && prev.publicHostnames.length) webhookWithPort.publicHostnames = prev.publicHostnames;
                         config.webhooks[existingIdx] = webhookWithPort;
                     } else {
                         config.webhooks.push(webhookWithPort);
@@ -1380,6 +1394,21 @@ const server = Bun.serve({
                     const idx = config.webhooks.findIndex(w => w.name.toLowerCase() === name.toLowerCase());
                     if (idx === -1) return jsonRes(404, { error: `Webhook "${name}" not found` });
 
+                    const removed = config.webhooks[idx];
+                    // Best-effort NPM unsync (restore original forward) for adopted webhooks.
+                    if (isNpmEnabled() && removed.npmProxyHostId && removed.npmOriginalForwardHost && removed.npmOriginalForwardPort) {
+                        try {
+                            const { updateProxyHost } = await import('./npm/client');
+                            await updateProxyHost(removed.npmProxyHostId, {
+                                forward_host: removed.npmOriginalForwardHost,
+                                forward_port: removed.npmOriginalForwardPort,
+                                forward_scheme: removed.npmOriginalForwardScheme || 'http',
+                                domain_names: removed.publicHostnames || [],
+                            });
+                        } catch (e) {
+                            console.warn(`[npm] failed to restore NPM forward for webhook "${name}":`, e instanceof Error ? e.message : e);
+                        }
+                    }
                     config.webhooks.splice(idx, 1);
                     persistWebhooks(config.webhooks);
                     await stopWebhookServer(name);
@@ -2062,11 +2091,12 @@ const server = Bun.serve({
                         const { listProxyHosts } = await import('./npm/client');
                         const hosts = await listProxyHosts();
                         const npmHost = (getNpmSettings()?.midlemanPublicHost || 'midleman').toLowerCase();
-                        const byId = new Map<number, string>();
-                        for (const p of config.proxyProfiles) if (p.npmProxyHostId) byId.set(p.npmProxyHostId, p.name);
+                        const byId = new Map<number, { name: string; kind: 'profile' | 'webhook' }>();
+                        for (const p of config.proxyProfiles) if (p.npmProxyHostId) byId.set(p.npmProxyHostId, { name: p.name, kind: 'profile' });
+                        for (const w of config.webhooks) if (w.npmProxyHostId) byId.set(w.npmProxyHostId, { name: w.name, kind: 'webhook' });
                         const out = hosts.map(h => {
-                            const linkedTo = byId.get(h.id);
-                            const looksAdopted = (h.forward_host || '').toLowerCase() === npmHost && !!linkedTo;
+                            const linked = byId.get(h.id);
+                            const looksAdopted = (h.forward_host || '').toLowerCase() === npmHost && !!linked;
                             return {
                                 id: h.id,
                                 domain_names: h.domain_names || [],
@@ -2077,8 +2107,10 @@ const server = Bun.serve({
                                 ssl_forced: !!h.ssl_forced,
                                 http2_support: !!h.http2_support,
                                 enabled: h.enabled !== false,
-                                linkedProfile: linkedTo || null,
-                                adopted: !!linkedTo,
+                                linkedProfile: linked?.kind === 'profile' ? linked.name : null,
+                                linkedWebhook: linked?.kind === 'webhook' ? linked.name : null,
+                                linkedKind: linked?.kind || null,
+                                adopted: !!linked,
                                 adoptedAndPointingHere: looksAdopted,
                             };
                         });
@@ -2098,8 +2130,10 @@ const server = Bun.serve({
                     try {
                         const { getProxyHost } = await import('./npm/client');
                         const host = await getProxyHost(id);
-                        const taken = config.proxyProfiles.find(p => p.npmProxyHostId === id);
-                        if (taken) return jsonRes(409, { error: `Already linked to profile "${taken.name}"` });
+                        const takenProfile = config.proxyProfiles.find(p => p.npmProxyHostId === id);
+                        if (takenProfile) return jsonRes(409, { error: `Already linked to profile "${takenProfile.name}"` });
+                        const takenWebhook = config.webhooks.find(w => w.npmProxyHostId === id);
+                        if (takenWebhook) return jsonRes(409, { error: `Already linked to webhook "${takenWebhook.name}"` });
                         const scheme = host.forward_scheme === 'https' ? 'https' : 'http';
                         return jsonRes(200, {
                             preview: {
@@ -2188,9 +2222,11 @@ const server = Bun.serve({
                 if (hostGetMatch && req.method === 'PUT') {
                     if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
                     const id = Number(hostGetMatch[1]);
-                    // Guard: if linked to a Midleman profile, refuse direct edits (they'd be overwritten on next sync).
-                    const linked = config.proxyProfiles.find(p => p.npmProxyHostId === id);
-                    if (linked) return jsonRes(409, { error: `Host #${id} is linked to profile "${linked.name}". Edit via the profile instead.` });
+                    // Guard: if linked to a Midleman profile or webhook, refuse direct edits (they'd be overwritten on next sync).
+                    const linkedProfile = config.proxyProfiles.find(p => p.npmProxyHostId === id);
+                    if (linkedProfile) return jsonRes(409, { error: `Host #${id} is linked to profile "${linkedProfile.name}". Edit via the profile instead.` });
+                    const linkedWebhook = config.webhooks.find(w => w.npmProxyHostId === id);
+                    if (linkedWebhook) return jsonRes(409, { error: `Host #${id} is linked to webhook "${linkedWebhook.name}". Edit via the webhook instead.` });
                     let body: any;
                     try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
                     try {
@@ -2208,8 +2244,10 @@ const server = Bun.serve({
                 if (hostGetMatch && req.method === 'DELETE') {
                     if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
                     const id = Number(hostGetMatch[1]);
-                    const linked = config.proxyProfiles.find(p => p.npmProxyHostId === id);
-                    if (linked) return jsonRes(409, { error: `Host #${id} is linked to profile "${linked.name}". Delete the profile (or Release it) first.` });
+                    const linkedProfile = config.proxyProfiles.find(p => p.npmProxyHostId === id);
+                    if (linkedProfile) return jsonRes(409, { error: `Host #${id} is linked to profile "${linkedProfile.name}". Delete the profile (or Release it) first.` });
+                    const linkedWebhook = config.webhooks.find(w => w.npmProxyHostId === id);
+                    if (linkedWebhook) return jsonRes(409, { error: `Host #${id} is linked to webhook "${linkedWebhook.name}". Delete the webhook (or Release it) first.` });
                     try {
                         const { deleteProxyHost } = await import('./npm/client');
                         await deleteProxyHost(id);
@@ -2280,8 +2318,8 @@ const server = Bun.serve({
                     }
                 }
 
-                // Bulk adopt: create profiles for several NPM hosts at once.
-                // Body: { hostIds: number[], authMode: 'none'|'accessKey'|'login', accessKey?, isWebApp?, require2fa? }
+                // Bulk adopt: create profiles OR webhooks for several NPM hosts at once.
+                // Body: { hostIds: number[], importAs?: 'proxy'|'webhook', authMode?, accessKey?, isWebApp?, require2fa? }
                 if (url.pathname === '/admin/npm/proxy-hosts/bulk-adopt' && req.method === 'POST') {
                     if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
                     let body: any;
@@ -2289,44 +2327,93 @@ const server = Bun.serve({
                     const ids = Array.isArray(body?.hostIds) ? body.hostIds.filter((v: unknown) => typeof v === 'number' && v > 0) : [];
                     if (ids.length === 0) return jsonRes(400, { error: 'No host ids supplied' });
                     if (ids.length > 100) return jsonRes(400, { error: 'Too many hosts (max 100 per batch)' });
+                    const importAs: 'proxy' | 'webhook' = body?.importAs === 'webhook' ? 'webhook' : 'proxy';
                     const authMode = (body?.authMode === 'accessKey' || body?.authMode === 'login') ? body.authMode : 'none';
                     const require2fa = !!body?.require2fa;
                     const isWebApp = !!body?.isWebApp;
                     const sharedAccessKey: string = typeof body?.accessKey === 'string' ? body.accessKey.trim() : '';
+                    const sharedAuthToken: string = typeof body?.authToken === 'string' ? body.authToken.trim() : '';
 
-                    // Helper: build a unique, valid profile name from hostnames.
+                    // Helper: build a unique, valid name from hostnames.
                     const slugify = (s: string) =>
                         s.toLowerCase()
                          .replace(/^\*\.?/, '')
                          .replace(/[^a-z0-9._-]+/g, '-')
                          .replace(/^[-.]+|[-.]+$/g, '')
                          .slice(0, 64) || 'host';
-                    const existingNames = new Set(config.proxyProfiles.map(p => p.name));
+                    const existingNames = importAs === 'webhook'
+                        ? new Set(config.webhooks.map(w => w.name))
+                        : new Set(config.proxyProfiles.map(p => p.name));
                     const uniqueName = (base: string) => {
                         if (!existingNames.has(base)) { existingNames.add(base); return base; }
                         for (let i = 2; i < 1000; i++) {
                             const candidate = (base.length > 60 ? base.slice(0, 60) : base) + '-' + i;
                             if (!existingNames.has(candidate)) { existingNames.add(candidate); return candidate; }
                         }
-                        throw new Error('Could not derive a unique profile name');
+                        throw new Error('Could not derive a unique name');
                     };
 
-                    const { getProxyHost } = await import('./npm/client');
+                    const { getProxyHost, updateProxyHost } = await import('./npm/client');
                     const { syncProfile } = await import('./npm/sync');
 
-                    const results: Array<{ hostId: number; ok: boolean; profile?: string; error?: string }> = [];
+                    const results: Array<{ hostId: number; ok: boolean; profile?: string; webhook?: string; error?: string }> = [];
+                    const midlemanHost = (getNpmSettings()?.midlemanPublicHost || process.env.MIDLEMAN_PUBLIC_HOST || 'midleman');
+
                     for (const hostId of ids) {
                         try {
-                            const taken = config.proxyProfiles.find(p => p.npmProxyHostId === hostId);
-                            if (taken) { results.push({ hostId, ok: false, error: `Already linked to "${taken.name}"` }); continue; }
+                            const linkedP = config.proxyProfiles.find(p => p.npmProxyHostId === hostId);
+                            if (linkedP) { results.push({ hostId, ok: false, error: `Already linked to profile "${linkedP.name}"` }); continue; }
+                            const linkedW = config.webhooks.find(w => w.npmProxyHostId === hostId);
+                            if (linkedW) { results.push({ hostId, ok: false, error: `Already linked to webhook "${linkedW.name}"` }); continue; }
+
                             const host = await getProxyHost(hostId);
                             const scheme = host.forward_scheme === 'https' ? 'https' : 'http';
                             const domains = (host.domain_names || []).filter(Boolean);
                             if (domains.length === 0) { results.push({ hostId, ok: false, error: 'Host has no domain_names' }); continue; }
                             const name = uniqueName(slugify(domains[0]));
+                            const originalTarget = `${scheme}://${host.forward_host}:${host.forward_port}`;
+
+                            if (importAs === 'webhook') {
+                                // Assign a dedicated port for this webhook and start it; then point NPM at it.
+                                const excludePorts = getWebhookStatus().map(s => s.port).filter(Boolean);
+                                const assignedPort = await assignWebhookPort(name, 0, config.port, excludePorts);
+                                const webhook: import('./core/types').WebhookDistributor = {
+                                    name,
+                                    port: assignedPort,
+                                    targets: [originalTarget],
+                                    authToken: sharedAuthToken || undefined,
+                                    publicHostnames: domains.map(d => d.toLowerCase()),
+                                    npmProxyHostId: host.id,
+                                    npmOriginalForwardHost: host.forward_host,
+                                    npmOriginalForwardPort: host.forward_port,
+                                    npmOriginalForwardScheme: scheme,
+                                };
+                                config.webhooks.push(webhook);
+                                persistWebhooks(config.webhooks);
+                                try { startWebhookServer(webhook); } catch (e) {
+                                    console.warn(`[npm:bulk] could not start webhook "${name}":`, e instanceof Error ? e.message : e);
+                                }
+
+                                // Update NPM to forward to the webhook port.
+                                try {
+                                    await updateProxyHost(host.id, {
+                                        domain_names: domains,
+                                        forward_host: midlemanHost,
+                                        forward_port: assignedPort,
+                                        forward_scheme: 'http',
+                                        allow_websocket_upgrade: host.allow_websocket_upgrade !== false,
+                                    });
+                                    results.push({ hostId, ok: true, webhook: name });
+                                } catch (e) {
+                                    results.push({ hostId, ok: false, webhook: name, error: e instanceof Error ? e.message : String(e) });
+                                }
+                                continue;
+                            }
+
+                            // Default: import as proxy profile (existing flow).
                             const profile = {
                                 name,
-                                targetUrl: `${scheme}://${host.forward_host}:${host.forward_port}`,
+                                targetUrl: originalTarget,
                                 authMode,
                                 require2fa: authMode === 'login' ? require2fa : undefined,
                                 isWebApp: authMode === 'login' ? isWebApp : undefined,
@@ -2348,7 +2435,6 @@ const server = Bun.serve({
                             config.proxyProfiles.push(profile as any);
                             persistProfiles(config.proxyProfiles);
 
-                            // Start the proxy server for the new profile so /proxy/{name}/ routes through.
                             try {
                                 const excludePorts = getProxyServerStatus().map(s => s.port).filter(Boolean);
                                 const port = await assignProxyPort(profile.name, config.port, excludePorts);
@@ -2357,7 +2443,6 @@ const server = Bun.serve({
                                 console.warn(`[npm:bulk] could not start proxy server for "${profile.name}":`, e instanceof Error ? e.message : e);
                             }
 
-                            // Update NPM so it points at Midleman now.
                             const syncRes = await syncProfile(profile as any, config.proxyProfiles);
                             if (!syncRes.ok) {
                                 results.push({ hostId, ok: false, profile: profile.name, error: syncRes.error || 'sync failed' });
@@ -2368,11 +2453,42 @@ const server = Bun.serve({
                             results.push({ hostId, ok: false, error: e instanceof Error ? e.message : String(e) });
                         }
                     }
-                    invalidateProfileCache();
+                    if (importAs === 'proxy') invalidateProfileCache();
 
                     const me = getAuthedAdmin(req);
-                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.bulk_adopt', targetType: 'npm', details: { count: ids.length, authMode, ok: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
-                    return jsonRes(200, { results, total: ids.length, ok: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length });
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.bulk_adopt', targetType: 'npm', details: { count: ids.length, importAs, authMode, ok: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { results, importAs, total: ids.length, ok: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length });
+                }
+
+                // Release a webhook from its NPM link: restore NPM's original forward and clear the link.
+                const webhookReleaseMatch = url.pathname.match(/^\/admin\/webhooks\/([^/]+)\/npm-release$/);
+                if (webhookReleaseMatch && req.method === 'POST') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    const name = decodeURIComponent(webhookReleaseMatch[1]).toLowerCase();
+                    const webhook = config.webhooks.find(w => w.name === name);
+                    if (!webhook) return jsonRes(404, { error: 'Webhook not found' });
+                    if (!webhook.npmProxyHostId) return jsonRes(400, { error: 'Webhook is not linked to an NPM host' });
+                    try {
+                        const { updateProxyHost } = await import('./npm/client');
+                        if (webhook.npmOriginalForwardHost && webhook.npmOriginalForwardPort) {
+                            await updateProxyHost(webhook.npmProxyHostId, {
+                                forward_host: webhook.npmOriginalForwardHost,
+                                forward_port: webhook.npmOriginalForwardPort,
+                                forward_scheme: webhook.npmOriginalForwardScheme || 'http',
+                                domain_names: webhook.publicHostnames || [],
+                            });
+                        }
+                        webhook.npmProxyHostId = undefined;
+                        webhook.npmOriginalForwardHost = undefined;
+                        webhook.npmOriginalForwardPort = undefined;
+                        webhook.npmOriginalForwardScheme = undefined;
+                        persistWebhooks(config.webhooks);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.release', targetType: 'webhook', targetId: name, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { ok: true });
+                    } catch (e) {
+                        return jsonRes(502, { ok: false, error: e instanceof Error ? e.message : String(e) });
+                    }
                 }
 
                 const npmSyncMatch = url.pathname.match(/^\/admin\/npm\/sync\/([a-z0-9_-]+)$/i);
