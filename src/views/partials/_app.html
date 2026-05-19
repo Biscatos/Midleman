@@ -28,18 +28,15 @@
         <span class="sidebar-link-label">Requests</span>
         <span class="sidebar-badge" id="navReqBadge">0</span>
       </button>
-      <button class="sidebar-link" data-page="siplogs" data-tooltip="TCP/UDP Logs" onclick="navigate('siplogs')">
+
+      <div class="sidebar-section-label">Access</div>
+      <button class="sidebar-link" data-page="proxyusers" data-tooltip="Users" onclick="navigate('proxyusers')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="6" width="5" height="5" rx="1.5"/>
-          <rect x="16" y="6" width="5" height="5" rx="1.5"/>
-          <rect x="3" y="13" width="5" height="5" rx="1.5"/>
-          <rect x="16" y="13" width="5" height="5" rx="1.5"/>
-          <path d="M8 8.5h8"/>
-          <path d="M13 6.5l3 2-3 2"/>
-          <path d="M16 15.5H8"/>
-          <path d="M11 13.5l-3 2 3 2"/>
+          <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/>
+          <path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>
         </svg>
-        <span class="sidebar-link-label">TCP/UDP Logs</span>
+        <span class="sidebar-link-label">Users</span>
+        <span class="sidebar-badge" id="navProxyUserBadge">0</span>
       </button>
 
       <div class="sidebar-section-label">Resources</div>
@@ -55,27 +52,12 @@
         <span class="sidebar-link-label">HTTP Proxies</span>
         <span class="sidebar-badge" id="navProfileBadge">0</span>
       </button>
-      <button class="sidebar-link" data-page="tcpudp" data-tooltip="TCP/UDP Proxies" onclick="navigate('tcpudp')">
+      <button class="sidebar-link" data-page="oauthclients" data-tooltip="OAuth Clients" onclick="navigate('oauthclients')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="2.5" y="9" width="5" height="6" rx="1.5"/>
-          <rect x="16.5" y="9" width="5" height="6" rx="1.5"/>
-          <rect x="9.5" y="7" width="5" height="10" rx="1.5"/>
-          <path d="M7.5 12h2"/>
-          <path d="M14.5 12h2"/>
-          <path d="M11 9.5l2 2.5-2 2.5"/>
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
         </svg>
-        <span class="sidebar-link-label">TCP/UDP Proxies</span>
-        <span class="sidebar-badge" id="navTcpUdpBadge">0</span>
-      </button>
-      <button class="sidebar-link" data-page="certs" data-tooltip="Certificates" onclick="navigate('certs')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="4" width="18" height="14" rx="2"/>
-          <path d="M7 9h10M7 13h6"/>
-          <circle cx="17" cy="15" r="2"/>
-          <path d="M17 17v3l-1-1-1 1v-3"/>
-        </svg>
-        <span class="sidebar-link-label">Certificates</span>
-        <span class="sidebar-badge" id="navCertsBadge">0</span>
+        <span class="sidebar-link-label">OAuth Clients</span>
+        <span class="sidebar-badge" id="navOauthBadge">0</span>
       </button>
       <button class="sidebar-link" data-page="webhooks" data-tooltip="Webhooks" onclick="navigate('webhooks')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -89,46 +71,51 @@
         <span class="sidebar-link-label">Webhooks</span>
         <span class="sidebar-badge" id="navWebhookBadge">0</span>
       </button>
-      <button class="sidebar-link" data-page="oauthclients" data-tooltip="OAuth Clients" onclick="navigate('oauthclients')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-        </svg>
-        <span class="sidebar-link-label">OAuth Clients</span>
-        <span class="sidebar-badge" id="navOauthBadge">0</span>
-      </button>
 
-      <div class="sidebar-section-label">Access</div>
-      <button class="sidebar-link" data-page="proxyusers" data-tooltip="Users" onclick="navigate('proxyusers')">
+      <div class="sidebar-section-label">TCP/UDP</div>
+      <button class="sidebar-link" data-page="certs" data-tooltip="Certificates" onclick="navigate('certs')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/>
-          <path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>
+          <rect x="3" y="4" width="18" height="14" rx="2"/>
+          <path d="M7 9h10M7 13h6"/>
+          <circle cx="17" cy="15" r="2"/>
+          <path d="M17 17v3l-1-1-1 1v-3"/>
         </svg>
-        <span class="sidebar-link-label">Users</span>
-        <span class="sidebar-badge" id="navProxyUserBadge">0</span>
+        <span class="sidebar-link-label">Certificates</span>
+        <span class="sidebar-badge" id="navCertsBadge">0</span>
+      </button>
+      <button class="sidebar-link" data-page="siplogs" data-tooltip="TCP/UDP Logs" onclick="navigate('siplogs')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="6" width="5" height="5" rx="1.5"/>
+          <rect x="16" y="6" width="5" height="5" rx="1.5"/>
+          <rect x="3" y="13" width="5" height="5" rx="1.5"/>
+          <rect x="16" y="13" width="5" height="5" rx="1.5"/>
+          <path d="M8 8.5h8"/>
+          <path d="M13 6.5l3 2-3 2"/>
+          <path d="M16 15.5H8"/>
+          <path d="M11 13.5l-3 2 3 2"/>
+        </svg>
+        <span class="sidebar-link-label">TCP/UDP Logs</span>
+      </button>
+      <button class="sidebar-link" data-page="tcpudp" data-tooltip="TCP/UDP Proxies" onclick="navigate('tcpudp')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2.5" y="9" width="5" height="6" rx="1.5"/>
+          <rect x="16.5" y="9" width="5" height="6" rx="1.5"/>
+          <rect x="9.5" y="7" width="5" height="10" rx="1.5"/>
+          <path d="M7.5 12h2"/>
+          <path d="M14.5 12h2"/>
+          <path d="M11 9.5l2 2.5-2 2.5"/>
+        </svg>
+        <span class="sidebar-link-label">TCP/UDP Proxies</span>
+        <span class="sidebar-badge" id="navTcpUdpBadge">0</span>
       </button>
 
       <div class="sidebar-section-label">Config</div>
-      <button class="sidebar-link" data-page="ldap" data-tooltip="LDAP" onclick="navigate('ldap')">
+      <button class="sidebar-link" data-page="audit" data-tooltip="Audit Log" onclick="navigate('audit')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/>
+          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/>
         </svg>
-        <span class="sidebar-link-label">LDAP</span>
-        <span class="sidebar-badge" id="navLdapBadge">0</span>
-      </button>
-      <button class="sidebar-link" data-page="email" data-tooltip="Email / SMTP" onclick="navigate('email')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-          <polyline points="22,6 12,13 2,6"/>
-        </svg>
-        <span class="sidebar-link-label">Email</span>
-        <span class="sidebar-badge" id="navSmtpBadge" style="display:none">!</span>
-      </button>
-      <button class="sidebar-link" data-page="npm" data-tooltip="Nginx Proxy Manager" onclick="navigate('npm')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-        </svg>
-        <span class="sidebar-link-label">Nginx PM</span>
-        <span class="sidebar-badge" id="navNpmBadge" style="display:none">!</span>
+        <span class="sidebar-link-label">Audit Log</span>
       </button>
       <button class="sidebar-link" data-page="consentpages" data-tooltip="Consent Pages" onclick="navigate('consentpages')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -138,12 +125,27 @@
         <span class="sidebar-link-label">Consent Pages</span>
         <span class="sidebar-badge" id="navConsentBadge">0</span>
       </button>
-      <button class="sidebar-link" data-page="audit" data-tooltip="Audit Log" onclick="navigate('audit')">
+      <button class="sidebar-link" data-page="email" data-tooltip="Email / SMTP" onclick="navigate('email')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-          <polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/>
+          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+          <polyline points="22,6 12,13 2,6"/>
         </svg>
-        <span class="sidebar-link-label">Audit Log</span>
+        <span class="sidebar-link-label">Email</span>
+        <span class="sidebar-badge" id="navSmtpBadge" style="display:none">!</span>
+      </button>
+      <button class="sidebar-link" data-page="ldap" data-tooltip="LDAP" onclick="navigate('ldap')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/>
+        </svg>
+        <span class="sidebar-link-label">LDAP</span>
+        <span class="sidebar-badge" id="navLdapBadge">0</span>
+      </button>
+      <button class="sidebar-link" data-page="npm" data-tooltip="Nginx Proxy Manager" onclick="navigate('npm')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+        </svg>
+        <span class="sidebar-link-label">Nginx PM</span>
+        <span class="sidebar-badge" id="navNpmBadge" style="display:none">!</span>
       </button>
     </nav>
 
@@ -1003,6 +1005,87 @@
             <div><span style="color:var(--text3)">Userinfo:</span> <span id="oeUserinfo">—</span></div>
             <div><span style="color:var(--text3)">JWKS:</span> <span id="oeJwks">—</span></div>
           </div>
+
+          <details style="margin-top:14px">
+            <summary style="cursor:pointer;font-size:12px;color:var(--text2);user-select:none;padding:6px 0;list-style:none;display:flex;align-items:center;gap:6px">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition:transform .15s"><polyline points="9 18 15 12 9 6"/></svg>
+              Response payloads
+            </summary>
+            <style>details[open] > summary > svg { transform: rotate(90deg); }</style>
+
+            <div style="display:flex;flex-direction:column;gap:12px;margin-top:10px">
+              <div>
+                <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">POST /oauth/token <span style="text-transform:none;letter-spacing:0;color:var(--text3)">— after the authorization-code exchange</span></div>
+                <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">{
+  "access_token": "&lt;JWT&gt;",
+  "id_token":     "&lt;JWT&gt;",
+  "token_type":   "Bearer",
+  "expires_in":   86400,
+  "scope":        "openid profile email",
+  "refresh_token": "&lt;opaque&gt;"
+}</pre>
+                <p style="font-size:11px;color:var(--text3);margin-top:6px;line-height:1.5">
+                  <code style="background:var(--surface2);padding:1px 6px;border-radius:4px">access_token</code> and <code style="background:var(--surface2);padding:1px 6px;border-radius:4px">id_token</code> carry the same RS256 JWT — verify via the JWKS endpoint above.
+                </p>
+              </div>
+
+              <div>
+                <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">JWT claims <span style="text-transform:none;letter-spacing:0;color:var(--text3)">— decoded payload of access_token / id_token</span></div>
+                <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">{
+  "iss":   "&lt;JWT_ISSUER&gt;",
+  "sub":   "&lt;uuid-v5 derived from midleman_uid&gt;",
+  "aud":   "&lt;oauth_client_id&gt;",
+  "iat":   1730000000,
+  "exp":   1730086400,
+  "midleman_uid":        42,
+  "preferred_username":  "jdoe",
+
+  // included when "email" scope is granted
+  "email":          "jdoe@example.com",
+  "email_verified": true,
+
+  // included when "profile" scope is granted
+  "name": "John Doe",
+
+  // included when the authorize request had a nonce
+  "nonce": "&lt;client-supplied&gt;"
+}</pre>
+              </div>
+
+              <div>
+                <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">GET /oauth/userinfo <span style="text-transform:none;letter-spacing:0;color:var(--text3)">— with <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:10.5px">Authorization: Bearer &lt;access_token&gt;</code></span></div>
+                <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">{
+  "sub":                "&lt;uuid&gt;",
+  "preferred_username": "jdoe",
+  "email":              "jdoe@example.com",
+  "email_verified":     true,
+  "name":               "John Doe",
+  "midleman_uid":       42
+}</pre>
+              </div>
+
+              <div>
+                <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Refresh: POST /oauth/token <span style="text-transform:none;letter-spacing:0;color:var(--text3)">— <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:10.5px">grant_type=refresh_token</code></span></div>
+                <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">{
+  "access_token":  "&lt;new JWT&gt;",
+  "id_token":      "&lt;new JWT&gt;",
+  "token_type":    "Bearer",
+  "expires_in":    86400,
+  "scope":         "openid profile email",
+  "refresh_token": "&lt;rotated opaque&gt;"
+}</pre>
+                <p style="font-size:11px;color:var(--text3);margin-top:6px;line-height:1.5">Refresh tokens are single-use and rotate on every call. The previous token is invalidated.</p>
+              </div>
+
+              <div>
+                <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Errors <span style="text-transform:none;letter-spacing:0;color:var(--text3)">— RFC 6749 §5.2 shape</span></div>
+                <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">{
+  "error":             "invalid_grant",
+  "error_description": "Authorization code expired or already used"
+}</pre>
+              </div>
+            </div>
+          </details>
         </div>
       </div>
     </div>

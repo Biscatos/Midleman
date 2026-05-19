@@ -46,8 +46,13 @@ function drawTimelineChart(canvas, data) {
     return;
   }
 
+  // Defensive sort: render strictly in chronological order even if the
+  // server returns buckets out of order.
+  data = data.slice().sort((a, b) => (a.bucket < b.bucket ? -1 : a.bucket > b.bucket ? 1 : 0));
+
   const maxVal = Math.max(...data.map(d => d.count), 1);
-  const barW = Math.max(2, (plotW / data.length) - 2);
+  const slotW = plotW / data.length;
+  const barW = Math.max(2, slotW - 2);
 
   // Y-axis grid lines
   const ySteps = 4;
@@ -69,8 +74,9 @@ function drawTimelineChart(canvas, data) {
 
   // Bars
   data.forEach((d, i) => {
-    const x = padLeft + (plotW / data.length) * i + 1;
-    const barH = (d.count / maxVal) * plotH;
+    const x = padLeft + slotW * i + 1;
+    if (d.count <= 0) return;
+    const barH = Math.max(1, (d.count / maxVal) * plotH);
     const y = padTop + plotH - barH;
 
     ctx.fillStyle = colors.accent;
@@ -87,22 +93,26 @@ function drawTimelineChart(canvas, data) {
     }
   });
 
-  // X-axis labels (show ~6 labels)
+  // X-axis labels: enforce a minimum pixel gap between labels so they never
+  // overlap, regardless of bucket count. Each label is ~32px wide ("HH:MM"
+  // in 10px monospace), so we require >=44px center-to-center spacing.
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   ctx.font = '10px JetBrains Mono, monospace';
   ctx.fillStyle = colors.label;
-  const labelStep = Math.max(1, Math.floor(data.length / 6));
+  const minLabelGap = 44;
+  let lastLabelX = -Infinity;
   data.forEach((d, i) => {
-    if (i % labelStep === 0 || i === data.length - 1) {
-      const x = padLeft + (plotW / data.length) * i + barW / 2;
-      const hour = d.bucket.substring(11, 16);
-      ctx.fillText(hour, x, padTop + plotH + 6);
-    }
+    const cx = padLeft + slotW * i + slotW / 2;
+    if (cx - lastLabelX < minLabelGap) return;
+    if (cx > w - padRight - 16) return; // avoid clipping at right edge
+    const hour = d.bucket.substring(11, 16);
+    ctx.fillText(hour, cx, padTop + plotH + 6);
+    lastLabelX = cx;
   });
 
   // Store layout metadata for tooltip hit-testing
-  canvas._chartMeta = { data, padLeft, padRight, padTop, padBot, plotW, plotH, barW, maxVal, w, h };
+  canvas._chartMeta = { data, padLeft, padRight, padTop, padBot, plotW, plotH, barW, slotW, maxVal, w, h };
   setupTimelineTooltip(canvas);
 }
 
@@ -114,18 +124,13 @@ function setupTimelineTooltip(canvas) {
   canvas.addEventListener('mousemove', (e) => {
     const meta = canvas._chartMeta;
     if (!meta) { tip.style.display = 'none'; return; }
-    const { data, padLeft, padRight, plotW, padTop, plotH, barW, maxVal, w } = meta;
+    const { data, padLeft, padRight, plotW, padTop, plotH, barW, slotW, maxVal, w } = meta;
     const cr = canvas.getBoundingClientRect();
     const mx = e.clientX - cr.left;
     const my = e.clientY - cr.top;
 
     let found = null;
     data.forEach((d, i) => {
-      const x = padLeft + (plotW / data.length) * i + 1;
-      const barH = (d.count / maxVal) * plotH;
-      const by = padTop + plotH - barH;
-      // Expand hit area horizontally to full slot width for easier hover
-      const slotW = plotW / data.length;
       const slotX = padLeft + slotW * i;
       if (mx >= slotX && mx < slotX + slotW && my >= padTop && my <= padTop + plotH) {
         found = d;

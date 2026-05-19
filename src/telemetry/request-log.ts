@@ -584,7 +584,7 @@ export function getRequestLogChart(): {
 
     try {
         // Time-bucketed request counts (last 24h, 30-minute buckets)
-        const timeline = db.prepare(`
+        const rawTimeline = db.prepare(`
             SELECT strftime('%Y-%m-%dT%H:', timestamp) ||
                    CASE WHEN CAST(strftime('%M', timestamp) AS INTEGER) < 30 THEN '00' ELSE '30' END AS bucket,
                    COUNT(*) as count,
@@ -594,6 +594,27 @@ export function getRequestLogChart(): {
             GROUP BY bucket
             ORDER BY bucket ASC
         `).all() as { bucket: string; count: number; errors: number }[];
+
+        // Build a dense 48-slot grid (last 24h, 30-minute resolution, UTC) so the
+        // chart always renders consistently even when traffic is sparse.
+        const byBucket = new Map(rawTimeline.map(r => [r.bucket, r]));
+        const now = new Date();
+        const anchor = new Date(Date.UTC(
+            now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+            now.getUTCHours(), now.getUTCMinutes() < 30 ? 0 : 30, 0, 0,
+        ));
+        const timeline: { bucket: string; count: number; errors: number }[] = [];
+        for (let i = 47; i >= 0; i--) {
+            const t = new Date(anchor.getTime() - i * 30 * 60 * 1000);
+            const bucket =
+                t.getUTCFullYear() + '-' +
+                String(t.getUTCMonth() + 1).padStart(2, '0') + '-' +
+                String(t.getUTCDate()).padStart(2, '0') + 'T' +
+                String(t.getUTCHours()).padStart(2, '0') + ':' +
+                String(t.getUTCMinutes()).padStart(2, '0');
+            const hit = byBucket.get(bucket);
+            timeline.push({ bucket, count: hit?.count ?? 0, errors: hit?.errors ?? 0 });
+        }
 
         // Method breakdown
         const methods = db.prepare(`

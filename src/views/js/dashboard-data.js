@@ -3917,7 +3917,7 @@ function renderAuditLogs(logs, total) {
         '<td style="padding:10px 8px;font-family:monospace;font-size:11.5px;' + actionStyle + '">' + esc(l.action) + '</td>' +
         '<td style="padding:10px 8px;color:var(--text2);font-size:11.5px">' + esc(target || '—') + '</td>' +
         '<td style="padding:10px 8px;color:var(--text3);font-size:11.5px;font-family:monospace">' + esc(l.ipAddress || '—') + '</td>' +
-        '<td style="padding:10px 12px;text-align:right"><button class="btn btn-sm btn-ghost" onclick="showAuditDetail(' + idx + ')">Detalhes</button></td>' +
+        '<td style="padding:10px 12px;text-align:right"><button class="btn btn-sm btn-ghost" onclick="showAuditDetail(' + idx + ')">Details</button></td>' +
         '</tr>';
     }).join('');
   }
