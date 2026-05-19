@@ -296,7 +296,38 @@ function loginBackToStep1() {
   document.getElementById('loginUser').focus();
 }
 
+function openLogoutModal() {
+  const m = document.getElementById('logoutModal');
+  if (!m) return;
+  m.classList.add('active');
+  document.addEventListener('keydown', logoutKeyHandler);
+  setTimeout(() => { const b = document.getElementById('logoutCancelBtn'); if (b) b.focus(); }, 30);
+}
+
+function closeLogoutModal() {
+  const m = document.getElementById('logoutModal');
+  if (!m) return;
+  const confirmBtn = document.getElementById('logoutConfirmBtn');
+  if (confirmBtn && confirmBtn.dataset.loading === '1') return;
+  m.classList.remove('active');
+  document.removeEventListener('keydown', logoutKeyHandler);
+}
+
+function logoutKeyHandler(e) {
+  if (e.key === 'Escape') closeLogoutModal();
+}
+
 async function doLogout() {
+  const confirmBtn = document.getElementById('logoutConfirmBtn');
+  const cancelBtn  = document.getElementById('logoutCancelBtn');
+  const closeBtn   = document.getElementById('logoutCloseBtn');
+  if (confirmBtn) {
+    confirmBtn.dataset.loading = '1';
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = '<span class="btn-spinner"></span> A terminar sessão…';
+  }
+  if (cancelBtn) cancelBtn.disabled = true;
+  if (closeBtn)  closeBtn.disabled  = true;
   try { await fetch('/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
   window.location.href = '/';
 }

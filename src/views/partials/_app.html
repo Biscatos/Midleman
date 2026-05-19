@@ -162,7 +162,7 @@
           <div class="sidebar-user-role">Administrator</div>
         </div>
       </div>
-      <button class="sidebar-link sidebar-logout" data-tooltip="Sign out" onclick="doLogout()">
+      <button class="sidebar-link sidebar-logout" data-tooltip="Sign out" onclick="openLogoutModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
           <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
@@ -2960,6 +2960,23 @@
         <button class="btn" onclick="closeLdapModal()">Cancel</button>
         <button class="btn btn-primary" onclick="submitLdap()" id="ldapSubmitBtn">Create</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Logout Confirmation Modal -->
+<div class="modal-overlay" id="logoutModal" onclick="if(event.target===this)closeLogoutModal()">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <h3>Terminar sessão</h3>
+      <button class="close-btn" id="logoutCloseBtn" onclick="closeLogoutModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="margin:0;color:var(--text2);font-size:14px;line-height:1.5">Tem a certeza que deseja terminar a sessão? Terá de iniciar sessão novamente para aceder ao painel.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="logoutCancelBtn" onclick="closeLogoutModal()">Cancelar</button>
+      <button class="btn btn-danger" id="logoutConfirmBtn" onclick="doLogout()">Terminar sessão</button>
     </div>
   </div>
 </div>
