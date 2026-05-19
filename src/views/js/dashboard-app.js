@@ -395,9 +395,7 @@ async function doLogout() {
 const PAGE_TITLES = {
   overview: 'Dashboard',
   requests: 'Request Log',
-  siplogs: 'TCP/UDP Logs',
-  tcpudp: 'TCP/UDP Proxies',
-  certs: 'Certificates',
+  tcpudp: 'TCP/UDP',
   profiles: 'HTTP Proxies',
   webhooks: 'Webhooks',
   proxyusers: 'Users',
@@ -410,6 +408,9 @@ const PAGE_TITLES = {
 };
 
 function navigate(page) {
+  let pendingTcpTab = null;
+  if (page === 'siplogs') { page = 'tcpudp'; pendingTcpTab = 'logs'; }
+  if (page === 'certs')   { page = 'tcpudp'; pendingTcpTab = 'certs'; }
   currentPage = page;
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
@@ -420,9 +421,10 @@ function navigate(page) {
     else n.classList.remove('active');
   });
   if (page === 'requests') { rlPage = 1; fetchRequestLogs(); }
-  if (page === 'siplogs') { slPage = 1; populateSipProfileFilter(); fetchSipLogs(); }
-  if (page === 'tcpudp') { fetchSipProxies(); }
-  if (page === 'certs') { fetchCerts(); }
+  if (page === 'tcpudp') {
+    if (pendingTcpTab) switchTcpUdpTab(pendingTcpTab);
+    else fetchSipProxies();
+  }
   if (page === 'proxyusers') { fetchProxyUsers(); fetchInvites(); }
   if (page === 'oauthclients') { fetchOauthClients(); }
   if (page === 'consentpages') { fetchConsentPages(); }

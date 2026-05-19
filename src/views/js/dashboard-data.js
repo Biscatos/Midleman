@@ -4651,7 +4651,7 @@ function sipLogNextPage() {
 function ensureSipAutoRefreshTimer() {
   if (_slAutoRefreshTimer) return;
   _slAutoRefreshTimer = setInterval(() => {
-    if (currentPage !== 'siplogs') return;
+    if (currentPage !== 'tcpudp' || _tcpUdpOuterTab !== 'logs') return;
     const cb = document.getElementById('slAutoRefresh');
     if (!cb || !cb.checked) return;
     // Skip if a detail modal is open (avoid disrupting reads)
@@ -4699,6 +4699,42 @@ async function openSipDetail(id) {
 
 function closeSipDetail() {
   document.getElementById('sipDetailModal').style.display = 'none';
+}
+
+// ─── TCP/UDP: outer tabs (Proxies / Logs) ──────────────────────────────────
+let _tcpUdpOuterTab = 'proxies';
+
+function switchTcpUdpTab(tab) {
+  _tcpUdpOuterTab = tab;
+  const btns = {
+    proxies: document.getElementById('tabBtnTcpProxies'),
+    logs:    document.getElementById('tabBtnTcpLogs'),
+    certs:   document.getElementById('tabBtnTcpCerts'),
+  };
+  const panes = {
+    proxies: document.getElementById('tabPaneTcpProxies'),
+    logs:    document.getElementById('tabPaneTcpLogs'),
+    certs:   document.getElementById('tabPaneTcpCerts'),
+  };
+  if (!btns.proxies || !btns.logs || !btns.certs) return;
+  const setActive = (btn, on) => {
+    btn.style.borderBottomColor = on ? 'var(--accent)' : 'transparent';
+    btn.style.color = on ? 'var(--text)' : 'var(--text3)';
+  };
+  for (const k of Object.keys(panes)) {
+    if (panes[k]) panes[k].style.display = (k === tab) ? '' : 'none';
+    setActive(btns[k], k === tab);
+  }
+  if (tab === 'logs') {
+    slPage = 1;
+    populateSipProfileFilter();
+    if (_tcpUdpLogTab === 'messages') fetchSipLogs();
+    else { populateConnProfileFilter(); fetchConnLogs(); }
+  } else if (tab === 'certs') {
+    fetchCerts();
+  } else {
+    fetchSipProxies();
+  }
 }
 
 // ─── TCP/UDP Logs: tabs (Messages / Connections) ───────────────────────────
@@ -4838,7 +4874,7 @@ async function fetchCerts() {
     }
     const data = await res.json();
     const certs = data.certs || [];
-    const badge = document.getElementById('navCertsBadge');
+    const badge = document.getElementById('tabTcpCertsBadge');
     if (badge) badge.textContent = String(certs.length);
     if (!certs.length) {
       body.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No certificates yet. Click <strong>+ New Certificate</strong> to add one.</td></tr>';
