@@ -557,7 +557,7 @@ async function editProfile(name) {
   try { const res = await api('/admin/profiles/' + encodeURIComponent(name)); if (!res.ok) return toast('Not found', 'error'); openProfileModal((await res.json()).profile); } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 async function deleteProfile(name) {
-  if (!confirm('Delete proxy "' + name + '"?')) return;
+  if (!(await showConfirm({ title: 'Apagar proxy', message: 'Apagar proxy "' + name + '"?', confirmText: 'Apagar' }))) return;
   try { const res = await api('/admin/profiles/' + encodeURIComponent(name), { method: 'DELETE' }); if (res.ok) { toast('Proxy deleted'); await fetchProfiles(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 function copyProxyUrl(name, port) {
@@ -721,7 +721,7 @@ async function saveEditProxyUser() {
     const desired = document.getElementById('npuIsAdmin').checked;
     const current = !!_allProxyUsers.find(u => u.id === _editUserId)?.isAdmin;
     if (desired !== current) {
-      if (!desired && !confirm('Remove admin role from this user? They will lose dashboard access.')) return;
+      if (!desired && !(await showConfirm({ title: 'Remover papel de administrador', message: 'Remover o papel de administrador deste utilizador? Perderá acesso ao dashboard.', confirmText: 'Remover' }))) return;
       body.isAdmin = desired;
     }
   }
@@ -736,7 +736,7 @@ async function saveEditProxyUser() {
 }
 
 async function deleteProxyUserAction(id, username) {
-  if (!confirm('Delete user "' + username + '"? This will revoke all profile access.')) return;
+  if (!(await showConfirm({ title: 'Apagar utilizador', message: 'Apagar utilizador "' + username + '"? Todo o acesso aos perfis será revogado.', confirmText: 'Apagar' }))) return;
   try {
     const res = await api('/admin/proxy-users/' + id, { method: 'DELETE' });
     if (res.ok) { toast('User deleted'); fetchProxyUsers(); } else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
@@ -754,7 +754,7 @@ async function resetProxyUserPw(id) {
 }
 
 async function disable2fa(id, username) {
-  if (!confirm('Disable 2FA for "' + username + '"?\n\nTheir account will be protected only by password. The user will be notified by email.')) return;
+  if (!(await showConfirm({ title: 'Desativar 2FA', message: 'Desativar 2FA para "' + username + '"?', detail: 'A conta ficará protegida apenas pela palavra-passe. O utilizador será notificado por email.', confirmText: 'Desativar' }))) return;
   try {
     const res = await api('/admin/proxy-users/' + id, { method: 'PUT', body: JSON.stringify({ reset2fa: true }) });
     if (res.ok) { toast('2FA disabled — user notified by email'); fetchProxyUsers(); } else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
@@ -762,7 +762,7 @@ async function disable2fa(id, username) {
 }
 
 async function force2fa(id, username) {
-  if (!confirm('Require "' + username + '" to set up 2FA on next login?\n\nIf they already have 2FA, it will be reset and they will be asked to configure it again. The user will be notified by email.')) return;
+  if (!(await showConfirm({ title: 'Exigir configuração de 2FA', message: 'Exigir que "' + username + '" configure 2FA no próximo login?', detail: 'Se já tiver 2FA, será reposto e terá de o configurar novamente. O utilizador será notificado por email.', confirmText: 'Exigir', danger: false }))) return;
   try {
     const res = await api('/admin/proxy-users/' + id, { method: 'PUT', body: JSON.stringify({ force2fa: true }) });
     if (res.ok) { toast('User will be required to set up 2FA on next login'); fetchProxyUsers(); } else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
@@ -858,7 +858,7 @@ async function addLdapGroupToProfileUI() {
 
 async function removeLdapGroupFromProfileUI(ruleId) {
   if (!_profileUsersProfile) return;
-  if (!confirm('Remove this LDAP group rule?')) return;
+  if (!(await showConfirm({ title: 'Remover regra de grupo LDAP', message: 'Remover esta regra de grupo LDAP?', confirmText: 'Remover' }))) return;
   try {
     const res = await api('/admin/profiles/' + encodeURIComponent(_profileUsersProfile) + '/ldap-groups/' + ruleId, { method: 'DELETE' });
     if (res.ok) { toast('Rule removed'); await refreshProfileLdapGroups(); }
@@ -943,7 +943,7 @@ async function assignUserToCurrentProfile() {
 
 async function removeUserFromProfile(userId, username) {
   if (!_profileUsersProfile) return;
-  if (!confirm('Remove "' + username + '" from this profile?')) return;
+  if (!(await showConfirm({ title: 'Remover do perfil', message: 'Remover "' + username + '" deste perfil?', confirmText: 'Remover' }))) return;
   const btn = document.querySelector(`#pfuListBody button[onclick*="removeUserFromProfile(${userId},"]`);
   if (btn) { btn.disabled = true; btn.textContent = 'Removing...'; }
   try {
@@ -1077,7 +1077,7 @@ async function assignProfileToCurrentUser() {
 
 async function removeProfileFromCurrentUser(profileName) {
   if (!_userProfilesUserId) return;
-  if (!confirm('Remove access to "' + profileName + '"?')) return;
+  if (!(await showConfirm({ title: 'Remover acesso', message: 'Remover acesso a "' + profileName + '"?', confirmText: 'Remover' }))) return;
   try {
     const res = await api('/admin/profiles/' + encodeURIComponent(profileName) + '/users/' + _userProfilesUserId, { method: 'DELETE' });
     if (res.ok) { toast('Access removed'); refreshUserResources(); fetchProxyUsers(); }
@@ -1100,7 +1100,7 @@ async function assignOauthClientToCurrentUser() {
 
 async function removeOauthClientFromCurrentUser(clientId, clientName) {
   if (!_userProfilesUserId) return;
-  if (!confirm('Remove access to "' + clientName + '"?')) return;
+  if (!(await showConfirm({ title: 'Remover acesso', message: 'Remover acesso a "' + clientName + '"?', confirmText: 'Remover' }))) return;
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(clientId) + '/users/' + _userProfilesUserId, { method: 'DELETE' });
     if (res.ok) { toast('Access removed'); refreshUserResources(); }
@@ -1471,7 +1471,7 @@ function copyTokenLink(token) {
 }
 
 async function revokeInvite(token) {
-  if (!confirm('Revoke this invite? The link will stop working.')) return;
+  if (!(await showConfirm({ title: 'Revogar convite', message: 'Revogar este convite? O link deixará de funcionar.', confirmText: 'Revogar' }))) return;
   try {
     const res = await api('/admin/invites/' + token, { method: 'DELETE' });
     if (res.ok) { toast('Invite revoked'); fetchInvites(); }
@@ -1748,7 +1748,7 @@ async function prRetryOne(id) {
 }
 
 async function prDismissOne(id) {
-  if (!confirm('Cancel this pending retry? The delivery will be abandoned.')) return;
+  if (!(await showConfirm({ title: 'Cancelar nova tentativa', message: 'Cancelar esta nova tentativa pendente? A entrega será abandonada.', confirmText: 'Cancelar entrega' }))) return;
   try {
     const res = await api(`/admin/webhooks/pending-retry/${encodeURIComponent(id)}`, { method: 'DELETE' });
     if (res.ok) { await refreshPendingRetryModal(); await fetchWebhooks(); }
@@ -2607,7 +2607,7 @@ function openWebhookModal(webhook = null) {
 
 async function releaseWebhookFromNpm() {
   if (!editingWebhook || !editingWebhook.name) return;
-  if (!confirm('Release this webhook from the NPM host? NPM will be restored to the original forward target.')) return;
+  if (!(await showConfirm({ title: 'Libertar webhook', message: 'Libertar este webhook do host NPM? O NPM será restaurado para o destino de encaminhamento original.', confirmText: 'Libertar' }))) return;
   try {
     const res = await api('/admin/webhooks/' + encodeURIComponent(editingWebhook.name) + '/npm-release', { method: 'POST' });
     const data = await res.json();
@@ -2721,7 +2721,7 @@ async function editWebhook(name) {
 }
 
 async function deleteWebhook(name) {
-  if (!confirm('Delete webhook "' + name + '"?')) return;
+  if (!(await showConfirm({ title: 'Apagar webhook', message: 'Apagar webhook "' + name + '"?', confirmText: 'Apagar' }))) return;
   try { const res = await api('/admin/webhooks/' + encodeURIComponent(name), { method: 'DELETE' }); if (res.ok) { toast('Deleted'); await fetchWebhooks(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
@@ -3281,7 +3281,7 @@ async function editSipProxy(name) {
 }
 
 async function deleteSipProxy(name) {
-  if (!confirm('Delete TCP/UDP proxy "' + name + '"? This stops the listener immediately.')) return;
+  if (!(await showConfirm({ title: 'Apagar proxy TCP/UDP', message: 'Apagar proxy TCP/UDP "' + name + '"? O listener será parado imediatamente.', confirmText: 'Apagar' }))) return;
   try {
     const res = await api('/admin/tcpudp/' + encodeURIComponent(name), { method: 'DELETE' });
     if (res.ok) { toast('TCP/UDP proxy deleted'); await fetchSipProxies(); }
@@ -3454,7 +3454,7 @@ async function submitOauthClient() {
   if (!name) return toast('Name is required', 'error');
   if (!redirectUris.length) return toast('At least one redirect URI', 'error');
   const pkceRequired = document.getElementById('oauthClientPkceRequired').checked;
-  if (!pkceRequired && !confirm('Disable PKCE for this client?\n\nThis removes a security defense (auth-code interception protection). Only do this for legacy clients that cannot send a code_challenge.')) return;
+  if (!pkceRequired && !(await showConfirm({ title: 'Desativar PKCE', message: 'Desativar PKCE para este cliente?', detail: 'Isto remove uma defesa de segurança (proteção contra interceção de auth-code). Faz isto apenas para clientes legados que não conseguem enviar um code_challenge.', confirmText: 'Desativar PKCE' }))) return;
   try {
     const res = await api('/admin/oauth-clients', {
       method: 'POST',
@@ -3484,7 +3484,7 @@ async function submitEditOauthClient() {
   if (!name) return toast('Name is required', 'error');
   if (!redirectUris.length) return toast('At least one redirect URI', 'error');
   const urisChanged = redirectUris.join('\n') !== _editingOauthClientOriginalUris.trim();
-  if (urisChanged && !confirm('Changing redirect URIs will revoke every refresh token for this client. Continue?')) return;
+  if (urisChanged && !(await showConfirm({ title: 'Alterar redirect URIs', message: 'Alterar as redirect URIs irá revogar todos os refresh tokens deste cliente. Continuar?', confirmText: 'Alterar' }))) return;
   const consentEnabled = document.getElementById('oauthClientConsentEnabled').checked;
   const consentPageRaw = document.getElementById('oauthClientConsentPageId').value;
   const consentPageId = consentPageRaw ? Number(consentPageRaw) : null;
@@ -3492,7 +3492,7 @@ async function submitEditOauthClient() {
     return toast('Choose a consent page or disable consent.', 'error');
   }
   const pkceRequired = document.getElementById('oauthClientPkceRequired').checked;
-  if (!pkceRequired && !confirm('Disable PKCE for this client?\n\nThis removes a security defense (auth-code interception protection). Only do this for legacy clients that cannot send a code_challenge.')) return;
+  if (!pkceRequired && !(await showConfirm({ title: 'Desativar PKCE', message: 'Desativar PKCE para este cliente?', detail: 'Isto remove uma defesa de segurança (proteção contra interceção de auth-code). Faz isto apenas para clientes legados que não conseguem enviar um code_challenge.', confirmText: 'Desativar PKCE' }))) return;
   const payload = {
     name,
     redirectUris,
@@ -3518,7 +3518,7 @@ async function submitEditOauthClient() {
 }
 
 async function deleteOauthClient(clientId, name) {
-  if (!confirm('Delete client "' + name + '"? Every issued token will be revoked.')) return;
+  if (!(await showConfirm({ title: 'Apagar cliente OAuth', message: 'Apagar cliente "' + name + '"? Todos os tokens emitidos serão revogados.', confirmText: 'Apagar' }))) return;
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(clientId), { method: 'DELETE' });
     if (!res.ok) {
@@ -3616,7 +3616,7 @@ async function addUserToOauthClientUI() {
 
 async function removeUserFromOauthClientUI(userId, username) {
   if (!_ocuClientId) return;
-  if (!confirm('Remove "' + username + '" from this client\'s access?')) return;
+  if (!(await showConfirm({ title: 'Remover acesso', message: 'Remover "' + username + '" do acesso deste cliente?', confirmText: 'Remover' }))) return;
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/users/' + encodeURIComponent(userId), { method: 'DELETE' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
@@ -3676,7 +3676,7 @@ async function addLdapGroupToClientUI() {
 
 async function removeLdapGroupFromClientUI(ruleId) {
   if (!_ocuClientId) return;
-  if (!confirm('Remove this group rule? Users that depended on it will lose access on the next login (or sync).')) return;
+  if (!(await showConfirm({ title: 'Remover regra de grupo', message: 'Remover esta regra de grupo? Os utilizadores que dependiam dela perderão acesso no próximo login (ou sync).', confirmText: 'Remover' }))) return;
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/ldap-groups/' + encodeURIComponent(ruleId), { method: 'DELETE' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
@@ -3818,7 +3818,7 @@ function cancelSmtpTest() {
 }
 
 async function clearSmtpConfig() {
-  if (!confirm('Remove the entire SMTP configuration?')) return;
+  if (!(await showConfirm({ title: 'Remover configuração SMTP', message: 'Remover toda a configuração SMTP?', confirmText: 'Remover' }))) return;
   try {
     const res = await api('/admin/smtp', { method: 'DELETE' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return setSmtpStatus('smtpStatus', d.error || 'Error', 'err'); }
@@ -4157,7 +4157,7 @@ async function submitLdap() {
 }
 
 async function deleteLdapConfig(id, name) {
-  if (!confirm('Delete directory "' + name + '"?\n\nAlready-provisioned LDAP users will lose their source — they won\'t be able to log in until you configure it again.')) return;
+  if (!(await showConfirm({ title: 'Apagar diretório', message: 'Apagar diretório "' + name + '"?', detail: 'Os utilizadores LDAP já provisionados perderão a sua origem — não poderão iniciar sessão até reconfigurares o diretório.', confirmText: 'Apagar' }))) return;
   try {
     const res = await api('/admin/ldap/configs/' + encodeURIComponent(id), { method: 'DELETE' });
     if (!res.ok) {
@@ -4366,7 +4366,7 @@ function renderLdapAdoptions(events) {
 }
 
 async function confirmLdapAdoption(id) {
-  if (!confirm('Confirm this adoption? The local account becomes permanently replaced by the LDAP identity.')) return;
+  if (!(await showConfirm({ title: 'Confirmar adoção', message: 'Confirmar esta adoção? A conta local será permanentemente substituída pela identidade LDAP.', confirmText: 'Confirmar', danger: false }))) return;
   try {
     const res = await api('/admin/ldap/adoptions/' + encodeURIComponent(id) + '/confirm', { method: 'POST' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
@@ -4376,7 +4376,7 @@ async function confirmLdapAdoption(id) {
 }
 
 async function revertLdapAdoption(id) {
-  if (!confirm('Revert? The local account goes back to its previous state (original username, email and password hash). The LDAP identity will need to be registered manually on another user — sessions and tokens get revoked.')) return;
+  if (!(await showConfirm({ title: 'Reverter adoção', message: 'Reverter? A conta local volta ao estado anterior (utilizador, email e hash da palavra-passe originais).', detail: 'A identidade LDAP terá de ser registada manualmente noutro utilizador — as sessões e tokens serão revogados.', confirmText: 'Reverter' }))) return;
   try {
     const res = await api('/admin/ldap/adoptions/' + encodeURIComponent(id) + '/revert', { method: 'POST' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
@@ -4516,7 +4516,7 @@ async function submitConsentPage() {
 }
 
 async function deleteConsentPage(id, name) {
-  if (!confirm('Delete page "' + name + '"?')) return;
+  if (!(await showConfirm({ title: 'Apagar página', message: 'Apagar página "' + name + '"?', confirmText: 'Apagar' }))) return;
   try {
     const res = await api('/admin/consent-pages/' + id, { method: 'DELETE' });
     const data = await res.json().catch(() => ({}));
@@ -5026,7 +5026,7 @@ async function saveCert() {
 }
 
 async function renewCert(id) {
-  if (!confirm('Force ACME renewal now? This contacts Let\'s Encrypt.')) return;
+  if (!(await showConfirm({ title: 'Forçar renovação ACME', message: 'Forçar renovação ACME agora? Será feito um pedido à Let\'s Encrypt.', confirmText: 'Renovar', danger: false }))) return;
   try {
     const res = await api('/admin/certs/' + id + '/renew', { method: 'POST' });
     const d = await res.json();
@@ -5037,7 +5037,7 @@ async function renewCert(id) {
 }
 
 async function deleteCertificate(id) {
-  if (!confirm('Delete this certificate? Profiles using it will lose TLS until reassigned.')) return;
+  if (!(await showConfirm({ title: 'Apagar certificado', message: 'Apagar este certificado? Os perfis que o usam perderão TLS até serem reatribuídos.', confirmText: 'Apagar' }))) return;
   try {
     const res = await api('/admin/certs/' + id, { method: 'DELETE' });
     const d = await res.json();
@@ -5212,7 +5212,7 @@ async function testNpmConnectionUi() {
 }
 
 async function clearNpmConfig() {
-  if (!confirm('Remove the NPM integration configuration?')) return;
+  if (!(await showConfirm({ title: 'Remover integração NPM', message: 'Remover a configuração de integração NPM?', confirmText: 'Remover' }))) return;
   try {
     const res = await api('/admin/npm', { method: 'DELETE' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return setNpmStatus('npmStatus', d.error || 'Error', 'err'); }
@@ -5495,7 +5495,7 @@ function openLinkedProfile(name) {
 
 async function releaseProfileFromNpm() {
   if (!editingProfile || !editingProfile.name) return;
-  if (!confirm('Release this profile from the NPM host? NPM will be restored to the original forward target.')) return;
+  if (!(await showConfirm({ title: 'Libertar perfil do NPM', message: 'Libertar este perfil do host NPM? O NPM será restaurado para o destino de encaminhamento original.', confirmText: 'Libertar' }))) return;
   try {
     const res = await api('/admin/profiles/' + encodeURIComponent(editingProfile.name) + '/npm-release', { method: 'POST' });
     const data = await res.json();
@@ -5633,7 +5633,7 @@ function onNpmPageSizeChange() {
 }
 
 async function toggleNpmHost(id, enable) {
-  if (!enable && !confirm('Disable proxy host #' + id + '? It will stop serving requests until re-enabled.')) return;
+  if (!enable && !(await showConfirm({ title: 'Desativar proxy host', message: 'Desativar proxy host #' + id + '? Deixará de servir pedidos até ser reativado.', confirmText: 'Desativar' }))) return;
   try {
     const path = '/admin/npm/proxy-hosts/' + id + '/' + (enable ? 'enable' : 'disable');
     const res = await api(path, { method: 'POST' });
@@ -5647,7 +5647,7 @@ async function toggleNpmHost(id, enable) {
 async function deleteNpmHost(id) {
   const host = _npmHostsAll.find(h => h.id === id);
   const domains = host ? (host.domain_names || []).join(', ') : '#' + id;
-  if (!confirm('Delete proxy host "' + domains + '"?\n\nThis removes it from NPM permanently. The associated certificate (if any) is not deleted.')) return;
+  if (!(await showConfirm({ title: 'Apagar proxy host', message: 'Apagar proxy host "' + domains + '"?', detail: 'Isto remove-o do NPM permanentemente. O certificado associado (se existir) não é apagado.', confirmText: 'Apagar' }))) return;
   try {
     const res = await api('/admin/npm/proxy-hosts/' + id, { method: 'DELETE' });
     const d = await res.json();

@@ -2964,6 +2964,24 @@
   </div>
 </div>
 
+<!-- Generic Confirmation Modal -->
+<div class="modal-overlay" id="confirmModal" onclick="if(event.target===this)confirmModalCancel()">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <h3 id="confirmModalTitle">Confirmação</h3>
+      <button class="close-btn" id="confirmModalCloseBtn" onclick="confirmModalCancel()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p id="confirmModalMessage" style="margin:0;color:var(--text2);font-size:14px;line-height:1.5"></p>
+      <p id="confirmModalDetail" style="margin:10px 0 0;color:var(--text3);font-size:13px;line-height:1.5;display:none"></p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="confirmModalCancelBtn" onclick="confirmModalCancel()">Cancelar</button>
+      <button class="btn btn-danger" id="confirmModalConfirmBtn" onclick="confirmModalAccept()">Confirmar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Logout Confirmation Modal -->
 <div class="modal-overlay" id="logoutModal" onclick="if(event.target===this)closeLogoutModal()">
   <div class="modal" style="max-width:420px">

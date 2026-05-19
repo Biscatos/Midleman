@@ -317,6 +317,65 @@ function logoutKeyHandler(e) {
   if (e.key === 'Escape') closeLogoutModal();
 }
 
+let _confirmModalResolve = null;
+
+function showConfirm(opts) {
+  const o = (typeof opts === 'string') ? { message: opts } : (opts || {});
+  let title = o.title;
+  let message = o.message || '';
+  let detail = o.detail || '';
+  if (!detail && message.indexOf('\n\n') !== -1) {
+    const parts = message.split('\n\n');
+    message = parts.shift();
+    detail = parts.join('\n\n');
+  }
+  if (!title) title = 'Confirmação';
+  const confirmText = o.confirmText || 'Confirmar';
+  const cancelText  = o.cancelText  || 'Cancelar';
+  const danger = (o.danger !== false);
+
+  document.getElementById('confirmModalTitle').textContent = title;
+  document.getElementById('confirmModalMessage').textContent = message;
+  const det = document.getElementById('confirmModalDetail');
+  if (detail) { det.textContent = detail; det.style.display = ''; }
+  else { det.textContent = ''; det.style.display = 'none'; }
+  const okBtn = document.getElementById('confirmModalConfirmBtn');
+  okBtn.textContent = confirmText;
+  okBtn.classList.toggle('btn-danger', danger);
+  okBtn.classList.toggle('btn-primary', !danger);
+  document.getElementById('confirmModalCancelBtn').textContent = cancelText;
+
+  if (_confirmModalResolve) { try { _confirmModalResolve(false); } catch {} }
+
+  const m = document.getElementById('confirmModal');
+  m.classList.add('active');
+  document.addEventListener('keydown', confirmModalKey);
+  setTimeout(() => document.getElementById('confirmModalCancelBtn').focus(), 30);
+
+  return new Promise(res => { _confirmModalResolve = res; });
+}
+
+function confirmModalKey(e) {
+  if (e.key === 'Escape') confirmModalCancel();
+  else if (e.key === 'Enter') confirmModalAccept();
+}
+
+function confirmModalCancel() {
+  const m = document.getElementById('confirmModal');
+  if (m) m.classList.remove('active');
+  document.removeEventListener('keydown', confirmModalKey);
+  const r = _confirmModalResolve; _confirmModalResolve = null;
+  if (r) r(false);
+}
+
+function confirmModalAccept() {
+  const m = document.getElementById('confirmModal');
+  if (m) m.classList.remove('active');
+  document.removeEventListener('keydown', confirmModalKey);
+  const r = _confirmModalResolve; _confirmModalResolve = null;
+  if (r) r(true);
+}
+
 async function doLogout() {
   const confirmBtn = document.getElementById('logoutConfirmBtn');
   const cancelBtn  = document.getElementById('logoutCancelBtn');
