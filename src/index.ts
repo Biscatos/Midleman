@@ -576,17 +576,23 @@ const server = Bun.serve({
             // Health check
             if (url.pathname === '/health') {
                 const uptimeSec = Math.floor((Date.now() - startedAt) / 1000);
-                const healthData = {
-                    status: 'ok',
-                    uptime: uptimeSec,
-                    activeRequests,
-                    proxies: config.proxyProfiles.length,
-                    webhooks: config.webhooks.length,
-                };
 
+                // Public payload: status + uptime only. No counts, no active requests,
+                // no anything that could reveal load or topology in production.
+                // Authenticated admin requests get the full set (used by the dashboard).
                 const accept = req.headers.get('accept') || '';
                 if (!accept.includes('text/html')) {
-                    return jsonRes(200, healthData);
+                    const isAdmin = !!getAuthedAdmin(req);
+                    if (isAdmin) {
+                        return jsonRes(200, {
+                            status: 'ok',
+                            uptime: uptimeSec,
+                            activeRequests,
+                            proxyProfiles: config.proxyProfiles.length,
+                            webhooks: config.webhooks.length,
+                        });
+                    }
+                    return jsonRes(200, { status: 'ok', uptime: uptimeSec });
                 }
 
                 function fmtUptime(s: number): string {
@@ -599,17 +605,41 @@ const server = Bun.serve({
                 }
 
                 const html = `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Midleman — Health</title>
+  <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='system';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root,
+    [data-theme="dark"] {
+      --bg: #111;
+      --text: #eee;
+      --text2: #ccc;
+      --text3: #555;
+      --text4: #444;
+      --text5: #333;
+      --border: #1a1a1a;
+      --up: #3a3;
+      --wordmark: #444;
+    }
+    [data-theme="light"] {
+      --bg: #ffffff;
+      --text: #18181b;
+      --text2: #3f3f46;
+      --text3: #71717a;
+      --text4: #a1a1aa;
+      --text5: #d4d4d8;
+      --border: #e4e4e7;
+      --up: #15803d;
+      --wordmark: #a1a1aa;
+    }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-      background: #111;
-      color: #ccc;
+      background: var(--bg);
+      color: var(--text2);
       min-height: 100vh;
       display: flex;
       flex-direction: column;
@@ -623,7 +653,7 @@ const server = Bun.serve({
       font-weight: 600;
       letter-spacing: .1em;
       text-transform: uppercase;
-      color: #444;
+      color: var(--wordmark);
       margin-bottom: 32px;
     }
     .status-row {
@@ -635,60 +665,30 @@ const server = Bun.serve({
     .dot {
       width: 8px; height: 8px;
       border-radius: 50%;
-      background: #3a3;
+      background: var(--up);
       flex-shrink: 0;
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--up) 18%, transparent);
     }
     h1 {
       font-size: 20px;
       font-weight: 600;
-      color: #eee;
+      color: var(--text);
       letter-spacing: -.01em;
     }
     .sub {
       font-size: 13px;
-      color: #555;
-      margin-bottom: 36px;
+      color: var(--text3);
+      margin-bottom: 32px;
       padding-left: 18px;
     }
-    .grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 1px;
-      background: #1e1e1e;
-      border: 1px solid #1e1e1e;
-      border-radius: 8px;
-      overflow: hidden;
-      margin-bottom: 20px;
-    }
-    .cell {
-      background: #161616;
-      padding: 18px 16px;
-      text-align: center;
-    }
-    .cell-val {
-      font-size: 22px;
-      font-weight: 600;
-      color: #ddd;
-      font-variant-numeric: tabular-nums;
-      letter-spacing: -.02em;
-    }
-    .cell-label {
-      font-size: 11px;
-      color: #444;
-      margin-top: 4px;
-      font-weight: 500;
-      letter-spacing: .04em;
-      text-transform: uppercase;
-    }
     .meta {
-      display: flex;
-      justify-content: space-between;
       font-size: 11px;
-      color: #333;
+      color: var(--text4);
       padding-top: 16px;
-      border-top: 1px solid #1a1a1a;
+      border-top: 1px solid var(--border);
+      font-family: 'SF Mono', ui-monospace, monospace;
+      letter-spacing: .02em;
     }
-    .meta span { font-family: 'SF Mono', ui-monospace, monospace; }
   </style>
 </head>
 <body>
@@ -699,27 +699,18 @@ const server = Bun.serve({
       <h1>Operational</h1>
     </div>
     <p class="sub">All systems running</p>
-    <div class="grid">
-      <div class="cell">
-        <div class="cell-val">${healthData.proxies}</div>
-        <div class="cell-label">Proxies</div>
-      </div>
-      <div class="cell">
-        <div class="cell-val">${healthData.webhooks}</div>
-        <div class="cell-label">Webhooks</div>
-      </div>
-    </div>
-    <div class="meta">
-      <span>uptime ${fmtUptime(uptimeSec)}</span>
-      <span>${healthData.activeRequests} active</span>
-    </div>
+    <div class="meta">uptime · ${fmtUptime(uptimeSec)}</div>
   </div>
 </body>
 </html>`;
 
                 return new Response(html, {
                     status: 200,
-                    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                    headers: {
+                        'Content-Type': 'text/html; charset=utf-8',
+                        'Cache-Control': 'no-store',
+                        'X-Content-Type-Options': 'nosniff',
+                    },
                 });
             }
 

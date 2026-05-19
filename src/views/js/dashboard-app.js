@@ -18,7 +18,9 @@ const _prefersDark = (typeof window !== 'undefined' && window.matchMedia)
 
 function getThemePref() {
   const v = localStorage.getItem(THEME_KEY);
-  return THEME_MODES.includes(v) ? v : 'dark';
+  // Default to 'system' so the OS preference wins on first visit, matching the
+  // bootstrap snippet injected in every page <head>.
+  return THEME_MODES.includes(v) ? v : 'system';
 }
 function resolveTheme(pref) {
   if (pref === 'system') return _prefersDark && _prefersDark.matches ? 'dark' : 'light';
@@ -295,8 +297,8 @@ function loginBackToStep1() {
 }
 
 async function doLogout() {
-  await fetch('/auth/logout', { method: 'POST' });
-  window.location.reload();
+  try { await fetch('/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
+  window.location.href = '/';
 }
 
 // ─── Navigation ──────────────────────────────────────────────────────────────

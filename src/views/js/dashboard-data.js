@@ -207,9 +207,9 @@ async function fetchHealth() {
     document.getElementById('ovStatus').textContent = 'Online';
     document.getElementById('ovStatus').style.color = 'var(--green)';
     document.getElementById('ovUptime').textContent = 'Uptime: ' + fmtUptime(d.uptime);
-    document.getElementById('ovActive').textContent = d.activeRequests;
-    document.getElementById('ovProfiles').textContent = d.proxyProfiles || 0;
-    document.getElementById('ovWebhooks').textContent = d.webhooks || 0;
+    document.getElementById('ovActive').textContent = (typeof d.activeRequests === 'number') ? d.activeRequests : '—';
+    document.getElementById('ovProfiles').textContent = (typeof d.proxyProfiles === 'number') ? d.proxyProfiles : '—';
+    document.getElementById('ovWebhooks').textContent = (typeof d.webhooks === 'number') ? d.webhooks : '—';
   } catch {
     document.getElementById('navDot').className = 'status-dot offline';
     document.getElementById('navStatus').textContent = 'Offline';
@@ -333,16 +333,20 @@ function renderProfiles(profiles) {
     const npmBadge = (() => {
       if (!p.npmProxyHostId) return '';
       const hosts = (p.publicHostnames || []).filter(Boolean);
-      const tip = `NPM #${p.npmProxyHostId}` + (hosts.length ? ` — ${esc(hosts.join(', '))}` : '');
+      const tip = (hosts.length ? `Open https://${esc(hosts[0])} (NPM #${p.npmProxyHostId})` : `NPM #${p.npmProxyHostId}`)
+        + (hosts.length > 1 ? ` — also: ${esc(hosts.slice(1).join(', '))}` : '');
       const shown = hosts.length === 0
         ? `NPM #${p.npmProxyHostId}`
         : (hosts.length === 1
             ? esc(hosts[0])
             : `${esc(hosts[0])} <span style="color:var(--text3);font-weight:400">+${hosts.length - 1}</span>`);
-      return `<span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle" title="${tip}">
-        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shown}</span>
-      </span>`;
+      const inner = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shown}</span>`;
+      if (hosts.length === 0) {
+        return `<span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle" title="${tip}">${inner}</span>`;
+      }
+      const href = 'https://' + hosts[0].replace(/^\*\./, 'www.');
+      return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle;text-decoration:none;transition:background 0.15s" onmouseover="this.style.background='rgba(0,120,212,0.22)'" onmouseout="this.style.background='rgba(0,120,212,0.12)'" title="${tip}">${inner}</a>`;
     })();
     const hasAuth = p.authHeader;
     const authVal = hasAuth
@@ -1554,16 +1558,20 @@ function renderWebhooks(webhooks) {
     const wNpmBadge = (() => {
       if (!w.npmProxyHostId) return '';
       const hosts = (w.publicHostnames || []).filter(Boolean);
-      const tip = `NPM #${w.npmProxyHostId}` + (hosts.length ? ` — ${esc(hosts.join(', '))}` : '');
+      const tip = (hosts.length ? `Open https://${esc(hosts[0])} (NPM #${w.npmProxyHostId})` : `NPM #${w.npmProxyHostId}`)
+        + (hosts.length > 1 ? ` — also: ${esc(hosts.slice(1).join(', '))}` : '');
       const shown = hosts.length === 0
         ? `NPM #${w.npmProxyHostId}`
         : (hosts.length === 1
             ? esc(hosts[0])
             : `${esc(hosts[0])} <span style="color:var(--text3);font-weight:400">+${hosts.length - 1}</span>`);
-      return `<span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle" title="${tip}">
-        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shown}</span>
-      </span>`;
+      const inner = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shown}</span>`;
+      if (hosts.length === 0) {
+        return `<span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle" title="${tip}">${inner}</span>`;
+      }
+      const href = 'https://' + hosts[0].replace(/^\*\./, 'www.');
+      return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle;text-decoration:none;transition:background 0.15s" onmouseover="this.style.background='rgba(0,120,212,0.22)'" onmouseout="this.style.background='rgba(0,120,212,0.12)'" title="${tip}">${inner}</a>`;
     })();
     return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
   <td style="padding:8px 12px;font-weight:600">${esc(w.name)}</td>

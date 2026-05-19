@@ -5,10 +5,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/png" href="/logo.png">
-  <title>Midleman — Proxy Server</title>
+  <title>Midleman — Edge middleware platform</title>
   <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='system';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
     :root,
     [data-theme="dark"] {
@@ -69,14 +69,24 @@
       -webkit-font-smoothing: antialiased;
     }
 
-    /* top bar */
+    /* top bar — fixed */
     .topbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 50;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 16px 32px;
+      padding: 14px 32px;
       border-bottom: 1px solid var(--border);
+      background: color-mix(in srgb, var(--bg) 88%, transparent);
+      backdrop-filter: saturate(140%) blur(10px);
+      -webkit-backdrop-filter: saturate(140%) blur(10px);
     }
+    /* push content below the fixed bar */
+    body { padding-top: 60px; }
 
     .topbar-left {
       display: flex;
@@ -147,39 +157,61 @@
 
     /* main content */
     .main {
-      max-width: 580px;
+      max-width: 920px;
       margin: 0 auto;
-      padding: 80px 24px 60px;
+      padding: 64px 24px 48px;
     }
 
-    /* status pill */
+    /* hero */
+    .hero {
+      max-width: 620px;
+      padding-top: 24px;
+      margin-bottom: 56px;
+    }
+
+    /* status pill — sits inside the fixed topbar, links to /health */
     .status-pill {
       display: inline-flex;
       align-items: center;
-      gap: 7px;
-      padding: 5px 12px;
-      border-radius: 6px;
+      gap: 6px;
+      padding: 3px 9px 3px 8px;
+      margin-left: 4px;
+      border-radius: 999px;
       background: var(--surface3);
       border: 1px solid var(--border);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
-      color: var(--text4);
-      margin-bottom: 32px;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 11px;
+      font-weight: 300;
+      letter-spacing: 0.04em;
+      color: var(--text3);
+      text-decoration: none;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+    }
+
+    .status-pill #statusText {
+      font-weight: 300;
+    }
+
+    .status-pill:hover {
+      color: var(--text);
+      border-color: var(--border3);
     }
 
     .status-pill .indicator {
-      width: 7px;
-      height: 7px;
+      width: 6px;
+      height: 6px;
       border-radius: 50%;
       background: var(--border3);
     }
 
     .status-pill .indicator.up {
       background: var(--up);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--up) 22%, transparent);
     }
 
     .status-pill .indicator.down {
       background: var(--down);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--down) 22%, transparent);
     }
 
     h1 {
@@ -241,7 +273,7 @@
     /* info grid */
     .grid {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr 1fr;
+      grid-template-columns: 1fr 1fr;
       gap: 0;
       border: 1px solid var(--border);
       border-radius: 10px;
@@ -293,49 +325,57 @@
     }
 
     .cards {
-      display: flex;
-      flex-direction: column;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
       gap: 1px;
       background: var(--border);
       border-radius: 10px;
       overflow: hidden;
       border: 1px solid var(--border);
+      margin-bottom: 56px;
     }
 
     .card {
-      padding: 18px 20px;
+      padding: 20px 22px;
       background: var(--surface);
       display: flex;
       gap: 14px;
       align-items: flex-start;
+      transition: background 0.15s;
     }
+
+    .card:hover { background: var(--surface2, var(--surface)); }
 
     .card-num {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
+      font-size: 11px;
       color: var(--text5);
       min-width: 20px;
-      padding-top: 1px;
+      padding-top: 2px;
+      letter-spacing: 0.5px;
     }
+
+    .card-body { flex: 1; min-width: 0; }
 
     .card-body h3 {
       font-size: 14px;
       font-weight: 600;
       color: var(--text);
-      margin-bottom: 4px;
+      margin-bottom: 6px;
+      letter-spacing: -0.2px;
     }
 
     .card-body p {
-      font-size: 13px;
-      color: var(--text4);
-      line-height: 1.5;
+      font-size: 12.5px;
+      color: var(--text3);
+      line-height: 1.55;
     }
 
     /* footer */
     footer {
-      max-width: 580px;
-      margin: 48px auto 32px;
-      padding: 0 24px;
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 0 24px 32px;
     }
 
     .footer-inner {
@@ -410,35 +450,41 @@
       stroke-linejoin: round;
     }
 
+    @media (max-width: 760px) {
+      .topbar { padding: 12px 18px; }
+      .topbar-right a:not(.primary):not(.gh) { display: none; }
+      .cards { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 500px) {
+      .status-pill #statusText { display: none; }
+      .status-pill { padding: 6px; }
+    }
+
     @media (max-width: 600px) {
       .main {
-        padding: 48px 20px 40px;
+        padding: 40px 18px 32px;
       }
-
       h1 {
         font-size: 28px;
       }
-
       .grid {
         grid-template-columns: 1fr;
       }
-
       .grid-item {
         border-right: none;
         border-bottom: 1px solid var(--border);
       }
-
       .grid-item:last-child {
         border-bottom: none;
       }
-
       .actions {
         flex-direction: column;
       }
-
       .actions a {
         justify-content: center;
       }
+      .topbar-left span { display: none; }
     }
   </style>
 </head>
@@ -449,87 +495,104 @@
     <div class="topbar-left">
       <img src="/logo.png" alt="Midleman">
       <span>Midleman</span>
+      <a href="/health" class="status-pill" id="statusPill" title="View health">
+        <span class="indicator" id="ind"></span>
+        <span id="statusText">checking…</span>
+      </a>
     </div>
     <div class="topbar-right">
       <a href="https://github.com/Biscatos/Midleman" class="gh" target="_blank" rel="noopener">
         <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
         GitHub
       </a>
-      <a href="/health">Status</a>
       <a href="/dashboard" class="primary">Dashboard</a>
     </div>
   </div>
 
   <main class="main">
 
-    <div class="status-pill" id="statusPill">
-      <span class="indicator" id="ind"></span>
-      <span id="statusText">checking...</span>
-    </div>
+    <section class="hero">
+      <h1>The middleware platform for your edge</h1>
+      <p class="desc">
+        One place to terminate, authenticate, fan-out and route everything that crosses your perimeter —
+        HTTP, webhooks and SIP/RTP. Built on Bun, self-hosted, audit-logged.
+      </p>
 
-    <h1>HTTP proxy server with built-in auth</h1>
-    <p class="desc">
-      Route requests through profile-based proxy configurations.
-      Inject API keys, bypass authentication, and monitor everything in real time.
-    </p>
+      <div class="actions">
+        <a href="/dashboard" class="go">Open dashboard &rarr;</a>
+        <a href="/health" class="sec">View health</a>
+      </div>
+    </section>
 
-    <div class="actions">
-      <a href="/dashboard" class="go">Open dashboard &rarr;</a>
-      <a href="/health" class="sec">View health</a>
-    </div>
-
-    <div class="grid" id="statsGrid">
-      <div class="grid-item">
-        <div class="label">Status</div>
-        <div class="val" id="gStatus">--</div>
-      </div>
-      <div class="grid-item">
-        <div class="label">Uptime</div>
-        <div class="val" id="gUptime">--</div>
-      </div>
-      <div class="grid-item">
-        <div class="label">Profiles</div>
-        <div class="val" id="gProfiles">--</div>
-      </div>
-      <div class="grid-item">
-        <div class="label">Webhooks</div>
-        <div class="val" id="gWebhooks">--</div>
-      </div>
-    </div>
-
-    <div class="section-title">How it works</div>
+    <section class="features">
+    <div class="section-title">What's inside</div>
     <div class="cards">
       <div class="card">
         <span class="card-num">01</span>
         <div class="card-body">
-          <h3>Proxy forwarding</h3>
-          <p>Requests are streamed directly to target servers with zero buffering. Runs on Bun for minimal overhead.</p>
+          <h3>HTTP proxy &amp; gateway</h3>
+          <p>Profile-based reverse proxy with credential injection, per-route IP allowlists, blocked
+            extensions and streamed forwarding with zero buffering.</p>
         </div>
       </div>
       <div class="card">
         <span class="card-num">02</span>
         <div class="card-body">
-          <h3>Auth injection</h3>
-          <p>Each profile has its own API keys and headers. Clients hit the proxy without credentials — the proxy adds
-            them.</p>
+          <h3>Identity &amp; access</h3>
+          <p>Built-in user login (JWT + TOTP), static access keys, OAuth 2.0 / OIDC provider, LDAP
+            directory adoption and per-profile consent pages.</p>
         </div>
       </div>
       <div class="card">
         <span class="card-num">03</span>
         <div class="card-body">
-          <h3>Live telemetry</h3>
-          <p>Request counts, latency, and errors tracked per profile. Exportable via OpenTelemetry or the built-in
-            dashboard.</p>
+          <h3>Webhook distribution</h3>
+          <p>Fan-out incoming payloads to multiple destinations with body templating, retry policies,
+            persistent retry queue, DLQ and silence alerts. Native Meta verification.</p>
         </div>
       </div>
       <div class="card">
         <span class="card-num">04</span>
         <div class="card-body">
-          <h3>Webhook fan-out</h3>
-          <p>Receive incoming payloads and asynchronously dispatch them to multiple destinations instantly with native Meta verification support.</p>
+          <h3>SIP &amp; RTP relay</h3>
+          <p>TCP / UDP / TLS listeners, Via &amp; Record-Route rewriting, multi-threaded RTP media
+            relay so your PBX can stay on a private network.</p>
+        </div>
+      </div>
+      <div class="card">
+        <span class="card-num">05</span>
+        <div class="card-body">
+          <h3>Certificate store</h3>
+          <p>Central PEM/ACME cert store with Let's Encrypt issuance and renewal. Optional read-only
+            integration with an Nginx Proxy Manager Let's Encrypt volume.</p>
+        </div>
+      </div>
+      <div class="card">
+        <span class="card-num">06</span>
+        <div class="card-body">
+          <h3>Observability &amp; audit</h3>
+          <p>Per-profile request logs, SIP message logs, OpenTelemetry traces &amp; metrics, and a
+            full audit trail of every admin action.</p>
+        </div>
+      </div>
+      <div class="card">
+        <span class="card-num">07</span>
+        <div class="card-body">
+          <h3>Nginx Proxy Manager bridge</h3>
+          <p>Manage NPM proxy hosts and certificates from the dashboard. Adopt existing hosts into
+            Midleman profiles or webhooks — bulk import in one click.</p>
+        </div>
+      </div>
+      <div class="card">
+        <span class="card-num">08</span>
+        <div class="card-body">
+          <h3>Operator essentials</h3>
+          <p>SMTP, invite-based onboarding, encrypted credentials at rest, sandboxed config in JSON
+            files, single Docker image.</p>
         </div>
       </div>
     </div>
+    </section>
 
   </main>
 
@@ -557,33 +620,16 @@
     (async () => {
       const ind = document.getElementById('ind');
       const txt = document.getElementById('statusText');
-      const gStatus = document.getElementById('gStatus');
-      const gUptime = document.getElementById('gUptime');
-      const gProfiles = document.getElementById('gProfiles');
 
       try {
-        const r = await fetch('/health');
-        const d = await r.json();
-
+        const r = await fetch('/health', { headers: { Accept: 'application/json' } });
+        if (!r.ok) throw new Error('bad status');
+        await r.json();
         ind.classList.add('up');
         txt.textContent = 'operational';
-
-        gStatus.textContent = 'online';
-        gStatus.classList.add('ok');
-
-        const s = d.uptime;
-        if (s < 60) gUptime.textContent = Math.floor(s) + 's';
-        else if (s < 3600) gUptime.textContent = Math.floor(s / 60) + 'm ' + Math.floor(s % 60) + 's';
-        else gUptime.textContent = Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
-
-        gProfiles.textContent = d.proxyProfiles;
-        const gWebhooks = document.getElementById('gWebhooks');
-        if (gWebhooks) gWebhooks.textContent = d.webhooks || 0;
       } catch {
         ind.classList.add('down');
         txt.textContent = 'unreachable';
-        gStatus.textContent = 'offline';
-        gStatus.classList.add('err');
       }
     })();
 

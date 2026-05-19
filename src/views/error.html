@@ -11,183 +11,97 @@
     :root,
     [data-theme="dark"] {
       --bg: #0f1117;
-      --surface: #1c1e2b;
-      --border: #2e3148;
       --text: #e4e6f0;
       --text2: #8b8fa7;
       --text3: #5d6180;
-      --accent: #0078d4;
-      --accent2: #2899f5;
-      --green: #00b894;
-      --red: #e17055;
-      --orange: #fdcb6e;
-      --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+      --accent: #2899f5;
+      --rule: #2e3148;
     }
 
     [data-theme="light"] {
-      --bg: #f7f7f9;
-      --surface: #ffffff;
-      --border: #e4e4e7;
+      --bg: #ffffff;
       --text: #18181b;
       --text2: #52525b;
       --text3: #a1a1aa;
       --accent: #0064b3;
-      --accent2: #0078d4;
-      --green: #15803d;
-      --red: #b91c1c;
-      --orange: #c2410c;
-      --shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+      --rule: #e4e4e7;
     }
 
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
+      padding: 32px;
       -webkit-font-smoothing: antialiased;
     }
 
-    .container {
-      text-align: center;
-      max-width: 480px;
-      padding: 56px 40px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      box-shadow: var(--shadow);
+    main {
+      max-width: 420px;
+      width: 100%;
     }
 
-    .error-code {
-      font-size: 84px;
-      font-weight: 800;
-      line-height: 1;
-      margin-bottom: 4px;
-      letter-spacing: -3px;
-      color: var(--accent);
-    }
-
-    .error-code.c401 {
-      color: var(--orange);
-    }
-
-    .error-code.c404 {
-      color: var(--red);
-    }
-
-    .error-code.c500,
-    .error-code.c502,
-    .error-code.c503 {
-      color: var(--red);
-    }
-
-    .title {
-      font-size: 22px;
-      font-weight: 700;
-      margin-bottom: 12px;
-      letter-spacing: -0.3px;
-    }
-
-    .message {
-      font-size: 15px;
-      color: var(--text2);
-      line-height: 1.7;
-      margin-bottom: 32px;
-    }
-
-    .message a {
-      color: var(--accent2);
-      text-decoration: none;
-    }
-
-    .message a:hover {
-      text-decoration: underline;
-    }
-
-    .actions {
-      display: flex;
-      gap: 10px;
-      justify-content: center;
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 10px 22px;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-      background: var(--surface);
-      color: var(--text);
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      text-decoration: none;
-      transition: all 0.2s;
-    }
-
-    .btn:hover {
-      background: var(--border);
-      border-color: var(--text3);
-    }
-
-    .btn-primary {
-      background: var(--accent);
-      border-color: var(--accent);
-      color: #ffffff;
-    }
-
-    .btn-primary:hover {
-      background: var(--accent2);
-      border-color: var(--accent2);
-    }
-
-    .brand {
-      margin-top: 36px;
-      font-size: 12px;
+    .code {
+      font-family: 'SF Mono', ui-monospace, 'Menlo', Consolas, monospace;
+      font-size: 13px;
       color: var(--text3);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
+      letter-spacing: 0.06em;
+      margin-bottom: 14px;
     }
 
-    .brand img {
-      width: 18px;
-      height: 18px;
-      border-radius: 4px;
-      opacity: 0.5;
-    }
-
-    .brand span {
-      color: var(--accent);
+    h1 {
+      font-size: 22px;
       font-weight: 600;
+      letter-spacing: -0.2px;
+      margin-bottom: 10px;
     }
+
+    p {
+      font-size: 14px;
+      color: var(--text2);
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+
+    p a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    p a:hover { text-decoration: underline; }
+
+    .links {
+      padding-top: 18px;
+      border-top: 1px solid var(--rule);
+      display: flex;
+      gap: 20px;
+      font-size: 13px;
+    }
+
+    .links a {
+      color: var(--text2);
+      text-decoration: none;
+      transition: color .15s;
+    }
+
+    .links a:hover { color: var(--text); }
   </style>
 </head>
 
 <body>
-  <div class="container">
-    <div class="error-code {{STATUS_CLASS}}">{{STATUS_CODE}}</div>
-    <div class="title">{{TITLE}}</div>
-    <div class="message">{{MESSAGE}}</div>
-    <div class="actions">
-      <a href="/" class="btn">Home</a>
-      <a href="/dashboard" class="btn btn-primary">Dashboard</a>
+  <main>
+    <div class="code">{{STATUS_CODE}} · {{TITLE}}</div>
+    <h1>{{TITLE}}</h1>
+    <p>{{MESSAGE}}</p>
+    <div class="links">
+      <a href="/">Home</a>
+      <a href="/dashboard">Dashboard</a>
     </div>
-    <div class="brand">
-      <img src="/logo.png" alt="">
-      Powered by <span>Midleman</span>
-    </div>
-  </div>
+  </main>
 </body>
 
 </html>
