@@ -2,7 +2,7 @@ import type { ProxyProfile } from '../core/types';
 import { startProxySpan, endProxySpan, recordProxyBlocked, recordProxyRedirect } from '../telemetry/telemetry';
 import { logRequest, captureRequestBody, captureResponseBody, headersToRecord } from '../telemetry/request-log';
 import { isIpAllowed } from '../core/ip-filter';
-import { verifyJwt } from '../auth/auth';
+import { verifyJwt, logAudit } from '../auth/auth';
 
 // ─── Access Key Session Cache ───────────────────────────────────────────────
 // When a page is loaded with a valid ?key=, we cache the authorization so that
@@ -272,10 +272,12 @@ export async function handleProxyRequest(
         const headerKey = req.headers.get('x-mid-api-key');
         if (headerKey === profile.accessKey) {
             validatedAccessKey = profile.accessKey;
+            logAudit({ action: 'proxy.accesskey.success', actorUsername: 'apikey', details: { profile: profileName, via: 'header', path: remainingPath }, ip: clientIP, userAgent: req.headers.get('user-agent') });
         }
 
         // B. Direct ?key= — redirect to strip key from URL and set cookie first.
         if (!validatedAccessKey && providedKey === profile.accessKey) {
+            logAudit({ action: 'proxy.accesskey.success', actorUsername: 'apikey', details: { profile: profileName, via: 'query', path: remainingPath }, ip: clientIP, userAgent: req.headers.get('user-agent') });
             if (isBrowser) {
                 const clean = new URL(url.toString());
                 clean.searchParams.delete('key');
@@ -301,6 +303,23 @@ export async function handleProxyRequest(
 
         if (!validatedAccessKey) {
             console.warn(`❌ Proxy "${profileName}": REJECTED ${remainingPath} | cookie=${!!(req.headers.get('cookie')?.includes(`__pk_${profileName}`))} isAsset=${isSubResource}`);
+            // Only audit page-level rejections, not asset sub-requests, to avoid log spam
+            if (!isSubResource) {
+                const hadHeader = !!headerKey;
+                const hadQuery = !!providedKey;
+                logAudit({
+                    action: 'proxy.accesskey.failed',
+                    actorUsername: 'apikey',
+                    details: {
+                        profile: profileName,
+                        path: remainingPath,
+                        reason: hadHeader || hadQuery ? 'invalid_key' : 'missing_key',
+                        via: hadHeader ? 'header' : hadQuery ? 'query' : 'none',
+                    },
+                    ip: clientIP,
+                    userAgent: req.headers.get('user-agent'),
+                });
+            }
             return unauthorizedResponse(req, profileName);
         }
     }
