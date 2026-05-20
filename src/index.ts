@@ -252,12 +252,30 @@ const portAssignments = await assignAllPorts(
     config.port,
 );
 
+// Track profiles whose dedicated port shifted at boot — the upcoming NPM
+// reconcile needs to push the new forward_port to NPM, otherwise an upstream
+// reverse proxy would still point at the old (now-vacant) port and 502.
+// We only sync `profile.port` for profiles that *already* had one set: profiles
+// without `profile.port` use the path-rewrite mode (NPM points at the admin
+// port and rewrites), where the port-manager assignment is irrelevant.
+const profilesWithShiftedPort: string[] = [];
 for (const profile of config.proxyProfiles) {
     const port = portAssignments.proxies[profile.name];
+    if (typeof profile.port === 'number' && profile.port > 0 && profile.port !== port) {
+        console.warn(`[boot] proxy "${profile.name}" port shifted ${profile.port} → ${port}; will resync NPM`);
+        profile.port = port;
+        profilesWithShiftedPort.push(profile.name);
+    }
     try {
         startProxyServer(profile, port);
     } catch (err) {
         console.error(`❌ Failed to start proxy "${profile.name}":`, err instanceof Error ? err.message : err);
+    }
+}
+if (profilesWithShiftedPort.length > 0) {
+    // Persist the new port so subsequent boots see a consistent profile.port.
+    try { persistProfiles(config.proxyProfiles); } catch (e) {
+        console.error('[boot] failed to persist updated profile ports:', e instanceof Error ? e.message : e);
     }
 }
 
