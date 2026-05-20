@@ -1190,7 +1190,7 @@ function unauthorizedResponse(req: Request, profileName: string): Response {
     </div>
 
     <hr>
-    <p class="foot">Browser sessions are persisted via cookie after the first authenticated request.</p>
+    <p class="foot">When opened in a browser with <code>?key=</code>, a scoped cookie is set so the key isn't needed on subsequent requests. Requests authenticated via the header don't set a cookie.</p>
   </div>
 </body>
 </html>`;

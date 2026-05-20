@@ -5165,13 +5165,21 @@ function setNpmStatus(elId, msg, kind) {
 function _updateNpmPageVisibility(cfg, certVolumeMounted) {
   const empty = document.getElementById('npmEmptyState');
   const hostsCard = document.getElementById('npmHostsCard');
+  const certsCard = document.getElementById('npmCertsCard');
+  const subTabs = document.getElementById('npmSubTabs');
   const addBtn = document.getElementById('npmAddHostBtn');
+  const addCertBtn = document.getElementById('npmAddCertBtn');
   const refreshBtn = document.getElementById('npmRefreshBtn');
   const pill = document.getElementById('npmConnPill');
   const isReady = !!(cfg && cfg.enabled && cfg.url && cfg.email);
   if (empty) empty.style.display = isReady ? 'none' : '';
   if (hostsCard) hostsCard.style.display = isReady ? '' : 'none';
-  if (addBtn) addBtn.style.display = isReady ? '' : 'none';
+  if (certsCard) certsCard.style.display = isReady ? '' : 'none';
+  if (subTabs) subTabs.style.display = isReady ? 'flex' : 'none';
+  // Show "+ Add" buttons based on current sub-page when ready
+  const sub = isReady ? (_npmCurrentSubpage || 'proxy-hosts') : null;
+  if (addBtn) addBtn.style.display = (isReady && sub === 'proxy-hosts') ? '' : 'none';
+  if (addCertBtn) addCertBtn.style.display = (isReady && sub === 'certificates') ? '' : 'none';
   if (refreshBtn) refreshBtn.style.display = isReady ? '' : 'none';
   if (pill) {
     if (!cfg || !cfg.url) {
@@ -5202,10 +5210,8 @@ async function fetchNpmConfig() {
     const data = await res.json();
     const cfg = data.npm;
     _updateNpmPageVisibility(cfg, data.certVolumeMounted);
-    // If integration is enabled and we're on the NPM page, refresh the hosts table.
-    if (cfg && cfg.enabled && document.getElementById('npmHostsTableBody')) {
-      fetchNpmHostsTable();
-    }
+    // If integration is enabled and we're on the NPM page, refresh the current sub-page.
+    if (cfg && cfg.enabled) refreshNpmCurrentSubpage();
     const urlEl = document.getElementById('npmUrl');
     const emailEl = document.getElementById('npmEmail');
     const pwEl = document.getElementById('npmPassword');
@@ -5245,6 +5251,233 @@ async function fetchNpmConfig() {
     }
   } catch (e) {
     setNpmStatus('npmStatus', 'Failed to load: ' + e.message, 'err');
+  }
+}
+
+// ───────────────────── NPM sub-page tabs ─────────────────────
+let _npmCurrentSubpage = (typeof localStorage !== 'undefined' && localStorage.getItem('npm.subpage')) || 'proxy-hosts';
+
+function switchNpmSubpage(sub) {
+  if (sub !== 'proxy-hosts' && sub !== 'certificates') sub = 'proxy-hosts';
+  _npmCurrentSubpage = sub;
+  try { localStorage.setItem('npm.subpage', sub); } catch (_) {}
+  // Update tab buttons
+  document.querySelectorAll('.npm-subpage-tab').forEach(b => {
+    const active = b.getAttribute('data-subpage') === sub;
+    b.style.borderBottomColor = active ? 'var(--accent)' : 'transparent';
+    b.style.color = active ? 'var(--text)' : 'var(--text2)';
+    b.style.fontWeight = active ? '500' : '';
+  });
+  // Update sub-page panels
+  document.querySelectorAll('.npm-subpage').forEach(p => {
+    p.style.display = (p.getAttribute('data-subpage') === sub) ? '' : 'none';
+  });
+  // Update header buttons
+  const addHost = document.getElementById('npmAddHostBtn');
+  const addCert = document.getElementById('npmAddCertBtn');
+  // Only show if integration is ready (pill visible means ready-ish, but use the same gating as visibility)
+  const ready = !!document.getElementById('npmRefreshBtn') && document.getElementById('npmRefreshBtn').style.display !== 'none';
+  if (addHost) addHost.style.display = (ready && sub === 'proxy-hosts') ? '' : 'none';
+  if (addCert) addCert.style.display = (ready && sub === 'certificates') ? '' : 'none';
+  // Lazy-load data for the chosen sub-page
+  refreshNpmCurrentSubpage();
+}
+
+function refreshNpmCurrentSubpage() {
+  if (_npmCurrentSubpage === 'certificates') {
+    if (document.getElementById('npmCertsTableBody')) fetchNpmCertsTable();
+  } else {
+    if (document.getElementById('npmHostsTableBody')) fetchNpmHostsTable();
+  }
+}
+
+// ───────────────────── NPM certificates ─────────────────────
+let _npmCertsAll = [];
+let _npmCertsHostUsage = {}; // certId → array of domain_names lists using it (best-effort)
+
+function _certExpiryInfo(expiresOn) {
+  if (!expiresOn) return { text: '—', color: 'var(--text3)', sortKey: Number.POSITIVE_INFINITY };
+  const t = Date.parse(expiresOn);
+  if (isNaN(t)) return { text: String(expiresOn), color: 'var(--text3)', sortKey: Number.POSITIVE_INFINITY };
+  const now = Date.now();
+  const diffMs = t - now;
+  const dayMs = 86400000;
+  const d = new Date(t);
+  const pad = n => String(n).padStart(2, '0');
+  const text = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  let color, suffix = '';
+  if (diffMs < 0) { color = 'var(--err-text)'; suffix = ' (expired)'; }
+  else if (diffMs < 30 * dayMs) { color = '#f59e0b'; suffix = ` (in ${Math.ceil(diffMs / dayMs)}d)`; }
+  else { color = '#22c55e'; }
+  return { text: text + suffix, color, sortKey: t };
+}
+
+async function fetchNpmCertsTable() {
+  const body = document.getElementById('npmCertsTableBody');
+  if (!body) return;
+  body.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text3)">Loading…</td></tr>';
+  try {
+    const res = await api('/admin/npm/certificates');
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      body.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--err-text)">' + _esc(d.error || 'Failed to load') + '</td></tr>';
+      return;
+    }
+    const data = await res.json();
+    _npmCertsAll = data.certificates || [];
+    // Best-effort cert-in-use lookup using already-loaded hosts (no extra fetch).
+    _npmCertsHostUsage = {};
+    (_npmHostsAll || []).forEach(h => {
+      const cid = Number(h.certificate_id);
+      if (cid > 0) {
+        if (!_npmCertsHostUsage[cid]) _npmCertsHostUsage[cid] = [];
+        _npmCertsHostUsage[cid].push((h.domain_names || []).join(', '));
+      }
+    });
+    renderNpmCertsTable();
+  } catch (e) {
+    body.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--err-text)">' + _esc(e.message) + '</td></tr>';
+  }
+}
+
+function _filterNpmCerts() {
+  const q = (document.getElementById('npmCertsSearch')?.value || '').trim().toLowerCase();
+  const f = document.getElementById('npmCertsFilter')?.value || 'all';
+  const now = Date.now();
+  const dayMs = 86400000;
+  return _npmCertsAll.filter(c => {
+    if (q) {
+      const hay = ((c.domain_names || []).join(' ') + ' ' + (c.nice_name || '')).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    const t = c.expires_on ? Date.parse(c.expires_on) : NaN;
+    switch (f) {
+      case 'letsencrypt': return c.provider === 'letsencrypt';
+      case 'other': return c.provider === 'other';
+      case 'expiring': return !isNaN(t) && (t - now) > 0 && (t - now) < 30 * dayMs;
+      case 'expired': return !isNaN(t) && (t - now) < 0;
+      default: return true;
+    }
+  });
+}
+
+function renderNpmCertsTable() {
+  const body = document.getElementById('npmCertsTableBody');
+  if (!body) return;
+  const filtered = _filterNpmCerts();
+  // Sort by expiry ascending (soonest first)
+  filtered.sort((a, b) => _certExpiryInfo(a.expires_on).sortKey - _certExpiryInfo(b.expires_on).sortKey);
+  const total = filtered.length;
+  const cnt = document.getElementById('npmCertsCount');
+  if (cnt) cnt.textContent = total
+    ? (total + ' certificate' + (total === 1 ? '' : 's'))
+    : (_npmCertsAll.length ? '0 of ' + _npmCertsAll.length + ' (filtered)' : '');
+  if (!total) {
+    body.innerHTML = '<tr><td colspan="6" style="padding:32px;text-align:center;color:var(--text3)">'
+      + (_npmCertsAll.length ? 'No certificates match the current filter.' : 'No certificates yet. Click <strong>+ Let\'s Encrypt</strong> to add one.')
+      + '</td></tr>';
+    return;
+  }
+  body.innerHTML = filtered.map(c => {
+    const exp = _certExpiryInfo(c.expires_on);
+    const providerLabel = c.provider === 'letsencrypt' ? "Let's Encrypt" : (c.provider === 'other' ? 'Custom' : (c.provider || '—'));
+    const domains = (c.domain_names || []).join(', ') || '—';
+    const usedBy = _npmCertsHostUsage[c.id] || [];
+    const usedTag = usedBy.length
+      ? ' <span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 7px;border-radius:10px;font-size:11px" title="' + _esc(usedBy.join(' | ')) + '">In use × ' + usedBy.length + '</span>'
+      : '';
+    const renewBtn = c.provider === 'letsencrypt'
+      ? '<button type="button" class="btn btn-sm" onclick="renewNpmCert(' + c.id + ')" title="Renew certificate">Renew</button>'
+      : '';
+    return '<tr>'
+      + '<td style="padding:10px 14px;border-bottom:1px solid var(--border);color:var(--text2)">' + c.id + '</td>'
+      + '<td style="padding:10px 14px;border-bottom:1px solid var(--border)">' + _esc(c.nice_name || '—') + usedTag + '</td>'
+      + '<td style="padding:10px 14px;border-bottom:1px solid var(--border);color:var(--text2)">' + _esc(providerLabel) + '</td>'
+      + '<td style="padding:10px 14px;border-bottom:1px solid var(--border);max-width:280px;word-break:break-all">' + _esc(domains) + '</td>'
+      + '<td style="padding:10px 14px;border-bottom:1px solid var(--border);color:' + exp.color + ';white-space:nowrap">' + _esc(exp.text) + '</td>'
+      + '<td style="padding:10px 14px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap">'
+        + renewBtn
+        + ' <button type="button" class="btn btn-sm" onclick="deleteNpmCert(' + c.id + ')" title="Delete" style="color:var(--err-text)">Delete</button>'
+      + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+function openNpmCertLEModal() {
+  document.getElementById('leDomains').value = '';
+  document.getElementById('leEmail').value = '';
+  document.getElementById('leDnsChallenge').checked = false;
+  document.getElementById('leAgree').checked = false;
+  setNpmStatus('leStatus', '', '');
+  document.getElementById('npmCertLEModal').classList.add('active');
+}
+function closeNpmCertLEModal() {
+  document.getElementById('npmCertLEModal').classList.remove('active');
+}
+
+async function saveNpmCertLE() {
+  const domains = document.getElementById('leDomains').value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  const email = document.getElementById('leEmail').value.trim();
+  const dns = document.getElementById('leDnsChallenge').checked;
+  const agree = document.getElementById('leAgree').checked;
+  if (!domains.length) { setNpmStatus('leStatus', 'At least one domain is required.', 'err'); return; }
+  if (!email) { setNpmStatus('leStatus', 'Email is required.', 'err'); return; }
+  if (!agree) { setNpmStatus('leStatus', 'You must agree to the Let\'s Encrypt Terms of Service.', 'err'); return; }
+  const btn = document.getElementById('leSaveBtn');
+  btn.disabled = true;
+  setNpmStatus('leStatus', 'Requesting certificate…', 'info');
+  try {
+    const payload = {
+      provider: 'letsencrypt',
+      nice_name: 'letsencrypt:' + domains[0],
+      domain_names: domains,
+      meta: {
+        letsencrypt_agree: true,
+        letsencrypt_email: email,
+        ...(dns ? { dns_challenge: true } : {}),
+      },
+    };
+    const res = await api('/admin/npm/certificates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setNpmStatus('leStatus', data.error || ('Failed (' + res.status + ')'), 'err');
+      return;
+    }
+    setNpmStatus('leStatus', 'Certificate created.', 'ok');
+    closeNpmCertLEModal();
+    fetchNpmCertsTable();
+  } catch (e) {
+    setNpmStatus('leStatus', e.message || 'Request failed.', 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function renewNpmCert(id) {
+  if (!confirm('Renew certificate #' + id + '?\n\nLet\'s Encrypt will be asked to issue a fresh certificate.')) return;
+  try {
+    const res = await api('/admin/npm/certificates/' + id + '/renew', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { alert(data.error || ('Renew failed (' + res.status + ')')); return; }
+    fetchNpmCertsTable();
+  } catch (e) {
+    alert(e.message || 'Renew failed');
+  }
+}
+
+async function deleteNpmCert(id) {
+  const usedBy = _npmCertsHostUsage[id] || [];
+  const usedWarn = usedBy.length
+    ? '\n\nWARNING: this certificate is used by ' + usedBy.length + ' proxy host(s):\n  • ' + usedBy.join('\n  • ') + '\n\nNPM will block deletion until those hosts are reassigned.'
+    : '';
+  if (!confirm('Delete certificate #' + id + '?' + usedWarn)) return;
+  try {
+    const res = await api('/admin/npm/certificates/' + id, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { alert(data.error || ('Delete failed (' + res.status + ')')); return; }
+    fetchNpmCertsTable();
+  } catch (e) {
+    alert(e.message || 'Delete failed');
   }
 }
 

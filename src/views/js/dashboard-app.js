@@ -430,7 +430,7 @@ function navigate(page) {
   if (page === 'consentpages') { fetchConsentPages(); }
   if (page === 'ldap') { fetchLdapConfigs(); filterLdapAdoptions('pending'); }
   if (page === 'email') { fetchSmtpConfig(); }
-  if (page === 'npm') { fetchNpmConfig(); }
+  if (page === 'npm') { if (typeof switchNpmSubpage === 'function') switchNpmSubpage(_npmCurrentSubpage || 'proxy-hosts'); fetchNpmConfig(); }
   if (page === 'audit') { fetchAuditLogs(true); }
   const titleEl = document.getElementById('topbarPageTitle');
   if (titleEl) titleEl.textContent = PAGE_TITLES[page] || page;

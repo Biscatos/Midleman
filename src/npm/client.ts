@@ -187,6 +187,10 @@ export async function deleteCertificate(id: number): Promise<void> {
     await authedRequest<unknown>('DELETE', `/api/nginx/certificates/${id}`);
 }
 
+export async function renewCertificate(id: number): Promise<NpmCertificate> {
+    return authedRequest<NpmCertificate>('POST', `/api/nginx/certificates/${id}/renew`);
+}
+
 /** Throws if NPM is not enabled — call before any mutating method to short-circuit. */
 export function assertEnabled(): void {
     if (!isNpmEnabled()) throw new NpmError('NPM integration disabled', 0);

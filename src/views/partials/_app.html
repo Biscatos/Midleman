@@ -1357,7 +1357,7 @@
         </div>
         <div style="display:flex;gap:8px;align-items:center" id="npmHeaderActions">
           <span id="npmConnPill" style="display:none;font-size:11.5px;padding:4px 10px;border-radius:10px"></span>
-          <button class="btn btn-sm" id="npmRefreshBtn" onclick="fetchNpmHostsTable()" style="display:none" title="Refresh list">
+          <button class="btn btn-sm" id="npmRefreshBtn" onclick="refreshNpmCurrentSubpage()" style="display:none" title="Refresh">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
           </button>
           <button class="btn btn-sm" onclick="openNpmConfigModal()" title="Settings">
@@ -1365,7 +1365,14 @@
             Settings
           </button>
           <button class="btn btn-sm btn-primary" id="npmAddHostBtn" onclick="openNpmHostModal(null)" style="display:none">+ Proxy Host</button>
+          <button class="btn btn-sm btn-primary" id="npmAddCertBtn" onclick="openNpmCertLEModal()" style="display:none">+ Let's Encrypt</button>
         </div>
+      </div>
+
+      <!-- ── Sub-tabs (visible when connected) ── -->
+      <div id="npmSubTabs" style="display:none;margin-top:18px;border-bottom:1px solid var(--border);gap:0">
+        <button type="button" class="npm-subpage-tab" data-subpage="proxy-hosts" onclick="switchNpmSubpage('proxy-hosts')" style="background:none;border:none;border-bottom:2px solid var(--accent);padding:10px 16px;color:var(--text);font-size:13px;font-weight:500;cursor:pointer">Proxy Hosts</button>
+        <button type="button" class="npm-subpage-tab" data-subpage="certificates" onclick="switchNpmSubpage('certificates')" style="background:none;border:none;border-bottom:2px solid transparent;padding:10px 16px;color:var(--text2);font-size:13px;cursor:pointer">Certificates</button>
       </div>
 
       <!-- ── Empty state: not configured / disabled ── -->
@@ -1378,6 +1385,8 @@
         </div>
       </div>
 
+      <!-- ── Sub-page: Proxy Hosts ── -->
+      <div class="npm-subpage" data-subpage="proxy-hosts">
       <!-- ── Hosts table (visible when connected) ── -->
       <div class="card" id="npmHostsCard" style="margin-top:18px;display:none">
         <div class="card-body" style="padding:14px 16px;border-bottom:1px solid var(--border)">
@@ -1432,15 +1441,99 @@
           </div>
         </div>
       </div>
+      </div>
+      <!-- ── /Sub-page: Proxy Hosts ── -->
 
-      <div class="card" style="margin-top:18px" id="npmVolumeCard">
-        <div class="card-header"><h3>Shared Let's Encrypt volume</h3></div>
-        <div class="card-body">
-          <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">When the NPM <code>/etc/letsencrypt</code> volume is mounted into Midleman read-only, Midleman reads certificates issued by NPM's <code>certbot</code> directly from disk (for SIP TLS and other listeners). The internal ACME client is disabled when this is active — only one party should renew at a time.</p>
-          <div id="npmVolumeStatus" style="font-size:12.5px;color:var(--text2)">Checking…</div>
+      <!-- ── Sub-page: Certificates ── -->
+      <div class="npm-subpage" data-subpage="certificates" style="display:none">
+        <div class="card" id="npmCertsCard" style="margin-top:18px;display:none">
+          <div class="card-body" style="padding:14px 16px;border-bottom:1px solid var(--border)">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+              <div style="flex:1;min-width:220px;position:relative">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" id="npmCertsSearch" oninput="renderNpmCertsTable()" placeholder="Search name or domain…" style="width:100%;padding:8px 10px 8px 32px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+              </div>
+              <select id="npmCertsFilter" onchange="renderNpmCertsTable()" style="padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+                <option value="all">All certificates</option>
+                <option value="letsencrypt">Let's Encrypt only</option>
+                <option value="other">Custom only</option>
+                <option value="expiring">Expiring soon (&lt; 30 days)</option>
+                <option value="expired">Expired</option>
+              </select>
+              <span id="npmCertsCount" style="font-size:12px;color:var(--text2)"></span>
+            </div>
+          </div>
+          <div style="overflow:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead style="background:var(--surface)">
+                <tr style="text-align:left">
+                  <th style="padding:10px 14px;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">#</th>
+                  <th style="padding:10px 14px;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Name</th>
+                  <th style="padding:10px 14px;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Provider</th>
+                  <th style="padding:10px 14px;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Domains</th>
+                  <th style="padding:10px 14px;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Expires</th>
+                  <th style="padding:10px 14px;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2);text-align:right">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="npmCertsTableBody">
+                <tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text3)">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:18px" id="npmVolumeCard">
+          <div class="card-header"><h3>Shared Let's Encrypt volume</h3></div>
+          <div class="card-body">
+            <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">When the NPM <code>/etc/letsencrypt</code> volume is mounted into Midleman read-only, Midleman reads certificates issued by NPM's <code>certbot</code> directly from disk (for SIP TLS and other listeners). The internal ACME client is disabled when this is active — only one party should renew at a time.</p>
+            <div id="npmVolumeStatus" style="font-size:12.5px;color:var(--text2)">Checking…</div>
+          </div>
         </div>
       </div>
+      <!-- ── /Sub-page: Certificates ── -->
     </div>
+
+<!-- ═══ NPM LET'S ENCRYPT CERTIFICATE MODAL ═══ -->
+<div class="modal-overlay" id="npmCertLEModal">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <h3>Add Let's Encrypt Certificate</h3>
+      <button class="close-btn" onclick="closeNpmCertLEModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">Request a new certificate from Let's Encrypt. Domains must already point to this NPM instance (HTTP-01) or you must have a DNS provider configured in NPM (DNS-01).</p>
+      <div class="form-grid">
+        <div class="form-group span-2">
+          <label>Domain Names <span style="color:var(--err-text)">*</span></label>
+          <input type="text" id="leDomains" placeholder="example.com, www.example.com">
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Comma-separated. Wildcards (*.example.com) require DNS challenge.</span>
+        </div>
+        <div class="form-group span-2">
+          <label>Email <span style="color:var(--err-text)">*</span></label>
+          <input type="email" id="leEmail" placeholder="you@example.com">
+        </div>
+        <div class="form-group span-2">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="leDnsChallenge" style="cursor:pointer;accent-color:var(--accent)">
+            <span>Use DNS Challenge</span>
+          </label>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Requires a DNS provider configured in the NPM instance.</span>
+        </div>
+        <div class="form-group span-2">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="leAgree" style="cursor:pointer;accent-color:var(--accent)">
+            <span>I agree to the <a href="https://letsencrypt.org/repository/" target="_blank" rel="noopener" style="color:var(--accent)">Let's Encrypt Terms of Service</a> <span style="color:var(--err-text)">*</span></span>
+          </label>
+        </div>
+      </div>
+      <div id="leStatus" style="margin-top:14px;font-size:12.5px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeNpmCertLEModal()">Cancel</button>
+      <button class="btn btn-primary" id="leSaveBtn" onclick="saveNpmCertLE()">Save</button>
+    </div>
+  </div>
+</div>
 
 <!-- ═══ NPM CONNECTION SETTINGS MODAL ═══ -->
 <div class="modal-overlay" id="npmConfigModal">

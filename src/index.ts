@@ -2318,6 +2318,21 @@ const server = Bun.serve({
                     }
                 }
 
+                const certRenewMatch = url.pathname.match(/^\/admin\/npm\/certificates\/(\d+)\/renew$/);
+                if (certRenewMatch && req.method === 'POST') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    const id = Number(certRenewMatch[1]);
+                    try {
+                        const { renewCertificate } = await import('./npm/client');
+                        const cert = await renewCertificate(id);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.cert.renew', targetType: 'npm_cert', targetId: id, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { certificate: cert });
+                    } catch (e) {
+                        return jsonRes(502, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
                 const certDeleteMatch = url.pathname.match(/^\/admin\/npm\/certificates\/(\d+)$/);
                 if (certDeleteMatch && req.method === 'DELETE') {
                     if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
