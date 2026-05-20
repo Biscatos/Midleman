@@ -323,6 +323,24 @@ async function fetchProfiles() {
   } catch { }
 }
 
+async function linkProfileToNpmHost(profileName, hostId) {
+  const msg = 'Vincular "' + profileName + '" ao host NPM #' + hostId
+    + '? O NPM passará a encaminhar tráfego para o Midleman (em vez do backend directamente).';
+  if (!(await showConfirm({ title: 'Vincular ao NPM', message: msg, confirmText: 'Vincular' }))) return;
+  try {
+    const res = await api('/admin/npm/link-profile', {
+      method: 'POST',
+      body: JSON.stringify({ profileName, hostId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { toast(data.error || 'Falha ao vincular', 'error'); return; }
+    toast('Profile "' + profileName + '" vinculado ao NPM #' + hostId);
+    await fetchProfiles();
+  } catch (e) {
+    toast('Erro de rede: ' + e.message, 'error');
+  }
+}
+
 // Returns the first NPM host whose forward target matches the profile's target
 // URL (host + port), if any. Used to surface a passive hint on profiles that
 // are not yet linked. Returns null if no integration data or no match.
@@ -371,10 +389,12 @@ function renderProfiles(profiles) {
       const domains = (match.domain_names || []).filter(Boolean);
       const first = domains[0] || ('NPM #' + match.id);
       const extra = domains.length > 1 ? ' +' + (domains.length - 1) : '';
-      const tip = 'This profile\'s forward target matches NPM host #' + match.id
-        + (domains.length ? ' (' + domains.join(', ') + ')' : '')
-        + '. Use "Import from NPM" to adopt it.';
-      return '<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help" title="' + esc(tip) + '">Possible NPM: ' + esc(first) + esc(extra) + '</span>';
+      const tip = 'NPM host #' + match.id + (domains.length ? ' (' + domains.join(', ') + ')' : '')
+        + ' forwards to the same target as this profile. Click Link to vincular and redirect NPM → Midleman.';
+      const linkBtn = '<button type="button" onclick="event.stopPropagation();linkProfileToNpmHost(\'' + esc(p.name) + '\',' + match.id + ')" '
+        + 'style="background:var(--accent);color:#fff;border:none;border-radius:3px;font-size:10.5px;padding:1px 7px;cursor:pointer;margin-left:6px" '
+        + 'title="Link this profile to NPM host #' + match.id + ' and redirect NPM to Midleman">Link</button>';
+      return '<span style="background:var(--surface2);color:var(--text2);padding:2px 4px 2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help;display:inline-flex;align-items:center" title="' + esc(tip) + '">Possible NPM: ' + esc(first) + esc(extra) + linkBtn + '</span>';
     })();
     const npmBadge = (() => {
       if (!p.npmProxyHostId) return npmHint;

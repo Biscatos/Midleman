@@ -2457,6 +2457,81 @@ const server = Bun.serve({
                     return jsonRes(200, { results, importAs, total: ids.length, ok: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length });
                 }
 
+                // Link an existing profile to an existing NPM host (no new profile created).
+                // Body: { profileName: string, hostId: number }
+                // Requires that the NPM host's forward target matches the profile's targetUrl
+                // (host + port). Updates profile with NPM metadata, then redirects NPM → Midleman.
+                if (url.pathname === '/admin/npm/link-profile' && req.method === 'POST') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const profileName = String(body?.profileName || '').trim();
+                    const hostId = Number(body?.hostId || 0);
+                    if (!profileName || !hostId) return jsonRes(400, { error: 'profileName and hostId are required' });
+                    const profile = config.proxyProfiles.find(p => p.name === profileName);
+                    if (!profile) return jsonRes(404, { error: 'Profile not found' });
+                    if (profile.npmProxyHostId) return jsonRes(409, { error: `Profile is already linked to NPM host #${profile.npmProxyHostId}` });
+                    const otherLinkedP = config.proxyProfiles.find(p => p.npmProxyHostId === hostId);
+                    if (otherLinkedP) return jsonRes(409, { error: `NPM host #${hostId} is already linked to profile "${otherLinkedP.name}"` });
+                    const otherLinkedW = config.webhooks.find(w => w.npmProxyHostId === hostId);
+                    if (otherLinkedW) return jsonRes(409, { error: `NPM host #${hostId} is already linked to webhook "${otherLinkedW.name}"` });
+
+                    const { getProxyHost } = await import('./npm/client');
+                    const { syncProfile } = await import('./npm/sync');
+                    let host: Awaited<ReturnType<typeof getProxyHost>>;
+                    try { host = await getProxyHost(hostId); } catch (e) {
+                        return jsonRes(502, { error: e instanceof Error ? e.message : 'Failed to fetch host from NPM' });
+                    }
+                    const scheme = host.forward_scheme === 'https' ? 'https' : 'http';
+
+                    // Sanity-check: profile target must match the NPM forward target.
+                    let pu: URL;
+                    try { pu = new URL(profile.targetUrl); } catch { return jsonRes(400, { error: 'Profile has an invalid targetUrl' }); }
+                    const pHost = pu.hostname.toLowerCase();
+                    const pPort = pu.port ? Number(pu.port) : (pu.protocol === 'https:' ? 443 : 80);
+                    const nHost = (host.forward_host || '').toLowerCase();
+                    const nPort = Number(host.forward_port || 0);
+                    if (pHost !== nHost || pPort !== nPort) {
+                        return jsonRes(409, { error: `Forward target mismatch: NPM points to ${nHost}:${nPort} but profile targets ${pHost}:${pPort}` });
+                    }
+
+                    const domains = (host.domain_names || []).filter(Boolean).map(d => d.toLowerCase());
+                    profile.publicHostnames = domains;
+                    profile.tlsMode = (typeof host.certificate_id === 'number' && host.certificate_id > 0) ? 'manual' : (profile.tlsMode || 'none');
+                    profile.http2 = !!host.http2_support;
+                    profile.hstsEnabled = !!host.hsts_enabled;
+                    profile.sslForced = !!host.ssl_forced;
+                    profile.allowWebsocketUpgrade = host.allow_websocket_upgrade !== false;
+                    if (host.advanced_config) profile.advancedConfig = host.advanced_config;
+                    profile.npmProxyHostId = host.id;
+                    profile.npmCertificateId = (typeof host.certificate_id === 'number' && host.certificate_id > 0) ? host.certificate_id : undefined;
+                    profile.npmOriginalForwardHost = host.forward_host;
+                    profile.npmOriginalForwardPort = host.forward_port;
+                    profile.npmOriginalForwardScheme = scheme;
+                    persistProfiles(config.proxyProfiles);
+                    invalidateProfileCache();
+
+                    const syncRes = await syncProfile(profile as any, config.proxyProfiles);
+                    if (!syncRes.ok) {
+                        // Roll back the link fields on sync failure so the profile isn't left
+                        // in a half-adopted state pointing at a NPM host that still routes
+                        // straight to the backend.
+                        profile.npmProxyHostId = undefined;
+                        profile.npmCertificateId = undefined;
+                        profile.npmOriginalForwardHost = undefined;
+                        profile.npmOriginalForwardPort = undefined;
+                        profile.npmOriginalForwardScheme = undefined;
+                        persistProfiles(config.proxyProfiles);
+                        invalidateProfileCache();
+                        return jsonRes(502, { error: syncRes.error || 'NPM sync failed' });
+                    }
+                    persistProfiles(config.proxyProfiles);
+
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.link_profile', targetType: 'profile', details: { profileName, hostId, domains }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { ok: true, profileName, hostId, domains });
+                }
+
                 // Release a webhook from its NPM link: restore NPM's original forward and clear the link.
                 const webhookReleaseMatch = url.pathname.match(/^\/admin\/webhooks\/([^/]+)\/npm-release$/);
                 if (webhookReleaseMatch && req.method === 'POST') {
