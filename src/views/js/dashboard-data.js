@@ -296,16 +296,51 @@ async function fetchProfiles() {
     if (_allInvites.length) renderInvites(_allInvites);
     document.getElementById('navProfileBadge').textContent = _allProfiles.length;
     document.getElementById('ovProfileNames').textContent = _allProfiles.map(p => p.name).join(', ') || 'none';
-    // Toggle "Import from NPM" button based on integration state
+    // Toggle "Import from NPM" button based on integration state, and preload
+    // the NPM hosts list so we can show "possible NPM" hints next to unlinked
+    // profiles whose forward target matches a known NPM proxy host.
     try {
       const ns = await api('/admin/npm');
       if (ns.ok) {
         const data = await ns.json();
         const importBtn = document.getElementById('npmImportBtn');
-        if (importBtn) importBtn.style.display = (data.npm && data.npm.enabled) ? '' : 'none';
+        const enabled = !!(data.npm && data.npm.enabled);
+        if (importBtn) importBtn.style.display = enabled ? '' : 'none';
+        if (enabled) {
+          try {
+            const hr = await api('/admin/npm/proxy-hosts');
+            if (hr.ok) {
+              const hd = await hr.json();
+              _npmHostsAll = hd.hosts || [];
+              filterProfiles();
+            }
+          } catch { /* ignore */ }
+        } else {
+          _npmHostsAll = [];
+        }
       }
     } catch { /* ignore */ }
   } catch { }
+}
+
+// Returns the first NPM host whose forward target matches the profile's target
+// URL (host + port), if any. Used to surface a passive hint on profiles that
+// are not yet linked. Returns null if no integration data or no match.
+function _findPossibleNpmHostForProfile(p) {
+  if (!p || p.npmProxyHostId) return null;
+  if (!_npmHostsAll || !_npmHostsAll.length) return null;
+  const target = p.targetUrl || '';
+  if (!target) return null;
+  let u;
+  try { u = new URL(target); } catch { return null; }
+  const tHost = u.hostname.toLowerCase();
+  const tPort = u.port ? Number(u.port) : (u.protocol === 'https:' ? 443 : 80);
+  return _npmHostsAll.find(h => {
+    if (h.linkedProfile || h.linkedWebhook) return false;
+    const fh = (h.forward_host || '').toLowerCase();
+    const fp = Number(h.forward_port || 0);
+    return fh === tHost && fp === tPort;
+  }) || null;
 }
 
 function filterProfiles() {
@@ -330,8 +365,19 @@ function renderProfiles(profiles) {
     const statusBadge = p.running
       ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px">Running</span>'
       : '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>';
+    const npmHint = (() => {
+      const match = _findPossibleNpmHostForProfile(p);
+      if (!match) return '';
+      const domains = (match.domain_names || []).filter(Boolean);
+      const first = domains[0] || ('NPM #' + match.id);
+      const extra = domains.length > 1 ? ' +' + (domains.length - 1) : '';
+      const tip = 'This profile\'s forward target matches NPM host #' + match.id
+        + (domains.length ? ' (' + domains.join(', ') + ')' : '')
+        + '. Use "Import from NPM" to adopt it.';
+      return '<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help" title="' + esc(tip) + '">Possible NPM: ' + esc(first) + esc(extra) + '</span>';
+    })();
     const npmBadge = (() => {
-      if (!p.npmProxyHostId) return '';
+      if (!p.npmProxyHostId) return npmHint;
       const hosts = (p.publicHostnames || []).filter(Boolean);
       const tip = (hosts.length ? `Open https://${esc(hosts[0])} (NPM #${p.npmProxyHostId})` : `NPM #${p.npmProxyHostId}`)
         + (hosts.length > 1 ? ` — also: ${esc(hosts.slice(1).join(', '))}` : '');
@@ -5219,6 +5265,9 @@ async function saveNpmConfig(closeModalOnSuccess) {
     if (!res.ok) { setNpmStatus('npmStatus', data.error || 'Failed to save.', 'err'); return; }
     toast('NPM configuration saved');
     await fetchNpmConfig();
+    // Re-evaluate the "Import from NPM" button visibility on the Profiles page
+    // and refresh the linked-host badges, even if the user isn't on that page.
+    try { await fetchProfiles(); } catch { /* ignore */ }
     if (closeModalOnSuccess) closeNpmConfigModal();
   } catch (e) {
     setNpmStatus('npmStatus', 'Network error: ' + e.message, 'err');
@@ -5254,6 +5303,8 @@ async function clearNpmConfig() {
     if (!res.ok) { const d = await res.json().catch(() => ({})); return setNpmStatus('npmStatus', d.error || 'Error', 'err'); }
     toast('NPM configuration removed');
     await fetchNpmConfig();
+    try { await fetchProfiles(); } catch { /* ignore */ }
+    _npmHostsAll = [];
   } catch (e) {
     setNpmStatus('npmStatus', 'Network error: ' + e.message, 'err');
   }
@@ -5336,6 +5387,8 @@ function closeNpmImportModal() {
   document.getElementById('npmImportModal').classList.remove('active');
 }
 
+let _npmImportHostsAll = [];
+
 async function fetchNpmProxyHosts() {
   const body = document.getElementById('npmImportBody');
   const status = document.getElementById('npmImportStatus');
@@ -5350,43 +5403,78 @@ async function fetchNpmProxyHosts() {
       return;
     }
     const data = await res.json();
-    const hosts = data.hosts || [];
-    if (!hosts.length) {
-      body.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text3)">No proxy hosts in NPM yet.</td></tr>';
-      updateNpmSelectionCount();
-      return;
-    }
-    body.innerHTML = hosts.map(h => {
-      const domains = (h.domain_names || []).join(', ');
-      const fwd = (h.forward_scheme || 'http') + '://' + (h.forward_host || '?') + ':' + (h.forward_port || '?');
-      const isLinked = h.adopted && (h.linkedProfile || h.linkedWebhook);
-      const checkbox = isLinked
-        ? '<input type="checkbox" disabled>'
-        : '<input type="checkbox" class="npm-import-cb" data-host-id="' + h.id + '" onchange="updateNpmSelectionCount()">';
-      let badge, action;
-      if (h.linkedProfile) {
-        badge = '<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:10px;font-size:11px">Linked → profile "' + _esc(h.linkedProfile) + '"</span>';
-        action = '<a href="javascript:void(0)" onclick="openLinkedProfile(\'' + _esc(h.linkedProfile) + '\')" style="color:var(--accent);font-size:12px">Open</a>';
-      } else if (h.linkedWebhook) {
-        badge = '<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:10px;font-size:11px">Linked → webhook "' + _esc(h.linkedWebhook) + '"</span>';
-        action = '<a href="javascript:void(0)" onclick="openLinkedWebhook(\'' + _esc(h.linkedWebhook) + '\')" style="color:var(--accent);font-size:12px">Open</a>';
-      } else {
-        badge = '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 8px;border-radius:10px;font-size:11px">Available</span>';
-        action = '<button class="btn btn-sm" onclick="adoptNpmHost(' + h.id + ')" title="Adopt as proxy with custom settings">Customize…</button>';
-      }
-      return '<tr style="border-bottom:1px solid var(--border)">' +
-        '<td style="padding:8px 12px">' + checkbox + '</td>' +
-        '<td style="padding:8px 12px;color:var(--text3)">#' + h.id + '</td>' +
-        '<td style="padding:8px 12px">' + _esc(domains || '(no domains)') + '</td>' +
-        '<td style="padding:8px 12px;color:var(--text2);font-family:monospace;font-size:11.5px">' + _esc(fwd) + '</td>' +
-        '<td style="padding:8px 12px">' + badge + '</td>' +
-        '<td style="padding:8px 12px;text-align:right">' + action + '</td>' +
-        '</tr>';
-    }).join('');
-    updateNpmSelectionCount();
+    _npmImportHostsAll = data.hosts || [];
+    renderNpmImportTable();
   } catch (e) {
     body.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--err-text)">' + _esc(e.message) + '</td></tr>';
   }
+}
+
+function renderNpmImportTable() {
+  const body = document.getElementById('npmImportBody');
+  if (!body) return;
+  const q = (document.getElementById('npmImportSearch')?.value || '').trim().toLowerCase();
+  const f = document.getElementById('npmImportFilter')?.value || 'available';
+  const all = _npmImportHostsAll;
+  if (!all.length) {
+    body.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text3)">No proxy hosts in NPM yet.</td></tr>';
+    updateNpmSelectionCount();
+    return;
+  }
+  const hosts = all.filter(h => {
+    if (q) {
+      const hay = ((h.domain_names || []).join(' ') + ' ' + (h.forward_host || '')).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    const linked = !!(h.adopted && (h.linkedProfile || h.linkedWebhook));
+    if (f === 'available') return !linked;
+    if (f === 'linked') return linked;
+    return true;
+  });
+  if (!hosts.length) {
+    body.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text3)">No hosts match the current filter.</td></tr>';
+    updateNpmSelectionCount();
+    return;
+  }
+  body.innerHTML = hosts.map(h => {
+    const isHttps = !!(h.certificate_id && Number(h.certificate_id) > 0);
+    const domainsHtml = (h.domain_names || []).length
+      ? (h.domain_names || []).map(d => {
+          const href = (isHttps ? 'https://' : 'http://') + String(d).replace(/^\*\./, 'www.');
+          return '<a href="' + _esc(href) + '" target="_blank" rel="noopener noreferrer" '
+            + 'style="color:var(--accent);text-decoration:none" '
+            + 'onmouseover="this.style.textDecoration=\'underline\'" '
+            + 'onmouseout="this.style.textDecoration=\'none\'" '
+            + 'onclick="event.stopPropagation()" '
+            + 'title="Open ' + _esc(href) + '">' + _esc(d) + '</a>';
+        }).join(', ')
+      : '(no domains)';
+    const fwd = (h.forward_scheme || 'http') + '://' + (h.forward_host || '?') + ':' + (h.forward_port || '?');
+    const isLinked = h.adopted && (h.linkedProfile || h.linkedWebhook);
+    const checkbox = isLinked
+      ? '<input type="checkbox" disabled>'
+      : '<input type="checkbox" class="npm-import-cb" data-host-id="' + h.id + '" onchange="updateNpmSelectionCount()">';
+    let badge, action;
+    if (h.linkedProfile) {
+      badge = '<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:10px;font-size:11px">Linked → profile "' + _esc(h.linkedProfile) + '"</span>';
+      action = '<a href="javascript:void(0)" onclick="openLinkedProfile(\'' + _esc(h.linkedProfile) + '\')" style="color:var(--accent);font-size:12px">Open</a>';
+    } else if (h.linkedWebhook) {
+      badge = '<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:10px;font-size:11px">Linked → webhook "' + _esc(h.linkedWebhook) + '"</span>';
+      action = '<a href="javascript:void(0)" onclick="openLinkedWebhook(\'' + _esc(h.linkedWebhook) + '\')" style="color:var(--accent);font-size:12px">Open</a>';
+    } else {
+      badge = '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 8px;border-radius:10px;font-size:11px">Available</span>';
+      action = '<button class="btn btn-sm" onclick="adoptNpmHost(' + h.id + ')" title="Adopt as proxy with custom settings">Customize…</button>';
+    }
+    return '<tr style="border-bottom:1px solid var(--border)">' +
+      '<td style="padding:8px 12px">' + checkbox + '</td>' +
+      '<td style="padding:8px 12px;color:var(--text3)">#' + h.id + '</td>' +
+      '<td style="padding:8px 12px">' + domainsHtml + '</td>' +
+      '<td style="padding:8px 12px;color:var(--text2);font-family:monospace;font-size:11.5px">' + _esc(fwd) + '</td>' +
+      '<td style="padding:8px 12px">' + badge + '</td>' +
+      '<td style="padding:8px 12px;text-align:right">' + action + '</td>' +
+      '</tr>';
+  }).join('');
+  updateNpmSelectionCount();
 }
 
 function toggleNpmSelectAll(checked) {
@@ -5623,7 +5711,17 @@ function renderNpmHostsTable() {
   }
 
   body.innerHTML = slice.map(h => {
-    const domains = (h.domain_names || []).join(', ');
+    const isHttps = !!(h.certificate_id && Number(h.certificate_id) > 0);
+    const domainsHtml = (h.domain_names || []).length
+      ? (h.domain_names || []).map(d => {
+          const href = (isHttps ? 'https://' : 'http://') + String(d).replace(/^\*\./, 'www.');
+          return '<a href="' + _esc(href) + '" target="_blank" rel="noopener noreferrer" '
+            + 'style="color:var(--accent);text-decoration:none" '
+            + 'onmouseover="this.style.textDecoration=\'underline\'" '
+            + 'onmouseout="this.style.textDecoration=\'none\'" '
+            + 'title="Open ' + _esc(href) + '">' + _esc(d) + '</a>';
+        }).join(', ')
+      : '(no domains)';
     const fwd = (h.forward_scheme || 'http') + '://' + (h.forward_host || '?') + ':' + (h.forward_port || '?');
     const sslBadge = (h.certificate_id && Number(h.certificate_id) > 0)
       ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 7px;border-radius:10px;font-size:11px">SSL</span>'
@@ -5646,7 +5744,7 @@ function renderNpmHostsTable() {
       : '<button type="button" class="btn btn-sm" onclick="deleteNpmHost(' + h.id + ')" style="color:var(--err-text)">Delete</button>';
     return '<tr style="border-bottom:1px solid var(--border)">' +
       '<td style="padding:10px 14px;color:var(--text3)">#' + h.id + '</td>' +
-      '<td style="padding:10px 14px">' + _esc(domains || '(no domains)') + linkedTag + '</td>' +
+      '<td style="padding:10px 14px">' + domainsHtml + linkedTag + '</td>' +
       '<td style="padding:10px 14px;color:var(--text2);font-family:monospace;font-size:11.5px">' + _esc(fwd) + '</td>' +
       '<td style="padding:10px 14px">' + sslBadge + '</td>' +
       '<td style="padding:10px 14px">' + enabledBadge + '</td>' +

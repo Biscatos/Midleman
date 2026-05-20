@@ -2406,6 +2406,14 @@
       </div>
 
       <div id="npmImportStatus" style="font-size:12.5px;color:var(--text2);margin-bottom:10px"></div>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+        <input type="text" id="npmImportSearch" oninput="renderNpmImportTable()" placeholder="Search domains or forward host…" style="flex:1;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+        <select id="npmImportFilter" onchange="renderNpmImportTable()" style="padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+          <option value="available">Available only</option>
+          <option value="all">All hosts</option>
+          <option value="linked">Linked only</option>
+        </select>
+      </div>
       <div style="max-height:50vh;overflow:auto;border:1px solid var(--border);border-radius:var(--radius-sm)">
         <table style="width:100%;border-collapse:collapse;font-size:12.5px">
           <thead style="position:sticky;top:0;background:var(--surface);z-index:1">
