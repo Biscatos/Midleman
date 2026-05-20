@@ -41,7 +41,13 @@ function save(): void {
         mkdirSync(DATA_DIR, { recursive: true });
         writeFileSync(PORTS_FILE, JSON.stringify(portMap, null, 2));
     } catch (err) {
-        console.warn('⚠️  Could not save port assignments:', err instanceof Error ? err.message : err);
+        // Loud on purpose: a silently-failed save() is what produces the
+        // "ports change after upgrade" symptom (the old file survives, but
+        // the in-memory map drifts on the next boot if reassignment happened
+        // for a different reason). If you see this in logs, fix the volume
+        // mount / permissions before the next restart.
+        console.error('[port-manager] CRITICAL: could not save port assignments to ' + PORTS_FILE + ':',
+            err instanceof Error ? err.message : err);
     }
 }
 
@@ -84,23 +90,37 @@ export async function assignAllPorts(
 ): Promise<{ proxies: Record<string, number>; webhooks: Record<string, number>; tcpUdp: Record<string, number> }> {
     const used = new Set<number>([adminPort]);
 
+    // Boot path: trust persisted ports as long as they don't collide *inside*
+    // this batch. We deliberately do NOT probe isPortFree() here — at startup
+    // none of our own servers are running yet, so a probe failure (Bun.serve
+    // race, transient OS issue, anything) would silently move the proxy to a
+    // brand-new port. That's the "ports changed after upgrade" symptom.
+    //
+    // If the persisted port is genuinely held by another process, the later
+    // startProxyServer() call surfaces a clear error rather than us mutating
+    // state behind the user's back.
+    const takePreferred = async (preferred: number | undefined): Promise<number> => {
+        if (preferred && preferred > 0 && !used.has(preferred)) return preferred;
+        return allocate(used, preferred);
+    };
+
     const proxies: Record<string, number> = {};
     for (const name of proxyNames) {
-        const port = await allocate(used, portMap.proxies[name]);
+        const port = await takePreferred(portMap.proxies[name]);
         proxies[name] = port;
         used.add(port);
     }
 
     const webhookPorts: Record<string, number> = {};
     for (const name of webhookNames) {
-        const port = await allocate(used, portMap.webhooks[name]);
+        const port = await takePreferred(portMap.webhooks[name]);
         webhookPorts[name] = port;
         used.add(port);
     }
 
     const tcpUdpPorts: Record<string, number> = {};
     for (const name of tcpUdpNames) {
-        const port = await allocate(used, portMap.tcpUdp[name]);
+        const port = await takePreferred(portMap.tcpUdp[name]);
         tcpUdpPorts[name] = port;
         used.add(port);
     }
