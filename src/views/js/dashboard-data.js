@@ -5169,6 +5169,7 @@ function _updateNpmPageVisibility(cfg, certVolumeMounted) {
   const subTabs = document.getElementById('npmSubTabs');
   const addBtn = document.getElementById('npmAddHostBtn');
   const addCertBtn = document.getElementById('npmAddCertBtn');
+  const addCustomCertBtn = document.getElementById('npmAddCustomCertBtn');
   const refreshBtn = document.getElementById('npmRefreshBtn');
   const pill = document.getElementById('npmConnPill');
   const isReady = !!(cfg && cfg.enabled && cfg.url && cfg.email);
@@ -5180,6 +5181,7 @@ function _updateNpmPageVisibility(cfg, certVolumeMounted) {
   const sub = isReady ? (_npmCurrentSubpage || 'proxy-hosts') : null;
   if (addBtn) addBtn.style.display = (isReady && sub === 'proxy-hosts') ? '' : 'none';
   if (addCertBtn) addCertBtn.style.display = (isReady && sub === 'certificates') ? '' : 'none';
+  if (addCustomCertBtn) addCustomCertBtn.style.display = (isReady && sub === 'certificates') ? '' : 'none';
   if (refreshBtn) refreshBtn.style.display = isReady ? '' : 'none';
   if (pill) {
     if (!cfg || !cfg.url) {
@@ -5275,10 +5277,12 @@ function switchNpmSubpage(sub) {
   // Update header buttons
   const addHost = document.getElementById('npmAddHostBtn');
   const addCert = document.getElementById('npmAddCertBtn');
+  const addCustomCert = document.getElementById('npmAddCustomCertBtn');
   // Only show if integration is ready (pill visible means ready-ish, but use the same gating as visibility)
   const ready = !!document.getElementById('npmRefreshBtn') && document.getElementById('npmRefreshBtn').style.display !== 'none';
   if (addHost) addHost.style.display = (ready && sub === 'proxy-hosts') ? '' : 'none';
   if (addCert) addCert.style.display = (ready && sub === 'certificates') ? '' : 'none';
+  if (addCustomCert) addCustomCert.style.display = (ready && sub === 'certificates') ? '' : 'none';
   // Lazy-load data for the chosen sub-page
   refreshNpmCurrentSubpage();
 }
@@ -5387,8 +5391,9 @@ function renderNpmCertsTable() {
       ? ' <span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 7px;border-radius:10px;font-size:11px" title="' + _esc(usedBy.join(' | ')) + '">In use × ' + usedBy.length + '</span>'
       : '';
     const renewBtn = c.provider === 'letsencrypt'
-      ? '<button type="button" class="btn btn-sm" onclick="renewNpmCert(' + c.id + ')" title="Renew certificate">Renew</button>'
+      ? '<button type="button" class="btn btn-sm" onclick="renewNpmCert(' + c.id + ')" title="Renew certificate">Renew</button> '
       : '';
+    const dlBtn = '<button type="button" class="btn btn-sm" onclick="downloadNpmCert(' + c.id + ')" title="Download certificate (zip)">Download</button> ';
     return '<tr>'
       + '<td style="padding:10px 14px;border-bottom:1px solid var(--border);color:var(--text2)">' + c.id + '</td>'
       + '<td style="padding:10px 14px;border-bottom:1px solid var(--border)">' + _esc(c.nice_name || '—') + usedTag + '</td>'
@@ -5396,8 +5401,9 @@ function renderNpmCertsTable() {
       + '<td style="padding:10px 14px;border-bottom:1px solid var(--border);max-width:280px;word-break:break-all">' + _esc(domains) + '</td>'
       + '<td style="padding:10px 14px;border-bottom:1px solid var(--border);color:' + exp.color + ';white-space:nowrap">' + _esc(exp.text) + '</td>'
       + '<td style="padding:10px 14px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap">'
+        + dlBtn
         + renewBtn
-        + ' <button type="button" class="btn btn-sm" onclick="deleteNpmCert(' + c.id + ')" title="Delete" style="color:var(--err-text)">Delete</button>'
+        + '<button type="button" class="btn btn-sm" onclick="deleteNpmCert(' + c.id + ')" title="Delete" style="color:var(--err-text)">Delete</button>'
       + '</td>'
       + '</tr>';
   }).join('');
@@ -5462,6 +5468,94 @@ async function renewNpmCert(id) {
     fetchNpmCertsTable();
   } catch (e) {
     alert(e.message || 'Renew failed');
+  }
+}
+
+function openNpmCertCustomModal() {
+  document.getElementById('ccName').value = '';
+  document.getElementById('ccKey').value = '';
+  document.getElementById('ccCert').value = '';
+  document.getElementById('ccIntermediate').value = '';
+  setNpmStatus('ccStatus', '', '');
+  document.getElementById('npmCertCustomModal').classList.add('active');
+}
+function closeNpmCertCustomModal() {
+  document.getElementById('npmCertCustomModal').classList.remove('active');
+}
+
+async function _readFileTextHead(file, bytes) {
+  if (!file) return '';
+  const slice = file.slice(0, bytes);
+  try { return await slice.text(); } catch { return ''; }
+}
+
+async function saveNpmCertCustom() {
+  const name = document.getElementById('ccName').value.trim();
+  const keyFile = document.getElementById('ccKey').files[0];
+  const certFile = document.getElementById('ccCert').files[0];
+  const intFile = document.getElementById('ccIntermediate').files[0];
+  if (!name) { setNpmStatus('ccStatus', 'Name is required.', 'err'); return; }
+  if (!keyFile) { setNpmStatus('ccStatus', 'Certificate key file is required.', 'err'); return; }
+  if (!certFile) { setNpmStatus('ccStatus', 'Certificate file is required.', 'err'); return; }
+  const MAX = 256 * 1024;
+  if (keyFile.size > MAX) { setNpmStatus('ccStatus', 'Key file exceeds 256 KB.', 'err'); return; }
+  if (certFile.size > MAX) { setNpmStatus('ccStatus', 'Certificate file exceeds 256 KB.', 'err'); return; }
+  if (intFile && intFile.size > MAX) { setNpmStatus('ccStatus', 'Intermediate file exceeds 256 KB.', 'err'); return; }
+  // Best-effort: detect passphrase-protected keys client-side before upload.
+  const head = await _readFileTextHead(keyFile, 4096);
+  if (/ENCRYPTED/.test(head)) {
+    setNpmStatus('ccStatus', 'This key looks passphrase-protected. Decrypt it first (openssl rsa -in enc.key -out plain.key).', 'err');
+    return;
+  }
+  const btn = document.getElementById('ccSaveBtn');
+  btn.disabled = true;
+  setNpmStatus('ccStatus', 'Uploading…', 'info');
+  try {
+    const form = new FormData();
+    form.append('nice_name', name);
+    form.append('certificate', certFile);
+    form.append('certificate_key', keyFile);
+    if (intFile) form.append('intermediate_certificate', intFile);
+    // Bypass api() so the browser sets multipart Content-Type with boundary.
+    const res = await fetch('/admin/npm/certificates/custom', { method: 'POST', body: form, credentials: 'same-origin' });
+    if (res.status === 401) { window.location.reload(); return; }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setNpmStatus('ccStatus', data.error || ('Failed (' + res.status + ')'), 'err');
+      return;
+    }
+    setNpmStatus('ccStatus', 'Certificate uploaded.', 'ok');
+    closeNpmCertCustomModal();
+    fetchNpmCertsTable();
+  } catch (e) {
+    setNpmStatus('ccStatus', e.message || 'Upload failed.', 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function downloadNpmCert(id) {
+  try {
+    const res = await api('/admin/npm/certificates/' + id + '/download');
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      alert(d.error || ('Download failed (' + res.status + ')'));
+      return;
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get('content-disposition') || '';
+    const m = cd.match(/filename="?([^";]+)"?/i);
+    const fname = (m && m[1]) || ('npm-cert-' + id + '.zip');
+    const a = document.createElement('a');
+    const objUrl = URL.createObjectURL(blob);
+    a.href = objUrl;
+    a.download = fname;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(objUrl), 5000);
+  } catch (e) {
+    alert(e.message || 'Download failed');
   }
 }
 

@@ -2318,6 +2318,69 @@ const server = Bun.serve({
                     }
                 }
 
+                if (url.pathname === '/admin/npm/certificates/custom' && req.method === 'POST') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    let form;
+                    try { form = await req.formData(); } catch { return jsonRes(400, { error: 'Invalid multipart payload' }); }
+                    const niceName = String(form.get('nice_name') || '').trim();
+                    const cert = form.get('certificate');
+                    const key = form.get('certificate_key');
+                    const intermediate = form.get('intermediate_certificate');
+                    if (!niceName) return jsonRes(400, { error: 'Name is required' });
+                    if (!(cert instanceof File) || cert.size === 0) return jsonRes(400, { error: 'Certificate file is required' });
+                    if (!(key instanceof File) || key.size === 0) return jsonRes(400, { error: 'Certificate key file is required' });
+                    const MAX = 256 * 1024;
+                    if (cert.size > MAX) return jsonRes(400, { error: 'Certificate file exceeds 256 KB' });
+                    if (key.size > MAX) return jsonRes(400, { error: 'Certificate key file exceeds 256 KB' });
+                    if (intermediate instanceof File && intermediate.size > MAX) return jsonRes(400, { error: 'Intermediate certificate file exceeds 256 KB' });
+                    // Reject encrypted keys (NPM does not support passphrase-protected keys).
+                    const keyText = await key.text();
+                    if (/ENCRYPTED/.test(keyText.slice(0, 4096))) return jsonRes(400, { error: 'Encrypted/passphrase-protected keys are not supported. Decrypt the key before upload.' });
+                    try {
+                        const { createOtherCertificate, uploadCertificateFiles, deleteCertificate } = await import('./npm/client');
+                        const created = await createOtherCertificate(niceName);
+                        const uploadFiles: { certificate: Blob; certificate_key: Blob; intermediate_certificate?: Blob } = {
+                            certificate: cert,
+                            certificate_key: key,
+                        };
+                        if (intermediate instanceof File && intermediate.size > 0) uploadFiles.intermediate_certificate = intermediate;
+                        try {
+                            const final = await uploadCertificateFiles(created.id, uploadFiles);
+                            const me = getAuthedAdmin(req);
+                            logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.cert.create.custom', targetType: 'npm_cert', targetId: created.id, details: { nice_name: niceName }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                            return jsonRes(201, { certificate: final });
+                        } catch (uploadErr) {
+                            // Clean up the orphaned cert shell so we don't leave garbage in NPM.
+                            try { await deleteCertificate(created.id); } catch { /* ignore */ }
+                            throw uploadErr;
+                        }
+                    } catch (e) {
+                        return jsonRes(502, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
+                const certDownloadMatch = url.pathname.match(/^\/admin\/npm\/certificates\/(\d+)\/download$/);
+                if (certDownloadMatch && req.method === 'GET') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    const id = Number(certDownloadMatch[1]);
+                    try {
+                        const { downloadCertificate } = await import('./npm/client');
+                        const out = await downloadCertificate(id);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.cert.download', targetType: 'npm_cert', targetId: id, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        const filename = out.filename || `npm-cert-${id}.zip`;
+                        return new Response(out.data, {
+                            status: 200,
+                            headers: {
+                                'Content-Type': out.contentType,
+                                'Content-Disposition': `attachment; filename="${filename.replace(/"/g, '')}"`,
+                            },
+                        });
+                    } catch (e) {
+                        return jsonRes(502, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
                 const certRenewMatch = url.pathname.match(/^\/admin\/npm\/certificates\/(\d+)\/renew$/);
                 if (certRenewMatch && req.method === 'POST') {
                     if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });

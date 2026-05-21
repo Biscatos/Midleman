@@ -76,6 +76,49 @@ async function ensureToken(): Promise<{ url: string; token: string }> {
     return { url: s.url, token: tok.token };
 }
 
+async function authedFormRequest<T>(method: string, path: string, form: FormData, attempt = 0): Promise<T> {
+    const { url, token } = await ensureToken();
+    const res = await fetch(`${url}${path}`, {
+        method,
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: form,
+    });
+    const text = await res.text();
+    if (res.status === 401 && attempt === 0) {
+        updateTokenCache('', 0);
+        return authedFormRequest<T>(method, path, form, attempt + 1);
+    }
+    if ((res.status === 502 || res.status === 503 || res.status === 504) && attempt < 2) {
+        const wait = 500 * Math.pow(2, attempt);
+        await new Promise(r => setTimeout(r, wait));
+        return authedFormRequest<T>(method, path, form, attempt + 1);
+    }
+    if (!res.ok) throw new NpmError(`NPM ${method} ${path} → ${res.status}`, res.status, text);
+    return text ? (JSON.parse(text) as T) : (undefined as T);
+}
+
+async function authedBinaryRequest(method: string, path: string, attempt = 0): Promise<{ data: ArrayBuffer; contentType: string; filename?: string }> {
+    const { url, token } = await ensureToken();
+    const res = await fetch(`${url}${path}`, {
+        method,
+        headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (res.status === 401 && attempt === 0) {
+        updateTokenCache('', 0);
+        return authedBinaryRequest(method, path, attempt + 1);
+    }
+    if (!res.ok) {
+        const text = await res.text();
+        throw new NpmError(`NPM ${method} ${path} → ${res.status}`, res.status, text);
+    }
+    const data = await res.arrayBuffer();
+    const contentType = res.headers.get('content-type') || 'application/octet-stream';
+    const cd = res.headers.get('content-disposition') || '';
+    const m = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i);
+    const filename = m ? decodeURIComponent(m[1]) : undefined;
+    return { data, contentType, filename };
+}
+
 async function authedRequest<T>(method: string, path: string, body?: unknown, attempt = 0): Promise<T> {
     const { url, token } = await ensureToken();
     const res = await fetch(`${url}${path}`, {
@@ -189,6 +232,38 @@ export async function deleteCertificate(id: number): Promise<void> {
 
 export async function renewCertificate(id: number): Promise<NpmCertificate> {
     return authedRequest<NpmCertificate>('POST', `/api/nginx/certificates/${id}/renew`);
+}
+
+export async function createOtherCertificate(niceName: string): Promise<NpmCertificate> {
+    return authedRequest<NpmCertificate>('POST', '/api/nginx/certificates', {
+        provider: 'other',
+        nice_name: niceName,
+    });
+}
+
+export async function uploadCertificateFiles(
+    id: number,
+    files: { certificate: File | Blob; certificate_key: File | Blob; intermediate_certificate?: File | Blob },
+): Promise<NpmCertificate> {
+    const form = new FormData();
+    form.append('certificate', files.certificate);
+    form.append('certificate_key', files.certificate_key);
+    if (files.intermediate_certificate) form.append('intermediate_certificate', files.intermediate_certificate);
+    return authedFormRequest<NpmCertificate>('POST', `/api/nginx/certificates/${id}/upload`, form);
+}
+
+export async function validateCertificateFiles(
+    files: { certificate: File | Blob; certificate_key: File | Blob; intermediate_certificate?: File | Blob },
+): Promise<unknown> {
+    const form = new FormData();
+    form.append('certificate', files.certificate);
+    form.append('certificate_key', files.certificate_key);
+    if (files.intermediate_certificate) form.append('intermediate_certificate', files.intermediate_certificate);
+    return authedFormRequest<unknown>('POST', '/api/nginx/certificates/validate', form);
+}
+
+export async function downloadCertificate(id: number): Promise<{ data: ArrayBuffer; contentType: string; filename?: string }> {
+    return authedBinaryRequest('GET', `/api/nginx/certificates/${id}/download`);
 }
 
 /** Throws if NPM is not enabled — call before any mutating method to short-circuit. */
