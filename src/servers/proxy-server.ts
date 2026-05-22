@@ -124,7 +124,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                     const rlKey = `u:${username.toLowerCase()}`;
                     const ipKey = `ip:${clientIp}`;
                     if (!checkRateLimit(rlKey) || !checkRateLimit(ipKey, MAX_ATTEMPTS_PER_IP)) {
-                        logAudit({ action: 'proxy.login.rate_limited', actorUsername: username, details: { profile: profile.name }, ip: clientIp, userAgent });
+                        logAudit({ action: 'proxy.login.rate_limited', actorUsername: username, targetType: 'proxy_profile', targetId: profile.name, details: { profile: profile.name }, ip: clientIp, userAgent });
                         return jsonRes(429, { error: 'Too many attempts. Try again in 15 minutes.' });
                     }
 
@@ -149,6 +149,8 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                                 logAudit({
                                     action: 'ldap.provision.refused',
                                     actorUsername: ldap.auth.username,
+                                    targetType: 'proxy_profile',
+                                    targetId: profile.name,
                                     details: {
                                         directory: ldap.auth.configName,
                                         dn: ldap.auth.dn,
@@ -167,6 +169,8 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                                     action: 'ldap.user.adopted',
                                     actorUserId: shadow.id,
                                     actorUsername: shadow.username,
+                                    targetType: 'proxy_profile',
+                                    targetId: profile.name,
                                     details: {
                                         directory: ldap.auth.configName,
                                         dn: ldap.auth.dn,
@@ -202,6 +206,8 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                         logAudit({
                             action: 'proxy.login.failed',
                             actorUsername: username,
+                            targetType: 'proxy_profile',
+                            targetId: profile.name,
                             details: {
                                 profile: profile.name,
                                 reason: ldapDiagnostic ? `ldap_${ldapDiagnostic.reason}` : 'local_password_mismatch',
@@ -217,7 +223,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
 
                     // Check if user has access to this profile
                     if (!proxyUserHasProfile(cred.user.id, profile.name)) {
-                        logAudit({ action: 'proxy.login.denied', actorUserId: cred.user.id, actorUsername: cred.user.username, details: { profile: profile.name, reason: 'no_profile_access' }, ip: clientIp, userAgent });
+                        logAudit({ action: 'proxy.login.denied', actorUserId: cred.user.id, actorUsername: cred.user.username, targetType: 'proxy_profile', targetId: profile.name, details: { profile: profile.name, reason: 'no_profile_access' }, ip: clientIp, userAgent });
                         return jsonRes(403, { error: 'You do not have access to this application' });
                     }
 
@@ -228,7 +234,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                     if (!require2fa && !totpEnabled) {
                         const token = signJwt({ sub: userIdToUuid(cred.user.id), username: cred.user.username, profile: profile.name, midleman_uid: cred.user.id });
                         const maxAge = getJwtMaxAge();
-                        logAudit({ action: 'proxy.login.success', actorUserId: cred.user.id, actorUsername: cred.user.username, details: { profile: profile.name, mfa: false, authSource: cred.user.authSource || 'local' }, ip: clientIp, userAgent });
+                        logAudit({ action: 'proxy.login.success', actorUserId: cred.user.id, actorUsername: cred.user.username, targetType: 'proxy_profile', targetId: profile.name, details: { profile: profile.name, mfa: false, authSource: cred.user.authSource || 'local' }, ip: clientIp, userAgent });
                         return new Response(JSON.stringify({ status: 'ok', username: cred.user.username }), {
                             status: 200,
                             headers: {
@@ -275,13 +281,13 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                     if (challenge.totpEnabled && challenge.totpSecret) {
                         // Verify existing TOTP
                         if (!verifyTotp(challenge.totpSecret, totpCode)) {
-                            logAudit({ action: 'proxy.login.failed', actorUserId: challenge.userId, actorUsername: challenge.username, details: { profile: profile.name, reason: 'bad_totp' }, ip: clientIp, userAgent });
+                            logAudit({ action: 'proxy.login.failed', actorUserId: challenge.userId, actorUsername: challenge.username, targetType: 'proxy_profile', targetId: profile.name, details: { profile: profile.name, reason: 'bad_totp' }, ip: clientIp, userAgent });
                             return jsonRes(401, { error: 'Invalid authenticator code' });
                         }
                     } else if (totpSecret) {
                         // First-time setup: verify the code against the new secret, then save
                         if (!verifyTotp(totpSecret, totpCode)) {
-                            logAudit({ action: 'proxy.login.failed', actorUserId: challenge.userId, actorUsername: challenge.username, details: { profile: profile.name, reason: 'bad_totp_setup' }, ip: clientIp, userAgent });
+                            logAudit({ action: 'proxy.login.failed', actorUserId: challenge.userId, actorUsername: challenge.username, targetType: 'proxy_profile', targetId: profile.name, details: { profile: profile.name, reason: 'bad_totp_setup' }, ip: clientIp, userAgent });
                             return jsonRes(401, { error: 'Invalid code. Scan the QR code and try again.' });
                         }
                         setupProxyUserTotp(challenge.userId, totpSecret);
@@ -292,7 +298,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                     // Issue JWT
                     const token = signJwt({ sub: userIdToUuid(challenge.userId), username: challenge.username, profile: profile.name, midleman_uid: challenge.userId });
                     const maxAge = getJwtMaxAge();
-                    logAudit({ action: 'proxy.login.success', actorUserId: challenge.userId, actorUsername: challenge.username, details: { profile: profile.name, mfa: true }, ip: clientIp, userAgent });
+                    logAudit({ action: 'proxy.login.success', actorUserId: challenge.userId, actorUsername: challenge.username, targetType: 'proxy_profile', targetId: profile.name, details: { profile: profile.name, mfa: true }, ip: clientIp, userAgent });
                     return new Response(JSON.stringify({ status: 'ok', username: challenge.username }), {
                         status: 200,
                         headers: {
@@ -315,6 +321,8 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                                 action: 'proxy.logout',
                                 actorUserId: typeof payload.midleman_uid === 'number' ? payload.midleman_uid : null,
                                 actorUsername: typeof payload.username === 'string' ? payload.username : '',
+                                targetType: 'proxy_profile',
+                                targetId: profile.name,
                                 details: { profile: profile.name },
                                 ip: clientIp,
                                 userAgent,

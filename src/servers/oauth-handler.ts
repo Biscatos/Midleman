@@ -282,6 +282,8 @@ function buildSuccessResponse(authReq: AuthRequest, userId: number, req: Request
         action: 'oauth.login.success',
         actorUserId: userId,
         actorUsername: user?.username,
+        targetType: 'oauth_client',
+        targetId: authReq.clientId,
         details: { clientId: authReq.clientId, totpUsed: !!opts?.totpUsed, ssoId },
         ip,
         userAgent: ua,
@@ -320,7 +322,7 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
         logAudit({
             action: 'oauth.login.rate_limited',
             actorUsername: username,
-            details: { ip: clientIp },
+            details: { ip: clientIp, authRequestId },
             ip: clientIp,
             userAgent: req.headers.get('user-agent') || undefined,
         });
@@ -340,6 +342,7 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
 
     // 1) Proxy user local (covers admins too)
     if (!cred) cred = await verifyProxyUserCredentials(username, password);
+    let ldapDiagnostic: { reason?: string; detail?: string } | null = null;
 
     // 2) Fallback to LDAP if no local match
     if (!cred) {
@@ -363,6 +366,8 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
                 logAudit({
                     action: 'ldap.provision.refused',
                     actorUsername: ldap.auth.username,
+                    targetType: 'oauth_client',
+                    targetId: authReq.clientId,
                     details: {
                         directory: ldap.auth.configName,
                         dn: ldap.auth.dn,
@@ -385,6 +390,8 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
                     action: 'ldap.user.adopted',
                     actorUserId: shadow.id,
                     actorUsername: shadow.username,
+                    targetType: 'oauth_client',
+                    targetId: authReq.clientId,
                     details: {
                         directory: ldap.auth.configName,
                         dn: ldap.auth.dn,
@@ -403,6 +410,8 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
                         action: 'ldap.access.revoked',
                         actorUserId: shadow.id,
                         actorUsername: shadow.username,
+                        targetType: 'oauth_client',
+                        targetId: authReq.clientId,
                         details: { directory: ldap.auth.configName, dn: ldap.auth.dn, revokedClients, reason: 'group_change_on_login' },
                     });
                 }
@@ -417,6 +426,8 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
                 status: 502,
                 headers: { 'Content-Type': 'application/json' },
             });
+        } else {
+            ldapDiagnostic = { reason: ldap.reason, detail: 'detail' in ldap ? ldap.detail : undefined };
         }
         // invalid_credentials | no_directory → generic 401 below
     }
@@ -425,7 +436,13 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
         logAudit({
             action: 'oauth.login.failed',
             actorUsername: username,
-            details: { clientId: authReq.clientId, reason: 'invalid_credentials' },
+            targetType: 'oauth_client',
+            targetId: authReq.clientId,
+            details: {
+                clientId: authReq.clientId,
+                reason: ldapDiagnostic ? `ldap_${ldapDiagnostic.reason}` : 'local_password_mismatch',
+                ldapDetail: ldapDiagnostic?.detail,
+            },
             ip: clientIp,
             userAgent: req.headers.get('user-agent') || undefined,
         });
@@ -447,6 +464,8 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
             action: 'oauth.login.denied',
             actorUserId: cred.user.id,
             actorUsername: cred.user.username,
+            targetType: 'oauth_client',
+            targetId: authReq.clientId,
             details: { clientId: authReq.clientId, reason: 'not_in_allow_list' },
             ip: clientIp,
             userAgent: req.headers.get('user-agent') || undefined,
@@ -535,7 +554,9 @@ export async function handleOauthTotp(req: Request): Promise<Response> {
         logAudit({
             action: 'oauth.totp.rate_limited',
             actorUserId: challenge.userId,
-            details: { ip: clientIp },
+            targetType: 'oauth_client',
+            targetId: authReq.clientId,
+            details: { ip: clientIp, clientId: authReq.clientId },
             ip: clientIp,
             userAgent: req.headers.get('user-agent') || undefined,
         });
@@ -548,6 +569,8 @@ export async function handleOauthTotp(req: Request): Promise<Response> {
             action: 'oauth.totp.failed',
             actorUserId: challenge.userId,
             actorUsername: totpUser?.username,
+            targetType: 'oauth_client',
+            targetId: authReq.clientId,
             details: { clientId: authReq.clientId },
             ip: clientIp,
             userAgent: req.headers.get('user-agent') || undefined,
@@ -629,6 +652,8 @@ export async function handleToken(req: Request): Promise<Response> {
     if (!ok) {
         logAudit({
             action: 'oauth.token.client_auth_failed',
+            targetType: 'oauth_client',
+            targetId: creds.clientId,
             details: { clientId: creds.clientId, ip: clientIp },
             ip: clientIp,
             userAgent: req.headers.get('user-agent') || undefined,
