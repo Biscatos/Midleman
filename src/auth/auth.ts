@@ -973,7 +973,21 @@ const MAX_ATTEMPTS = 5;
 const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const MAX_RATE_LIMIT_ENTRIES = 10_000; // prevent unbounded growth under distributed attacks
 
-export function checkRateLimit(key: string): boolean {
+/** Peek: returns true if the key is still under the limit. Does NOT increment.
+ *  Call this BEFORE attempting credentials to block already-saturated keys.
+ *  Pass a higher `max` for coarse-grained keys (e.g. per-IP behind corporate
+ *  NAT — many legitimate users share one egress IP). */
+export function checkRateLimit(key: string, max: number = MAX_ATTEMPTS): boolean {
+    const now = Date.now();
+    const entry = attempts.get(key);
+    if (!entry || entry.resetAt < now) return true;
+    return entry.count < max;
+}
+
+/** Increment failure counter for the key. Call this only on FAILED auth
+ *  attempts — successful logins must not consume budget, otherwise a busy user
+ *  locks themselves out. */
+export function recordFailedAttempt(key: string): void {
     const now = Date.now();
     if (attempts.size >= MAX_RATE_LIMIT_ENTRIES) {
         const oldest = attempts.keys().next().value;
@@ -982,11 +996,15 @@ export function checkRateLimit(key: string): boolean {
     const entry = attempts.get(key);
     if (!entry || entry.resetAt < now) {
         attempts.set(key, { count: 1, resetAt: now + WINDOW_MS });
-        return true;
+        return;
     }
     entry.count++;
-    return entry.count <= MAX_ATTEMPTS;
 }
+
+/** Per-IP threshold. Generous so corporate NATs (one egress IP for many users)
+ *  don't lock everyone out when one person mistypes. The per-username bucket
+ *  is the real defence against brute-force on a specific account. */
+export const MAX_ATTEMPTS_PER_IP = 50;
 
 // Cleanup old entries periodically
 setInterval(() => {

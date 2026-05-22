@@ -1,6 +1,6 @@
 import type { ProxyProfile } from '../core/types';
 import { handleDirectProxy } from '../proxy/proxy';
-import { verifyProxyUserCredentials, signJwt, verifyJwt, getJwtMaxAge, checkRateLimit, proxyUserHasProfile, createProxyLoginChallenge, consumeProxyLoginChallenge, peekProxyLoginChallenge, generateTotpSecret, verifyTotp, setupProxyUserTotp, userIdToUuid, upsertLdapShadowProxyUserDetailed, assignProxyUserToProfile, logAudit } from '../auth/auth';
+import { verifyProxyUserCredentials, signJwt, verifyJwt, getJwtMaxAge, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, proxyUserHasProfile, createProxyLoginChallenge, consumeProxyLoginChallenge, peekProxyLoginChallenge, generateTotpSecret, verifyTotp, setupProxyUserTotp, userIdToUuid, upsertLdapShadowProxyUserDetailed, assignProxyUserToProfile, getProxyUserTotpSecret, logAudit } from '../auth/auth';
 import { tryLdapLogin } from '../auth/ldap';
 import { getConsentPage } from '../auth/consent-pages';
 import { renderConsentMarkdown, escapeHtmlAttr } from '../core/consent';
@@ -117,8 +117,13 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                     const password = body.password || '';
                     if (!username || !password) return jsonRes(400, { error: 'Username and password required' });
 
-                    // Rate limit by IP and by username to prevent both IP-spoofing and username enumeration
-                    if (!checkRateLimit(clientIp) || !checkRateLimit(`u:${username.toLowerCase()}`)) {
+                    // Two-tier rate limit: tight 5/15min by username (blocks
+                    // targeted brute-force) + loose 50/15min by IP (catches
+                    // distributed credential stuffing without locking out an
+                    // entire corporate NAT when one user mistypes).
+                    const rlKey = `u:${username.toLowerCase()}`;
+                    const ipKey = `ip:${clientIp}`;
+                    if (!checkRateLimit(rlKey) || !checkRateLimit(ipKey, MAX_ATTEMPTS_PER_IP)) {
                         logAudit({ action: 'proxy.login.rate_limited', actorUsername: username, details: { profile: profile.name }, ip: clientIp, userAgent });
                         return jsonRes(429, { error: 'Too many attempts. Try again in 15 minutes.' });
                     }
@@ -151,6 +156,8 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                                         profile: profile.name,
                                     },
                                 });
+                                recordFailedAttempt(rlKey);
+                                recordFailedAttempt(ipKey);
                                 return jsonRes(401, { error: 'Invalid username or password' });
                             }
                             const shadow = outcome.user;
@@ -171,7 +178,12 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                             if (ldap.grantedProfile) {
                                 assignProxyUserToProfile(shadow.id, ldap.grantedProfile);
                             }
-                            cred = { user: shadow, totpSecret: null };
+                            // The shadow row may already have TOTP enrolled
+                            // (e.g. an admin who set up TOTP in the dashboard
+                            // and now logs into the proxy via LDAP). Load the
+                            // stored secret so the challenge can verify a code
+                            // instead of falling through to the setup branch.
+                            cred = { user: shadow, totpSecret: shadow.totpEnabled ? getProxyUserTotpSecret(shadow.id) : null };
                         } else if (ldap.reason === 'server_error') {
                             return jsonRes(502, { error: 'Directory configuration error. Ask an admin to check the LDAP directory.' });
                         }
@@ -179,6 +191,8 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
 
                     if (!cred) {
                         logAudit({ action: 'proxy.login.failed', actorUsername: username, details: { profile: profile.name, reason: 'bad_credentials' }, ip: clientIp, userAgent });
+                        recordFailedAttempt(rlKey);
+                        recordFailedAttempt(ipKey);
                         return jsonRes(401, { error: 'Invalid username or password' });
                     }
 

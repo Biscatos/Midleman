@@ -18,7 +18,7 @@ import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption } from './auth/auth';
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption } from './auth/auth';
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
 import { initConsentPages, listConsentPages, getConsentPage, createConsentPage, updateConsentPage, deleteConsentPage, findConsentPageOauthReferences } from './auth/consent-pages';
 import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin, runLdapSync, getLastLdapSyncReport } from './auth/ldap';
@@ -476,12 +476,20 @@ const server = Bun.serve({
             // Step 1: verify username + password, return challenge token
             if (url.pathname === '/auth/login/verify' && req.method === 'POST') {
                 const clientIp = reqClientIp(req);
-                if (!checkRateLimit(clientIp)) return jsonRes(429, { error: 'Too many attempts. Try again in 15 minutes.' });
                 let body: any;
                 try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
                 const username = (body.username || '').trim();
                 const password = body.password || '';
                 if (!username || !password) return jsonRes(400, { error: 'Username and password required' });
+                // Two-tier rate limit: tight per-username (5/15min) + loose
+                // per-IP (50/15min). Per-IP bucket has a generous threshold so
+                // corporate NATs (one egress IP for many users) don't lock
+                // everyone out, while still catching distributed brute-force.
+                const adminRlKey = `admin:u:${username.toLowerCase()}`;
+                const adminIpKey = `admin:ip:${clientIp}`;
+                if (!checkRateLimit(adminRlKey) || !checkRateLimit(adminIpKey, MAX_ATTEMPTS_PER_IP)) {
+                    return jsonRes(429, { error: 'Too many attempts. Try again in 15 minutes.' });
+                }
                 // 1) Local-first: try the local user table (also rejects shadow LDAP rows).
                 let cred = await verifyCredentials(username, password);
 
@@ -534,6 +542,8 @@ const server = Bun.serve({
 
                 if (!cred) {
                     logAudit({ action: 'admin.login.failed', actorUsername: username, targetType: 'midleman', ip: clientIp, userAgent: req.headers.get('user-agent') });
+                    recordFailedAttempt(adminRlKey);
+                    recordFailedAttempt(adminIpKey);
                     return jsonRes(401, { error: 'Invalid username or password' });
                 }
                 // First-time login for an admin without TOTP set up yet → enrol TOTP now.
@@ -558,8 +568,13 @@ const server = Bun.serve({
                 if (!challengeToken || !totpCode) return jsonRes(400, { error: 'Challenge token and TOTP code required' });
                 const challenge = consumeLoginChallenge(challengeToken);
                 if (!challenge) return jsonRes(401, { error: 'Session expired. Please start login again.' });
+                const totpRlKey = `admin:totp:u:${challenge.userId}`;
+                if (!checkRateLimit(totpRlKey)) {
+                    return jsonRes(429, { error: 'Too many attempts. Try again in 15 minutes.' });
+                }
                 if (!verifyTotp(challenge.totpSecret, totpCode)) {
                     logAudit({ action: 'admin.login.failed', actorUserId: challenge.userId, actorUsername: challenge.username, targetType: 'midleman', details: { reason: 'bad_totp' }, ip: clientIp, userAgent: req.headers.get('user-agent') });
+                    recordFailedAttempt(totpRlKey);
                     return jsonRes(401, { error: 'Invalid authenticator code' });
                 }
                 // First-login flow: persist the freshly-set TOTP secret

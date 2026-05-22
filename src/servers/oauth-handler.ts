@@ -20,6 +20,8 @@ import {
     signJwt, verifyJwt, userIdToUuid,
     upsertLdapShadowProxyUserDetailed, assignProxyUserToProfile, findLdapShadowProxyUser, logAudit,
     checkRateLimit,
+    recordFailedAttempt,
+    MAX_ATTEMPTS_PER_IP,
 } from '../auth/auth';
 import { tryLdapLogin } from '../auth/ldap';
 
@@ -307,10 +309,14 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
         return jsonError(400, 'invalid_request', 'Missing required fields');
     }
 
-    // Rate limit by IP and by username — same 5 attempts / 15 min as proxy login.
-    // Prefixed with 'oauth:' so OAuth counters are independent from dashboard login.
+    // Two-tier rate limit: tight per-username (5/15min) + loose per-IP
+    // (50/15min). Per-IP catches distributed credential stuffing without
+    // locking out everyone behind a corporate NAT. Prefixed with 'oauth:' so
+    // counters are independent from dashboard login.
     const clientIp = getClientIp(req);
-    if (!checkRateLimit(`oauth:ip:${clientIp}`) || !checkRateLimit(`oauth:u:${username.toLowerCase()}`)) {
+    const rlKey = `oauth:u:${username.toLowerCase()}`;
+    const ipKey = `oauth:ip:${clientIp}`;
+    if (!checkRateLimit(rlKey) || !checkRateLimit(ipKey, MAX_ATTEMPTS_PER_IP)) {
         logAudit({
             action: 'oauth.login.rate_limited',
             actorUsername: username,
@@ -365,6 +371,8 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
                         clientId: authReq.clientId,
                     },
                 });
+                recordFailedAttempt(rlKey);
+                recordFailedAttempt(ipKey);
                 const newId = storeAuthRequest(authReq);
                 return new Response(JSON.stringify({ error: 'Invalid username or password', auth_request: newId }), {
                     status: 401,
@@ -421,6 +429,8 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
             ip: clientIp,
             userAgent: req.headers.get('user-agent') || undefined,
         });
+        recordFailedAttempt(rlKey);
+        recordFailedAttempt(ipKey);
         // Re-store the auth request so user can retry without restarting
         const newId = storeAuthRequest(authReq);
         return new Response(JSON.stringify({ error: 'Invalid username or password', auth_request: newId }), {
@@ -507,18 +517,6 @@ export async function handleOauthTotp(req: Request): Promise<Response> {
     }
 
     const clientIp = getClientIp(req);
-    // TOTP brute-force protection: rate-limit by IP and by the challenge token
-    // (challenge token is single-use anyway, but a fresh one is re-issued after
-    // each failure — the per-IP limit is the real backstop).
-    if (!checkRateLimit(`oauth:totp:ip:${clientIp}`)) {
-        logAudit({
-            action: 'oauth.totp.rate_limited',
-            details: { ip: clientIp },
-            ip: clientIp,
-            userAgent: req.headers.get('user-agent') || undefined,
-        });
-        return jsonError(429, 'too_many_requests', 'Too many attempts. Try again in 15 minutes.');
-    }
 
     const challenge = consumeLoginChallenge(challengeToken);
     if (!challenge) {
@@ -528,6 +526,20 @@ export async function handleOauthTotp(req: Request): Promise<Response> {
     const authReq = consumeAuthRequest(challenge.authRequestId);
     if (!authReq) {
         return jsonError(400, 'invalid_request', 'Login session expired. Restart the sign-in flow.');
+    }
+
+    // TOTP brute-force protection: rate-limit by userId (only counts failures).
+    // Per-IP was dropped because corporate NATs share one egress IP.
+    const totpRlKey = `oauth:totp:u:${challenge.userId}`;
+    if (!checkRateLimit(totpRlKey)) {
+        logAudit({
+            action: 'oauth.totp.rate_limited',
+            actorUserId: challenge.userId,
+            details: { ip: clientIp },
+            ip: clientIp,
+            userAgent: req.headers.get('user-agent') || undefined,
+        });
+        return jsonError(429, 'too_many_requests', 'Too many attempts. Try again in 15 minutes.');
     }
 
     if (!verifyTotp(challenge.totpSecret, totpCode)) {
@@ -540,6 +552,7 @@ export async function handleOauthTotp(req: Request): Promise<Response> {
             ip: clientIp,
             userAgent: req.headers.get('user-agent') || undefined,
         });
+        recordFailedAttempt(totpRlKey);
         // Re-issue challenge so user can retry the code.
         const newAuthRequestId = storeAuthRequest(authReq);
         const newChallenge = createOauthLoginChallenge(challenge.userId, challenge.totpSecret, newAuthRequestId);
@@ -598,19 +611,17 @@ export async function handleToken(req: Request): Promise<Response> {
     if (req.method !== 'POST') return jsonError(405, 'method_not_allowed');
 
     const clientIp = getClientIp(req);
-    // Per-IP and per-client rate-limit on client_secret verification. Stops
-    // brute-force against client_secret without locking out a legitimate client
-    // making many concurrent refresh-token calls from one IP (we use 'token:'
-    // prefix and keys distinct from interactive-login counters).
-    if (!checkRateLimit(`oauth:token:ip:${clientIp}`)) {
-        return jsonError(429, 'too_many_requests', 'Too many attempts. Try again in 15 minutes.');
-    }
 
     const body = await parseTokenBody(req);
     const creds = extractClientCredentials(req, body);
     if (!creds) return jsonError(401, 'invalid_client', 'Missing client credentials');
 
-    if (!checkRateLimit(`oauth:token:c:${creds.clientId}`)) {
+    // Per-client rate-limit on client_secret verification. Per-IP was dropped
+    // because legitimate clients behind one NAT/egress IP would lock each other
+    // out under load. Counts only FAILED attempts so a healthy client running
+    // many refreshes never trips the limit.
+    const tokenRlKey = `oauth:token:c:${creds.clientId}`;
+    if (!checkRateLimit(tokenRlKey)) {
         return jsonError(429, 'too_many_requests', 'Too many attempts. Try again in 15 minutes.');
     }
 
@@ -622,6 +633,7 @@ export async function handleToken(req: Request): Promise<Response> {
             ip: clientIp,
             userAgent: req.headers.get('user-agent') || undefined,
         });
+        recordFailedAttempt(tokenRlKey);
         return jsonError(401, 'invalid_client', 'Invalid client credentials');
     }
 
