@@ -1328,8 +1328,10 @@ export type LdapProvisionOutcome =
 
 export function findLdapShadowProxyUser(ldapConfigId: number, ldapDn: string): ProxyUser | null {
     if (!db) return null;
+    // AD/LDAP DNs are case-insensitive by spec; compare without case so that a
+    // CN re-cased by the directory server doesn't orphan an existing shadow row.
     const row = db.prepare(`SELECT id, username, full_name, email, totp_enabled, auth_source, ldap_config_id, ldap_dn, created_at
-        FROM proxy_users WHERE auth_source = 'ldap' AND ldap_config_id = $cid AND ldap_dn = $dn`)
+        FROM proxy_users WHERE auth_source = 'ldap' AND ldap_config_id = $cid AND ldap_dn = $dn COLLATE NOCASE`)
         .get({ $cid: ldapConfigId, $dn: ldapDn }) as any;
     return row ? rowToProxyUser(row) : null;
 }
@@ -1381,6 +1383,21 @@ export function upsertLdapShadowProxyUserDetailed(input: LdapProxyProvisionInput
                 // B) Cross-directory conflict — always refuse.
                 return { ok: false, reason: 'multi_directory_conflict', collidingUserId: emailRow.id, otherConfigId: emailRow.ldap_config_id };
             }
+            if (emailRow.auth_source === 'ldap' && emailRow.ldap_config_id === input.ldapConfigId) {
+                // Same directory, same email — the row is the same identity but
+                // findLdapShadowProxyUser missed it (likely because the stored
+                // ldap_dn drifted from what the directory now returns: re-cased
+                // CN, moved OU, etc.). Refresh the DN and attrs in place
+                // instead of falling through to the username_collision branch.
+                db.prepare(`UPDATE proxy_users
+                    SET ldap_dn = $dn, full_name = $fn, username = $u,
+                        ldap_groups_last_seen = $g, ldap_last_sync_at = datetime('now'),
+                        ldap_orphan = 0, updated_at = datetime('now')
+                    WHERE id = $id`)
+                    .run({ $dn: input.ldapDn, $fn: cleanFullName, $u: input.username, $g: groupsJson, $id: emailRow.id });
+                const refreshed = getProxyUser(emailRow.id);
+                return refreshed ? { ok: true, user: refreshed } : { ok: false, reason: 'auth_unavailable' };
+            }
             if (emailRow.auth_source === 'local' || emailRow.auth_source === null) {
                 // C) Local match — adopt only if explicitly opted in and the
                 //    local row does NOT have TOTP enabled.
@@ -1430,8 +1447,20 @@ export function upsertLdapShadowProxyUserDetailed(input: LdapProxyProvisionInput
     }
 
     // D) Username collision without email match.
-    const usernameCollision = db.prepare(`SELECT id FROM proxy_users WHERE username = $u`).get({ $u: input.username }) as any;
+    const usernameCollision = db.prepare(`SELECT id, auth_source, ldap_config_id FROM proxy_users WHERE username = $u`).get({ $u: input.username }) as any;
     if (usernameCollision) {
+        if (usernameCollision.auth_source === 'ldap' && usernameCollision.ldap_config_id === input.ldapConfigId) {
+            // Same directory, same username — same identity as A, but the stored
+            // ldap_dn drifted. Refresh in place instead of refusing.
+            db.prepare(`UPDATE proxy_users
+                SET ldap_dn = $dn, full_name = $fn, email = $em,
+                    ldap_groups_last_seen = $g, ldap_last_sync_at = datetime('now'),
+                    ldap_orphan = 0, updated_at = datetime('now')
+                WHERE id = $id`)
+                .run({ $dn: input.ldapDn, $fn: cleanFullName, $em: normalizedEmail, $g: groupsJson, $id: usernameCollision.id });
+            const refreshed = getProxyUser(usernameCollision.id);
+            return refreshed ? { ok: true, user: refreshed } : { ok: false, reason: 'auth_unavailable' };
+        }
         return { ok: false, reason: 'username_collision', collidingUserId: usernameCollision.id };
     }
 
