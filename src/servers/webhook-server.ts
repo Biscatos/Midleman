@@ -755,7 +755,7 @@ async function handleWebhookFanout(
         const fetchStart = performance.now();
         
         let tUrl: string;
-        let tMethod = req.method;
+        let tMethod = 'POST';
         let tHeaders = new Headers(forwardHeaders);
         let tBody: ArrayBuffer | string | undefined = bodyBuffer;
         let tBodySize = bodyBuffer?.byteLength || 0;
