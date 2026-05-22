@@ -2916,7 +2916,11 @@ const server = Bun.serve({
                     const client = getOauthClient(clientId);
                     if (!client) return jsonRes(404, { error: 'Client not found' });
                     const groups = listLdapGroupsForOauthClient(clientId);
-                    const directories = listLdapConfigs().map(c => ({ id: c.id, name: c.name }));
+                    // OAuth user logins flow through scope='proxy'; admin-only
+                    // directories cannot grant access here.
+                    const directories = listLdapConfigs()
+                        .filter(c => c.scope === 'proxy' || c.scope === 'both')
+                        .map(c => ({ id: c.id, name: c.name }));
                     return jsonRes(200, { groups, directories });
                 }
 
@@ -2930,7 +2934,11 @@ const server = Bun.serve({
                     const groupMatch = typeof body.groupMatch === 'string' ? body.groupMatch.trim() : '';
                     if (!ldapConfigId || isNaN(ldapConfigId)) return jsonRes(400, { error: 'ldapConfigId required' });
                     if (!groupMatch) return jsonRes(400, { error: 'groupMatch required (CN short form or full DN)' });
-                    if (!getLdapConfig(ldapConfigId)) return jsonRes(400, { error: 'Unknown ldapConfigId' });
+                    const ldapCfg = getLdapConfig(ldapConfigId);
+                    if (!ldapCfg) return jsonRes(400, { error: 'Unknown ldapConfigId' });
+                    if (ldapCfg.scope !== 'proxy' && ldapCfg.scope !== 'both') {
+                        return jsonRes(400, { error: 'Directory scope must include "proxy" to grant access to OAuth clients' });
+                    }
                     const rule = addLdapGroupToOauthClient(clientId, ldapConfigId, groupMatch);
                     if (!rule) return jsonRes(409, { error: 'Rule already exists or could not be created' });
                     const me = getAuthedAdmin(req);
@@ -3253,7 +3261,13 @@ const server = Bun.serve({
                     if (!profile) return jsonRes(404, { error: `Profile "${name}" not found` });
                     if (profile.authMode !== 'login') return jsonRes(400, { error: 'LDAP group rules only apply to profiles with authMode=login' });
                     const groups = listLdapGroupsForProfile(name);
-                    const directories = listLdapConfigs().map(c => ({ id: c.id, name: c.name }));
+                    // Only expose directories whose scope reaches proxy users
+                    // ('proxy' or 'both'). Admin-only directories cannot grant
+                    // access to proxy profiles, so listing them here just
+                    // creates rules that silently never match.
+                    const directories = listLdapConfigs()
+                        .filter(c => c.scope === 'proxy' || c.scope === 'both')
+                        .map(c => ({ id: c.id, name: c.name }));
                     return jsonRes(200, { groups, directories });
                 }
 
@@ -3269,7 +3283,11 @@ const server = Bun.serve({
                     const groupMatch = typeof body.groupMatch === 'string' ? body.groupMatch.trim() : '';
                     if (!ldapConfigId || isNaN(ldapConfigId)) return jsonRes(400, { error: 'ldapConfigId required' });
                     if (!groupMatch) return jsonRes(400, { error: 'groupMatch required (CN short form or full DN)' });
-                    if (!getLdapConfig(ldapConfigId)) return jsonRes(400, { error: 'Unknown ldapConfigId' });
+                    const ldapCfg = getLdapConfig(ldapConfigId);
+                    if (!ldapCfg) return jsonRes(400, { error: 'Unknown ldapConfigId' });
+                    if (ldapCfg.scope !== 'proxy' && ldapCfg.scope !== 'both') {
+                        return jsonRes(400, { error: 'Directory scope must include "proxy" to grant access to proxy profiles' });
+                    }
                     const rule = addLdapGroupToProfile(name, ldapConfigId, groupMatch);
                     if (!rule) return jsonRes(409, { error: 'Rule already exists or could not be created' });
                     const me = getAuthedAdmin(req);
