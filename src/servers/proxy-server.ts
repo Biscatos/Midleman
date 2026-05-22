@@ -130,6 +130,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
 
                     // 1) Local-first
                     let cred = await verifyProxyUserCredentials(username, password);
+                    let ldapDiagnostic: { reason?: string; detail?: string; configName?: string } | null = null;
 
                     // 2) Fallback to LDAP
                     if (!cred) {
@@ -186,11 +187,29 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                             cred = { user: shadow, totpSecret: shadow.totpEnabled ? getProxyUserTotpSecret(shadow.id) : null };
                         } else if (ldap.reason === 'server_error') {
                             return jsonRes(502, { error: 'Directory configuration error. Ask an admin to check the LDAP directory.' });
+                        } else {
+                            // Capture WHY ldap failed so the proxy.login.failed
+                            // audit entry below carries something actionable
+                            // instead of a generic 'bad_credentials'.
+                            ldapDiagnostic = {
+                                reason: ldap.reason,
+                                detail: 'detail' in ldap ? ldap.detail : undefined,
+                            };
                         }
                     }
 
                     if (!cred) {
-                        logAudit({ action: 'proxy.login.failed', actorUsername: username, details: { profile: profile.name, reason: 'bad_credentials' }, ip: clientIp, userAgent });
+                        logAudit({
+                            action: 'proxy.login.failed',
+                            actorUsername: username,
+                            details: {
+                                profile: profile.name,
+                                reason: ldapDiagnostic ? `ldap_${ldapDiagnostic.reason}` : 'local_password_mismatch',
+                                ldapDetail: ldapDiagnostic?.detail,
+                            },
+                            ip: clientIp,
+                            userAgent,
+                        });
                         recordFailedAttempt(rlKey);
                         recordFailedAttempt(ipKey);
                         return jsonRes(401, { error: 'Invalid username or password' });
