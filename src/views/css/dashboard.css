@@ -1595,6 +1595,10 @@ body.sidebar-collapsed .sidebar-link:hover[data-tooltip]::after { opacity: 1; }
   display: flex;
 }
 
+#confirmModal {
+  z-index: 1200;
+}
+
 .modal {
   background: var(--surface);
   border: 1px solid var(--border);
