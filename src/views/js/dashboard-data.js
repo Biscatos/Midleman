@@ -720,8 +720,13 @@ function renderProxyUsers(users) {
     const emailCell = u.email
       ? `<div style="font-size:12px;color:var(--text2)">${esc(u.email)}</div>`
       : `<span style="color:var(--text3)">—</span>`;
+    const canReset = !!u.email && (u.authSource || 'local') === 'local';
+    const resetBtn = canReset
+      ? `<button onclick="sendPasswordReset(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Email a password reset link to ${esc(u.email)}">Reset password</button>`
+      : '';
     const actionsCell = `<button onclick="openEditProxyUserModal(${u.id})" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Edit">Edit</button>
          <button onclick="openUserResourcesModal(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Manage resources">Resources</button>
+         ${resetBtn}
          ${u.totpEnabled
            ? `<button onclick="disable2fa(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--orange);font-size:11px;margin-right:4px" title="Disable 2FA (user will be notified by email)">Disable 2FA</button>`
            : (u.force2faSetup
@@ -837,6 +842,16 @@ async function force2fa(id, username) {
 
 // Backwards-compatible alias (in case any inline handler still references it).
 async function reset2fa(id, username) { return disable2fa(id, username); }
+
+async function sendPasswordReset(id, username) {
+  if (!(await showConfirm({ title: 'Enviar link de reposição de palavra-passe', message: 'Enviar email de reposição para "' + username + '"?', detail: 'O utilizador recebe um link único que expira em 60 minutos. A configuração de 2FA permanece inalterada.', confirmText: 'Enviar' }))) return;
+  try {
+    const res = await api('/admin/proxy-users/' + id + '/password-reset', { method: 'POST' });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) toast('Reset email sent to ' + (d.email || username));
+    else toast(d.error || 'Failed to send reset email', 'error');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
 
 // ─── Profile ↔ User Association ─────────────────────────────────────────────
 let _profileUsersProfile = null;

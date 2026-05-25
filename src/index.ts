@@ -18,11 +18,11 @@ import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption } from './auth/auth';
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, cleanupExpiredPasswordResetTokens, findResetCandidateByEmail } from './auth/auth';
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
 import { initConsentPages, listConsentPages, getConsentPage, createConsentPage, updateConsentPage, deleteConsentPage, findConsentPageOauthReferences } from './auth/consent-pages';
 import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin, runLdapSync, getLastLdapSyncReport } from './auth/ldap';
-import { initSmtp, getSmtpConfig, publicSmtpConfig, validateSmtpInput, saveSmtpConfig, deleteSmtpConfig, isSmtpConfigured, testSmtpConnection, sendMail, renderTestEmail, renderAdminInviteEmail, renderProxyInviteEmail, renderForce2faEmail, render2faDisabledEmail } from './core/smtp';
+import { initSmtp, getSmtpConfig, publicSmtpConfig, validateSmtpInput, saveSmtpConfig, deleteSmtpConfig, isSmtpConfigured, testSmtpConnection, sendMail, renderTestEmail, renderAdminInviteEmail, renderProxyInviteEmail, renderForce2faEmail, render2faDisabledEmail, renderPasswordResetEmail } from './core/smtp';
 import { initNpmSettings, getNpmSettings, publicNpmSettings, validateNpmInput, saveNpmSettings, deleteNpmSettings, isNpmEnabled, decryptNpmPassword } from './core/npm-settings';
 import { isNpmCertVolumePresent, startCertWatcher, onCertReloaded } from './certs/npm-cert-loader';
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
@@ -605,6 +605,133 @@ const server = Bun.serve({
                         'Set-Cookie': clearSessionCookie(config.auth.cookieName),
                     },
                 });
+            }
+
+            // ===== Public password reset =====
+            // POST /auth/forgot — self-service. Always responds 200 with a generic
+            // body. Whether the email exists, the user is LDAP, has no email, or
+            // SMTP failed are NEVER signalled back; audit log records the truth.
+            if (url.pathname === '/auth/forgot' && req.method === 'POST') {
+                const clientIp = reqClientIp(req);
+                const ua = req.headers.get('user-agent');
+                let body: any;
+                try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                const email = String(body.email || '').trim().toLowerCase();
+                // Generic response — used for every outcome below.
+                const ok = jsonRes(200, { status: 'ok', message: 'If an account exists for this address, a password reset email has been sent.' });
+
+                if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                    // No audit — there's no actor and no real lookup happened.
+                    return ok;
+                }
+
+                // Rate-limit per IP and per email separately. Failures only count
+                // against the IP bucket so a single attacker cannot lock out a
+                // victim's email.
+                const ipKey = `forgot:ip:${clientIp}`;
+                const emailKey = `forgot:em:${email}`;
+                if (!checkRateLimit(ipKey, MAX_ATTEMPTS_PER_IP) || !checkRateLimit(emailKey)) {
+                    logAudit({ action: 'password_reset.rate_limited', targetType: 'midleman', details: { email, ip: clientIp }, ip: clientIp, userAgent: ua });
+                    return ok;
+                }
+                recordFailedAttempt(ipKey);
+
+                const candidate = findResetCandidateByEmail(email);
+                if (!candidate) {
+                    logAudit({ action: 'password_reset.requested', targetType: 'midleman', details: { email, outcome: 'no_local_match' }, ip: clientIp, userAgent: ua });
+                    return ok;
+                }
+                if (!isSmtpConfigured()) {
+                    logAudit({ action: 'password_reset.requested', actorUserId: candidate.id, actorUsername: candidate.username, targetType: 'proxy_user', targetId: candidate.id, details: { email, outcome: 'smtp_unavailable' }, ip: clientIp, userAgent: ua });
+                    return ok;
+                }
+                const { token, expiresAt } = createPasswordResetToken(candidate.id, { createdBy: null, createdIp: clientIp });
+                const reqHost = req.headers.get('host') || `localhost:${config.port}`;
+                const protocol = req.headers.get('x-forwarded-proto') || 'http';
+                const resetUrl = `${protocol}://${reqHost}/auth/reset?token=${encodeURIComponent(token)}`;
+                const tpl = renderPasswordResetEmail({
+                    fullName: candidate.fullName,
+                    resetUrl,
+                    expiresInMinutes: 60,
+                    initiatedByAdmin: false,
+                });
+                const r = await sendMail({ to: candidate.email, subject: tpl.subject, html: tpl.html, text: tpl.text });
+                logAudit({
+                    actorUserId: candidate.id, actorUsername: candidate.username,
+                    action: 'password_reset.requested',
+                    targetType: 'proxy_user', targetId: candidate.id,
+                    details: { email, outcome: r.ok ? 'sent' : 'send_failed', emailError: r.error, expiresAt },
+                    ip: clientIp, userAgent: ua,
+                });
+                return ok;
+            }
+
+            // GET /auth/reset?token=… — serve the page (token validity is also
+            // re-checked on POST). The page itself renders an error state when
+            // invalid; we still respond 200 so the user gets a helpful message
+            // instead of a bare 4xx.
+            if (url.pathname === '/auth/reset' && req.method === 'GET') {
+                const token = url.searchParams.get('token') || '';
+                const info = getPasswordResetToken(token);
+                const now = new Date();
+                const expired = !info || !!info.usedAt || new Date(info.expiresAt) < now;
+                const escH = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                const pageHtml = readFileSync(resolve(import.meta.dir, 'views/password-reset.html'), 'utf-8');
+                const html = pageHtml
+                    .replace(/\{\{TOKEN\}\}/g, expired ? '' : escH(token))
+                    .replace(/\{\{INVALID_DISPLAY\}\}/g, expired ? 'block' : 'none')
+                    .replace(/\{\{FORM_DISPLAY\}\}/g, expired ? 'none' : 'block');
+                return new Response(html, { status: expired ? 410 : 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+            }
+
+            // POST /auth/reset — { token, password } → set the new password.
+            // Token is single-use and bound to one user_id. TOTP remains
+            // untouched: a fresh login (with 2FA if enrolled) is still required.
+            if (url.pathname === '/auth/reset' && req.method === 'POST') {
+                const clientIp = reqClientIp(req);
+                const ua = req.headers.get('user-agent');
+                let body: any;
+                try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                const token = String(body.token || '').trim();
+                const password = String(body.password || '');
+                if (!token) return jsonRes(400, { error: 'Missing token.' });
+                if (!password || password.length < 8) return jsonRes(400, { error: 'Password must be at least 8 characters.' });
+
+                // Rate-limit by IP to slow brute-forcing the token space.
+                const ipKey = `reset:ip:${clientIp}`;
+                if (!checkRateLimit(ipKey, MAX_ATTEMPTS_PER_IP)) {
+                    return jsonRes(429, { error: 'Too many attempts. Try again in 15 minutes.' });
+                }
+
+                const userId = consumePasswordResetToken(token);
+                if (!userId) {
+                    recordFailedAttempt(ipKey);
+                    logAudit({ action: 'password_reset.failed', targetType: 'midleman', details: { reason: 'invalid_or_expired_token' }, ip: clientIp, userAgent: ua });
+                    return jsonRes(410, { error: 'This reset link is invalid, expired, or already used. Request a new one.' });
+                }
+                const target = getProxyUser(userId);
+                if (!target) {
+                    logAudit({ action: 'password_reset.failed', targetType: 'proxy_user', targetId: userId, details: { reason: 'user_missing' }, ip: clientIp, userAgent: ua });
+                    return jsonRes(410, { error: 'Account no longer exists.' });
+                }
+                if ((target.authSource || 'local') !== 'local') {
+                    // Defensive: token shouldn't have been issued for LDAP users.
+                    logAudit({ action: 'password_reset.failed', actorUserId: userId, actorUsername: target.username, targetType: 'proxy_user', targetId: userId, details: { reason: 'ldap_user' }, ip: clientIp, userAgent: ua });
+                    return jsonRes(409, { error: 'This account is managed by a directory and cannot be reset here.' });
+                }
+                const updated = await updateProxyUserPassword(userId, password);
+                if (!updated) {
+                    logAudit({ action: 'password_reset.failed', actorUserId: userId, actorUsername: target.username, targetType: 'proxy_user', targetId: userId, details: { reason: 'update_failed' }, ip: clientIp, userAgent: ua });
+                    return jsonRes(500, { error: 'Failed to update password.' });
+                }
+                logAudit({
+                    actorUserId: userId, actorUsername: target.username,
+                    action: 'password_reset.completed',
+                    targetType: 'proxy_user', targetId: userId,
+                    details: { username: target.username },
+                    ip: clientIp, userAgent: ua,
+                });
+                return jsonRes(200, { status: 'ok' });
             }
 
             // Health check
@@ -1868,6 +1995,43 @@ const server = Bun.serve({
                         }
                     }
                     return jsonRes(200, { status: 'updated' });
+                }
+
+                // POST /admin/proxy-users/:id/password-reset — issue + email a reset link
+                if (url.pathname.match(/^\/admin\/proxy-users\/\d+\/password-reset$/) && req.method === 'POST') {
+                    const userId = parseInt(url.pathname.split('/')[3], 10);
+                    const target = getProxyUser(userId);
+                    if (!target) return jsonRes(404, { error: 'User not found' });
+                    if ((target.authSource || 'local') !== 'local') {
+                        return jsonRes(409, { error: 'This user is managed by a directory (LDAP) and cannot have a local password reset.' });
+                    }
+                    if (!target.email) {
+                        return jsonRes(409, { error: 'User has no email address. Set one before sending a reset link.' });
+                    }
+                    if (!isSmtpConfigured()) {
+                        return jsonRes(503, { error: 'SMTP is not configured. Configure it before sending reset emails.' });
+                    }
+                    const me = getAuthedAdmin(req);
+                    const { token, expiresAt } = createPasswordResetToken(userId, { createdBy: me?.id ?? null, createdIp: reqClientIp(req) });
+                    const reqHost = req.headers.get('host') || `localhost:${config.port}`;
+                    const protocol = req.headers.get('x-forwarded-proto') || 'http';
+                    const resetUrl = `${protocol}://${reqHost}/auth/reset?token=${encodeURIComponent(token)}`;
+                    const tpl = renderPasswordResetEmail({
+                        fullName: target.fullName,
+                        resetUrl,
+                        expiresInMinutes: 60,
+                        initiatedByAdmin: true,
+                    });
+                    const r = await sendMail({ to: target.email, subject: tpl.subject, html: tpl.html, text: tpl.text });
+                    logAudit({
+                        actorUserId: me?.id, actorUsername: me?.username,
+                        action: 'password_reset.admin_sent',
+                        targetType: 'proxy_user', targetId: userId,
+                        details: { username: target.username, email: target.email, emailSent: r.ok, emailError: r.error, expiresAt },
+                        ip: reqClientIp(req), userAgent: req.headers.get('user-agent'),
+                    });
+                    if (!r.ok) return jsonRes(502, { error: r.error || 'Failed to send email.' });
+                    return jsonRes(200, { status: 'sent', email: target.email, expiresAt });
                 }
 
                 // DELETE /admin/proxy-users/:id — delete a global proxy user

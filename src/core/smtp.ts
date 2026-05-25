@@ -772,6 +772,48 @@ ${footerText}`.trim();
     return { subject, html, text };
 }
 
+export interface PasswordResetEmailParams {
+    fullName?: string;
+    resetUrl: string;
+    expiresInMinutes: number;
+    initiatedByAdmin: boolean;
+}
+
+export function renderPasswordResetEmail(p: PasswordResetEmailParams): { subject: string; html: string; text: string } {
+    const brandName = getInviteBrandName();
+    const subject = appendBrand('Password reset', brandName);
+    const hello = p.fullName ? `Hi ${p.fullName},` : 'Hi,';
+    const footerHtml = brandName ? `<p style="margin:16px 0 0;font-size:11px;color:#a1a1aa;text-align:center;letter-spacing:0.08em;text-transform:uppercase">${escHtml(brandName)}</p>` : '';
+    const footerText = brandName ? `\n— ${brandName}` : '';
+    const lead = p.initiatedByAdmin
+        ? 'An administrator has issued a password reset for your account. Click the button below to choose a new password.'
+        : 'We received a request to reset your password. Click the button below to choose a new password. If you did not request this, you can safely ignore this email.';
+    const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 16px">
+<tr><td align="center">
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border-radius:12px;padding:32px;box-shadow:0 2px 12px rgba(0,0,0,0.06)">
+<tr><td>
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:500;color:#0f1015">Password reset</h1>
+<p style="margin:0 0 14px;font-size:14px;color:#52525b;line-height:1.6">${escHtml(hello)}</p>
+<p style="margin:0 0 20px;font-size:14px;color:#52525b;line-height:1.6">${lead}</p>
+<p style="margin:24px 0"><a href="${escHtml(p.resetUrl)}" style="display:inline-block;background:#0078d4;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600">Choose a new password</a></p>
+<p style="margin:0 0 4px;font-size:12px;color:#71717a">Or copy this link:</p>
+<p style="margin:0;font-size:12px;color:#52525b;word-break:break-all"><a href="${escHtml(p.resetUrl)}" style="color:#0078d4">${escHtml(p.resetUrl)}</a></p>
+<p style="margin:20px 0 0;font-size:12px;color:#71717a">This link expires in ${p.expiresInMinutes} minute${p.expiresInMinutes === 1 ? '' : 's'} and can only be used once. Your existing two-factor authentication settings remain unchanged.</p>
+</td></tr></table>
+${footerHtml}
+</td></tr></table></body></html>`;
+    const text = `${hello}
+
+${lead}
+
+Reset your password: ${p.resetUrl}
+
+This link expires in ${p.expiresInMinutes} minute${p.expiresInMinutes === 1 ? '' : 's'} and can only be used once. Your existing two-factor authentication settings remain unchanged.
+${footerText}`.trim();
+    return { subject, html, text };
+}
+
 export function renderTestEmail(): { subject: string; html: string; text: string } {
     return {
         subject: 'Midleman SMTP — Test',

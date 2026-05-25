@@ -122,6 +122,19 @@ CREATE TABLE IF NOT EXISTS admin_invites (
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    token_hash  TEXT PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES proxy_users(id) ON DELETE CASCADE,
+    expires_at  TEXT NOT NULL,
+    used_at     TEXT,
+    created_by  INTEGER,
+    created_ip  TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_password_reset_expires ON password_reset_tokens(expires_at);
+
 CREATE TABLE IF NOT EXISTS ldap_adoption_events (
     id                     INTEGER PRIMARY KEY AUTOINCREMENT,
     proxy_user_id          INTEGER NOT NULL REFERENCES proxy_users(id) ON DELETE CASCADE,
@@ -165,7 +178,9 @@ export function initAuth(dataDir: string, maxAge: number = 86400): void {
         ensureProxyUsersColumns(db);
 
         cleanExpiredSessions();
+        cleanupExpiredPasswordResetTokens();
         setInterval(cleanExpiredSessions, 60 * 60 * 1000);
+        setInterval(cleanupExpiredPasswordResetTokens, 6 * 60 * 60 * 1000);
         const adminCount = (db.prepare("SELECT COUNT(*) AS c FROM proxy_users WHERE roles LIKE '%admin%'").get() as any)?.c || 0;
         const proxyCount = (db.prepare("SELECT COUNT(*) AS c FROM proxy_users").get() as any)?.c || 0;
         console.log(`🔐 Auth: ${proxyCount} user(s) total, ${adminCount} with admin role`);
@@ -2084,4 +2099,77 @@ export function revokeAdminInvite(token: string): boolean {
     if (!db) return false;
     const result = db.prepare('DELETE FROM admin_invites WHERE token = $t AND used_at IS NULL').run({ $t: token });
     return result.changes > 0;
+}
+
+// ─── Password reset tokens ──────────────────────────────────────────────────
+
+const PASSWORD_RESET_TTL_MINUTES = 60;
+
+function hashResetToken(rawToken: string): string {
+    return createHash('sha256').update(rawToken).digest('hex');
+}
+
+export interface PasswordResetTokenInfo {
+    userId: number;
+    expiresAt: string;
+    usedAt: string | null;
+}
+
+/** Generate a single-use reset token. Returns the RAW token (only time it
+ *  exists in memory) — only the SHA-256 hash is stored. */
+export function createPasswordResetToken(userId: number, opts?: { createdBy?: number | null; createdIp?: string | null }): { token: string; expiresAt: string } {
+    if (!db) throw new Error('DB not ready');
+    // Invalidate any previously-issued unused tokens for this user so the
+    // newest link is always the only one that works.
+    db.prepare("UPDATE password_reset_tokens SET used_at = datetime('now') WHERE user_id = $u AND used_at IS NULL")
+        .run({ $u: userId });
+    const raw = crypto.randomUUID() + crypto.randomUUID().replace(/-/g, '');
+    const hash = hashResetToken(raw);
+    const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000).toISOString();
+    db.prepare('INSERT INTO password_reset_tokens (token_hash, user_id, expires_at, created_by, created_ip) VALUES ($h, $u, $e, $cb, $ip)')
+        .run({ $h: hash, $u: userId, $e: expiresAt, $cb: opts?.createdBy ?? null, $ip: opts?.createdIp ?? null });
+    return { token: raw, expiresAt };
+}
+
+/** Look up token by raw value. Does NOT consume it — for the GET page. */
+export function getPasswordResetToken(rawToken: string): PasswordResetTokenInfo | null {
+    if (!db || !rawToken) return null;
+    const hash = hashResetToken(rawToken);
+    const row = db.prepare('SELECT user_id, expires_at, used_at FROM password_reset_tokens WHERE token_hash = $h').get({ $h: hash }) as any;
+    if (!row) return null;
+    return { userId: row.user_id, expiresAt: row.expires_at, usedAt: row.used_at };
+}
+
+/** Atomically mark the token used. Returns the user_id if the token was valid
+ *  and previously unused; null otherwise. */
+export function consumePasswordResetToken(rawToken: string): number | null {
+    if (!db || !rawToken) return null;
+    const hash = hashResetToken(rawToken);
+    const now = new Date().toISOString();
+    const result = db.prepare(
+        "UPDATE password_reset_tokens SET used_at = $now WHERE token_hash = $h AND used_at IS NULL AND expires_at > $now RETURNING user_id"
+    ).get({ $h: hash, $now: now }) as any;
+    if (!result) return null;
+    return result.user_id as number;
+}
+
+/** Sweep expired/used tokens older than 7 days. Called from cleanup loop. */
+export function cleanupExpiredPasswordResetTokens(): void {
+    if (!db) return;
+    try {
+        const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        db.prepare("DELETE FROM password_reset_tokens WHERE expires_at < $c OR (used_at IS NOT NULL AND used_at < $c)").run({ $c: cutoff });
+    } catch {}
+}
+
+/** Look up a local (non-LDAP, non-shadow) proxy_user by email. Returns null
+ *  if no match OR if the matched user is LDAP/shadow (we cannot reset their
+ *  password). Callers should NOT distinguish these cases to the requester. */
+export function findResetCandidateByEmail(email: string): { id: number; username: string; fullName: string; email: string } | null {
+    if (!db || !email) return null;
+    const row = db.prepare(
+        "SELECT id, username, full_name, email, auth_source FROM proxy_users WHERE email = $e AND email != '' AND auth_source = 'local'"
+    ).get({ $e: email.toLowerCase().trim() }) as any;
+    if (!row) return null;
+    return { id: row.id, username: row.username, fullName: row.full_name || '', email: row.email };
 }

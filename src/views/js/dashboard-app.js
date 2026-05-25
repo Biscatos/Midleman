@@ -296,6 +296,34 @@ function loginBackToStep1() {
   document.getElementById('loginUser').focus();
 }
 
+async function doForgotPassword() {
+  const userField = document.getElementById('loginUser');
+  const email = (userField?.value || '').trim();
+  if (!email || email.indexOf('@') === -1) {
+    showAuthError('loginError', 'Enter the email address associated with your account, then click "Forgot password?".');
+    return;
+  }
+  hideAuthError('loginError');
+  try {
+    const res = await fetch('/auth/forgot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json().catch(() => ({}));
+    showAuthError('loginError', data.message || 'If an account exists for this address, a password reset email has been sent.');
+    const el = document.getElementById('loginError');
+    if (el) { el.style.background = 'var(--ok-bg, rgba(0,184,92,0.08))'; el.style.borderColor = 'var(--ok-bdr, rgba(0,184,92,0.2))'; el.style.color = 'var(--ok-text, #00b85c)'; }
+  } catch {
+    showAuthError('loginError', 'Network error. Try again.');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const link = document.getElementById('loginForgotLink');
+  if (link) link.addEventListener('click', e => { e.preventDefault(); doForgotPassword(); });
+});
+
 function openLogoutModal() {
   const m = document.getElementById('logoutModal');
   if (!m) return;

@@ -362,6 +362,7 @@
         <input type="password" id="loginPass" autocomplete="current-password">
       </div>
       <button class="btn-primary" id="loginBtn" onclick="doStep1()"></button>
+      <div style="margin-top:14px;text-align:center;font-size:12.5px"><a href="#" id="forgotLink" onclick="doForgot(event)" style="color:#71717a;text-decoration:none"></a></div>
     </div>
 
     <div class="step" id="step2verify">
@@ -466,6 +467,10 @@
         errLogin: 'Login failed.', errConn: 'Connection error. Please try again.',
         errTotp: 'Enter the 6-digit code.', errTotpFail: 'Verification failed.', errSetupFail: 'Setup failed.',
         errSetupCode: 'Enter the 6-digit code from your authenticator.',
+        forgotLink: 'Forgot password?',
+        forgotPrompt: 'Enter your email address',
+        forgotSent: 'If an account exists for this address, a password reset email has been sent.',
+        forgotInvalidEmail: 'Enter a valid email address.',
       },
       pt: {
         signIn: 'Entrar', verification: 'Verificação', setup2fa: 'Configurar 2FA',
@@ -480,6 +485,10 @@
         errLogin: 'Falha no início de sessão.', errConn: 'Erro de ligação. Tente novamente.',
         errTotp: 'Introduza o código de 6 dígitos.', errTotpFail: 'Verificação falhada.', errSetupFail: 'Configuração falhada.',
         errSetupCode: 'Introduza o código de 6 dígitos do seu autenticador.',
+        forgotLink: 'Esqueceu a palavra-passe?',
+        forgotPrompt: 'Introduza o seu endereço de email',
+        forgotSent: 'Se existir uma conta para este endereço, foi enviado um email de reposição de palavra-passe.',
+        forgotInvalidEmail: 'Introduza um endereço de email válido.',
       },
     }[lang];
 
@@ -502,8 +511,22 @@
       document.querySelectorAll('.btn-back').forEach(b => b.textContent = t.back);
       document.getElementById('subtitleVerify').textContent = t.subtitleVerify;
       document.getElementById('subtitleSetup').textContent = t.subtitleSetup;
+      const fl = document.getElementById('forgotLink'); if (fl) fl.textContent = t.forgotLink;
     }
     applyLang();
+
+    async function doForgot(ev) {
+      if (ev) ev.preventDefault();
+      const cur = (document.getElementById('loginUser').value || '').trim();
+      const email = (cur.indexOf('@') !== -1 ? cur : prompt(t.forgotPrompt) || '').trim();
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showError('loginError', t.forgotInvalidEmail); return; }
+      clearErrors();
+      try {
+        await fetch('/auth/forgot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+      } catch {}
+      const el = document.getElementById('loginError');
+      if (el) { el.textContent = t.forgotSent; el.classList.add('visible'); el.style.color = '#00b85c'; el.style.background = 'rgba(0,184,92,0.08)'; el.style.borderColor = 'rgba(0,184,92,0.2)'; }
+    }
 
     document.getElementById('loginPass').addEventListener('keydown', e => { if (e.key === 'Enter') doStep1(); });
     document.getElementById('totpVerifyCode').addEventListener('keydown', e => { if (e.key === 'Enter') doTotpVerify(); });

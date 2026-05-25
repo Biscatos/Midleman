@@ -142,6 +142,7 @@
       <input id="password" type="password" autocomplete="current-password" required>
 
       <button id="loginBtn" class="primary" type="button">Sign in & authorize</button>
+      <div style="margin-top:14px;text-align:center;font-size:12.5px"><a href="#" id="forgotLink" style="color:var(--text2);text-decoration:none"></a></div>
       <div id="err1" class="err hidden"></div>
     </div>
 
@@ -203,6 +204,10 @@
         btnSettingUp:    'Verifying…',
         errSetupCode:    'Enter the 6-digit code.',
         errSetupFail:    'Setup failed. Scan the QR and try again.',
+        forgotLink:      'Forgot password?',
+        forgotPrompt:    'Enter your email address',
+        forgotSent:      'If an account exists for this address, a password reset email has been sent.',
+        forgotInvalidEmail: 'Enter a valid email address.',
       },
       pt: {
         pageTitle:       'Entrar',
@@ -231,6 +236,10 @@
         btnSettingUp:    'A verificar…',
         errSetupCode:    'Introduza o código de 6 dígitos.',
         errSetupFail:    'Configuração falhou. Digitalize o QR e tente novamente.',
+        forgotLink:      'Esqueceu a palavra-passe?',
+        forgotPrompt:    'Introduza o seu endereço de email',
+        forgotSent:      'Se existir uma conta para este endereço, foi enviado um email de reposição de palavra-passe.',
+        forgotInvalidEmail: 'Introduza um endereço de email válido.',
       },
     };
 
@@ -262,6 +271,7 @@
       document.getElementById('labelSetupTotp').textContent = T.labelSetupTotp;
       setupBtn.textContent = T.btnSetup;
       setupBackBtn.textContent = T.btnBack;
+      const fl = document.getElementById('forgotLink'); if (fl) fl.textContent = T.forgotLink;
       const ca = document.getElementById('consentAccept');
       if (ca) ca.textContent = T.consentAccept;
     }
@@ -446,11 +456,29 @@
       }
     }
 
+    async function doForgot(ev) {
+      if (ev) ev.preventDefault();
+      hideErr(err1);
+      const cur = (usernameEl.value || '').trim();
+      const email = (cur.indexOf('@') !== -1 ? cur : (prompt(T.forgotPrompt) || '')).trim();
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showErr(err1, T.forgotInvalidEmail); return; }
+      try {
+        await fetch('/auth/forgot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+      } catch {}
+      err1.textContent = T.forgotSent;
+      err1.classList.remove('hidden');
+      err1.style.color = '#00b85c';
+      err1.style.background = 'rgba(0,184,92,0.08)';
+      err1.style.borderColor = 'rgba(0,184,92,0.2)';
+    }
+
     loginBtn.addEventListener('click', doLogin);
     totpBtn.addEventListener('click', doTotp);
     backBtn.addEventListener('click', showStep1);
     setupBtn.addEventListener('click', doSetup);
     setupBackBtn.addEventListener('click', showStep1);
+    const _fl = document.getElementById('forgotLink');
+    if (_fl) _fl.addEventListener('click', doForgot);
     passwordEl.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
     usernameEl.addEventListener('keydown', e => { if (e.key === 'Enter') passwordEl.focus(); });
     totpEl.addEventListener('keydown', e => { if (e.key === 'Enter') doTotp(); });
