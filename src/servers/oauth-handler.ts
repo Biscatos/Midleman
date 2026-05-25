@@ -22,8 +22,10 @@ import {
     checkRateLimit,
     recordFailedAttempt,
     MAX_ATTEMPTS_PER_IP,
+    generateTotpSecret, setupProxyUserTotp,
 } from '../auth/auth';
 import { tryLdapLogin } from '../auth/ldap';
+import QRCode from 'qrcode';
 
 /** Revoke OAuth refresh tokens for any client this user no longer has access to. */
 function reconcileLdapAllowList(userId: number, ldapConfigId: number, freshGroups: string[]): { revokedClients: string[] } {
@@ -135,14 +137,15 @@ interface LoginChallenge {
     totpSecret: string;
     authRequestId: string;
     expiresAt: number;
+    needsSetup?: boolean;
 }
 
 const loginChallenges = new Map<string, LoginChallenge>();
 const LOGIN_CHALLENGE_TTL = 5 * 60 * 1000;
 
-function createOauthLoginChallenge(userId: number, totpSecret: string, authRequestId: string): string {
+function createOauthLoginChallenge(userId: number, totpSecret: string, authRequestId: string, needsSetup = false): string {
     const token = crypto.randomUUID();
-    loginChallenges.set(token, { userId, totpSecret, authRequestId, expiresAt: Date.now() + LOGIN_CHALLENGE_TTL });
+    loginChallenges.set(token, { userId, totpSecret, authRequestId, expiresAt: Date.now() + LOGIN_CHALLENGE_TTL, needsSetup });
     if (loginChallenges.size > 5000) {
         const oldest = loginChallenges.keys().next().value;
         if (oldest) loginChallenges.delete(oldest);
@@ -508,6 +511,34 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
         });
     }
 
+    // Non-admin user flagged "Pending setup" by an admin → force TOTP enrolment now.
+    // Admins are handled by the explicit isAdmin block above and must enrol via dashboard.
+    if (!isAdmin && cred.user.force2faSetup) {
+        const totp = generateTotpSecret(cred.user.username);
+        const qrDataUrl = await QRCode.toDataURL(totp.otpauthUrl, { width: 200, margin: 2 }).catch(() => null);
+        const newAuthRequestId = storeAuthRequest(authReq);
+        const challengeToken = createOauthLoginChallenge(cred.user.id, totp.secret, newAuthRequestId, true);
+        logAudit({
+            action: 'oauth.totp.setup_required',
+            actorUserId: cred.user.id,
+            actorUsername: cred.user.username,
+            targetType: 'oauth_client',
+            targetId: authReq.clientId,
+            details: { clientId: authReq.clientId, reason: 'force_2fa_setup' },
+            ip: clientIp,
+            userAgent: req.headers.get('user-agent') || undefined,
+        });
+        return new Response(JSON.stringify({
+            status: 'totp_setup',
+            challengeToken,
+            totpSecret: totp.secret,
+            qrDataUrl,
+        }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+        });
+    }
+
     if (isAdmin) {
         // Defensive: an admin should never reach this branch because the check
         // above already requires TOTP, but emit explicit audit if we do.
@@ -531,6 +562,7 @@ export async function handleOauthTotp(req: Request): Promise<Response> {
 
     const challengeToken = (body.challengeToken || '').trim();
     const totpCode = (body.totpCode || '').trim();
+    const setupSecret = (body.totpSecret || '').trim();
     if (!challengeToken || !totpCode) {
         return jsonError(400, 'invalid_request', 'Missing challengeToken or totpCode');
     }
@@ -545,6 +577,13 @@ export async function handleOauthTotp(req: Request): Promise<Response> {
     const authReq = consumeAuthRequest(challenge.authRequestId);
     if (!authReq) {
         return jsonError(400, 'invalid_request', 'Login session expired. Restart the sign-in flow.');
+    }
+
+    // In setup mode, the secret travels in the body so the client can re-show the
+    // QR if verification fails. Bind it to the challenge's secret to prevent a
+    // caller from swapping in their own.
+    if (challenge.needsSetup && setupSecret && setupSecret !== challenge.totpSecret) {
+        return jsonError(400, 'invalid_request', 'TOTP secret mismatch. Restart the sign-in flow.');
     }
 
     // TOTP brute-force protection: rate-limit by userId (only counts failures).
@@ -571,17 +610,37 @@ export async function handleOauthTotp(req: Request): Promise<Response> {
             actorUsername: totpUser?.username,
             targetType: 'oauth_client',
             targetId: authReq.clientId,
-            details: { clientId: authReq.clientId },
+            details: { clientId: authReq.clientId, reason: challenge.needsSetup ? 'bad_totp_setup' : 'bad_totp' },
             ip: clientIp,
             userAgent: req.headers.get('user-agent') || undefined,
         });
         recordFailedAttempt(totpRlKey);
-        // Re-issue challenge so user can retry the code.
+        // Re-issue challenge so user can retry the code. Preserve setup mode so
+        // the front-end can keep the QR visible.
         const newAuthRequestId = storeAuthRequest(authReq);
-        const newChallenge = createOauthLoginChallenge(challenge.userId, challenge.totpSecret, newAuthRequestId);
-        return new Response(JSON.stringify({ error: 'Invalid authenticator code', challengeToken: newChallenge }), {
+        const newChallenge = createOauthLoginChallenge(challenge.userId, challenge.totpSecret, newAuthRequestId, challenge.needsSetup);
+        const errMsg = challenge.needsSetup
+            ? 'Invalid code. Scan the QR code and try again.'
+            : 'Invalid authenticator code';
+        return new Response(JSON.stringify({ error: errMsg, challengeToken: newChallenge }), {
             status: 401,
             headers: { 'Content-Type': 'application/json' },
+        });
+    }
+
+    // First-time setup: persist the freshly-enrolled secret and clear force_2fa_setup.
+    if (challenge.needsSetup) {
+        setupProxyUserTotp(challenge.userId, challenge.totpSecret);
+        const enrolUser = getProxyUser(challenge.userId);
+        logAudit({
+            action: 'oauth.totp.enrolled',
+            actorUserId: challenge.userId,
+            actorUsername: enrolUser?.username,
+            targetType: 'oauth_client',
+            targetId: authReq.clientId,
+            details: { clientId: authReq.clientId, via: 'oauth_login' },
+            ip: clientIp,
+            userAgent: req.headers.get('user-agent') || undefined,
         });
     }
 

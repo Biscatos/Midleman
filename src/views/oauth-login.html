@@ -155,6 +155,18 @@
       <div id="err2" class="err hidden"></div>
     </div>
 
+    <!-- Step 2b: TOTP first-time setup (admin flagged "Pending setup") -->
+    <div id="stepSetup" class="hidden">
+      <p class="sub" id="setupIntro" style="margin-bottom:14px">Scan this QR code with your authenticator app, then enter the 6-digit code to finish setup.</p>
+      <div style="display:flex;justify-content:center;margin:8px 0 12px"><img id="setupQr" alt="TOTP QR" style="width:180px;height:180px;background:#fff;padding:6px;border-radius:6px"></div>
+      <div style="text-align:center;font-family:monospace;font-size:12px;color:var(--text2);word-break:break-all;margin-bottom:6px" id="setupSecret"></div>
+      <label id="labelSetupTotp" for="setupTotp">6-digit code</label>
+      <input id="setupTotp" type="text" class="totp-input" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code">
+      <button id="setupBtn" class="primary" type="button">Verify & finish setup</button>
+      <button id="setupBackBtn" class="back" type="button">Back</button>
+      <div id="errSetup" class="err hidden"></div>
+    </div>
+
   </div>
 
   <script>
@@ -185,6 +197,12 @@
         errVerify:       'Verification failed.',
         expiredTitle:    'Session expired',
         expiredMsg:      'Your sign-in session has expired. Please close this tab and start the sign-in process again from the application.',
+        setupIntro:      'Two-factor authentication setup is required. Scan the QR code with your authenticator app, then enter the 6-digit code to finish.',
+        labelSetupTotp:  '6-digit code',
+        btnSetup:        'Verify & finish setup',
+        btnSettingUp:    'Verifying…',
+        errSetupCode:    'Enter the 6-digit code.',
+        errSetupFail:    'Setup failed. Scan the QR and try again.',
       },
       pt: {
         pageTitle:       'Entrar',
@@ -207,6 +225,12 @@
         errVerify:       'Falha na verificação.',
         expiredTitle:    'Sessão expirada',
         expiredMsg:      'A sua sessão de início de sessão expirou. Feche este separador e inicie o processo de início de sessão novamente na aplicação.',
+        setupIntro:      'É necessário configurar a autenticação de dois fatores. Digitalize o código QR com a sua aplicação autenticadora e introduza o código de 6 dígitos para concluir.',
+        labelSetupTotp:  'Código de 6 dígitos',
+        btnSetup:        'Verificar e concluir configuração',
+        btnSettingUp:    'A verificar…',
+        errSetupCode:    'Introduza o código de 6 dígitos.',
+        errSetupFail:    'Configuração falhou. Digitalize o QR e tente novamente.',
       },
     };
 
@@ -234,6 +258,10 @@
       document.getElementById('expiredTitle').textContent = T.expiredTitle;
       document.getElementById('expiredMsg').textContent   = T.expiredMsg;
       document.getElementById('btnClose').textContent     = T.btnClose;
+      document.getElementById('setupIntro').textContent   = T.setupIntro;
+      document.getElementById('labelSetupTotp').textContent = T.labelSetupTotp;
+      setupBtn.textContent = T.btnSetup;
+      setupBackBtn.textContent = T.btnBack;
       const ca = document.getElementById('consentAccept');
       if (ca) ca.textContent = T.consentAccept;
     }
@@ -242,15 +270,21 @@
 
     const step1 = document.getElementById('step1');
     const step2 = document.getElementById('step2');
+    const stepSetup = document.getElementById('stepSetup');
     const stepExpired = document.getElementById('stepExpired');
     const err1 = document.getElementById('err1');
     const err2 = document.getElementById('err2');
+    const errSetup = document.getElementById('errSetup');
     const loginBtn = document.getElementById('loginBtn');
     const totpBtn = document.getElementById('totpBtn');
     const backBtn = document.getElementById('backBtn');
+    const setupBtn = document.getElementById('setupBtn');
+    const setupBackBtn = document.getElementById('setupBackBtn');
     const usernameEl = document.getElementById('username');
     const passwordEl = document.getElementById('password');
     const totpEl = document.getElementById('totp');
+    const setupTotpEl = document.getElementById('setupTotp');
+    let setupSecret = '';
 
     applyStrings();
 
@@ -260,6 +294,7 @@
     function showExpired(title, msg) {
       step1.classList.add('hidden');
       step2.classList.add('hidden');
+      stepSetup.classList.add('hidden');
       stepExpired.classList.remove('hidden');
       if (title) document.getElementById('expiredTitle').textContent = title;
       if (msg)   document.getElementById('expiredMsg').textContent = msg;
@@ -272,19 +307,32 @@
 
     function showStep1() {
       step2.classList.add('hidden');
+      stepSetup.classList.add('hidden');
       stepExpired.classList.add('hidden');
       step1.classList.remove('hidden');
       hideErr(err2);
+      hideErr(errSetup);
       totpEl.value = '';
+      setupTotpEl.value = '';
       challengeToken = '';
+      setupSecret = '';
       usernameEl.focus();
     }
     function showStep2() {
       step1.classList.add('hidden');
+      stepSetup.classList.add('hidden');
       step2.classList.remove('hidden');
       hideErr(err1);
       totpEl.value = '';
       totpEl.focus();
+    }
+    function showStepSetup() {
+      step1.classList.add('hidden');
+      step2.classList.add('hidden');
+      stepSetup.classList.remove('hidden');
+      hideErr(err1);
+      setupTotpEl.value = '';
+      setupTotpEl.focus();
     }
 
     async function doLogin() {
@@ -311,6 +359,14 @@
         if (res.ok && data.status === 'totp_required') {
           challengeToken = data.challengeToken;
           showStep2();
+          return;
+        }
+        if (res.ok && data.status === 'totp_setup') {
+          challengeToken = data.challengeToken;
+          setupSecret = data.totpSecret || '';
+          document.getElementById('setupQr').src = data.qrDataUrl || '';
+          document.getElementById('setupSecret').textContent = setupSecret;
+          showStepSetup();
           return;
         }
         if (isSessionExpiredError(data)) {
@@ -358,12 +414,47 @@
       }
     }
 
+    async function doSetup() {
+      hideErr(errSetup);
+      const code = setupTotpEl.value.trim();
+      if (!code || code.length !== 6) { showErr(errSetup, T.errSetupCode); return; }
+
+      setupBtn.disabled = true; setupBtn.textContent = T.btnSettingUp;
+      try {
+        const res = await fetch('/oauth/totp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ challengeToken, totpCode: code, totpSecret: setupSecret }),
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && data.status === 'ok' && data.redirect) {
+          window.location.href = data.redirect;
+          return;
+        }
+        if (data.challengeToken) challengeToken = data.challengeToken;
+        if (isSessionExpiredError(data)) {
+          showExpired(T.expiredTitle, T.expiredMsg);
+          return;
+        }
+        showErr(errSetup, data.error || data.error_description || T.errSetupFail);
+      } catch {
+        showErr(errSetup, T.errNetwork);
+      } finally {
+        setupBtn.disabled = false;
+        setupBtn.textContent = T.btnSetup;
+      }
+    }
+
     loginBtn.addEventListener('click', doLogin);
     totpBtn.addEventListener('click', doTotp);
     backBtn.addEventListener('click', showStep1);
+    setupBtn.addEventListener('click', doSetup);
+    setupBackBtn.addEventListener('click', showStep1);
     passwordEl.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
     usernameEl.addEventListener('keydown', e => { if (e.key === 'Enter') passwordEl.focus(); });
     totpEl.addEventListener('keydown', e => { if (e.key === 'Enter') doTotp(); });
+    setupTotpEl.addEventListener('keydown', e => { if (e.key === 'Enter') doSetup(); });
 
     (function initConsent() {
       const modal = document.getElementById('consentModal');
