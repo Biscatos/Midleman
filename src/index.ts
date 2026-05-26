@@ -1955,12 +1955,18 @@ const server = Bun.serve({
                     if (body.password !== undefined) {
                         return jsonRes(400, { error: 'Direct password updates are not allowed. Send a password reset link instead.' });
                     }
-                    if (typeof body.fullName === 'string' || typeof body.email === 'string') {
+                    if (typeof body.fullName === 'string' || typeof body.email === 'string' || typeof body.phoneNumber === 'string') {
                         const current = getProxyUser(userId);
                         if (!current) return jsonRes(404, { error: 'User not found' });
                         const email = (body.email ?? current.email).trim().toLowerCase();
                         if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonRes(400, { error: 'Invalid email address' });
-                        updateProxyUserInfo(userId, (body.fullName ?? current.fullName).trim(), email);
+                        let phoneNumber: string | undefined;
+                        if (typeof body.phoneNumber === 'string') {
+                            const raw = body.phoneNumber.trim();
+                            if (raw && !/^\+?[0-9 ()-]{6,20}$/.test(raw)) return jsonRes(400, { error: 'Invalid phone number' });
+                            phoneNumber = raw;
+                        }
+                        updateProxyUserInfo(userId, (body.fullName ?? current.fullName).trim(), email, phoneNumber);
                     }
                     if (body.reset2fa) {
                         const target = getProxyUser(userId);

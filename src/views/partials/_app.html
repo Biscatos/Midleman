@@ -1460,38 +1460,57 @@
 
     <!-- ═══ NOTIF ADD MEMBER MODAL ═══ -->
     <div id="notifMemberModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
-      <div style="max-width:560px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+      <div style="max-width:640px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column;max-height:90vh">
         <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
           <div>
-            <h3 style="margin:0;font-size:16px">Add recipient</h3>
-            <p style="margin:4px 0 0;font-size:12.5px;color:var(--text2)" id="notifMemberSubtitle">Link a system user (recommended) or enter contact details directly.</p>
+            <h3 style="margin:0;font-size:16px">Add recipients</h3>
+            <p style="margin:4px 0 0;font-size:12.5px;color:var(--text2)">Pick system users (recommended — contact data stays in sync) or add an external contact manually.</p>
           </div>
           <button onclick="closeNotifMemberModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">&times;</button>
         </div>
-        <div style="padding:16px 22px;display:flex;flex-direction:column;gap:14px">
-          <div>
-            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">System user</label>
-            <select id="notifMemberUser" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
-              <option value="">— External recipient (enter manually below) —</option>
-            </select>
-            <p style="font-size:11px;color:var(--text3);margin-top:6px">When linked, email and phone are inherited from the user and follow their profile changes.</p>
+
+        <!-- Tabs -->
+        <div style="display:flex;gap:0;border-bottom:1px solid var(--border);background:var(--surface)">
+          <button type="button" class="notif-member-tab" data-tab="users" onclick="switchNotifMemberTab('users')" style="background:none;border:none;border-bottom:2px solid var(--accent);padding:10px 18px;color:var(--text);font-size:13px;font-weight:500;cursor:pointer">System users</button>
+          <button type="button" class="notif-member-tab" data-tab="external" onclick="switchNotifMemberTab('external')" style="background:none;border:none;border-bottom:2px solid transparent;padding:10px 18px;color:var(--text2);font-size:13px;cursor:pointer">External contact</button>
+        </div>
+
+        <!-- Users tab -->
+        <div class="notif-member-tabpane" data-tab="users" style="flex:1;min-height:0;display:flex;flex-direction:column">
+          <div style="padding:14px 22px 8px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <div style="flex:1;min-width:180px;display:flex;align-items:center;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:0 10px">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input id="notifMemberFilter" type="text" oninput="renderNotifMemberUserList()" placeholder="Filter by name, email or phone" style="flex:1;padding:8px;background:transparent;border:none;color:var(--text);font-size:13px;outline:none">
+              <button id="notifMemberFilterClearBtn" onclick="document.getElementById('notifMemberFilter').value='';renderNotifMemberUserList()" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px;padding:0 4px;display:none">&times;</button>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text2)">
+              <span id="notifMemberSelectedCount">0 selected</span>
+              <button class="btn btn-sm" onclick="toggleNotifMemberSelectAll()" id="notifMemberSelectAllBtn" style="font-size:11.5px">Select all</button>
+            </div>
           </div>
+          <div style="flex:1;min-height:200px;max-height:50vh;overflow-y:auto;background:var(--surface)" id="notifMemberUserList"></div>
+        </div>
+
+        <!-- External tab -->
+        <div class="notif-member-tabpane" data-tab="external" style="display:none;padding:16px 22px;flex-direction:column;gap:14px">
+          <p style="margin:0;font-size:12px;color:var(--text3);line-height:1.6">For contacts that are not Midleman users — a vendor's on-call email, an external phone number, etc. Updates here don't propagate to anyone else.</p>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
             <div>
               <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Display name</label>
-              <input id="notifMemberName" type="text" placeholder="John Doe" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+              <input id="notifMemberName" type="text" placeholder="On-call vendor" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
             </div>
             <div>
               <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Email</label>
-              <input id="notifMemberEmail" type="email" placeholder="john@example.com" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+              <input id="notifMemberEmail" type="email" placeholder="alerts@vendor.com" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
             </div>
             <div>
               <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Phone (E.164)</label>
               <input id="notifMemberPhone" type="text" placeholder="+244…" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
             </div>
           </div>
-          <div id="notifMemberStatus" style="font-size:12.5px"></div>
         </div>
+
+        <div id="notifMemberStatus" style="padding:0 22px;font-size:12.5px"></div>
         <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn btn-sm" onclick="closeNotifMemberModal()">Cancel</button>
           <button class="btn btn-primary btn-sm" onclick="saveNotifMember()" id="notifMemberSaveBtn">Add</button>
@@ -2468,13 +2487,14 @@
                     style="width:100%;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
                 </div>
                 <div>
-                  <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Notify email (SMTP must be configured)</label>
-                  <input type="email" id="wSilenceEmail" placeholder="alerts@example.com"
+                  <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Legacy notify email <span style="color:var(--text3)">(optional)</span></label>
+                  <input type="email" id="wSilenceEmail" placeholder="(leave empty to use central rules only)"
                     style="width:100%;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
                 </div>
               </div>
               <div style="font-size:10px;color:var(--text3);line-height:1.5">
-                One alert per silence episode. The clock starts at the first payload received — a freshly created webhook never triggers.
+                One alert per silence episode. The clock starts at the first payload received — a freshly created webhook never triggers.<br>
+                Alerts are also dispatched through <a href="#" onclick="navigate('notifications');return false" style="color:var(--accent);text-decoration:none">Notifications</a> — add a rule for <code style="background:var(--surface2);padding:1px 4px;border-radius:3px;font-size:10px">webhook.silenced</code> to reach groups via email + SMS.
               </div>
             </div>
           </div>
@@ -2999,6 +3019,10 @@
           <div class="form-group span-2"><label>Email</label><input type="email" id="npuEmail"
               placeholder="e.g. john@company.com" autocomplete="off">
             <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">Allows login by email.</span>
+          </div>
+          <div class="form-group span-2"><label>Phone</label><input type="text" id="npuPhone"
+              placeholder="e.g. +244923000000" autocomplete="off">
+            <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">E.164 format. Used for SMS 2FA and notification groups. Setting or changing the number resets phone verification.</span>
           </div>
           <div class="form-group span-2"><label>Username *</label><input type="text" id="npuUsername"
               placeholder="e.g. john.doe" autocomplete="off"></div>

@@ -303,6 +303,7 @@ export function initAuth(dataDir: string, maxAge: number = 86400): void {
         const adminCount = (db.prepare("SELECT COUNT(*) AS c FROM proxy_users WHERE roles LIKE '%admin%'").get() as any)?.c || 0;
         const proxyCount = (db.prepare("SELECT COUNT(*) AS c FROM proxy_users").get() as any)?.c || 0;
         console.log(`🔐 Auth: ${proxyCount} user(s) total, ${adminCount} with admin role`);
+        try { bootstrapDefaultNotificationRule(); } catch (e) { console.warn('notif bootstrap err', e); }
     } catch (err) {
         console.error('❌ Failed to initialize auth database:', err);
         db = null;
@@ -1188,7 +1189,7 @@ export function listAllProxyUsers(): ProxyUser[] {
     // (admins lived in a separate table and had mirror rows here). After the
     // migration any admin is just a regular row with 'admin' in `roles`.
     const rows = db.prepare(
-        "SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, created_at FROM proxy_users WHERE auth_source != 'admin_shadow' ORDER BY username"
+        "SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, phone_number, phone_verified, sms_2fa_enabled, created_at FROM proxy_users WHERE auth_source != 'admin_shadow' ORDER BY username"
     ).all() as any[];
     return rows.map(rowToProxyUser);
 }
@@ -1256,13 +1257,28 @@ export function findProxyUserByEmailOrUsername(email: string, username: string):
     return null;
 }
 
-export function updateProxyUserInfo(id: number, fullName: string, email: string): boolean {
+export function updateProxyUserInfo(id: number, fullName: string, email: string, phoneNumber?: string): boolean {
     if (!db) return false;
     // LDAP-sourced rows are refreshed from the directory at login.
     const row = db.prepare("SELECT auth_source FROM proxy_users WHERE id = $id").get({ $id: id }) as any;
     if (row?.auth_source === 'ldap') return false;
-    const result = db.prepare("UPDATE proxy_users SET full_name = $fn, email = $em, updated_at = datetime('now') WHERE id = $id")
-        .run({ $fn: fullName.trim(), $em: email.trim().toLowerCase(), $id: id });
+    if (phoneNumber === undefined) {
+        const result = db.prepare("UPDATE proxy_users SET full_name = $fn, email = $em, updated_at = datetime('now') WHERE id = $id")
+            .run({ $fn: fullName.trim(), $em: email.trim().toLowerCase(), $id: id });
+        return result.changes > 0;
+    }
+    // Phone number set/changed by admin: treat as trusted. The verified flag
+    // means "an admin entered this number" — there is no user-driven challenge
+    // flow today. If a self-service phone-edit path is added later, that path
+    // should reset phone_verified to 0 and gate on OTP confirmation.
+    const normalized = phoneNumber.trim();
+    const verifiedFlag = normalized ? 1 : 0;
+    // When the number is cleared, also disable SMS-2FA — there's nothing to
+    // deliver the code to. When set/changed, leave sms_2fa_enabled alone.
+    const sql = normalized
+        ? "UPDATE proxy_users SET full_name = $fn, email = $em, phone_number = $ph, phone_verified = $v, updated_at = datetime('now') WHERE id = $id"
+        : "UPDATE proxy_users SET full_name = $fn, email = $em, phone_number = $ph, phone_verified = $v, sms_2fa_enabled = 0, updated_at = datetime('now') WHERE id = $id";
+    const result = db.prepare(sql).run({ $fn: fullName.trim(), $em: email.trim().toLowerCase(), $ph: normalized, $v: verifiedFlag, $id: id });
     return result.changes > 0;
 }
 
@@ -2445,11 +2461,22 @@ export interface NotificationGroupMember {
     id: number;
     groupId: number;
     proxyUserId: number | null;
+    /** Raw email column. Empty when the member is linked to a proxy_user. */
     email: string;
+    /** Raw phone column. Empty when the member is linked to a proxy_user. */
     phone: string;
+    /** Raw display_name column. */
     displayName: string;
     stale: boolean;
     createdAt: string;
+    /** Effective contact data for display — for proxy_user-linked rows, these
+     *  carry the user's current email/phone/name; for free-form rows they
+     *  mirror the columns above. */
+    effectiveEmail: string;
+    effectivePhone: string;
+    effectiveDisplayName: string;
+    /** Resolved proxy_user metadata when linked. */
+    proxyUsername?: string;
 }
 
 export interface NotificationGroupWithMembers extends NotificationGroup {
@@ -2492,15 +2519,21 @@ function rowToGroup(r: any): NotificationGroup {
 }
 
 function rowToMember(r: any): NotificationGroupMember {
+    const email = r.email || '';
+    const phone = r.phone || '';
+    const displayName = r.display_name || '';
     return {
         id: r.id,
         groupId: r.group_id,
         proxyUserId: r.proxy_user_id ?? null,
-        email: r.email || '',
-        phone: r.phone || '',
-        displayName: r.display_name || '',
+        email,
+        phone,
+        displayName,
         stale: !!r.stale,
         createdAt: r.created_at,
+        effectiveEmail: email,
+        effectivePhone: phone,
+        effectiveDisplayName: displayName,
     };
 }
 
@@ -2552,7 +2585,11 @@ function hydrateGroup(group: NotificationGroup): NotificationGroupWithMembers {
             email = u.email || email;
             phone = u.phone_number || phone;
             displayName = displayName || u.full_name || u.username;
+            m.proxyUsername = u.username;
         }
+        m.effectiveEmail = email;
+        m.effectivePhone = phone;
+        m.effectiveDisplayName = displayName;
         if (!email && !phone) { staleCount++; continue; }
         resolved.push({ memberId: m.id, proxyUserId: m.proxyUserId, email, phone, displayName });
     }
@@ -2769,4 +2806,57 @@ export function setNotificationCacheInvalidator(fn: () => void): void {
 }
 function invalidateNotificationCache(): void {
     if (_notifCacheInvalidator) try { _notifCacheInvalidator(); } catch {}
+}
+
+/** First-run bootstrap: if there are no notification rules yet, AND there is
+ *  at least one admin user with an email, create an "Admins" group with that
+ *  admin (and any other admins) as members, plus a default rule
+ *  `webhook.* / critical / Admins`. Idempotent — re-running does nothing.
+ *  This guarantees that fresh installs get critical webhook alerts somewhere
+ *  without manual config, while preserving production setups untouched
+ *  (existing systems already have notifyEmail per webhook). */
+export function bootstrapDefaultNotificationRule(): void {
+    if (!db) return;
+    const rulesExist = (db.prepare('SELECT 1 FROM notification_rules LIMIT 1').get()) != null;
+    if (rulesExist) return;
+    const adminRows = db.prepare(
+        "SELECT id, email FROM proxy_users WHERE roles LIKE '%admin%' AND email != '' AND auth_source != 'admin_shadow'"
+    ).all() as any[];
+    if (adminRows.length === 0) return;
+
+    // Reuse a group called "Admins" if it already exists; otherwise create it.
+    let groupRow = db.prepare('SELECT id FROM notification_groups WHERE name = $n').get({ $n: 'Admins' }) as any;
+    if (!groupRow) {
+        db.prepare('INSERT INTO notification_groups (name, description) VALUES ($n, $d)')
+            .run({ $n: 'Admins', $d: 'Auto-created on first run. Receives critical webhook alerts by default.' });
+        groupRow = db.prepare('SELECT id FROM notification_groups WHERE name = $n').get({ $n: 'Admins' }) as any;
+    }
+    const groupId = groupRow.id as number;
+
+    // Add admins as members, skipping any already linked to the group.
+    const existingUserIds = new Set(
+        (db.prepare('SELECT proxy_user_id FROM notification_group_members WHERE group_id = $g AND proxy_user_id IS NOT NULL').all({ $g: groupId }) as any[])
+            .map(r => r.proxy_user_id)
+    );
+    for (const a of adminRows) {
+        if (existingUserIds.has(a.id)) continue;
+        db.prepare(
+            'INSERT INTO notification_group_members (group_id, proxy_user_id) VALUES ($g, $u)'
+        ).run({ $g: groupId, $u: a.id });
+    }
+
+    // Default rule: webhook.* / critical -> Admins (no channel override, so it
+    // uses severity defaults — email for now, +SMS if/when phones are set).
+    db.prepare(
+        'INSERT INTO notification_rules (name, category_pattern, min_severity, group_id, priority) VALUES ($n, $c, $s, $g, $p)'
+    ).run({
+        $n: 'Default: webhook critical alerts',
+        $c: 'webhook.*',
+        $s: 'critical',
+        $g: groupId,
+        $p: 100,
+    });
+
+    invalidateNotificationCache();
+    console.log(`📣 Bootstrapped default notification group "Admins" (${adminRows.length} member(s)) + rule webhook.* / critical`);
 }

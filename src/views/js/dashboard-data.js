@@ -1114,9 +1114,13 @@ function renderProxyUsers(users) {
     const nameCell = u.fullName
       ? `<div style="font-weight:600;color:var(--text)">${esc(u.fullName)}</div><div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`
       : `<div style="font-weight:600;color:var(--text)">${esc(u.username)}</div>`;
-    const emailCell = u.email
+    const emailLine = u.email
       ? `<div style="font-size:12px;color:var(--text2)">${esc(u.email)}</div>`
-      : `<span style="color:var(--text3)">—</span>`;
+      : '';
+    const phoneLine = u.phoneNumber
+      ? `<div style="font-size:11.5px;color:var(--text3);font-family:ui-monospace,Menlo,monospace;margin-top:2px">${esc(u.phoneNumber)}</div>`
+      : '';
+    const emailCell = (emailLine || phoneLine) ? (emailLine + phoneLine) : `<span style="color:var(--text3)">—</span>`;
     const actionsCell = `<button data-type="proxyUser" data-id="${u.id}" onclick="showContextMenu(event,this)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:2px 10px;cursor:pointer;color:var(--text2);font-size:18px;line-height:1.2;letter-spacing:1px" title="Actions">&#8942;</button>`;
     return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
       <td style="padding:8px 12px">${nameCell}</td>
@@ -1146,6 +1150,7 @@ async function openEditProxyUserModal(id) {
   if (!user) return;
   document.getElementById('npuFullName').value = user.fullName || '';
   document.getElementById('npuEmail').value = user.email || '';
+  document.getElementById('npuPhone').value = user.phoneNumber || '';
   document.getElementById('npuUsername').value = user.username;
   document.getElementById('npuPassword').value = '';
   // Password changes are not allowed via the edit modal — admins must send a
@@ -1168,8 +1173,12 @@ async function saveEditProxyUser() {
   errEl.style.display = 'none';
   const fullName = document.getElementById('npuFullName').value.trim();
   const email = document.getElementById('npuEmail').value.trim();
+  const phoneRaw = document.getElementById('npuPhone').value.trim();
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = 'Invalid email.'; errEl.style.display = 'block'; return; }
+  if (phoneRaw && !/^[+0-9 ()-]{6,20}$/.test(phoneRaw)) { errEl.textContent = 'Invalid phone number.'; errEl.style.display = 'block'; return; }
   const body = { fullName, email };
+  const currentPhone = _allProxyUsers.find(u => u.id === _editUserId)?.phoneNumber || '';
+  if (phoneRaw !== currentPhone) body.phoneNumber = phoneRaw;
   // Send isAdmin only when the toggle is visible (i.e. not self-edit) AND the
   // value actually changed — avoids no-op audit entries and accidental demotes.
   const adminGroupVisible = document.getElementById('npuIsAdminGroup').style.display !== 'none';
@@ -3000,8 +3009,9 @@ function renderWebhookTargets() {
               </div>
             </div>
             <div>
-              <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">Notify email (SMTP must be configured)</label>
+              <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">Legacy notify email <span style="opacity:.7">(optional — kept for back-compat)</span></label>
               <input type="email" value="${esc(t.persistentRetry?.notifyEmail || '')}" placeholder="alerts@example.com" oninput="updateTargetPersistentRetry(${i},'notifyEmail',this.value)" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px;outline:none">
+              <p style="font-size:10.5px;color:var(--text3);margin:4px 0 0;line-height:1.5">Alerts are now routed centrally. Add a rule for <code style="background:var(--surface2);padding:1px 4px;border-radius:3px;font-size:10px">webhook.retry_exhausted</code> in <a href="#" onclick="navigate('notifications');return false" style="color:var(--accent);text-decoration:none">Notifications</a> to reach groups via email + SMS.</p>
             </div>
           </div>` : ''}
         </div>
@@ -3159,7 +3169,8 @@ async function saveWebhook() {
     const thr = parseInt(document.getElementById('wSilenceThreshold').value) || 0;
     const email = document.getElementById('wSilenceEmail').value.trim();
     if (!thr || thr < 1) return toast('Silence threshold must be at least 1 minute', 'error');
-    if (!email) return toast('Silence alert requires an email address', 'error');
+    // notifyEmail is now optional — when empty, the silence alert relies
+    // entirely on the central notifications pipeline (rules → groups).
     body.silenceAlert = { enabled: true, thresholdMinutes: thr, notifyEmail: email };
   } else {
     body.silenceAlert = { enabled: false, thresholdMinutes: 15, notifyEmail: '' };
@@ -7169,12 +7180,20 @@ function renderNotifGroups() {
   empty.style.display = 'none';
   list.innerHTML = _notifGroups.map(g => {
     const memberRows = g.members.map(m => {
-      const linked = m.proxyUserId ? '<span style="font-size:10.5px;padding:2px 6px;border-radius:8px;background:var(--surface2);color:var(--text2);margin-right:6px">USER</span>' : '';
+      const linkedBadge = m.proxyUserId
+        ? '<span style="font-size:10.5px;padding:2px 6px;border-radius:8px;background:var(--surface2);color:var(--text2);margin-right:6px" title="System user">USER</span>'
+        : '<span style="font-size:10.5px;padding:2px 6px;border-radius:8px;background:var(--surface2);color:var(--text3);margin-right:6px" title="External recipient">EXT</span>';
       const stale = m.stale ? '<span style="font-size:10.5px;padding:2px 6px;border-radius:8px;background:rgba(234,179,8,0.18);color:#ca8a04;margin-right:6px">stale</span>' : '';
-      const channels = [m.email && esc(m.email), m.phone && esc(m.phone)].filter(Boolean).join(' &middot; ') || '<span style="color:var(--text3)">no contact</span>';
-      const name = m.displayName ? esc(m.displayName) : '';
-      return '<tr><td style="padding:8px 12px;border-top:1px solid var(--border)">' + linked + stale + name + '</td>'
-        + '<td style="padding:8px 12px;border-top:1px solid var(--border);color:var(--text2)">' + channels + '</td>'
+      const name = m.effectiveDisplayName || m.proxyUsername || '<span style="color:var(--text3)">(no name)</span>';
+      const nameHtml = (typeof name === 'string' && name.startsWith('<')) ? name : esc(name);
+      const subtitle = m.proxyUsername && m.effectiveDisplayName && m.proxyUsername !== m.effectiveDisplayName
+        ? '<div style="font-size:11px;color:var(--text3);margin-top:2px">@' + esc(m.proxyUsername) + '</div>'
+        : '';
+      const emailLine = m.effectiveEmail ? '<div style="color:var(--text2)">' + esc(m.effectiveEmail) + '</div>' : '';
+      const phoneLine = m.effectivePhone ? '<div style="color:var(--text2);font-family:ui-monospace,Menlo,monospace;font-size:12px">' + esc(m.effectivePhone) + '</div>' : '';
+      const channels = (emailLine || phoneLine) ? (emailLine + phoneLine) : '<span style="color:var(--text3)">no contact</span>';
+      return '<tr><td style="padding:8px 12px;border-top:1px solid var(--border)">' + linkedBadge + stale + nameHtml + subtitle + '</td>'
+        + '<td style="padding:8px 12px;border-top:1px solid var(--border);font-size:12.5px">' + channels + '</td>'
         + '<td style="padding:8px 12px;border-top:1px solid var(--border);text-align:right">'
         + '<button class="btn btn-sm" onclick="removeNotifMember(' + g.id + ',' + m.id + ')" style="color:var(--err-text);font-size:11.5px">Remove</button>'
         + '</td></tr>';
@@ -7339,47 +7358,193 @@ async function testNotifGroup(id) {
 
 // ── Member modal ─────────────────────────────────────────────────────────────
 
+let _notifMemberAllUsers = [];
+let _notifMemberSelectedIds = new Set();
+let _notifMemberCurrentTab = 'users';
+
+function switchNotifMemberTab(tab) {
+  _notifMemberCurrentTab = tab;
+  document.querySelectorAll('.notif-member-tab').forEach(b => {
+    const active = b.getAttribute('data-tab') === tab;
+    b.style.borderBottomColor = active ? 'var(--accent)' : 'transparent';
+    b.style.color = active ? 'var(--text)' : 'var(--text2)';
+    b.style.fontWeight = active ? '500' : '400';
+  });
+  document.querySelectorAll('.notif-member-tabpane').forEach(p => {
+    p.style.display = p.getAttribute('data-tab') === tab ? (tab === 'external' ? 'flex' : 'flex') : 'none';
+  });
+  const btn = document.getElementById('notifMemberSaveBtn');
+  if (btn) btn.textContent = tab === 'users' ? 'Add selected' : 'Add';
+}
+
+function _notifMemberAlreadyInGroup(userId) {
+  const g = _notifGroups.find(x => x.id === _notifAddingMemberGroupId);
+  if (!g) return false;
+  return g.members.some(m => m.proxyUserId === userId);
+}
+
+function renderNotifMemberUserList() {
+  const wrap = document.getElementById('notifMemberUserList');
+  if (!wrap) return;
+  const q = (document.getElementById('notifMemberFilter').value || '').trim().toLowerCase();
+  const clearBtn = document.getElementById('notifMemberFilterClearBtn');
+  if (clearBtn) clearBtn.style.display = q ? '' : 'none';
+
+  const matches = _notifMemberAllUsers.filter(u => {
+    if (!q) return true;
+    return (
+      (u.username || '').toLowerCase().includes(q) ||
+      (u.fullName || '').toLowerCase().includes(q) ||
+      (u.email || '').toLowerCase().includes(q) ||
+      (u.phoneNumber || '').toLowerCase().includes(q)
+    );
+  });
+
+  if (matches.length === 0) {
+    wrap.innerHTML = '<div style="padding:36px;text-align:center;color:var(--text3);font-size:12.5px">' + (q ? 'No users match the filter.' : 'No system users available.') + '</div>';
+    _updateNotifMemberSelectedCount();
+    return;
+  }
+
+  wrap.innerHTML = matches.map(u => {
+    const inGroup = _notifMemberAlreadyInGroup(u.id);
+    const selected = _notifMemberSelectedIds.has(u.id);
+    const contactParts = [];
+    if (u.email) contactParts.push('<span>' + esc(u.email) + '</span>');
+    if (u.phoneNumber) contactParts.push('<span style="font-family:ui-monospace,Menlo,monospace;font-size:12px">' + esc(u.phoneNumber) + '</span>');
+    if (contactParts.length === 0) contactParts.push('<span style="color:var(--text3)">no contact data</span>');
+    const adminBadge = u.isAdmin ? '<span style="font-size:10px;padding:2px 6px;border-radius:8px;background:var(--surface2);color:var(--text2);margin-left:6px">admin</span>' : '';
+    const inGroupBadge = inGroup ? '<span style="font-size:10px;padding:2px 6px;border-radius:8px;background:rgba(34,197,94,0.15);color:var(--ok-text);margin-left:6px">in group</span>' : '';
+    const rowStyle = inGroup
+      ? 'opacity:0.5;cursor:not-allowed'
+      : 'cursor:pointer';
+    const onClick = inGroup ? '' : 'onclick="toggleNotifMemberSelect(' + u.id + ')"';
+    return '<div data-uid="' + u.id + '" ' + onClick + ' style="display:flex;align-items:center;gap:12px;padding:10px 22px;border-bottom:1px solid var(--border);' + rowStyle + '">'
+      + '<input type="checkbox" ' + (selected ? 'checked' : '') + ' ' + (inGroup ? 'disabled' : '') + ' style="margin:0;flex-shrink:0;pointer-events:none">'
+      + '<div style="flex:1;min-width:0">'
+        + '<div style="font-size:13px;color:var(--text);font-weight:500">' + esc(u.fullName || u.username) + adminBadge + inGroupBadge + '</div>'
+        + '<div style="font-size:12px;color:var(--text2);margin-top:2px;display:flex;gap:10px;flex-wrap:wrap">' + contactParts.join('<span style="color:var(--text3)">·</span>') + '</div>'
+      + '</div>'
+    + '</div>';
+  }).join('');
+  _updateNotifMemberSelectedCount();
+}
+
+function toggleNotifMemberSelect(userId) {
+  if (_notifMemberAlreadyInGroup(userId)) return;
+  if (_notifMemberSelectedIds.has(userId)) _notifMemberSelectedIds.delete(userId);
+  else _notifMemberSelectedIds.add(userId);
+  renderNotifMemberUserList();
+}
+
+function toggleNotifMemberSelectAll() {
+  const q = (document.getElementById('notifMemberFilter').value || '').trim().toLowerCase();
+  const visible = _notifMemberAllUsers.filter(u => {
+    if (_notifMemberAlreadyInGroup(u.id)) return false;
+    if (!q) return true;
+    return (
+      (u.username || '').toLowerCase().includes(q) ||
+      (u.fullName || '').toLowerCase().includes(q) ||
+      (u.email || '').toLowerCase().includes(q) ||
+      (u.phoneNumber || '').toLowerCase().includes(q)
+    );
+  });
+  const allSelected = visible.length > 0 && visible.every(u => _notifMemberSelectedIds.has(u.id));
+  if (allSelected) visible.forEach(u => _notifMemberSelectedIds.delete(u.id));
+  else visible.forEach(u => _notifMemberSelectedIds.add(u.id));
+  renderNotifMemberUserList();
+}
+
+function _updateNotifMemberSelectedCount() {
+  const n = _notifMemberSelectedIds.size;
+  const el = document.getElementById('notifMemberSelectedCount');
+  if (el) el.textContent = n === 1 ? '1 selected' : n + ' selected';
+  const btn = document.getElementById('notifMemberSelectAllBtn');
+  if (btn) {
+    const q = (document.getElementById('notifMemberFilter').value || '').trim().toLowerCase();
+    const visible = _notifMemberAllUsers.filter(u => {
+      if (_notifMemberAlreadyInGroup(u.id)) return false;
+      if (!q) return true;
+      return (
+        (u.username || '').toLowerCase().includes(q) ||
+        (u.fullName || '').toLowerCase().includes(q) ||
+        (u.email || '').toLowerCase().includes(q) ||
+        (u.phoneNumber || '').toLowerCase().includes(q)
+      );
+    });
+    const allSelected = visible.length > 0 && visible.every(u => _notifMemberSelectedIds.has(u.id));
+    btn.textContent = allSelected ? 'Unselect all' : 'Select all';
+    btn.disabled = visible.length === 0;
+  }
+}
+
 async function openNotifMemberModal(groupId) {
   _notifAddingMemberGroupId = groupId;
+  _notifMemberSelectedIds = new Set();
   document.getElementById('notifMemberName').value = '';
   document.getElementById('notifMemberEmail').value = '';
   document.getElementById('notifMemberPhone').value = '';
+  document.getElementById('notifMemberFilter').value = '';
   _setNotifStatus('notifMemberStatus', '', 'info');
-  // Populate user dropdown
-  const sel = document.getElementById('notifMemberUser');
-  sel.innerHTML = '<option value="">— External recipient (enter manually below) —</option>';
+  switchNotifMemberTab('users');
+  // Load users
+  _notifMemberAllUsers = [];
+  document.getElementById('notifMemberUserList').innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3);font-size:12.5px">Loading users…</div>';
   try {
     const res = await api('/admin/proxy-users');
     if (res.ok) {
       const data = await res.json();
-      (data.users || []).forEach(u => {
-        const label = (u.fullName || u.username) + ' (' + (u.email || 'no email') + ')';
-        sel.innerHTML += '<option value="' + u.id + '">' + esc(label) + '</option>';
+      _notifMemberAllUsers = (data.users || []).slice().sort((a, b) => {
+        const an = (a.fullName || a.username || '').toLowerCase();
+        const bn = (b.fullName || b.username || '').toLowerCase();
+        return an < bn ? -1 : an > bn ? 1 : 0;
       });
     }
   } catch {}
-  sel.value = '';
+  renderNotifMemberUserList();
   document.getElementById('notifMemberModal').style.display = 'flex';
 }
 function closeNotifMemberModal() { document.getElementById('notifMemberModal').style.display = 'none'; }
 
 async function saveNotifMember() {
   if (!_notifAddingMemberGroupId) return;
-  const proxyUserId = document.getElementById('notifMemberUser').value;
-  const displayName = document.getElementById('notifMemberName').value.trim();
-  const email = document.getElementById('notifMemberEmail').value.trim();
-  const phone = document.getElementById('notifMemberPhone').value.trim();
-  if (!proxyUserId && !email && !phone) {
-    _setNotifStatus('notifMemberStatus', 'Pick a user, or enter at least an email/phone.', 'err');
-    return;
-  }
-  const body = { displayName };
-  if (proxyUserId) body.proxyUserId = parseInt(proxyUserId, 10);
-  if (email) body.email = email;
-  if (phone) body.phone = phone;
   const btn = document.getElementById('notifMemberSaveBtn');
   btn.disabled = true;
   try {
+    if (_notifMemberCurrentTab === 'users') {
+      const ids = Array.from(_notifMemberSelectedIds);
+      if (ids.length === 0) {
+        _setNotifStatus('notifMemberStatus', 'Select at least one user.', 'err');
+        return;
+      }
+      _setNotifStatus('notifMemberStatus', 'Adding ' + ids.length + ' recipient(s)…', 'info');
+      let ok = 0; let failed = 0;
+      for (const id of ids) {
+        try {
+          const r = await api('/admin/notification-groups/' + _notifAddingMemberGroupId + '/members', {
+            method: 'POST',
+            body: JSON.stringify({ proxyUserId: id }),
+          });
+          if (r.ok) ok++; else failed++;
+        } catch { failed++; }
+      }
+      if (failed === 0) toast(ok + ' recipient(s) added');
+      else toast(ok + ' added, ' + failed + ' failed', 'error');
+      closeNotifMemberModal();
+      await fetchNotifGroups();
+      return;
+    }
+    // External tab
+    const displayName = document.getElementById('notifMemberName').value.trim();
+    const email = document.getElementById('notifMemberEmail').value.trim();
+    const phone = document.getElementById('notifMemberPhone').value.trim();
+    if (!email && !phone) {
+      _setNotifStatus('notifMemberStatus', 'Enter at least an email or phone.', 'err');
+      return;
+    }
+    const body = { displayName };
+    if (email) body.email = email;
+    if (phone) body.phone = phone;
     const res = await api('/admin/notification-groups/' + _notifAddingMemberGroupId + '/members', { method: 'POST', body: JSON.stringify(body) });
     const data = await res.json();
     if (!res.ok) { _setNotifStatus('notifMemberStatus', data.error || 'Failed.', 'err'); return; }

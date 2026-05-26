@@ -562,14 +562,10 @@ interface SilenceState {
 const silenceStates = new Map<string, SilenceState>();
 
 async function sendSilenceNotification(webhookName: string, email: string, kind: 'silent' | 'recovered', lastActivity: number, thresholdMinutes: number): Promise<void> {
-    if (!isSmtpConfigured()) {
-        console.warn(`📧 [silence-alert] SMTP not configured — cannot notify ${email}`);
-        return;
-    }
     const lastIso = new Date(lastActivity).toISOString();
     const subject = kind === 'silent'
-        ? `[Midleman] Webhook silent — ${webhookName}`
-        : `[Midleman] Webhook resumed — ${webhookName}`;
+        ? `Webhook silent — ${webhookName}`
+        : `Webhook resumed — ${webhookName}`;
     const body = kind === 'silent'
         ? [
             `Webhook "${webhookName}" has not received any payload in the last ${thresholdMinutes} minute(s).`,
@@ -584,16 +580,35 @@ async function sendSilenceNotification(webhookName: string, email: string, kind:
             ``,
             `Previous last activity: ${lastIso}`,
         ].join('\n');
-    const html = `<pre style="font-family:ui-monospace,Menlo,monospace;font-size:13px;color:#111">${body.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]!))}</pre>`;
-    const r = await sendMail({ to: email, subject, html, text: body });
-    if (!r.ok) console.warn(`📧 [silence-alert] notify ${kind} failed: ${r.error}`);
-    else console.log(`📧 [silence-alert] notify ${kind} sent to ${email} (${webhookName})`);
+
+    // Route through the notifications pipeline.
+    const category = kind === 'silent' ? 'webhook.silenced' : 'webhook.unsilenced';
+    const severity = kind === 'silent' ? 'warning' : 'info';
+    try {
+        await emitNotificationEvent({
+            category,
+            severity,
+            subject,
+            body,
+            payload: { webhookName, kind, lastActivity, thresholdMinutes },
+        });
+    } catch (e) {
+        console.warn(`📧 [silence-alert] notification pipeline error:`, e);
+    }
+
+    // Back-compat: legacy literal email recipient.
+    if (email && isSmtpConfigured()) {
+        const html = `<pre style="font-family:ui-monospace,Menlo,monospace;font-size:13px;color:#111">${body.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]!))}</pre>`;
+        const r = await sendMail({ to: email, subject: `[Midleman] ${subject}`, html, text: body });
+        if (!r.ok) console.warn(`📧 [silence-alert] legacy notify ${kind} failed: ${r.error}`);
+        else console.log(`📧 [silence-alert] legacy notify ${kind} sent to ${email} (${webhookName})`);
+    }
 }
 
 async function silenceTick(): Promise<void> {
     for (const ws of servers.values()) {
         const cfg = ws.webhook.silenceAlert;
-        if (!cfg || !cfg.enabled || !cfg.notifyEmail) {
+        if (!cfg || !cfg.enabled) {
             // If config was turned off, drop any in-flight state so the next
             // enable starts fresh.
             silenceStates.delete(ws.webhook.name);

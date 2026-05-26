@@ -532,7 +532,9 @@ export function validateWebhookInput(input: unknown): string | null {
         if (typeof s.enabled !== 'boolean') return '"silenceAlert.enabled" must be a boolean';
         if (s.enabled) {
             if (typeof s.thresholdMinutes !== 'number' || s.thresholdMinutes < 1 || s.thresholdMinutes > 100000) return '"silenceAlert.thresholdMinutes" must be a positive number (1–100000)';
-            if (typeof s.notifyEmail !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.notifyEmail)) return '"silenceAlert.notifyEmail" must be a valid email';
+            // notifyEmail is now optional — when empty, the silence alert is
+            // dispatched only through the central notifications pipeline.
+            if (s.notifyEmail !== undefined && s.notifyEmail !== '' && (typeof s.notifyEmail !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.notifyEmail))) return '"silenceAlert.notifyEmail" must be a valid email or empty';
         }
     }
 
