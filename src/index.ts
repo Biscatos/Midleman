@@ -18,7 +18,12 @@ import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, cleanupExpiredPasswordResetTokens, findResetCandidateByEmail, logSmsSend } from './auth/auth';
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, cleanupExpiredPasswordResetTokens, findResetCandidateByEmail, logSmsSend,
+listNotificationGroups, getNotificationGroup, createNotificationGroup, updateNotificationGroup, deleteNotificationGroup,
+addNotificationGroupMember, removeNotificationGroupMember,
+listNotificationRules, createNotificationRule, updateNotificationRule, deleteNotificationRule,
+type NotificationSeverity, type NotificationChannel } from './auth/auth';
+import { emitNotificationEvent, dispatchTestToGroup } from './core/notifications';
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
 import { initConsentPages, listConsentPages, getConsentPage, createConsentPage, updateConsentPage, deleteConsentPage, findConsentPageOauthReferences } from './auth/consent-pages';
 import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin, runLdapSync, getLastLdapSyncReport } from './auth/ldap';
@@ -2279,6 +2284,162 @@ const server = Bun.serve({
                     }
                     logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'sms.test_send', targetType: 'sms', details: { to, ok: result.ok, providerUsed: result.providerUsed, error: result.error, attempts: result.attempts }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                     return jsonRes(result.ok ? 200 : 400, { ...result });
+                }
+
+                // ── Notification groups & rules ───────────────────────────────────────────
+
+                if (url.pathname === '/admin/notification-groups' && req.method === 'GET') {
+                    return jsonRes(200, { groups: listNotificationGroups() });
+                }
+                if (url.pathname === '/admin/notification-groups' && req.method === 'POST') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    if (!body?.name || typeof body.name !== 'string') return jsonRes(400, { error: '"name" is required' });
+                    try {
+                        const g = createNotificationGroup(body.name, typeof body.description === 'string' ? body.description : '');
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'notification_group.create', targetType: 'notification_group', targetId: g.id, details: { name: g.name }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { group: getNotificationGroup(g.id) });
+                    } catch (e) {
+                        return jsonRes(400, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+                {
+                    const m = url.pathname.match(/^\/admin\/notification-groups\/(\d+)$/);
+                    if (m) {
+                        const id = parseInt(m[1], 10);
+                        if (req.method === 'GET') {
+                            const g = getNotificationGroup(id);
+                            if (!g) return jsonRes(404, { error: 'Not found' });
+                            return jsonRes(200, { group: g });
+                        }
+                        if (req.method === 'PUT') {
+                            let body: any;
+                            try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                            const patch: any = {};
+                            if (typeof body?.name === 'string') patch.name = body.name;
+                            if (typeof body?.description === 'string') patch.description = body.description;
+                            if (body?.quietHoursJson === null || typeof body?.quietHoursJson === 'string') patch.quietHoursJson = body.quietHoursJson;
+                            const ok = updateNotificationGroup(id, patch);
+                            if (!ok) return jsonRes(404, { error: 'Not found or no changes' });
+                            const me = getAuthedAdmin(req);
+                            logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'notification_group.update', targetType: 'notification_group', targetId: id, details: patch, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                            return jsonRes(200, { group: getNotificationGroup(id) });
+                        }
+                        if (req.method === 'DELETE') {
+                            const ok = deleteNotificationGroup(id);
+                            if (!ok) return jsonRes(404, { error: 'Not found' });
+                            const me = getAuthedAdmin(req);
+                            logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'notification_group.delete', targetType: 'notification_group', targetId: id, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                            return jsonRes(200, { status: 'deleted' });
+                        }
+                    }
+                }
+                {
+                    const m = url.pathname.match(/^\/admin\/notification-groups\/(\d+)\/members$/);
+                    if (m && req.method === 'POST') {
+                        const groupId = parseInt(m[1], 10);
+                        let body: any;
+                        try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                        try {
+                            const member = addNotificationGroupMember({
+                                groupId,
+                                proxyUserId: typeof body?.proxyUserId === 'number' ? body.proxyUserId : null,
+                                email: typeof body?.email === 'string' ? body.email : '',
+                                phone: typeof body?.phone === 'string' ? body.phone : '',
+                                displayName: typeof body?.displayName === 'string' ? body.displayName : '',
+                            });
+                            const me = getAuthedAdmin(req);
+                            logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'notification_group.member_add', targetType: 'notification_group', targetId: groupId, details: { memberId: member.id }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                            return jsonRes(200, { group: getNotificationGroup(groupId) });
+                        } catch (e) {
+                            return jsonRes(400, { error: e instanceof Error ? e.message : String(e) });
+                        }
+                    }
+                }
+                {
+                    const m = url.pathname.match(/^\/admin\/notification-groups\/(\d+)\/members\/(\d+)$/);
+                    if (m && req.method === 'DELETE') {
+                        const groupId = parseInt(m[1], 10);
+                        const memberId = parseInt(m[2], 10);
+                        const ok = removeNotificationGroupMember(memberId);
+                        if (!ok) return jsonRes(404, { error: 'Not found' });
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'notification_group.member_remove', targetType: 'notification_group', targetId: groupId, details: { memberId }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { group: getNotificationGroup(groupId) });
+                    }
+                }
+                {
+                    const m = url.pathname.match(/^\/admin\/notification-groups\/(\d+)\/test$/);
+                    if (m && req.method === 'POST') {
+                        const groupId = parseInt(m[1], 10);
+                        const result = await dispatchTestToGroup(groupId, 'info');
+                        if (!result) return jsonRes(400, { error: 'Group not found or has no reachable members' });
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'notification_group.test', targetType: 'notification_group', targetId: groupId, details: { ok: result.recipientsOk, failed: result.recipientsFailed, attempts: result.attempts }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { ...result });
+                    }
+                }
+
+                if (url.pathname === '/admin/notification-rules' && req.method === 'GET') {
+                    return jsonRes(200, { rules: listNotificationRules() });
+                }
+                if (url.pathname === '/admin/notification-rules' && req.method === 'POST') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    if (typeof body?.categoryPattern !== 'string' || !body.categoryPattern.trim()) return jsonRes(400, { error: '"categoryPattern" is required' });
+                    if (typeof body?.groupId !== 'number') return jsonRes(400, { error: '"groupId" is required' });
+                    const sev: NotificationSeverity = (body.minSeverity === 'warning' || body.minSeverity === 'critical') ? body.minSeverity : 'info';
+                    const channels: NotificationChannel[] | null = Array.isArray(body.channelsOverride)
+                        ? body.channelsOverride.filter((c: any) => c === 'email' || c === 'sms')
+                        : null;
+                    try {
+                        const rule = createNotificationRule({
+                            name: typeof body.name === 'string' ? body.name : '',
+                            categoryPattern: body.categoryPattern,
+                            minSeverity: sev,
+                            groupId: body.groupId,
+                            channelsOverride: channels && channels.length ? channels : null,
+                            priority: typeof body.priority === 'number' ? body.priority : 100,
+                            enabled: body.enabled !== false,
+                        });
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'notification_rule.create', targetType: 'notification_rule', targetId: rule.id, details: { categoryPattern: rule.categoryPattern, minSeverity: rule.minSeverity, groupId: rule.groupId }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { rule });
+                    } catch (e) {
+                        return jsonRes(400, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+                {
+                    const m = url.pathname.match(/^\/admin\/notification-rules\/(\d+)$/);
+                    if (m) {
+                        const id = parseInt(m[1], 10);
+                        if (req.method === 'PUT') {
+                            let body: any;
+                            try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                            const patch: any = {};
+                            if (typeof body?.name === 'string') patch.name = body.name;
+                            if (typeof body?.categoryPattern === 'string') patch.categoryPattern = body.categoryPattern;
+                            if (body?.minSeverity === 'info' || body?.minSeverity === 'warning' || body?.minSeverity === 'critical') patch.minSeverity = body.minSeverity;
+                            if (typeof body?.groupId === 'number') patch.groupId = body.groupId;
+                            if (body?.channelsOverride === null) patch.channelsOverride = null;
+                            else if (Array.isArray(body?.channelsOverride)) patch.channelsOverride = body.channelsOverride.filter((c: any) => c === 'email' || c === 'sms');
+                            if (typeof body?.priority === 'number') patch.priority = body.priority;
+                            if (typeof body?.enabled === 'boolean') patch.enabled = body.enabled;
+                            const ok = updateNotificationRule(id, patch);
+                            if (!ok) return jsonRes(404, { error: 'Not found or no changes' });
+                            const me = getAuthedAdmin(req);
+                            logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'notification_rule.update', targetType: 'notification_rule', targetId: id, details: patch, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                            return jsonRes(200, { status: 'ok' });
+                        }
+                        if (req.method === 'DELETE') {
+                            const ok = deleteNotificationRule(id);
+                            if (!ok) return jsonRes(404, { error: 'Not found' });
+                            const me = getAuthedAdmin(req);
+                            logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'notification_rule.delete', targetType: 'notification_rule', targetId: id, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                            return jsonRes(200, { status: 'deleted' });
+                        }
+                    }
                 }
 
                 // ── NPM (Nginx Proxy Manager) integration ────────────────────────────────

@@ -183,6 +183,93 @@ CREATE TABLE IF NOT EXISTS sms_send_log (
 
 CREATE INDEX IF NOT EXISTS idx_sms_send_log_user ON sms_send_log(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_sms_send_log_created ON sms_send_log(created_at);
+
+-- ─── Notifications (groups, rules, dispatch log) ────────────────────────────
+
+CREATE TABLE IF NOT EXISTS notification_groups (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    description     TEXT NOT NULL DEFAULT '',
+    quiet_hours_json TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Members are EITHER a reference to a proxy_user (inherits their email/phone)
+-- OR a free-form recipient (email/phone + optional display name).
+-- We DO NOT cascade-delete on proxy_user removal — we keep the row and flag it
+-- stale=1 so the group UI can surface "this group has rotted" instead of
+-- silently shrinking.
+CREATE TABLE IF NOT EXISTS notification_group_members (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id        INTEGER NOT NULL REFERENCES notification_groups(id) ON DELETE CASCADE,
+    proxy_user_id   INTEGER,
+    email           TEXT NOT NULL DEFAULT '',
+    phone           TEXT NOT NULL DEFAULT '',
+    display_name    TEXT NOT NULL DEFAULT '',
+    stale           INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_notif_group_members_group ON notification_group_members(group_id);
+CREATE INDEX IF NOT EXISTS idx_notif_group_members_user ON notification_group_members(proxy_user_id);
+
+-- Rules are evaluated in priority order (ascending). category supports a
+-- trailing ".*" wildcard ("webhook.*") or "*" for everything. min_severity is
+-- one of info|warning|critical. channels_override is a CSV subset of
+-- "email,sms" — when NULL the dispatcher falls back to severity defaults
+-- (info/warning → email, critical → email+sms).
+CREATE TABLE IF NOT EXISTS notification_rules (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                TEXT NOT NULL DEFAULT '',
+    category_pattern    TEXT NOT NULL,
+    min_severity        TEXT NOT NULL DEFAULT 'info',
+    group_id            INTEGER NOT NULL REFERENCES notification_groups(id) ON DELETE CASCADE,
+    channels_override   TEXT,
+    priority            INTEGER NOT NULL DEFAULT 100,
+    enabled             INTEGER NOT NULL DEFAULT 1,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_notif_rules_priority ON notification_rules(enabled, priority);
+
+-- Master dispatch log: one row per fan-out event. Recipient outcomes go to
+-- sms_send_log / email_send_log linked by notification_id.
+CREATE TABLE IF NOT EXISTS notifications (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    category        TEXT NOT NULL,
+    severity        TEXT NOT NULL,
+    subject         TEXT NOT NULL DEFAULT '',
+    body            TEXT NOT NULL DEFAULT '',
+    payload_json    TEXT,
+    matched_rule_id INTEGER,
+    matched_group_id INTEGER,
+    recipients_total INTEGER NOT NULL DEFAULT 0,
+    recipients_ok   INTEGER NOT NULL DEFAULT 0,
+    recipients_failed INTEGER NOT NULL DEFAULT 0,
+    is_test         INTEGER NOT NULL DEFAULT 0,
+    created_at      INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_category ON notifications(category, created_at);
+
+-- Mirror of sms_send_log for the email channel. Re-used by the notification
+-- dispatcher to record per-recipient outcomes.
+CREATE TABLE IF NOT EXISTS email_send_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    notification_id INTEGER,
+    user_id         INTEGER,
+    to_address      TEXT NOT NULL,
+    subject         TEXT NOT NULL DEFAULT '',
+    success         INTEGER NOT NULL,
+    error           TEXT,
+    purpose         TEXT,
+    created_at      INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_send_log_notif ON email_send_log(notification_id);
+CREATE INDEX IF NOT EXISTS idx_email_send_log_created ON email_send_log(created_at);
 `;
 
 export function initAuth(dataDir: string, maxAge: number = 86400): void {
@@ -2338,4 +2425,348 @@ export function cleanupExpiredSmsOtpChallenges(): void {
     try {
         db.prepare('DELETE FROM sms_otp_challenges WHERE expires_at < $now').run({ $now: Date.now() });
     } catch {}
+}
+
+// ─── Notification groups & rules ────────────────────────────────────────────
+
+export type NotificationSeverity = 'info' | 'warning' | 'critical';
+export type NotificationChannel = 'email' | 'sms';
+
+export interface NotificationGroup {
+    id: number;
+    name: string;
+    description: string;
+    quietHoursJson: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface NotificationGroupMember {
+    id: number;
+    groupId: number;
+    proxyUserId: number | null;
+    email: string;
+    phone: string;
+    displayName: string;
+    stale: boolean;
+    createdAt: string;
+}
+
+export interface NotificationGroupWithMembers extends NotificationGroup {
+    members: NotificationGroupMember[];
+    /** Members materialized for delivery — includes resolved email/phone for
+     *  proxy_user-linked rows, and skips rows we can't reach. */
+    resolved: ResolvedRecipient[];
+    staleCount: number;
+}
+
+export interface ResolvedRecipient {
+    memberId: number;
+    proxyUserId: number | null;
+    email: string;
+    phone: string;
+    displayName: string;
+}
+
+export interface NotificationRule {
+    id: number;
+    name: string;
+    categoryPattern: string;
+    minSeverity: NotificationSeverity;
+    groupId: number;
+    channelsOverride: NotificationChannel[] | null;
+    priority: number;
+    enabled: boolean;
+    createdAt: string;
+}
+
+function rowToGroup(r: any): NotificationGroup {
+    return {
+        id: r.id,
+        name: r.name,
+        description: r.description || '',
+        quietHoursJson: r.quiet_hours_json ?? null,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+    };
+}
+
+function rowToMember(r: any): NotificationGroupMember {
+    return {
+        id: r.id,
+        groupId: r.group_id,
+        proxyUserId: r.proxy_user_id ?? null,
+        email: r.email || '',
+        phone: r.phone || '',
+        displayName: r.display_name || '',
+        stale: !!r.stale,
+        createdAt: r.created_at,
+    };
+}
+
+function rowToRule(r: any): NotificationRule {
+    const csv = (r.channels_override as string | null) || null;
+    const channels = csv
+        ? csv.split(',').map(s => s.trim()).filter(s => s === 'email' || s === 'sms') as NotificationChannel[]
+        : null;
+    return {
+        id: r.id,
+        name: r.name || '',
+        categoryPattern: r.category_pattern,
+        minSeverity: (r.min_severity || 'info') as NotificationSeverity,
+        groupId: r.group_id,
+        channelsOverride: channels,
+        priority: r.priority,
+        enabled: !!r.enabled,
+        createdAt: r.created_at,
+    };
+}
+
+export function listNotificationGroups(): NotificationGroupWithMembers[] {
+    if (!db) return [];
+    const groups = (db.prepare('SELECT * FROM notification_groups ORDER BY name').all() as any[]).map(rowToGroup);
+    return groups.map(g => hydrateGroup(g));
+}
+
+export function getNotificationGroup(id: number): NotificationGroupWithMembers | null {
+    if (!db) return null;
+    const row = db.prepare('SELECT * FROM notification_groups WHERE id = $id').get({ $id: id }) as any;
+    if (!row) return null;
+    return hydrateGroup(rowToGroup(row));
+}
+
+function hydrateGroup(group: NotificationGroup): NotificationGroupWithMembers {
+    if (!db) return { ...group, members: [], resolved: [], staleCount: 0 };
+    const memberRows = db.prepare('SELECT * FROM notification_group_members WHERE group_id = $g ORDER BY id').all({ $g: group.id }) as any[];
+    const members = memberRows.map(rowToMember);
+    const resolved: ResolvedRecipient[] = [];
+    let staleCount = 0;
+    for (const m of members) {
+        if (m.stale) { staleCount++; continue; }
+        let email = m.email;
+        let phone = m.phone;
+        let displayName = m.displayName;
+        if (m.proxyUserId) {
+            const u = db.prepare('SELECT username, full_name, email, phone_number FROM proxy_users WHERE id = $id').get({ $id: m.proxyUserId }) as any;
+            if (!u) { staleCount++; continue; }
+            email = u.email || email;
+            phone = u.phone_number || phone;
+            displayName = displayName || u.full_name || u.username;
+        }
+        if (!email && !phone) { staleCount++; continue; }
+        resolved.push({ memberId: m.id, proxyUserId: m.proxyUserId, email, phone, displayName });
+    }
+    return { ...group, members, resolved, staleCount };
+}
+
+export function createNotificationGroup(name: string, description = ''): NotificationGroup {
+    if (!db) throw new Error('Auth not initialized');
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error('Group name is required');
+    db.prepare('INSERT INTO notification_groups (name, description) VALUES ($n, $d)').run({ $n: trimmed, $d: description.trim() });
+    const row = db.prepare('SELECT * FROM notification_groups WHERE name = $n').get({ $n: trimmed }) as any;
+    invalidateNotificationCache();
+    return rowToGroup(row);
+}
+
+export function updateNotificationGroup(id: number, patch: { name?: string; description?: string; quietHoursJson?: string | null }): boolean {
+    if (!db) return false;
+    const fields: string[] = [];
+    const params: any = { $id: id };
+    if (patch.name !== undefined) { fields.push('name = $n'); params.$n = patch.name.trim(); }
+    if (patch.description !== undefined) { fields.push('description = $d'); params.$d = patch.description.trim(); }
+    if (patch.quietHoursJson !== undefined) { fields.push('quiet_hours_json = $q'); params.$q = patch.quietHoursJson; }
+    if (fields.length === 0) return false;
+    fields.push("updated_at = datetime('now')");
+    const r = db.prepare(`UPDATE notification_groups SET ${fields.join(', ')} WHERE id = $id`).run(params);
+    invalidateNotificationCache();
+    return r.changes > 0;
+}
+
+export function deleteNotificationGroup(id: number): boolean {
+    if (!db) return false;
+    const r = db.prepare('DELETE FROM notification_groups WHERE id = $id').run({ $id: id });
+    invalidateNotificationCache();
+    return r.changes > 0;
+}
+
+export function addNotificationGroupMember(input: {
+    groupId: number;
+    proxyUserId?: number | null;
+    email?: string;
+    phone?: string;
+    displayName?: string;
+}): NotificationGroupMember {
+    if (!db) throw new Error('Auth not initialized');
+    if (!input.proxyUserId && !input.email && !input.phone) {
+        throw new Error('Member needs proxyUserId, email or phone');
+    }
+    db.prepare(
+        'INSERT INTO notification_group_members (group_id, proxy_user_id, email, phone, display_name) VALUES ($g, $u, $e, $p, $n)'
+    ).run({
+        $g: input.groupId,
+        $u: input.proxyUserId ?? null,
+        $e: (input.email || '').trim().toLowerCase(),
+        $p: (input.phone || '').trim(),
+        $n: (input.displayName || '').trim(),
+    });
+    const row = db.prepare('SELECT * FROM notification_group_members WHERE id = last_insert_rowid()').get() as any;
+    invalidateNotificationCache();
+    return rowToMember(row);
+}
+
+export function removeNotificationGroupMember(memberId: number): boolean {
+    if (!db) return false;
+    const r = db.prepare('DELETE FROM notification_group_members WHERE id = $id').run({ $id: memberId });
+    invalidateNotificationCache();
+    return r.changes > 0;
+}
+
+export function listNotificationRules(): NotificationRule[] {
+    if (!db) return [];
+    return (db.prepare('SELECT * FROM notification_rules ORDER BY priority, id').all() as any[]).map(rowToRule);
+}
+
+export function createNotificationRule(input: {
+    name?: string;
+    categoryPattern: string;
+    minSeverity: NotificationSeverity;
+    groupId: number;
+    channelsOverride?: NotificationChannel[] | null;
+    priority?: number;
+    enabled?: boolean;
+}): NotificationRule {
+    if (!db) throw new Error('Auth not initialized');
+    const csv = input.channelsOverride && input.channelsOverride.length
+        ? input.channelsOverride.join(',')
+        : null;
+    db.prepare(
+        'INSERT INTO notification_rules (name, category_pattern, min_severity, group_id, channels_override, priority, enabled) VALUES ($n, $c, $s, $g, $co, $p, $e)'
+    ).run({
+        $n: (input.name || '').trim(),
+        $c: input.categoryPattern.trim(),
+        $s: input.minSeverity,
+        $g: input.groupId,
+        $co: csv,
+        $p: input.priority ?? 100,
+        $e: input.enabled === false ? 0 : 1,
+    });
+    const row = db.prepare('SELECT * FROM notification_rules WHERE id = last_insert_rowid()').get() as any;
+    invalidateNotificationCache();
+    return rowToRule(row);
+}
+
+export function updateNotificationRule(id: number, patch: Partial<{
+    name: string;
+    categoryPattern: string;
+    minSeverity: NotificationSeverity;
+    groupId: number;
+    channelsOverride: NotificationChannel[] | null;
+    priority: number;
+    enabled: boolean;
+}>): boolean {
+    if (!db) return false;
+    const fields: string[] = [];
+    const params: any = { $id: id };
+    if (patch.name !== undefined) { fields.push('name = $n'); params.$n = patch.name; }
+    if (patch.categoryPattern !== undefined) { fields.push('category_pattern = $c'); params.$c = patch.categoryPattern; }
+    if (patch.minSeverity !== undefined) { fields.push('min_severity = $s'); params.$s = patch.minSeverity; }
+    if (patch.groupId !== undefined) { fields.push('group_id = $g'); params.$g = patch.groupId; }
+    if (patch.channelsOverride !== undefined) {
+        const csv = patch.channelsOverride && patch.channelsOverride.length ? patch.channelsOverride.join(',') : null;
+        fields.push('channels_override = $co'); params.$co = csv;
+    }
+    if (patch.priority !== undefined) { fields.push('priority = $p'); params.$p = patch.priority; }
+    if (patch.enabled !== undefined) { fields.push('enabled = $e'); params.$e = patch.enabled ? 1 : 0; }
+    if (fields.length === 0) return false;
+    const r = db.prepare(`UPDATE notification_rules SET ${fields.join(', ')} WHERE id = $id`).run(params);
+    invalidateNotificationCache();
+    return r.changes > 0;
+}
+
+export function deleteNotificationRule(id: number): boolean {
+    if (!db) return false;
+    const r = db.prepare('DELETE FROM notification_rules WHERE id = $id').run({ $id: id });
+    invalidateNotificationCache();
+    return r.changes > 0;
+}
+
+export function createNotificationLogEntry(input: {
+    category: string;
+    severity: NotificationSeverity;
+    subject: string;
+    body: string;
+    payloadJson?: string | null;
+    matchedRuleId?: number | null;
+    matchedGroupId?: number | null;
+    recipientsTotal: number;
+    recipientsOk: number;
+    recipientsFailed: number;
+    isTest?: boolean;
+}): number {
+    if (!db) return 0;
+    const now = Date.now();
+    db.prepare(
+        'INSERT INTO notifications (category, severity, subject, body, payload_json, matched_rule_id, matched_group_id, recipients_total, recipients_ok, recipients_failed, is_test, created_at) VALUES ($c, $s, $sub, $b, $p, $r, $g, $rt, $ro, $rf, $t, $now)'
+    ).run({
+        $c: input.category,
+        $s: input.severity,
+        $sub: input.subject,
+        $b: input.body,
+        $p: input.payloadJson ?? null,
+        $r: input.matchedRuleId ?? null,
+        $g: input.matchedGroupId ?? null,
+        $rt: input.recipientsTotal,
+        $ro: input.recipientsOk,
+        $rf: input.recipientsFailed,
+        $t: input.isTest ? 1 : 0,
+        $now: now,
+    });
+    const r = db.prepare('SELECT last_insert_rowid() AS id').get() as any;
+    return r?.id || 0;
+}
+
+export function updateNotificationLogCounts(notificationId: number, ok: number, failed: number): void {
+    if (!db || !notificationId) return;
+    try {
+        db.prepare('UPDATE notifications SET recipients_ok = $o, recipients_failed = $f WHERE id = $id')
+            .run({ $o: ok, $f: failed, $id: notificationId });
+    } catch {}
+}
+
+export interface EmailSendLogEntry {
+    notificationId?: number | null;
+    userId?: number | null;
+    toAddress: string;
+    subject?: string;
+    success: boolean;
+    error?: string | null;
+    purpose?: string | null;
+}
+
+export function logEmailSend(entry: EmailSendLogEntry): void {
+    if (!db) return;
+    try {
+        db.prepare('INSERT INTO email_send_log (notification_id, user_id, to_address, subject, success, error, purpose, created_at) VALUES ($n, $u, $t, $s, $ok, $e, $pu, $c)')
+            .run({
+                $n: entry.notificationId ?? null,
+                $u: entry.userId ?? null,
+                $t: entry.toAddress,
+                $s: entry.subject ?? '',
+                $ok: entry.success ? 1 : 0,
+                $e: entry.error ?? null,
+                $pu: entry.purpose ?? null,
+                $c: Date.now(),
+            });
+    } catch {}
+}
+
+// Notification cache invalidation hook — the in-memory rules cache in
+// src/core/notifications.ts registers itself via setNotificationCacheInvalidator.
+let _notifCacheInvalidator: (() => void) | null = null;
+export function setNotificationCacheInvalidator(fn: () => void): void {
+    _notifCacheInvalidator = fn;
+}
+function invalidateNotificationCache(): void {
+    if (_notifCacheInvalidator) try { _notifCacheInvalidator(); } catch {}
 }

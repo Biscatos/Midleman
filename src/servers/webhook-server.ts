@@ -6,6 +6,7 @@ import {
     loadPersistedPendingRetry, persistPendingRetry, type StoredPendingRetry,
 } from '../core/store';
 import { sendMail, isSmtpConfigured } from '../core/smtp';
+import { emitNotificationEvent } from '../core/notifications';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -302,15 +303,9 @@ function enqueuePendingRetry(input: {
 }
 
 async function sendPendingNotification(entry: PendingRetry, kind: 'failure' | 'recovery'): Promise<void> {
-    const email = entry.persistentRetry.notifyEmail;
-    if (!email) return;
-    if (!isSmtpConfigured()) {
-        console.warn(`📧 [pending-retry] SMTP not configured — cannot notify ${email}`);
-        return;
-    }
     const subject = kind === 'failure'
-        ? `[Midleman] Persistent fanout failing — ${entry.webhookName} → ${entry.targetUrl}`
-        : `[Midleman] Persistent fanout recovered — ${entry.webhookName} → ${entry.targetUrl}`;
+        ? `Persistent fanout failing — ${entry.webhookName} → ${entry.targetUrl}`
+        : `Persistent fanout recovered — ${entry.webhookName} → ${entry.targetUrl}`;
     const body = [
         kind === 'failure'
             ? `Webhook "${entry.webhookName}" has failed to deliver to ${entry.targetUrl} after ${entry.attempts} persistent attempt(s).`
@@ -325,10 +320,40 @@ async function sendPendingNotification(entry: PendingRetry, kind: 'failure' | 'r
             ? `\nThe system will keep retrying. Open the dashboard to inspect or cancel: /admin#webhooks`
             : `\nThe entry has been removed from the pending-retry queue.`,
     ].join('\n');
-    const html = `<pre style="font-family:ui-monospace,Menlo,monospace;font-size:13px;color:#111">${body.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]!))}</pre>`;
-    const r = await sendMail({ to: email, subject, html, text: body });
-    if (!r.ok) console.warn(`📧 [pending-retry] notify ${kind} failed: ${r.error}`);
-    else console.log(`📧 [pending-retry] notify ${kind} sent to ${email}`);
+
+    // Route through the notifications pipeline. Rules with category
+    // "webhook.retry_exhausted" / "webhook.recovered" (or wildcards) decide
+    // which group + channels get this. Critical severity defaults to email+SMS.
+    const category = kind === 'failure' ? 'webhook.retry_exhausted' : 'webhook.recovered';
+    const severity = kind === 'failure' ? 'critical' : 'info';
+    try {
+        await emitNotificationEvent({
+            category,
+            severity,
+            subject,
+            body,
+            payload: {
+                webhookName: entry.webhookName,
+                targetUrl: entry.targetUrl,
+                requestId: entry.requestId,
+                method: entry.method,
+                attempts: entry.attempts,
+                lastError: entry.lastError,
+            },
+        });
+    } catch (e) {
+        console.warn(`📧 [pending-retry] notification pipeline error:`, e);
+    }
+
+    // Back-compat: if the target still has a literal notifyEmail set (no group
+    // assigned in the new pipeline), also send the legacy direct email.
+    const legacyEmail = entry.persistentRetry.notifyEmail;
+    if (legacyEmail && isSmtpConfigured()) {
+        const html = `<pre style="font-family:ui-monospace,Menlo,monospace;font-size:13px;color:#111">${body.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]!))}</pre>`;
+        const r = await sendMail({ to: legacyEmail, subject: `[Midleman] ${subject}`, html, text: body });
+        if (!r.ok) console.warn(`📧 [pending-retry] legacy notify ${kind} failed: ${r.error}`);
+        else console.log(`📧 [pending-retry] legacy notify ${kind} sent to ${legacyEmail}`);
+    }
 }
 
 async function attemptPendingRetry(entry: PendingRetry): Promise<void> {

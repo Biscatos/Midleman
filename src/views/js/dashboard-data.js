@@ -7106,3 +7106,395 @@ async function sendSmsTestUi() {
     btn.disabled = false;
   }
 }
+
+// ─── Notifications (groups + rules) ──────────────────────────────────────────
+
+let _notifGroups = [];
+let _notifRules = [];
+let _notifEditingGroupId = null;
+let _notifEditingRuleId = null;
+let _notifAddingMemberGroupId = null;
+let _notifCurrentTab = 'groups';
+
+function switchNotifTab(tab) {
+  _notifCurrentTab = tab;
+  document.querySelectorAll('.notif-tab').forEach(b => {
+    const active = b.getAttribute('data-tab') === tab;
+    b.style.borderBottomColor = active ? 'var(--accent)' : 'transparent';
+    b.style.color = active ? 'var(--text)' : 'var(--text2)';
+    b.style.fontWeight = active ? '500' : '400';
+  });
+  document.querySelectorAll('.notif-tabpane').forEach(p => {
+    p.style.display = p.getAttribute('data-tab') === tab ? '' : 'none';
+  });
+}
+
+function _setNotifStatus(elId, msg, kind) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (!msg) { el.textContent = ''; el.style.color = ''; return; }
+  const c = { ok: 'var(--ok-text)', err: 'var(--err-text)', info: 'var(--text2)' };
+  el.style.color = c[kind] || c.info;
+  el.textContent = msg;
+}
+
+async function fetchNotifGroups() {
+  try {
+    const res = await api('/admin/notification-groups');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    _notifGroups = data.groups || [];
+    renderNotifGroups();
+    const badge = document.getElementById('navNotifBadge');
+    if (badge) {
+      const n = _notifGroups.length;
+      if (n > 0) { badge.style.display = ''; badge.textContent = String(n); badge.title = n === 1 ? '1 notification group' : n + ' notification groups'; }
+      else badge.style.display = 'none';
+    }
+  } catch (e) {
+    const list = document.getElementById('notifGroupsList');
+    if (list) list.innerHTML = '<div class="card" style="padding:24px;text-align:center;color:var(--err-text)">Error loading groups: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderNotifGroups() {
+  const empty = document.getElementById('notifGroupsEmpty');
+  const list = document.getElementById('notifGroupsList');
+  if (!list) return;
+  if (_notifGroups.length === 0) {
+    empty.style.display = '';
+    list.innerHTML = '';
+    return;
+  }
+  empty.style.display = 'none';
+  list.innerHTML = _notifGroups.map(g => {
+    const memberRows = g.members.map(m => {
+      const linked = m.proxyUserId ? '<span style="font-size:10.5px;padding:2px 6px;border-radius:8px;background:var(--surface2);color:var(--text2);margin-right:6px">USER</span>' : '';
+      const stale = m.stale ? '<span style="font-size:10.5px;padding:2px 6px;border-radius:8px;background:rgba(234,179,8,0.18);color:#ca8a04;margin-right:6px">stale</span>' : '';
+      const channels = [m.email && esc(m.email), m.phone && esc(m.phone)].filter(Boolean).join(' &middot; ') || '<span style="color:var(--text3)">no contact</span>';
+      const name = m.displayName ? esc(m.displayName) : '';
+      return '<tr><td style="padding:8px 12px;border-top:1px solid var(--border)">' + linked + stale + name + '</td>'
+        + '<td style="padding:8px 12px;border-top:1px solid var(--border);color:var(--text2)">' + channels + '</td>'
+        + '<td style="padding:8px 12px;border-top:1px solid var(--border);text-align:right">'
+        + '<button class="btn btn-sm" onclick="removeNotifMember(' + g.id + ',' + m.id + ')" style="color:var(--err-text);font-size:11.5px">Remove</button>'
+        + '</td></tr>';
+    }).join('');
+    const staleNote = g.staleCount > 0
+      ? '<span style="font-size:11px;padding:2px 8px;border-radius:8px;background:rgba(234,179,8,0.18);color:#ca8a04">' + g.staleCount + ' stale</span>'
+      : '';
+    const empty = g.members.length === 0
+      ? '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3);font-size:12.5px">No recipients yet.</td></tr>'
+      : '';
+    return '<div class="card">'
+      + '<div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">'
+        + '<div style="min-width:0">'
+          + '<h3 style="margin:0;font-size:14.5px">' + esc(g.name) + '</h3>'
+          + (g.description ? '<p style="margin:2px 0 0;font-size:11.5px;color:var(--text3)">' + esc(g.description) + '</p>' : '')
+        + '</div>'
+        + '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
+          + staleNote
+          + '<span style="font-size:11px;color:var(--text3)">' + g.resolved.length + ' reachable</span>'
+          + '<button class="btn btn-sm" onclick="openNotifMemberModal(' + g.id + ')">+ Recipient</button>'
+          + '<button class="btn btn-sm" onclick="testNotifGroup(' + g.id + ')">Send test</button>'
+          + '<button class="btn btn-sm" onclick="editNotifGroup(' + g.id + ')">Edit</button>'
+          + '<button class="btn btn-sm" onclick="deleteNotifGroup(' + g.id + ')" style="color:var(--err-text)">Delete</button>'
+        + '</div>'
+      + '</div>'
+      + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">'
+      + '<tbody>' + memberRows + empty + '</tbody></table></div>'
+    + '</div>';
+  }).join('');
+}
+
+async function fetchNotifRules() {
+  try {
+    const res = await api('/admin/notification-rules');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    _notifRules = data.rules || [];
+    renderNotifRules();
+  } catch (e) {
+    const body = document.getElementById('notifRulesBody');
+    if (body) body.innerHTML = '<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+function _channelsLabel(rule) {
+  if (!rule.channelsOverride) {
+    return '<span style="font-size:11px;color:var(--text3)" title="info/warning → email; critical → email + SMS">by severity</span>';
+  }
+  return rule.channelsOverride.map(c => '<span style="font-size:10.5px;padding:2px 6px;border-radius:8px;background:var(--surface2);color:var(--text2);margin-right:4px">' + c + '</span>').join('');
+}
+
+function _severityPillHtml(sev) {
+  const palette = {
+    info:     'background:var(--surface2);color:var(--text2)',
+    warning:  'background:rgba(234,179,8,0.18);color:#ca8a04',
+    critical: 'background:rgba(239,68,68,0.15);color:var(--err-text)',
+  };
+  return '<span style="font-size:10.5px;padding:3px 8px;border-radius:8px;font-weight:500;letter-spacing:.3px;' + (palette[sev] || palette.info) + '">' + sev + '</span>';
+}
+
+function renderNotifRules() {
+  const empty = document.getElementById('notifRulesEmpty');
+  const card = document.getElementById('notifRulesCard');
+  const body = document.getElementById('notifRulesBody');
+  if (!body) return;
+  if (_notifRules.length === 0) {
+    empty.style.display = '';
+    card.style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  card.style.display = '';
+  body.innerHTML = _notifRules.map(r => {
+    const group = _notifGroups.find(g => g.id === r.groupId);
+    const groupLabel = group ? esc(group.name) : '<span style="color:var(--err-text)">missing</span>';
+    return '<tr>'
+      + '<td style="padding:10px 14px;border-top:1px solid var(--border);font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--text2)">' + r.priority + '</td>'
+      + '<td style="padding:10px 14px;border-top:1px solid var(--border);font-family:ui-monospace,Menlo,monospace;font-size:12.5px">' + esc(r.categoryPattern) + (r.name ? '<div style="font-family:inherit;font-size:11px;color:var(--text3);margin-top:2px">' + esc(r.name) + '</div>' : '') + '</td>'
+      + '<td style="padding:10px 14px;border-top:1px solid var(--border)">' + _severityPillHtml(r.minSeverity) + '</td>'
+      + '<td style="padding:10px 14px;border-top:1px solid var(--border)">' + groupLabel + '</td>'
+      + '<td style="padding:10px 14px;border-top:1px solid var(--border)">' + _channelsLabel(r) + '</td>'
+      + '<td style="padding:10px 14px;border-top:1px solid var(--border)">' + (r.enabled
+          ? '<span style="font-size:10.5px;padding:3px 8px;border-radius:8px;background:rgba(34,197,94,0.15);color:var(--ok-text)">enabled</span>'
+          : '<span style="font-size:10.5px;padding:3px 8px;border-radius:8px;background:var(--surface2);color:var(--text3)">disabled</span>') + '</td>'
+      + '<td style="padding:10px 14px;border-top:1px solid var(--border);text-align:right">'
+        + '<button class="btn btn-sm" onclick="editNotifRule(' + r.id + ')">Edit</button> '
+        + '<button class="btn btn-sm" onclick="deleteNotifRule(' + r.id + ')" style="color:var(--err-text)">Delete</button>'
+      + '</td></tr>';
+  }).join('');
+}
+
+// ── Group modal ──────────────────────────────────────────────────────────────
+
+function openNotifGroupModal() {
+  _notifEditingGroupId = null;
+  document.getElementById('notifGroupModalTitle').textContent = 'New group';
+  document.getElementById('notifGroupName').value = '';
+  document.getElementById('notifGroupDesc').value = '';
+  _setNotifStatus('notifGroupStatus', '', 'info');
+  document.getElementById('notifGroupModal').style.display = 'flex';
+}
+function editNotifGroup(id) {
+  const g = _notifGroups.find(x => x.id === id);
+  if (!g) return;
+  _notifEditingGroupId = id;
+  document.getElementById('notifGroupModalTitle').textContent = 'Edit group';
+  document.getElementById('notifGroupName').value = g.name;
+  document.getElementById('notifGroupDesc').value = g.description || '';
+  _setNotifStatus('notifGroupStatus', '', 'info');
+  document.getElementById('notifGroupModal').style.display = 'flex';
+}
+function closeNotifGroupModal() { document.getElementById('notifGroupModal').style.display = 'none'; }
+
+async function saveNotifGroup() {
+  const name = document.getElementById('notifGroupName').value.trim();
+  const description = document.getElementById('notifGroupDesc').value.trim();
+  if (!name) { _setNotifStatus('notifGroupStatus', 'Name is required.', 'err'); return; }
+  const btn = document.getElementById('notifGroupSaveBtn');
+  btn.disabled = true;
+  try {
+    const url = _notifEditingGroupId ? '/admin/notification-groups/' + _notifEditingGroupId : '/admin/notification-groups';
+    const method = _notifEditingGroupId ? 'PUT' : 'POST';
+    const res = await api(url, { method, body: JSON.stringify({ name, description }) });
+    const data = await res.json();
+    if (!res.ok) { _setNotifStatus('notifGroupStatus', data.error || 'Failed.', 'err'); return; }
+    toast(_notifEditingGroupId ? 'Group updated' : 'Group created');
+    closeNotifGroupModal();
+    await fetchNotifGroups();
+    await fetchNotifRules();
+  } catch (e) {
+    _setNotifStatus('notifGroupStatus', 'Network error: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function deleteNotifGroup(id) {
+  const g = _notifGroups.find(x => x.id === id);
+  if (!g) return;
+  if (!(await showConfirm({ title: 'Delete group', message: 'Delete "' + g.name + '"? Rules pointing to this group will be removed too.', confirmText: 'Delete' }))) return;
+  try {
+    const res = await api('/admin/notification-groups/' + id, { method: 'DELETE' });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); toast(d.error || 'Failed', 'error'); return; }
+    toast('Group deleted');
+    await fetchNotifGroups();
+    await fetchNotifRules();
+  } catch (e) { toast('Network error: ' + e.message, 'error'); }
+}
+
+async function testNotifGroup(id) {
+  try {
+    const res = await api('/admin/notification-groups/' + id + '/test', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) { toast(data.error || 'Test failed', 'error'); return; }
+    const total = data.recipientsTotal || 0;
+    const ok = data.recipientsOk || 0;
+    const failed = data.recipientsFailed || 0;
+    if (failed === 0) toast('Test sent to ' + ok + '/' + total + ' channel(s)');
+    else toast('Test: ' + ok + ' OK, ' + failed + ' failed (see audit log)', 'error');
+  } catch (e) { toast('Network error: ' + e.message, 'error'); }
+}
+
+// ── Member modal ─────────────────────────────────────────────────────────────
+
+async function openNotifMemberModal(groupId) {
+  _notifAddingMemberGroupId = groupId;
+  document.getElementById('notifMemberName').value = '';
+  document.getElementById('notifMemberEmail').value = '';
+  document.getElementById('notifMemberPhone').value = '';
+  _setNotifStatus('notifMemberStatus', '', 'info');
+  // Populate user dropdown
+  const sel = document.getElementById('notifMemberUser');
+  sel.innerHTML = '<option value="">— External recipient (enter manually below) —</option>';
+  try {
+    const res = await api('/admin/proxy-users');
+    if (res.ok) {
+      const data = await res.json();
+      (data.users || []).forEach(u => {
+        const label = (u.fullName || u.username) + ' (' + (u.email || 'no email') + ')';
+        sel.innerHTML += '<option value="' + u.id + '">' + esc(label) + '</option>';
+      });
+    }
+  } catch {}
+  sel.value = '';
+  document.getElementById('notifMemberModal').style.display = 'flex';
+}
+function closeNotifMemberModal() { document.getElementById('notifMemberModal').style.display = 'none'; }
+
+async function saveNotifMember() {
+  if (!_notifAddingMemberGroupId) return;
+  const proxyUserId = document.getElementById('notifMemberUser').value;
+  const displayName = document.getElementById('notifMemberName').value.trim();
+  const email = document.getElementById('notifMemberEmail').value.trim();
+  const phone = document.getElementById('notifMemberPhone').value.trim();
+  if (!proxyUserId && !email && !phone) {
+    _setNotifStatus('notifMemberStatus', 'Pick a user, or enter at least an email/phone.', 'err');
+    return;
+  }
+  const body = { displayName };
+  if (proxyUserId) body.proxyUserId = parseInt(proxyUserId, 10);
+  if (email) body.email = email;
+  if (phone) body.phone = phone;
+  const btn = document.getElementById('notifMemberSaveBtn');
+  btn.disabled = true;
+  try {
+    const res = await api('/admin/notification-groups/' + _notifAddingMemberGroupId + '/members', { method: 'POST', body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) { _setNotifStatus('notifMemberStatus', data.error || 'Failed.', 'err'); return; }
+    toast('Recipient added');
+    closeNotifMemberModal();
+    await fetchNotifGroups();
+  } catch (e) {
+    _setNotifStatus('notifMemberStatus', 'Network error: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function removeNotifMember(groupId, memberId) {
+  if (!(await showConfirm({ title: 'Remove recipient', message: 'Remove this recipient from the group?', confirmText: 'Remove' }))) return;
+  try {
+    const res = await api('/admin/notification-groups/' + groupId + '/members/' + memberId, { method: 'DELETE' });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); toast(d.error || 'Failed', 'error'); return; }
+    toast('Recipient removed');
+    await fetchNotifGroups();
+  } catch (e) { toast('Network error: ' + e.message, 'error'); }
+}
+
+// ── Rule modal ───────────────────────────────────────────────────────────────
+
+function _populateNotifRuleGroupSelect() {
+  const sel = document.getElementById('notifRuleGroup');
+  if (!sel) return;
+  sel.innerHTML = _notifGroups.length === 0
+    ? '<option value="">— No groups defined yet —</option>'
+    : _notifGroups.map(g => '<option value="' + g.id + '">' + esc(g.name) + '</option>').join('');
+}
+
+function openNotifRuleModal() {
+  _notifEditingRuleId = null;
+  document.getElementById('notifRuleModalTitle').textContent = 'New rule';
+  document.getElementById('notifRuleName').value = '';
+  document.getElementById('notifRuleCategory').value = '*';
+  document.getElementById('notifRuleSeverity').value = 'info';
+  document.getElementById('notifRulePriority').value = '100';
+  document.getElementById('notifRuleEnabled').checked = true;
+  document.querySelector('input[name="notifRuleChannelMode"][value="default"]').checked = true;
+  _populateNotifRuleGroupSelect();
+  _setNotifStatus('notifRuleStatus', '', 'info');
+  document.getElementById('notifRuleModal').style.display = 'flex';
+}
+function editNotifRule(id) {
+  const r = _notifRules.find(x => x.id === id);
+  if (!r) return;
+  _notifEditingRuleId = id;
+  document.getElementById('notifRuleModalTitle').textContent = 'Edit rule';
+  document.getElementById('notifRuleName').value = r.name || '';
+  // If the rule's categoryPattern is not in the static options, add it.
+  const catSel = document.getElementById('notifRuleCategory');
+  if (![...catSel.options].some(o => o.value === r.categoryPattern)) {
+    catSel.insertAdjacentHTML('beforeend', '<option value="' + esc(r.categoryPattern) + '">' + esc(r.categoryPattern) + ' (custom)</option>');
+  }
+  catSel.value = r.categoryPattern;
+  document.getElementById('notifRuleSeverity').value = r.minSeverity;
+  document.getElementById('notifRulePriority').value = String(r.priority);
+  document.getElementById('notifRuleEnabled').checked = !!r.enabled;
+  _populateNotifRuleGroupSelect();
+  document.getElementById('notifRuleGroup').value = String(r.groupId);
+  let mode = 'default';
+  if (r.channelsOverride && r.channelsOverride.length) {
+    const set = new Set(r.channelsOverride);
+    if (set.has('email') && set.has('sms')) mode = 'both';
+    else if (set.has('email')) mode = 'email';
+    else if (set.has('sms')) mode = 'sms';
+  }
+  document.querySelector('input[name="notifRuleChannelMode"][value="' + mode + '"]').checked = true;
+  _setNotifStatus('notifRuleStatus', '', 'info');
+  document.getElementById('notifRuleModal').style.display = 'flex';
+}
+function closeNotifRuleModal() { document.getElementById('notifRuleModal').style.display = 'none'; }
+
+async function saveNotifRule() {
+  const categoryPattern = document.getElementById('notifRuleCategory').value.trim();
+  const minSeverity = document.getElementById('notifRuleSeverity').value;
+  const groupId = parseInt(document.getElementById('notifRuleGroup').value, 10);
+  const priority = parseInt(document.getElementById('notifRulePriority').value, 10);
+  const name = document.getElementById('notifRuleName').value.trim();
+  const enabled = document.getElementById('notifRuleEnabled').checked;
+  const mode = document.querySelector('input[name="notifRuleChannelMode"]:checked').value;
+  let channelsOverride = null;
+  if (mode === 'email') channelsOverride = ['email'];
+  else if (mode === 'sms') channelsOverride = ['sms'];
+  else if (mode === 'both') channelsOverride = ['email', 'sms'];
+  if (!categoryPattern) { _setNotifStatus('notifRuleStatus', 'Category is required.', 'err'); return; }
+  if (!groupId) { _setNotifStatus('notifRuleStatus', 'Pick a group.', 'err'); return; }
+  const body = { name, categoryPattern, minSeverity, groupId, priority, enabled, channelsOverride };
+  const btn = document.getElementById('notifRuleSaveBtn');
+  btn.disabled = true;
+  try {
+    const url = _notifEditingRuleId ? '/admin/notification-rules/' + _notifEditingRuleId : '/admin/notification-rules';
+    const method = _notifEditingRuleId ? 'PUT' : 'POST';
+    const res = await api(url, { method, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) { _setNotifStatus('notifRuleStatus', data.error || 'Failed.', 'err'); return; }
+    toast(_notifEditingRuleId ? 'Rule updated' : 'Rule created');
+    closeNotifRuleModal();
+    await fetchNotifRules();
+  } catch (e) {
+    _setNotifStatus('notifRuleStatus', 'Network error: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function deleteNotifRule(id) {
+  if (!(await showConfirm({ title: 'Delete rule', message: 'Delete this rule?', confirmText: 'Delete' }))) return;
+  try {
+    const res = await api('/admin/notification-rules/' + id, { method: 'DELETE' });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); toast(d.error || 'Failed', 'error'); return; }
+    toast('Rule deleted');
+    await fetchNotifRules();
+  } catch (e) { toast('Network error: ' + e.message, 'error'); }
+}

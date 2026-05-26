@@ -119,6 +119,13 @@
       </button>
 
       <div class="sidebar-section-label sidebar-section-label--sub">System</div>
+      <button class="sidebar-link" data-page="notifications" data-tooltip="Notification groups & rules" onclick="navigate('notifications')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        <span class="sidebar-link-label">Notifications</span>
+        <span class="sidebar-badge" id="navNotifBadge" style="display:none" title="Notification groups">0</span>
+      </button>
       <button class="sidebar-link" data-page="consentpages" data-tooltip="OAuth consent pages" onclick="navigate('consentpages')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
@@ -1356,6 +1363,210 @@
           <button class="btn btn-sm" onclick="closeSmtpSendTestModal()">Close</button>
           <button class="btn btn-sm" id="smtpSendCancelBtn" onclick="cancelSmtpSend()" style="display:none;color:var(--err-text)">Cancel send</button>
           <button class="btn btn-primary btn-sm" onclick="sendSmtpTest()" id="smtpTestSendBtn">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ NOTIFICATIONS (groups + rules) ═══ -->
+    <div class="page" id="pageNotifications">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+        <div style="min-width:0;flex:1">
+          <h2 style="margin:0">Notifications</h2>
+          <p style="margin:6px 0 0">Define recipient groups and the rules that decide which events reach them. Events are matched by category and severity; channels default to email for info/warning and email + SMS for critical, with optional per-rule overrides.</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+          <button class="btn btn-sm" onclick="openNotifGroupModal()" id="notifAddGroupBtn">+ Group</button>
+          <button class="btn btn-sm" onclick="openNotifRuleModal()" id="notifAddRuleBtn">+ Rule</button>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div style="display:flex;gap:0;margin-top:18px;border-bottom:1px solid var(--border)">
+        <button type="button" class="notif-tab" data-tab="groups" onclick="switchNotifTab('groups')" style="background:none;border:none;border-bottom:2px solid var(--accent);padding:10px 16px;color:var(--text);font-size:13px;font-weight:500;cursor:pointer">Groups</button>
+        <button type="button" class="notif-tab" data-tab="rules" onclick="switchNotifTab('rules')" style="background:none;border:none;border-bottom:2px solid transparent;padding:10px 16px;color:var(--text2);font-size:13px;cursor:pointer">Rules</button>
+      </div>
+
+      <!-- Groups tab -->
+      <div class="notif-tabpane" data-tab="groups" style="margin-top:18px">
+        <div id="notifGroupsEmpty" class="card" style="text-align:center;padding:36px 24px;display:none">
+          <div style="max-width:520px;margin:0 auto">
+            <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="var(--text3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <h3 style="margin:16px 0 6px;font-size:17px;font-weight:500">No notification groups yet</h3>
+            <p style="margin:0 0 16px;font-size:13px;color:var(--text2);line-height:1.6">Create a group, add recipients (system users or external email/phone), then point one or more rules at it.</p>
+            <button class="btn btn-primary btn-sm" onclick="openNotifGroupModal()">Create first group</button>
+          </div>
+        </div>
+        <div id="notifGroupsList" style="display:flex;flex-direction:column;gap:12px"></div>
+      </div>
+
+      <!-- Rules tab -->
+      <div class="notif-tabpane" data-tab="rules" style="margin-top:18px;display:none">
+        <div id="notifRulesEmpty" class="card" style="text-align:center;padding:36px 24px;display:none">
+          <div style="max-width:520px;margin:0 auto">
+            <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="var(--text3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            <h3 style="margin:16px 0 6px;font-size:17px;font-weight:500">No rules defined</h3>
+            <p style="margin:0 0 16px;font-size:13px;color:var(--text2);line-height:1.6">A rule binds an event category and minimum severity to a group. Without any rule, events are silently dropped.</p>
+            <button class="btn btn-primary btn-sm" onclick="openNotifRuleModal()">Create first rule</button>
+          </div>
+        </div>
+        <div class="card" id="notifRulesCard" style="display:none">
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead>
+                <tr style="background:var(--surface2);text-align:left;color:var(--text2);font-size:11px;text-transform:uppercase;letter-spacing:.5px">
+                  <th style="padding:10px 14px;font-weight:600">Priority</th>
+                  <th style="padding:10px 14px;font-weight:600">Category</th>
+                  <th style="padding:10px 14px;font-weight:600">Min severity</th>
+                  <th style="padding:10px 14px;font-weight:600">Group</th>
+                  <th style="padding:10px 14px;font-weight:600">Channels</th>
+                  <th style="padding:10px 14px;font-weight:600">Status</th>
+                  <th style="padding:10px 14px;font-weight:600;text-align:right">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="notifRulesBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ NOTIF GROUP MODAL ═══ -->
+    <div id="notifGroupModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div style="max-width:560px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+          <div>
+            <h3 style="margin:0;font-size:16px" id="notifGroupModalTitle">New group</h3>
+            <p style="margin:4px 0 0;font-size:12.5px;color:var(--text2)">Pick a clear name — the group is referenced by rules.</p>
+          </div>
+          <button onclick="closeNotifGroupModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">&times;</button>
+        </div>
+        <div style="padding:16px 22px;display:flex;flex-direction:column;gap:14px">
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Name <span style="color:var(--err-text);text-transform:none">*</span></label>
+            <input id="notifGroupName" type="text" placeholder="On-call, Admins, …" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Description</label>
+            <input id="notifGroupDesc" type="text" placeholder="(optional)" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+          </div>
+          <div id="notifGroupStatus" style="font-size:12.5px"></div>
+        </div>
+        <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn btn-sm" onclick="closeNotifGroupModal()">Cancel</button>
+          <button class="btn btn-primary btn-sm" onclick="saveNotifGroup()" id="notifGroupSaveBtn">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ NOTIF ADD MEMBER MODAL ═══ -->
+    <div id="notifMemberModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div style="max-width:560px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+          <div>
+            <h3 style="margin:0;font-size:16px">Add recipient</h3>
+            <p style="margin:4px 0 0;font-size:12.5px;color:var(--text2)" id="notifMemberSubtitle">Link a system user (recommended) or enter contact details directly.</p>
+          </div>
+          <button onclick="closeNotifMemberModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">&times;</button>
+        </div>
+        <div style="padding:16px 22px;display:flex;flex-direction:column;gap:14px">
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">System user</label>
+            <select id="notifMemberUser" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+              <option value="">— External recipient (enter manually below) —</option>
+            </select>
+            <p style="font-size:11px;color:var(--text3);margin-top:6px">When linked, email and phone are inherited from the user and follow their profile changes.</p>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Display name</label>
+              <input id="notifMemberName" type="text" placeholder="John Doe" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Email</label>
+              <input id="notifMemberEmail" type="email" placeholder="john@example.com" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Phone (E.164)</label>
+              <input id="notifMemberPhone" type="text" placeholder="+244…" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+            </div>
+          </div>
+          <div id="notifMemberStatus" style="font-size:12.5px"></div>
+        </div>
+        <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn btn-sm" onclick="closeNotifMemberModal()">Cancel</button>
+          <button class="btn btn-primary btn-sm" onclick="saveNotifMember()" id="notifMemberSaveBtn">Add</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ NOTIF RULE MODAL ═══ -->
+    <div id="notifRuleModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div style="max-width:560px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+          <div>
+            <h3 style="margin:0;font-size:16px" id="notifRuleModalTitle">New rule</h3>
+            <p style="margin:4px 0 0;font-size:12.5px;color:var(--text2)">Bind a category pattern + severity to a recipient group.</p>
+          </div>
+          <button onclick="closeNotifRuleModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">&times;</button>
+        </div>
+        <div style="padding:16px 22px;display:flex;flex-direction:column;gap:14px">
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Name</label>
+            <input id="notifRuleName" type="text" placeholder="(optional, e.g. \"All critical to on-call\")" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Category pattern <span style="color:var(--err-text);text-transform:none">*</span></label>
+              <select id="notifRuleCategory" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+                <option value="*">* (all events)</option>
+                <option value="webhook.*">webhook.*</option>
+                <option value="webhook.retry_exhausted">webhook.retry_exhausted</option>
+                <option value="webhook.recovered">webhook.recovered</option>
+                <option value="auth.*">auth.*</option>
+                <option value="ldap.*">ldap.*</option>
+                <option value="cert.*">cert.*</option>
+                <option value="system.*">system.*</option>
+              </select>
+              <p style="font-size:11px;color:var(--text3);margin-top:6px">Supports trailing <code style="background:var(--surface2);padding:1px 4px;border-radius:3px">.*</code> wildcard, or <code style="background:var(--surface2);padding:1px 4px;border-radius:3px">*</code> for everything.</p>
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Minimum severity</label>
+              <select id="notifRuleSeverity" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+                <option value="info">Info & above (everything)</option>
+                <option value="warning">Warning & above</option>
+                <option value="critical">Critical only</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Group <span style="color:var(--err-text);text-transform:none">*</span></label>
+              <select id="notifRuleGroup" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></select>
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Priority</label>
+              <input id="notifRulePriority" type="number" value="100" min="0" max="9999" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+              <p style="font-size:11px;color:var(--text3);margin-top:6px">Lower = checked first. First match wins.</p>
+            </div>
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Channels</label>
+            <div style="display:flex;gap:14px;align-items:center;font-size:13px;color:var(--text2)">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="notifRuleChannelMode" value="default" checked> Use severity default</label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="notifRuleChannelMode" value="email"> Email only</label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="notifRuleChannelMode" value="sms"> SMS only</label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="notifRuleChannelMode" value="both"> Email + SMS</label>
+            </div>
+            <p style="font-size:11px;color:var(--text3);margin-top:6px">Default: <code style="background:var(--surface2);padding:1px 4px;border-radius:3px">info</code>/<code style="background:var(--surface2);padding:1px 4px;border-radius:3px">warning</code> → email · <code style="background:var(--surface2);padding:1px 4px;border-radius:3px">critical</code> → email + SMS.</p>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);cursor:pointer">
+            <input id="notifRuleEnabled" type="checkbox" checked> Enabled
+          </label>
+          <div id="notifRuleStatus" style="font-size:12.5px"></div>
+        </div>
+        <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn btn-sm" onclick="closeNotifRuleModal()">Cancel</button>
+          <button class="btn btn-primary btn-sm" onclick="saveNotifRule()" id="notifRuleSaveBtn">Save</button>
         </div>
       </div>
     </div>
