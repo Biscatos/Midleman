@@ -6768,3 +6768,220 @@ async function syncProfileToNpm(profileName) {
   }
 }
 
+// ─── SMS (WeSender / Twilio) ─────────────────────────────────────────────────
+
+let _smsHasWeKey = false;
+let _smsHasTwToken = false;
+let _smsCurrentPrefixRules = [];
+
+function setSmsStatus(elId, msg, kind) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (!msg) { el.textContent = ''; el.style.color = ''; return; }
+  const colorMap = { ok: 'var(--ok-text)', err: 'var(--err-text)', info: 'var(--text2)' };
+  el.style.color = colorMap[kind] || colorMap.info;
+  el.textContent = msg;
+}
+
+function updateSmsRoutingVisibility() {
+  const mode = document.getElementById('smsRouting').value;
+  document.getElementById('smsSecondaryWrap').style.display = (mode === 'failover') ? '' : 'none';
+  document.getElementById('smsPrefixCard').style.display = (mode === 'by-prefix') ? '' : 'none';
+  document.getElementById('smsPrimaryWrap').style.display = (mode === 'by-prefix') ? 'none' : '';
+}
+
+function renderSmsPrefixRules() {
+  const wrap = document.getElementById('smsPrefixRules');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  _smsCurrentPrefixRules.forEach((rule, idx) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;align-items:center';
+    row.innerHTML =
+      '<input type="text" value="' + (rule.prefix || '').replace(/"/g, '&quot;') + '" placeholder="+244 or *" data-idx="' + idx + '" data-field="prefix" style="flex:0 0 160px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">' +
+      '<select data-idx="' + idx + '" data-field="provider" style="flex:0 0 160px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">' +
+        '<option value="wesender"' + (rule.provider === 'wesender' ? ' selected' : '') + '>WeSender</option>' +
+        '<option value="twilio"' + (rule.provider === 'twilio' ? ' selected' : '') + '>Twilio</option>' +
+      '</select>' +
+      '<button class="btn btn-sm" data-idx="' + idx + '" data-action="del" style="color:var(--err-text)">Remove</button>';
+    wrap.appendChild(row);
+  });
+  wrap.querySelectorAll('input,select').forEach(el => {
+    el.addEventListener('change', e => {
+      const i = parseInt(e.target.getAttribute('data-idx'), 10);
+      const f = e.target.getAttribute('data-field');
+      _smsCurrentPrefixRules[i][f] = e.target.value.trim();
+    });
+  });
+  wrap.querySelectorAll('button[data-action="del"]').forEach(b => {
+    b.addEventListener('click', e => {
+      const i = parseInt(e.target.getAttribute('data-idx'), 10);
+      _smsCurrentPrefixRules.splice(i, 1);
+      renderSmsPrefixRules();
+    });
+  });
+}
+
+function addSmsPrefixRule() {
+  _smsCurrentPrefixRules.push({ prefix: '', provider: 'wesender' });
+  renderSmsPrefixRules();
+}
+
+async function fetchSmsConfig() {
+  try {
+    const res = await api('/admin/sms');
+    if (!res.ok) return;
+    const data = await res.json();
+    const cfg = data.sms;
+    const enabledEl = document.getElementById('smsEnabled');
+    const routingEl = document.getElementById('smsRouting');
+    const primaryEl = document.getElementById('smsPrimary');
+    const secondaryEl = document.getElementById('smsSecondary');
+    const ccEl = document.getElementById('smsDefaultCC');
+    const weKeyEl = document.getElementById('smsWeApiKey');
+    const weCEspEl = document.getElementById('smsWeCEspeciais');
+    const weHint = document.getElementById('smsWeKeyHint');
+    const twSidEl = document.getElementById('smsTwSid');
+    const twTokenEl = document.getElementById('smsTwToken');
+    const twTokenHint = document.getElementById('smsTwTokenHint');
+    const twFromEl = document.getElementById('smsTwFrom');
+    const clearBtn = document.getElementById('smsClearBtn');
+    if (cfg) {
+      enabledEl.checked = !!cfg.enabled;
+      routingEl.value = cfg.routing || 'single';
+      primaryEl.value = cfg.primary || 'wesender';
+      secondaryEl.value = cfg.secondary || 'twilio';
+      ccEl.value = cfg.defaultCountryCode || '';
+      weKeyEl.value = '';
+      weCEspEl.checked = !!(cfg.wesender && cfg.wesender.defaultCEspeciais);
+      _smsHasWeKey = !!(cfg.wesender && cfg.wesender.hasApiKey);
+      weHint.textContent = _smsHasWeKey ? 'Leave empty to keep the current key.' : 'No ApiKey set.';
+      twSidEl.value = (cfg.twilio && cfg.twilio.accountSid) || '';
+      twTokenEl.value = '';
+      _smsHasTwToken = !!(cfg.twilio && cfg.twilio.hasAuthToken);
+      twTokenHint.textContent = _smsHasTwToken ? 'Leave empty to keep the current token.' : 'No token set.';
+      twFromEl.value = (cfg.twilio && cfg.twilio.fromNumber) || '';
+      _smsCurrentPrefixRules = Array.isArray(cfg.prefixRules) ? cfg.prefixRules.map(r => ({ prefix: r.prefix || '', provider: r.provider || 'wesender' })) : [];
+      clearBtn.style.display = '';
+      setSmsStatus('smsStatus', cfg.enabled ? 'SMS active (routing: ' + cfg.routing + ').' : 'SMS configuration saved but disabled.', cfg.enabled ? 'ok' : 'info');
+    } else {
+      enabledEl.checked = false;
+      routingEl.value = 'single';
+      primaryEl.value = 'wesender';
+      secondaryEl.value = 'twilio';
+      ccEl.value = '';
+      weKeyEl.value = '';
+      weCEspEl.checked = false;
+      _smsHasWeKey = false;
+      weHint.textContent = 'No ApiKey set.';
+      twSidEl.value = '';
+      twTokenEl.value = '';
+      _smsHasTwToken = false;
+      twTokenHint.textContent = 'No token set.';
+      twFromEl.value = '';
+      _smsCurrentPrefixRules = [];
+      clearBtn.style.display = 'none';
+      setSmsStatus('smsStatus', 'No SMS configuration active.', 'info');
+    }
+    updateSmsRoutingVisibility();
+    renderSmsPrefixRules();
+  } catch (e) {
+    setSmsStatus('smsStatus', 'Failed to load: ' + e.message, 'err');
+  }
+}
+
+function _readSmsForm() {
+  const routing = document.getElementById('smsRouting').value;
+  const body = {
+    enabled: document.getElementById('smsEnabled').checked,
+    routing,
+    primary: document.getElementById('smsPrimary').value,
+    secondary: document.getElementById('smsSecondary').value,
+    defaultCountryCode: document.getElementById('smsDefaultCC').value.trim(),
+    prefixRules: _smsCurrentPrefixRules.filter(r => r.prefix !== '' || r.provider).map(r => ({ prefix: (r.prefix || '').trim(), provider: r.provider })),
+    wesender: {
+      defaultCEspeciais: document.getElementById('smsWeCEspeciais').checked,
+    },
+    twilio: {
+      accountSid: document.getElementById('smsTwSid').value.trim(),
+      fromNumber: document.getElementById('smsTwFrom').value.trim(),
+    },
+  };
+  const weKey = document.getElementById('smsWeApiKey').value;
+  if (weKey) body.wesender.apiKey = weKey;
+  const twToken = document.getElementById('smsTwToken').value;
+  if (twToken) body.twilio.authToken = twToken;
+  return body;
+}
+
+async function saveSmsConfig() {
+  const body = _readSmsForm();
+  if (body.routing === 'failover' && body.primary === body.secondary) {
+    setSmsStatus('smsStatus', 'Fallback provider must differ from primary.', 'err');
+    return;
+  }
+  if (body.routing === 'by-prefix' && (!body.prefixRules || body.prefixRules.length === 0)) {
+    setSmsStatus('smsStatus', 'Add at least one prefix rule (or switch routing mode).', 'err');
+    return;
+  }
+  setSmsStatus('smsStatus', 'Saving…', 'info');
+  try {
+    const res = await api('/admin/sms', { method: 'PUT', body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) { setSmsStatus('smsStatus', data.error || 'Failed to save.', 'err'); return; }
+    toast('SMS configuration saved');
+    await fetchSmsConfig();
+  } catch (e) {
+    setSmsStatus('smsStatus', 'Network error: ' + e.message, 'err');
+  }
+}
+
+async function clearSmsConfig() {
+  if (!(await showConfirm({ title: 'Remover configuração SMS', message: 'Remover toda a configuração SMS?', confirmText: 'Remover' }))) return;
+  try {
+    const res = await api('/admin/sms', { method: 'DELETE' });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return setSmsStatus('smsStatus', d.error || 'Error', 'err'); }
+    toast('SMS configuration removed');
+    await fetchSmsConfig();
+  } catch (e) {
+    setSmsStatus('smsStatus', 'Network error: ' + e.message, 'err');
+  }
+}
+
+function openSmsSendTestModal() {
+  document.getElementById('smsTestTo').value = '';
+  document.getElementById('smsTestProvider').value = '';
+  setSmsStatus('smsTestStatus', '', 'info');
+  document.getElementById('smsSendTestModal').style.display = 'flex';
+}
+function closeSmsSendTestModal() {
+  document.getElementById('smsSendTestModal').style.display = 'none';
+}
+
+async function sendSmsTestUi() {
+  const to = document.getElementById('smsTestTo').value.trim();
+  const provider = document.getElementById('smsTestProvider').value;
+  if (!to) { setSmsStatus('smsTestStatus', 'Enter a phone number.', 'err'); return; }
+  setSmsStatus('smsTestStatus', 'Sending…', 'info');
+  const btn = document.getElementById('smsTestSendBtn');
+  btn.disabled = true;
+  try {
+    const payload = { to };
+    if (provider) payload.provider = provider;
+    const res = await api('/admin/sms/send-test', { method: 'POST', body: JSON.stringify(payload) });
+    const data = await res.json();
+    if (data.ok) {
+      const used = data.providerUsed ? ' via ' + data.providerUsed : '';
+      setSmsStatus('smsTestStatus', 'Sent' + used + ' ✔', 'ok');
+    } else {
+      const attempts = Array.isArray(data.attempts) && data.attempts.length
+        ? ' — attempts: ' + data.attempts.map(a => a.provider + (a.ok ? ' OK' : ' FAIL: ' + (a.error || ''))).join(' | ')
+        : '';
+      setSmsStatus('smsTestStatus', 'Failed: ' + (data.error || 'unknown error') + attempts, 'err');
+    }
+  } catch (e) {
+    setSmsStatus('smsTestStatus', 'Network error: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}

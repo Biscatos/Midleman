@@ -23,7 +23,9 @@ import {
     recordFailedAttempt,
     MAX_ATTEMPTS_PER_IP,
     generateTotpSecret, setupProxyUserTotp,
+    createSmsOtpChallenge, verifySmsOtpChallenge, logSmsSend,
 } from '../auth/auth';
+import { sendSms, render2faCodeSms, isSmsConfigured as isSmsReady } from '../core/sms';
 import { tryLdapLogin } from '../auth/ldap';
 import QRCode from 'qrcode';
 
@@ -138,6 +140,8 @@ interface LoginChallenge {
     authRequestId: string;
     expiresAt: number;
     needsSetup?: boolean;
+    /** When set, this challenge is for SMS-OTP verification (not TOTP). */
+    smsOtp?: boolean;
 }
 
 const loginChallenges = new Map<string, LoginChallenge>();
@@ -511,6 +515,75 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
         });
     }
 
+    // SMS as 2FA — only when the user has no TOTP enabled. Requires a verified
+    // phone, the user-side opt-in, and a configured SMS provider.
+    if (
+        !cred.user.totpEnabled &&
+        cred.user.sms2faEnabled &&
+        cred.user.phoneVerified &&
+        cred.user.phoneNumber &&
+        isSmsReady()
+    ) {
+        const { code, rateLimited } = createSmsOtpChallenge(cred.user.id, 'login_2fa');
+        if (rateLimited) {
+            logAudit({
+                action: 'oauth.sms_otp.rate_limited',
+                actorUserId: cred.user.id,
+                actorUsername: cred.user.username,
+                targetType: 'oauth_client',
+                targetId: authReq.clientId,
+                details: { clientId: authReq.clientId },
+                ip: clientIp,
+                userAgent: req.headers.get('user-agent') || undefined,
+            });
+            return jsonError(429, 'too_many_requests', 'SMS verification limit reached. Try again later.');
+        }
+        const sendResult = await sendSms(cred.user.phoneNumber, render2faCodeSms(code));
+        if (sendResult.attempts) {
+            for (const a of sendResult.attempts) {
+                logSmsSend({ userId: cred.user.id, toNumber: cred.user.phoneNumber, provider: a.provider, success: a.ok, error: a.error || null, purpose: 'login_2fa' });
+            }
+        }
+        if (!sendResult.ok) {
+            logAudit({
+                action: 'oauth.sms_otp.send_failed',
+                actorUserId: cred.user.id,
+                actorUsername: cred.user.username,
+                targetType: 'oauth_client',
+                targetId: authReq.clientId,
+                details: { clientId: authReq.clientId, error: sendResult.error, attempts: sendResult.attempts },
+                ip: clientIp,
+                userAgent: req.headers.get('user-agent') || undefined,
+            });
+            return jsonError(502, 'sms_send_failed', 'Could not send the verification SMS. Please try again or contact your administrator.');
+        }
+        logAudit({
+            action: 'oauth.sms_otp.sent',
+            actorUserId: cred.user.id,
+            actorUsername: cred.user.username,
+            targetType: 'oauth_client',
+            targetId: authReq.clientId,
+            details: { clientId: authReq.clientId, providerUsed: sendResult.providerUsed },
+            ip: clientIp,
+            userAgent: req.headers.get('user-agent') || undefined,
+        });
+        const newAuthRequestId = storeAuthRequest(authReq);
+        const token = crypto.randomUUID();
+        loginChallenges.set(token, {
+            userId: cred.user.id,
+            totpSecret: '',
+            authRequestId: newAuthRequestId,
+            expiresAt: Date.now() + LOGIN_CHALLENGE_TTL,
+            smsOtp: true,
+        });
+        // Hint last 2 digits so the user knows which phone the code went to.
+        const phoneHint = cred.user.phoneNumber.slice(-2);
+        return new Response(JSON.stringify({ status: 'sms_otp_required', challengeToken: token, phoneHint }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+        });
+    }
+
     // Non-admin user flagged "Pending setup" by an admin → force TOTP enrolment now.
     // Admins are handled by the explicit isAdmin block above and must enrol via dashboard.
     if (!isAdmin && cred.user.force2faSetup) {
@@ -644,6 +717,93 @@ export async function handleOauthTotp(req: Request): Promise<Response> {
         });
     }
 
+    return buildSuccessResponse(authReq, challenge.userId, req, { totpUsed: true });
+}
+
+// ─── /oauth/sms-otp (POST) — alternative step 2: SMS-OTP verification ──────
+
+export async function handleOauthSmsOtp(req: Request): Promise<Response> {
+    if (req.method !== 'POST') return jsonError(405, 'method_not_allowed');
+    let body: any;
+    try { body = await req.json(); } catch { return jsonError(400, 'invalid_request', 'Invalid JSON body'); }
+
+    const challengeToken = (body.challengeToken || '').trim();
+    const code = (body.code || body.otpCode || '').trim();
+    if (!challengeToken || !code) {
+        return jsonError(400, 'invalid_request', 'Missing challengeToken or code');
+    }
+
+    const clientIp = getClientIp(req);
+    const challenge = consumeLoginChallenge(challengeToken);
+    if (!challenge || !challenge.smsOtp) {
+        return jsonError(400, 'invalid_request', 'Login session expired. Restart the sign-in flow.');
+    }
+
+    const authReq = consumeAuthRequest(challenge.authRequestId);
+    if (!authReq) {
+        return jsonError(400, 'invalid_request', 'Login session expired. Restart the sign-in flow.');
+    }
+
+    const rlKey = `oauth:sms_otp:u:${challenge.userId}`;
+    if (!checkRateLimit(rlKey)) {
+        logAudit({
+            action: 'oauth.sms_otp.rate_limited',
+            actorUserId: challenge.userId,
+            targetType: 'oauth_client',
+            targetId: authReq.clientId,
+            details: { ip: clientIp, clientId: authReq.clientId },
+            ip: clientIp,
+            userAgent: req.headers.get('user-agent') || undefined,
+        });
+        return jsonError(429, 'too_many_requests', 'Too many attempts. Try again in 15 minutes.');
+    }
+
+    const verdict = verifySmsOtpChallenge(challenge.userId, 'login_2fa', code);
+    if (verdict !== 'ok') {
+        const user = getProxyUser(challenge.userId);
+        logAudit({
+            action: 'oauth.sms_otp.failed',
+            actorUserId: challenge.userId,
+            actorUsername: user?.username,
+            targetType: 'oauth_client',
+            targetId: authReq.clientId,
+            details: { clientId: authReq.clientId, reason: verdict },
+            ip: clientIp,
+            userAgent: req.headers.get('user-agent') || undefined,
+        });
+        recordFailedAttempt(rlKey);
+        // For 'invalid' we re-issue the same challenge so the user can retry
+        // (rate limit + per-OTP attempt counter still apply). For 'expired',
+        // 'too_many_attempts' or 'no_challenge', they need a brand new code.
+        if (verdict === 'invalid') {
+            const newAuthRequestId = storeAuthRequest(authReq);
+            const newToken = crypto.randomUUID();
+            loginChallenges.set(newToken, {
+                userId: challenge.userId,
+                totpSecret: '',
+                authRequestId: newAuthRequestId,
+                expiresAt: Date.now() + LOGIN_CHALLENGE_TTL,
+                smsOtp: true,
+            });
+            return new Response(JSON.stringify({ error: 'Invalid verification code', challengeToken: newToken }), {
+                status: 401,
+                headers: { 'Content-Type': 'application/json' },
+            });
+        }
+        return jsonError(401, 'invalid_grant', verdict === 'expired'
+            ? 'Verification code expired. Restart the sign-in flow to get a new one.'
+            : 'Too many attempts. Restart the sign-in flow to get a new code.');
+    }
+
+    logAudit({
+        action: 'oauth.sms_otp.verified',
+        actorUserId: challenge.userId,
+        targetType: 'oauth_client',
+        targetId: authReq.clientId,
+        details: { clientId: authReq.clientId },
+        ip: clientIp,
+        userAgent: req.headers.get('user-agent') || undefined,
+    });
     return buildSuccessResponse(authReq, challenge.userId, req, { totpUsed: true });
 }
 

@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { createHash, createHmac, createPrivateKey, createPublicKey, createSign, createVerify, generateKeyPairSync, type KeyObject } from 'crypto';
+import { createHash, createHmac, createPrivateKey, createPublicKey, createSign, createVerify, generateKeyPairSync, randomInt, timingSafeEqual, type KeyObject } from 'crypto';
 import { resolve } from 'path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import type { AuthUser, ProxyUser } from '../core/types';
@@ -70,6 +70,9 @@ CREATE TABLE IF NOT EXISTS proxy_users (
     totp_secret  TEXT,
     totp_enabled INTEGER NOT NULL DEFAULT 0,
     force_2fa_setup INTEGER NOT NULL DEFAULT 0,
+    phone_number TEXT NOT NULL DEFAULT '',
+    phone_verified INTEGER NOT NULL DEFAULT 0,
+    sms_2fa_enabled INTEGER NOT NULL DEFAULT 0,
     roles        TEXT NOT NULL DEFAULT 'proxy',
     created_by_user_id INTEGER,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
@@ -153,6 +156,33 @@ CREATE TABLE IF NOT EXISTS ldap_adoption_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ldap_adoption_state ON ldap_adoption_events(state);
+
+CREATE TABLE IF NOT EXISTS sms_otp_challenges (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES proxy_users(id) ON DELETE CASCADE,
+    purpose     TEXT NOT NULL,
+    code_hash   TEXT NOT NULL,
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    expires_at  INTEGER NOT NULL,
+    created_at  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sms_otp_user ON sms_otp_challenges(user_id, purpose);
+CREATE INDEX IF NOT EXISTS idx_sms_otp_expires ON sms_otp_challenges(expires_at);
+
+CREATE TABLE IF NOT EXISTS sms_send_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER,
+    to_number   TEXT NOT NULL,
+    provider    TEXT NOT NULL,
+    success     INTEGER NOT NULL,
+    error       TEXT,
+    purpose     TEXT,
+    created_at  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sms_send_log_user ON sms_send_log(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_sms_send_log_created ON sms_send_log(created_at);
 `;
 
 export function initAuth(dataDir: string, maxAge: number = 86400): void {
@@ -179,8 +209,10 @@ export function initAuth(dataDir: string, maxAge: number = 86400): void {
 
         cleanExpiredSessions();
         cleanupExpiredPasswordResetTokens();
+        cleanupExpiredSmsOtpChallenges();
         setInterval(cleanExpiredSessions, 60 * 60 * 1000);
         setInterval(cleanupExpiredPasswordResetTokens, 6 * 60 * 60 * 1000);
+        setInterval(cleanupExpiredSmsOtpChallenges, 60 * 60 * 1000);
         const adminCount = (db.prepare("SELECT COUNT(*) AS c FROM proxy_users WHERE roles LIKE '%admin%'").get() as any)?.c || 0;
         const proxyCount = (db.prepare("SELECT COUNT(*) AS c FROM proxy_users").get() as any)?.c || 0;
         console.log(`🔐 Auth: ${proxyCount} user(s) total, ${adminCount} with admin role`);
@@ -248,6 +280,9 @@ function ensureProxyUsersColumns(d: Database): void {
         if (!cols.includes('roles')) d.exec("ALTER TABLE proxy_users ADD COLUMN roles TEXT NOT NULL DEFAULT 'proxy'");
         if (!cols.includes('created_by_user_id')) d.exec("ALTER TABLE proxy_users ADD COLUMN created_by_user_id INTEGER");
         if (!cols.includes('force_2fa_setup')) d.exec("ALTER TABLE proxy_users ADD COLUMN force_2fa_setup INTEGER NOT NULL DEFAULT 0");
+        if (!cols.includes('phone_number')) d.exec("ALTER TABLE proxy_users ADD COLUMN phone_number TEXT NOT NULL DEFAULT ''");
+        if (!cols.includes('phone_verified')) d.exec("ALTER TABLE proxy_users ADD COLUMN phone_verified INTEGER NOT NULL DEFAULT 0");
+        if (!cols.includes('sms_2fa_enabled')) d.exec("ALTER TABLE proxy_users ADD COLUMN sms_2fa_enabled INTEGER NOT NULL DEFAULT 0");
     } catch {}
 }
 
@@ -1045,6 +1080,9 @@ function rowToProxyUser(r: any): ProxyUser {
         ldapDn: r.ldap_dn ?? null,
         ldapOrphan: !!r.ldap_orphan,
         isAdmin: typeof r.roles === 'string' && r.roles.split(',').map((s: string) => s.trim()).includes('admin'),
+        phoneNumber: r.phone_number ?? '',
+        phoneVerified: !!r.phone_verified,
+        sms2faEnabled: !!r.sms_2fa_enabled,
     };
 }
 
@@ -1070,7 +1108,7 @@ export function listAllProxyUsers(): ProxyUser[] {
 
 export function getProxyUser(id: number): ProxyUser | null {
     if (!db) return null;
-    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, created_at FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
+    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, phone_number, phone_verified, sms_2fa_enabled, created_at FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
     return row ? rowToProxyUser(row) : null;
 }
 
@@ -1145,9 +1183,9 @@ export function updateProxyUserInfo(id: number, fullName: string, email: string)
 export async function verifyProxyUserCredentials(login: string, password: string): Promise<{ user: ProxyUser; totpSecret: string | null } | null> {
     if (!db) return null;
     // Try username first, then email
-    let row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE username = $u').get({ $u: login }) as any;
+    let row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, phone_number, phone_verified, sms_2fa_enabled, created_at FROM proxy_users WHERE username = $u').get({ $u: login }) as any;
     if (!row && login.includes('@')) {
-        row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE email = $e').get({ $e: login.toLowerCase() }) as any;
+        row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, phone_number, phone_verified, sms_2fa_enabled, created_at FROM proxy_users WHERE email = $e').get({ $e: login.toLowerCase() }) as any;
     }
     if (!row) return null;
     // Shadow accounts have no usable local password.
@@ -2172,4 +2210,132 @@ export function findResetCandidateByEmail(email: string): { id: number; username
     ).get({ $e: email.toLowerCase().trim() }) as any;
     if (!row) return null;
     return { id: row.id, username: row.username, fullName: row.full_name || '', email: row.email };
+}
+
+// ─── SMS phone fields & OTP challenges ──────────────────────────────────────
+
+export type SmsOtpPurpose = 'login_2fa' | 'phone_verify' | 'password_reset';
+
+const SMS_OTP_TTL_MS: Record<SmsOtpPurpose, number> = {
+    login_2fa: 5 * 60 * 1000,
+    phone_verify: 10 * 60 * 1000,
+    password_reset: 15 * 60 * 1000,
+};
+const SMS_OTP_MAX_ATTEMPTS = 5;
+const SMS_OTP_RATE_LIMIT_PER_HOUR = 3;
+
+function hashOtpCode(userId: number, purpose: string, code: string): string {
+    return createHash('sha256').update(`${userId}:${purpose}:${code}`).digest('hex');
+}
+
+/** Set/update the user's phone number. Resets verification + sms_2fa_enabled flags. */
+export function setProxyUserPhone(userId: number, phoneE164: string): boolean {
+    if (!db) return false;
+    const r = db.prepare(
+        "UPDATE proxy_users SET phone_number = $p, phone_verified = 0, sms_2fa_enabled = 0, updated_at = datetime('now') WHERE id = $id"
+    ).run({ $p: phoneE164, $id: userId });
+    return r.changes > 0;
+}
+
+export function markProxyUserPhoneVerified(userId: number): boolean {
+    if (!db) return false;
+    const r = db.prepare(
+        "UPDATE proxy_users SET phone_verified = 1, updated_at = datetime('now') WHERE id = $id"
+    ).run({ $id: userId });
+    return r.changes > 0;
+}
+
+export function setProxyUserSmsTwoFactor(userId: number, enabled: boolean): boolean {
+    if (!db) return false;
+    const r = db.prepare(
+        "UPDATE proxy_users SET sms_2fa_enabled = $e, updated_at = datetime('now') WHERE id = $id AND phone_verified = 1"
+    ).run({ $e: enabled ? 1 : 0, $id: userId });
+    return r.changes > 0;
+}
+
+/** Count SMS send attempts for this user in the last hour. Used for rate limiting. */
+export function countRecentSmsSends(userId: number): number {
+    if (!db) return 0;
+    const since = Date.now() - 60 * 60 * 1000;
+    const row = db.prepare('SELECT COUNT(*) AS c FROM sms_send_log WHERE user_id = $u AND created_at > $s').get({ $u: userId, $s: since }) as any;
+    return row?.c || 0;
+}
+
+export interface SmsSendLogEntry {
+    userId?: number | null;
+    toNumber: string;
+    provider: string;
+    success: boolean;
+    error?: string | null;
+    purpose?: string | null;
+}
+
+export function logSmsSend(entry: SmsSendLogEntry): void {
+    if (!db) return;
+    try {
+        db.prepare('INSERT INTO sms_send_log (user_id, to_number, provider, success, error, purpose, created_at) VALUES ($u, $t, $p, $s, $e, $pu, $c)')
+            .run({
+                $u: entry.userId ?? null,
+                $t: entry.toNumber,
+                $p: entry.provider,
+                $s: entry.success ? 1 : 0,
+                $e: entry.error ?? null,
+                $pu: entry.purpose ?? null,
+                $c: Date.now(),
+            });
+    } catch {}
+}
+
+/** Create a fresh 6-digit OTP challenge for the given user and purpose. Any
+ *  previous unconsumed challenge with the same purpose is invalidated. Returns
+ *  the raw code (only time it exists in memory) and whether the user is over
+ *  the hourly rate-limit. */
+export function createSmsOtpChallenge(userId: number, purpose: SmsOtpPurpose): { code: string; rateLimited: boolean } {
+    if (!db) throw new Error('DB not ready');
+    const rateLimited = countRecentSmsSends(userId) >= SMS_OTP_RATE_LIMIT_PER_HOUR;
+    if (rateLimited) return { code: '', rateLimited: true };
+    db.prepare('DELETE FROM sms_otp_challenges WHERE user_id = $u AND purpose = $p').run({ $u: userId, $p: purpose });
+    const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
+    const hash = hashOtpCode(userId, purpose, code);
+    const now = Date.now();
+    const ttl = SMS_OTP_TTL_MS[purpose];
+    db.prepare('INSERT INTO sms_otp_challenges (user_id, purpose, code_hash, expires_at, created_at) VALUES ($u, $p, $h, $e, $c)')
+        .run({ $u: userId, $p: purpose, $h: hash, $e: now + ttl, $c: now });
+    return { code, rateLimited: false };
+}
+
+export type SmsOtpVerifyResult = 'ok' | 'invalid' | 'expired' | 'no_challenge' | 'too_many_attempts';
+
+export function verifySmsOtpChallenge(userId: number, purpose: SmsOtpPurpose, code: string): SmsOtpVerifyResult {
+    if (!db) return 'no_challenge';
+    if (!/^\d{6}$/.test(code)) return 'invalid';
+    const row = db.prepare(
+        'SELECT id, code_hash, attempts, expires_at FROM sms_otp_challenges WHERE user_id = $u AND purpose = $p ORDER BY id DESC LIMIT 1'
+    ).get({ $u: userId, $p: purpose }) as any;
+    if (!row) return 'no_challenge';
+    if (row.attempts >= SMS_OTP_MAX_ATTEMPTS) {
+        db.prepare('DELETE FROM sms_otp_challenges WHERE id = $id').run({ $id: row.id });
+        return 'too_many_attempts';
+    }
+    if (Date.now() > row.expires_at) {
+        db.prepare('DELETE FROM sms_otp_challenges WHERE id = $id').run({ $id: row.id });
+        return 'expired';
+    }
+    const expected = Buffer.from(row.code_hash as string, 'hex');
+    const actual = Buffer.from(hashOtpCode(userId, purpose, code), 'hex');
+    const equal = expected.length === actual.length && timingSafeEqual(expected, actual);
+    if (!equal) {
+        db.prepare('UPDATE sms_otp_challenges SET attempts = attempts + 1 WHERE id = $id').run({ $id: row.id });
+        return 'invalid';
+    }
+    db.prepare('DELETE FROM sms_otp_challenges WHERE id = $id').run({ $id: row.id });
+    return 'ok';
+}
+
+/** Sweep expired/used OTP challenges. */
+export function cleanupExpiredSmsOtpChallenges(): void {
+    if (!db) return;
+    try {
+        db.prepare('DELETE FROM sms_otp_challenges WHERE expires_at < $now').run({ $now: Date.now() });
+    } catch {}
 }

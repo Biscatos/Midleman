@@ -18,14 +18,15 @@ import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, cleanupExpiredPasswordResetTokens, findResetCandidateByEmail } from './auth/auth';
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, cleanupExpiredPasswordResetTokens, findResetCandidateByEmail, logSmsSend } from './auth/auth';
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
 import { initConsentPages, listConsentPages, getConsentPage, createConsentPage, updateConsentPage, deleteConsentPage, findConsentPageOauthReferences } from './auth/consent-pages';
 import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin, runLdapSync, getLastLdapSyncReport } from './auth/ldap';
 import { initSmtp, getSmtpConfig, publicSmtpConfig, validateSmtpInput, saveSmtpConfig, deleteSmtpConfig, isSmtpConfigured, testSmtpConnection, sendMail, renderTestEmail, renderAdminInviteEmail, renderProxyInviteEmail, renderForce2faEmail, render2faDisabledEmail, renderPasswordResetEmail } from './core/smtp';
+import { initSms, getSmsConfig, publicSmsConfig, validateSmsInput, saveSmsConfig, deleteSmsConfig, isSmsConfigured, sendSms, sendSmsTest, renderWebhookAlertSms, type SmsProvider } from './core/sms';
 import { initNpmSettings, getNpmSettings, publicNpmSettings, validateNpmInput, saveNpmSettings, deleteNpmSettings, isNpmEnabled, decryptNpmPassword } from './core/npm-settings';
 import { isNpmCertVolumePresent, startCertWatcher, onCertReloaded } from './certs/npm-cert-loader';
-import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
+import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleOauthSmsOtp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
 import { resolve } from 'path';
@@ -108,6 +109,9 @@ initLdap(config.requestLog.dataDir);
 
 // Initialize SMTP (depends on initJwt for password encryption key)
 initSmtp(config.requestLog.dataDir);
+
+// Initialize SMS (depends on initJwt for credential encryption key)
+initSms(config.requestLog.dataDir);
 
 // Initialize NPM integration settings (optional — depends on initJwt for password encryption)
 initNpmSettings(config.requestLog.dataDir);
@@ -352,6 +356,7 @@ const jwksServer = jwksPortRaw ? Bun.serve({
         if (path === '/oauth/authorize' && req.method === 'GET') return handleAuthorize(req, url);
         if (path === '/oauth/login' && req.method === 'POST') return handleOauthLogin(req);
         if (path === '/oauth/totp' && req.method === 'POST') return handleOauthTotp(req);
+        if (path === '/oauth/sms-otp' && req.method === 'POST') return handleOauthSmsOtp(req);
         if (path === '/oauth/token' && req.method === 'POST') return handleToken(req);
         if (path === '/oauth/userinfo') return handleUserinfo(req);
         if (path === '/oauth/logout') return handleOauthLogout(req, url);
@@ -656,11 +661,26 @@ const server = Bun.serve({
                     initiatedByAdmin: false,
                 });
                 const r = await sendMail({ to: candidate.email, subject: tpl.subject, html: tpl.html, text: tpl.text });
+                // Also push the link via SMS when the user has a verified phone
+                // and an SMS provider is configured. Email remains the primary
+                // channel; SMS is a best-effort delivery aid.
+                let smsOutcome: { sent: boolean; error?: string; provider?: string } | undefined;
+                const fullCandidate = getProxyUser(candidate.id);
+                if (fullCandidate?.phoneVerified && fullCandidate.phoneNumber && isSmsConfigured()) {
+                    const { renderPasswordResetSms } = await import('./core/sms');
+                    const smsResult = await sendSms(fullCandidate.phoneNumber, renderPasswordResetSms(resetUrl));
+                    if (smsResult.attempts) {
+                        for (const a of smsResult.attempts) {
+                            logSmsSend({ userId: candidate.id, toNumber: fullCandidate.phoneNumber, provider: a.provider, success: a.ok, error: a.error || null, purpose: 'password_reset' });
+                        }
+                    }
+                    smsOutcome = { sent: smsResult.ok, error: smsResult.error, provider: smsResult.providerUsed };
+                }
                 logAudit({
                     actorUserId: candidate.id, actorUsername: candidate.username,
                     action: 'password_reset.requested',
                     targetType: 'proxy_user', targetId: candidate.id,
-                    details: { email, outcome: r.ok ? 'sent' : 'send_failed', emailError: r.error, expiresAt },
+                    details: { email, outcome: r.ok ? 'sent' : 'send_failed', emailError: r.error, expiresAt, sms: smsOutcome },
                     ip: clientIp, userAgent: ua,
                 });
                 return ok;
@@ -2211,6 +2231,53 @@ const server = Bun.serve({
                     const result = await sendMail({ to, subject: tpl.subject, html: tpl.html, text: tpl.text }, { signal: req.signal });
                     const me = getAuthedAdmin(req);
                     logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'smtp.test_send', targetType: 'smtp', details: { to, ok: result.ok, error: result.error }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(result.ok ? 200 : 400, { ...result });
+                }
+
+                // ── SMS (WeSender / Twilio) ──────────────────────────────────────────────
+
+                if (url.pathname === '/admin/sms' && req.method === 'GET') {
+                    return jsonRes(200, { sms: publicSmsConfig(getSmsConfig()) });
+                }
+
+                if (url.pathname === '/admin/sms' && req.method === 'PUT') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const err = validateSmsInput(body);
+                    if (err) return jsonRes(400, { error: err });
+                    try {
+                        const cfg = saveSmsConfig(body);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'sms.update', targetType: 'sms', details: { enabled: cfg.enabled, routing: cfg.routing, primary: cfg.primary, secondary: cfg.secondary }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { sms: publicSmsConfig(cfg) });
+                    } catch (e) {
+                        return jsonRes(500, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
+                if (url.pathname === '/admin/sms' && req.method === 'DELETE') {
+                    deleteSmsConfig();
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'sms.delete', targetType: 'sms', ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { status: 'deleted' });
+                }
+
+                if (url.pathname === '/admin/sms/send-test' && req.method === 'POST') {
+                    if (!isSmsConfigured()) return jsonRes(400, { error: 'SMS not configured. Save settings first.' });
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const to = typeof body?.to === 'string' ? body.to.trim() : '';
+                    if (!to) return jsonRes(400, { error: '"to" is required' });
+                    const forceProvider = body?.provider === 'wesender' || body?.provider === 'twilio'
+                        ? (body.provider as SmsProvider) : undefined;
+                    const result = await sendSmsTest(to, { signal: req.signal, forceProvider });
+                    const me = getAuthedAdmin(req);
+                    if (result.attempts) {
+                        for (const a of result.attempts) {
+                            logSmsSend({ userId: me?.id ?? null, toNumber: to, provider: a.provider, success: a.ok, error: a.error || null, purpose: 'admin_test' });
+                        }
+                    }
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'sms.test_send', targetType: 'sms', details: { to, ok: result.ok, providerUsed: result.providerUsed, error: result.error, attempts: result.attempts }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                     return jsonRes(result.ok ? 200 : 400, { ...result });
                 }
 

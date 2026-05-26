@@ -263,6 +263,12 @@ export interface ProxyUser {
   ldapOrphan?: boolean;
   /** True if 'admin' is present in the comma-separated `roles` column. */
   isAdmin?: boolean;
+  /** E.164 phone number for SMS 2FA / alerts. Empty string when not set. */
+  phoneNumber?: string;
+  /** Whether the phone number has been verified by OTP. */
+  phoneVerified?: boolean;
+  /** Whether the user opted in to SMS as their 2FA factor. */
+  sms2faEnabled?: boolean;
 }
 
 /**

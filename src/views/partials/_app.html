@@ -108,6 +108,13 @@
         <span class="sidebar-link-label">Email</span>
         <span class="sidebar-badge" id="navSmtpBadge" style="display:none">!</span>
       </button>
+      <button class="sidebar-link" data-page="sms" data-tooltip="SMS" onclick="navigate('sms')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        <span class="sidebar-link-label">SMS</span>
+        <span class="sidebar-badge" id="navSmsBadge" style="display:none">!</span>
+      </button>
       <button class="sidebar-link" data-page="ldap" data-tooltip="LDAP" onclick="navigate('ldap')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/>
@@ -1344,6 +1351,138 @@
           <button class="btn btn-sm" onclick="closeSmtpSendTestModal()">Close</button>
           <button class="btn btn-sm" id="smtpSendCancelBtn" onclick="cancelSmtpSend()" style="display:none;color:var(--err-text)">Cancel send</button>
           <button class="btn btn-primary btn-sm" onclick="sendSmtpTest()" id="smtpTestSendBtn">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ SMS (WeSender / Twilio) ═══ -->
+    <div class="page" id="pageSms">
+      <div class="page-header">
+        <h2>SMS</h2>
+        <p>Configure SMS providers used for 2FA codes, password-reset notifications and administrative alerts. Supports <strong>WeSender</strong> (Angola) and <strong>Twilio</strong> (international), with a single active provider, a primary + fallback pair, or routing by destination prefix.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h3>General</h3></div>
+        <div class="card-body">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
+            <div style="display:flex;align-items:center">
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)">
+                <input id="smsEnabled" type="checkbox"> Enabled
+              </label>
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Routing mode</label>
+              <select id="smsRouting" onchange="updateSmsRoutingVisibility()" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+                <option value="single">Single provider</option>
+                <option value="failover">Primary + fallback</option>
+                <option value="by-prefix">Route by phone prefix</option>
+              </select>
+            </div>
+            <div id="smsPrimaryWrap">
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Primary provider</label>
+              <select id="smsPrimary" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+                <option value="wesender">WeSender</option>
+                <option value="twilio">Twilio</option>
+              </select>
+            </div>
+            <div id="smsSecondaryWrap" style="display:none">
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Fallback provider</label>
+              <select id="smsSecondary" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+                <option value="twilio">Twilio</option>
+                <option value="wesender">WeSender</option>
+              </select>
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Default country code</label>
+              <input id="smsDefaultCC" type="text" placeholder="244" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+              <p style="font-size:11px;color:var(--text3);margin-top:6px">Used to expand local numbers (without "+") to E.164. Example: 244 for Angola.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="smsPrefixCard" style="margin-top:16px;display:none">
+        <div class="card-header"><h3>Prefix routing rules</h3></div>
+        <div class="card-body">
+          <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">Match destination numbers (in E.164) against each prefix in order. Use <code style="background:var(--surface2);padding:1px 6px;border-radius:4px">*</code> as the last entry to catch everything else.</p>
+          <div id="smsPrefixRules" style="display:flex;flex-direction:column;gap:8px"></div>
+          <div style="margin-top:12px">
+            <button class="btn btn-sm" onclick="addSmsPrefixRule()">+ Add rule</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-header"><h3>WeSender</h3></div>
+        <div class="card-body">
+          <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">Angolan SMS gateway. Endpoint: <code style="background:var(--surface2);padding:1px 6px;border-radius:4px">api.wesender.co.ao/envio/apikey</code>. You only need an ApiKey from your WeSender account.</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Api Key</label>
+              <input id="smsWeApiKey" type="password" autocomplete="new-password" placeholder="(unchanged)" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+              <p style="font-size:11px;color:var(--text3);margin-top:6px" id="smsWeKeyHint">Leave empty to keep the current key.</p>
+            </div>
+            <div style="display:flex;align-items:flex-end">
+              <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text2)">
+                <input id="smsWeCEspeciais" type="checkbox"> Allow special characters (CEspeciais)
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-header"><h3>Twilio</h3></div>
+        <div class="card-body">
+          <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">International SMS via Twilio. Requires Account SID, Auth Token and a verified sender number in E.164 format.</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Account SID</label>
+              <input id="smsTwSid" type="text" autocomplete="off" placeholder="ACxxxxxxxxxxxxxxxx" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Auth Token</label>
+              <input id="smsTwToken" type="password" autocomplete="new-password" placeholder="(unchanged)" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+              <p style="font-size:11px;color:var(--text3);margin-top:6px" id="smsTwTokenHint">Leave empty to keep the current token.</p>
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">From number</label>
+              <input id="smsTwFrom" type="text" placeholder="+15551234567" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-primary btn-sm" onclick="saveSmsConfig()">Save</button>
+        <button class="btn btn-sm" onclick="openSmsSendTestModal()">Send test SMS</button>
+        <button class="btn btn-sm" onclick="clearSmsConfig()" id="smsClearBtn" style="display:none;margin-left:auto;color:var(--err-text)">Remove configuration</button>
+      </div>
+      <div id="smsStatus" style="margin-top:14px;font-size:12.5px"></div>
+    </div>
+
+    <!-- ═══ SMS SEND TEST MODAL ═══ -->
+    <div id="smsSendTestModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div style="max-width:440px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+          <div><h3 style="margin:0;font-size:16px">Send test SMS</h3><p style="margin:4px 0 0;font-size:12.5px;color:var(--text2)">Uses the saved configuration. The destination is normalized to E.164.</p></div>
+          <button onclick="closeSmsSendTestModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">&times;</button>
+        </div>
+        <div style="padding:16px 22px">
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Phone number</label>
+          <input id="smsTestTo" type="text" placeholder="+244923000000" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+          <label style="display:block;font-size:11px;color:var(--text2);margin:12px 0 6px;text-transform:uppercase;letter-spacing:.5px">Force provider (optional)</label>
+          <select id="smsTestProvider" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+            <option value="">(use routing)</option>
+            <option value="wesender">WeSender</option>
+            <option value="twilio">Twilio</option>
+          </select>
+          <div id="smsTestStatus" style="margin-top:12px;font-size:12.5px"></div>
+        </div>
+        <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn btn-sm" onclick="closeSmsSendTestModal()">Close</button>
+          <button class="btn btn-primary btn-sm" onclick="sendSmsTestUi()" id="smsTestSendBtn">Send</button>
         </div>
       </div>
     </div>
