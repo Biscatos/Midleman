@@ -240,6 +240,21 @@ body {
 .sidebar-section-label:first-child {
   padding-top: 6px;
 }
+.sidebar-section-label--master {
+  font-size: 11px;
+  color: var(--text2);
+  letter-spacing: 1px;
+  padding-top: 18px;
+  padding-bottom: 2px;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+.sidebar-section-label--sub {
+  font-size: 9.5px;
+  padding-top: 10px;
+  padding-bottom: 2px;
+  opacity: 0.7;
+}
 
 .sidebar-badge {
   margin-left: auto;

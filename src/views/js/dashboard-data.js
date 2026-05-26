@@ -4446,7 +4446,11 @@ async function fetchLdapConfigs() {
     _ldapConfigs = configs || [];
     renderLdapConfigs(_ldapConfigs);
     const badge = document.getElementById('navLdapBadge');
-    if (badge) badge.textContent = String(_ldapConfigs.filter(c => c.enabled).length);
+    if (badge) {
+      const n = _ldapConfigs.filter(c => c.enabled).length;
+      badge.textContent = String(n);
+      badge.title = n === 1 ? '1 enabled directory' : n + ' enabled directories';
+    }
   } catch (e) {
     document.getElementById('ldapListBody').innerHTML =
       '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
@@ -4863,7 +4867,11 @@ async function fetchConsentPages() {
     _consentPages = pages || [];
     renderConsentPages(_consentPages);
     const badge = document.getElementById('navConsentBadge');
-    if (badge) badge.textContent = String(_consentPages.length);
+    if (badge) {
+      const n = _consentPages.length;
+      badge.textContent = String(n);
+      badge.title = n === 1 ? '1 consent page' : n + ' consent pages';
+    }
   } catch (e) {
     const tbody = document.getElementById('consentPagesListBody');
     if (tbody) tbody.innerHTML = '<tr><td colspan="4" style="padding:40px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
@@ -6788,6 +6796,101 @@ function updateSmsRoutingVisibility() {
   document.getElementById('smsSecondaryWrap').style.display = (mode === 'failover') ? '' : 'none';
   document.getElementById('smsPrefixCard').style.display = (mode === 'by-prefix') ? '' : 'none';
   document.getElementById('smsPrimaryWrap').style.display = (mode === 'by-prefix') ? 'none' : '';
+  const hint = document.getElementById('smsRoutingHint');
+  if (hint) {
+    if (mode === 'single') hint.textContent = 'All messages go through the primary provider.';
+    else if (mode === 'failover') hint.textContent = 'Try the primary provider first; on failure, automatically retry with the fallback.';
+    else hint.textContent = 'Match each destination against the rules below in order. Use "*" as catch-all.';
+  }
+  _renderSmsProviderBadges();
+}
+
+function _setStatusPill(el, label, kind) {
+  if (!el) return;
+  if (!label) { el.style.display = 'none'; return; }
+  const palette = {
+    ok:   { bg: 'rgba(34,197,94,0.15)',  fg: 'var(--ok-text)' },
+    warn: { bg: 'rgba(234,179,8,0.18)',  fg: 'var(--warn-text, #ca8a04)' },
+    err:  { bg: 'rgba(239,68,68,0.15)',  fg: 'var(--err-text)' },
+    mute: { bg: 'var(--surface2)',       fg: 'var(--text3)' },
+  };
+  const p = palette[kind] || palette.mute;
+  el.style.display = 'inline-block';
+  el.style.background = p.bg;
+  el.style.color = p.fg;
+  el.textContent = label;
+}
+
+function _badgeHtml(label, kind) {
+  const palette = {
+    ok:   'background:rgba(34,197,94,0.15);color:var(--ok-text)',
+    warn: 'background:rgba(234,179,8,0.18);color:#ca8a04',
+    err:  'background:rgba(239,68,68,0.15);color:var(--err-text)',
+    mute: 'background:var(--surface2);color:var(--text3)',
+  };
+  return '<span style="font-size:10.5px;padding:3px 8px;border-radius:8px;font-weight:500;letter-spacing:.3px;' + (palette[kind] || palette.mute) + '">' + label + '</span>';
+}
+
+function _renderSmsProviderBadges() {
+  const enabled = document.getElementById('smsEnabled');
+  const routing = document.getElementById('smsRouting');
+  const primary = document.getElementById('smsPrimary');
+  const secondary = document.getElementById('smsSecondary');
+  if (!enabled || !routing) return;
+  const isEnabled = enabled.checked;
+  const mode = routing.value;
+  const usedByPrefix = new Set();
+  if (mode === 'by-prefix') {
+    _smsCurrentPrefixRules.forEach(r => { if (r && r.provider) usedByPrefix.add(r.provider); });
+  }
+
+  function badgesFor(providerId, hasSecret, missingPieces) {
+    const parts = [];
+    if (isEnabled) {
+      if (mode === 'single' && primary.value === providerId) parts.push(_badgeHtml('Active', 'ok'));
+      else if (mode === 'failover' && primary.value === providerId) parts.push(_badgeHtml('Primary', 'ok'));
+      else if (mode === 'failover' && secondary.value === providerId) parts.push(_badgeHtml('Fallback', 'ok'));
+      else if (mode === 'by-prefix' && usedByPrefix.has(providerId)) parts.push(_badgeHtml('In routing', 'ok'));
+      else parts.push(_badgeHtml('Idle', 'mute'));
+    } else {
+      parts.push(_badgeHtml('Disabled', 'mute'));
+    }
+    if (missingPieces.length === 0) {
+      parts.push(_badgeHtml(hasSecret ? 'Configured' : 'Missing key', hasSecret ? 'ok' : 'warn'));
+    } else {
+      parts.push(_badgeHtml('Needs: ' + missingPieces.join(', '), 'warn'));
+    }
+    return parts.join('');
+  }
+
+  const weBadgesEl = document.getElementById('smsWeBadges');
+  const twBadgesEl = document.getElementById('smsTwBadges');
+  if (weBadgesEl) {
+    const missing = [];
+    if (!_smsHasWeKey && !document.getElementById('smsWeApiKey').value) missing.push('ApiKey');
+    weBadgesEl.innerHTML = badgesFor('wesender', _smsHasWeKey || !!document.getElementById('smsWeApiKey').value, missing);
+  }
+  if (twBadgesEl) {
+    const missing = [];
+    const sid = document.getElementById('smsTwSid').value.trim();
+    const from = document.getElementById('smsTwFrom').value.trim();
+    const tokenPresent = _smsHasTwToken || !!document.getElementById('smsTwToken').value;
+    if (!sid) missing.push('SID');
+    if (!tokenPresent) missing.push('Token');
+    if (!from) missing.push('From');
+    twBadgesEl.innerHTML = badgesFor('twilio', sid && tokenPresent && from, missing);
+  }
+}
+
+function _updateSmsStatusPill(cfg) {
+  const pill = document.getElementById('smsStatusPill');
+  if (!pill) return;
+  if (!cfg) return _setStatusPill(pill, 'Not configured', 'mute');
+  if (!cfg.enabled) return _setStatusPill(pill, 'Disabled', 'mute');
+  const haveWe = cfg.wesender && cfg.wesender.hasApiKey;
+  const haveTw = cfg.twilio && cfg.twilio.hasAuthToken && cfg.twilio.accountSid && cfg.twilio.fromNumber;
+  if (!haveWe && !haveTw) return _setStatusPill(pill, 'Incomplete', 'warn');
+  _setStatusPill(pill, 'Active', 'ok');
 }
 
 function renderSmsPrefixRules() {
@@ -6811,6 +6914,7 @@ function renderSmsPrefixRules() {
       const i = parseInt(e.target.getAttribute('data-idx'), 10);
       const f = e.target.getAttribute('data-field');
       _smsCurrentPrefixRules[i][f] = e.target.value.trim();
+      _renderSmsProviderBadges();
     });
   });
   wrap.querySelectorAll('button[data-action="del"]').forEach(b => {
@@ -6818,6 +6922,7 @@ function renderSmsPrefixRules() {
       const i = parseInt(e.target.getAttribute('data-idx'), 10);
       _smsCurrentPrefixRules.splice(i, 1);
       renderSmsPrefixRules();
+      _renderSmsProviderBadges();
     });
   });
 }
@@ -6825,6 +6930,7 @@ function renderSmsPrefixRules() {
 function addSmsPrefixRule() {
   _smsCurrentPrefixRules.push({ prefix: '', provider: 'wesender' });
   renderSmsPrefixRules();
+  _renderSmsProviderBadges();
 }
 
 async function fetchSmsConfig() {
@@ -6885,9 +6991,24 @@ async function fetchSmsConfig() {
     }
     updateSmsRoutingVisibility();
     renderSmsPrefixRules();
+    _updateSmsStatusPill(cfg);
+    _renderSmsProviderBadges();
+    _bindSmsLiveBadges();
   } catch (e) {
     setSmsStatus('smsStatus', 'Failed to load: ' + e.message, 'err');
   }
+}
+
+let _smsLiveBound = false;
+function _bindSmsLiveBadges() {
+  if (_smsLiveBound) return;
+  _smsLiveBound = true;
+  ['smsEnabled','smsPrimary','smsSecondary','smsWeApiKey','smsTwSid','smsTwToken','smsTwFrom'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const evt = (el.type === 'checkbox' || el.tagName === 'SELECT') ? 'change' : 'input';
+    el.addEventListener(evt, _renderSmsProviderBadges);
+  });
 }
 
 function _readSmsForm() {
