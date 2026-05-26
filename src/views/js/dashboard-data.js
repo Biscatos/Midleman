@@ -165,12 +165,15 @@ function showContextMenu(e, btn) {
     if (!w) return;
     const dlqCount = _dlqByWebhook[name] || 0;
     const pendingCount = _pendingByWebhook[name] || 0;
+    const npmAvailable = Array.isArray(_npmHostsAll) && _npmHostsAll.length > 0;
+    const canLinkNpm = !w.npmProxyHostId && npmAvailable;
     showActionMenu(btn, [
       dlqCount > 0 ? { label: `Failed deliveries (${dlqCount})`, fn: () => openDlqModal(name), danger: true } : null,
       pendingCount > 0 ? { label: `Pending retries (${pendingCount})`, fn: () => openPendingRetryModal(name) } : null,
       { label: 'View Logs', fn: () => viewWebhookLogs(name) },
       { label: 'Restart', fn: () => restartWebhookAction(name) },
       { label: 'Edit', fn: () => editWebhook(name) },
+      canLinkNpm ? { label: 'Link to NPM host…', fn: () => openLinkToNpmModalForWebhook(name) } : null,
       '---',
       { label: 'Delete', fn: () => deleteWebhook(name), danger: true },
     ]);
@@ -178,6 +181,8 @@ function showContextMenu(e, btn) {
     const p = _allProfiles.find(x => x.name === name);
     if (!p) return;
     const authMode = p.authMode || (p.hasAccessKey ? 'accessKey' : 'none');
+    const npmAvailable = Array.isArray(_npmHostsAll) && _npmHostsAll.length > 0;
+    const canLinkNpm = !p.npmProxyHostId && npmAvailable;
     showActionMenu(btn, [
       p.port ? { label: `Open :${p.port}`, fn: () => window.open(`${location.protocol}//${location.hostname}:${p.port}/`, '_blank') } : null,
       { label: 'Copy URL', fn: () => copyProxyUrl(p.name, p.port || 0) },
@@ -185,8 +190,23 @@ function showContextMenu(e, btn) {
       authMode === 'login' ? { label: 'Manage Users', fn: () => openProxyUsersModal(p.name) } : null,
       { label: 'Restart', fn: () => restartProfileAction(p.name) },
       { label: 'Edit', fn: () => editProfile(p.name) },
+      canLinkNpm ? { label: 'Link to NPM host…', fn: () => openLinkToNpmModal(p.name) } : null,
       '---',
       { label: 'Delete', fn: () => deleteProfile(p.name), danger: true },
+    ]);
+  } else if (type === 'proxyUser') {
+    const id = Number(btn.dataset.id);
+    const u = _allProxyUsers.find(x => x.id === id);
+    if (!u) return;
+    showActionMenu(btn, [
+      { label: 'Edit', fn: () => openEditProxyUserModal(u.id) },
+      { label: 'Resources', fn: () => openUserResourcesModal(u.id, u.username) },
+      { label: 'Reset password', fn: () => sendPasswordReset(u.id, u.username) },
+      u.totpEnabled
+        ? { label: 'Disable 2FA', fn: () => disable2fa(u.id, u.username) }
+        : (u.force2faSetup ? null : { label: 'Force 2FA', fn: () => force2fa(u.id, u.username) }),
+      '---',
+      { label: 'Delete', fn: () => deleteProxyUserAction(u.id, u.username), danger: true },
     ]);
   }
 }
@@ -323,22 +343,399 @@ async function fetchProfiles() {
   } catch { }
 }
 
-async function linkProfileToNpmHost(profileName, hostId) {
-  const msg = 'Vincular "' + profileName + '" ao host NPM #' + hostId
-    + '? O NPM passará a encaminhar tráfego para o Midleman (em vez do backend directamente).';
-  if (!(await showConfirm({ title: 'Vincular ao NPM', message: msg, confirmText: 'Vincular' }))) return;
+async function linkProfileToNpmHost(profileName, hostId, opts) {
+  opts = opts || {};
+  if (!opts.skipConfirm) {
+    const msg = 'Vincular "' + profileName + '" ao host NPM #' + hostId
+      + '? O NPM passará a encaminhar tráfego para o Midleman (em vez do backend directamente).';
+    if (!(await showConfirm({ title: 'Vincular ao NPM', message: msg, confirmText: 'Vincular' }))) return;
+  }
   try {
     const res = await api('/admin/npm/link-profile', {
       method: 'POST',
-      body: JSON.stringify({ profileName, hostId }),
+      body: JSON.stringify({ profileName, hostId, force: !!opts.force }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) { toast(data.error || 'Falha ao vincular', 'error'); return; }
-    toast('Profile "' + profileName + '" vinculado ao NPM #' + hostId);
+    if (!res.ok) {
+      // Mismatch path: ask the user to acknowledge that the NPM host's original
+      // forward target will be replaced and any traffic relying on it will stop.
+      if (res.status === 409 && data && data.mismatch && !opts.force) {
+        const m = data.mismatch;
+        const detail = 'NPM #' + hostId + ' encaminha actualmente para ' + m.npm.host + ':' + m.npm.port
+          + '. Ao vincular, o NPM passa a encaminhar para o Midleman, e este profile encaminhará para '
+          + m.profile.host + ':' + m.profile.port + '. Se não forem o mesmo serviço, o tráfego que ia para '
+          + m.npm.host + ':' + m.npm.port + ' via este NPM host deixa de funcionar.';
+        const ok = await showConfirm({
+          title: 'Forward targets não coincidem',
+          message: 'O profile e o NPM host apontam para destinos diferentes. Vincular mesmo assim?',
+          detail,
+          confirmText: 'Vincular mesmo assim',
+          danger: true,
+        });
+        if (!ok) return;
+        return linkProfileToNpmHost(profileName, hostId, { force: true, skipConfirm: true });
+      }
+      toast(data.error || 'Falha ao vincular', 'error');
+      return;
+    }
+    toast('Profile "' + profileName + '" vinculado ao NPM #' + hostId + (data.forced ? ' (forçado)' : ''));
     await fetchProfiles();
+    // If we're on the NPM page, refresh its tables too.
+    try { if (typeof fetchNpmHostsTable === 'function') await fetchNpmHostsTable(); } catch { /* ignore */ }
+    try { if (typeof _npmImportHostsAll !== 'undefined' && _npmImportHostsAll.length) await fetchNpmProxyHosts(); } catch { /* ignore */ }
   } catch (e) {
     toast('Erro de rede: ' + e.message, 'error');
   }
+}
+
+// Modal: pick an existing NPM host to link to the given profile.
+// Built dynamically (no HTML changes needed). Lists NPM hosts that are not yet
+// linked to any profile or webhook. Match badge highlights exact host+port matches.
+async function openLinkToNpmModal(profileName) {
+  const profile = _allProfiles.find(p => p.name === profileName);
+  if (!profile) { toast('Profile não encontrado', 'error'); return; }
+  if (profile.npmProxyHostId) { toast('Profile já vinculado ao NPM #' + profile.npmProxyHostId, 'error'); return; }
+
+  // Ensure we have a fresh NPM hosts list.
+  let hosts = [];
+  try {
+    const r = await api('/admin/npm/proxy-hosts');
+    if (!r.ok) { const d = await r.json().catch(() => ({})); toast(d.error || 'Falha ao carregar NPM hosts', 'error'); return; }
+    const d = await r.json();
+    hosts = (d.hosts || []).filter(h => !h.linkedProfile && !h.linkedWebhook);
+  } catch (e) { toast('Erro de rede: ' + e.message, 'error'); return; }
+
+  if (!hosts.length) { toast('Não há NPM hosts disponíveis para vincular.', 'error'); return; }
+
+  // Compute the profile's target for match highlighting.
+  let tHost = '', tPort = 0;
+  try {
+    const u = new URL(profile.targetUrl);
+    tHost = u.hostname.toLowerCase();
+    tPort = u.port ? Number(u.port) : (u.protocol === 'https:' ? 443 : 80);
+  } catch { /* invalid targetUrl — no match highlighting */ }
+
+  // Sort: exact matches first, then by id.
+  hosts.sort((a, b) => {
+    const am = ((a.forward_host || '').toLowerCase() === tHost && Number(a.forward_port) === tPort) ? 0 : 1;
+    const bm = ((b.forward_host || '').toLowerCase() === tHost && Number(b.forward_port) === tPort) ? 0 : 1;
+    return am - bm || (a.id - b.id);
+  });
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay active';
+  overlay.id = '_linkToNpmOverlay';
+  overlay.innerHTML =
+    '<div class="modal" style="max-width:720px">' +
+    '  <div class="modal-header">' +
+    '    <h3 style="margin:0">Vincular profile "' + _esc(profileName) + '" a um NPM host</h3>' +
+    '    <button type="button" class="btn btn-sm" onclick="closeLinkToNpmModal()">&times;</button>' +
+    '  </div>' +
+    '  <div class="modal-body" style="max-height:60vh;overflow-y:auto">' +
+    '    <div style="color:var(--text2);font-size:12.5px;margin-bottom:10px">' +
+    '      Profile encaminha para <code style="font-family:monospace">' + _esc(tHost + ':' + (tPort || '?')) + '</code>. ' +
+    '      Hosts com destino exactamente igual aparecem marcados como <strong>match</strong>.' +
+    '    </div>' +
+    '    <table style="width:100%;border-collapse:collapse;font-size:13px">' +
+    '      <thead><tr style="text-align:left;color:var(--text3);border-bottom:1px solid var(--border)">' +
+    '        <th style="padding:6px 8px">#</th>' +
+    '        <th style="padding:6px 8px">Domains</th>' +
+    '        <th style="padding:6px 8px">Forwards to</th>' +
+    '        <th style="padding:6px 8px"></th>' +
+    '        <th style="padding:6px 8px;text-align:right"></th>' +
+    '      </tr></thead>' +
+    '      <tbody>' + hosts.map(h => {
+      const fh = (h.forward_host || '').toLowerCase();
+      const fp = Number(h.forward_port || 0);
+      const matches = (tHost && fh === tHost && fp === tPort);
+      const fwd = (h.forward_scheme || 'http') + '://' + (h.forward_host || '?') + ':' + (h.forward_port || '?');
+      const domains = (h.domain_names || []).length ? h.domain_names.join(', ') : '(no domains)';
+      const matchBadge = matches
+        ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 8px;border-radius:10px;font-size:11px">match</span>'
+        : '<span style="background:var(--surface2);color:var(--text3);padding:2px 8px;border-radius:10px;font-size:11px">mismatch</span>';
+      return '<tr style="border-bottom:1px solid var(--border)">' +
+        '<td style="padding:8px;color:var(--text3)">#' + h.id + '</td>' +
+        '<td style="padding:8px">' + _esc(domains) + '</td>' +
+        '<td style="padding:8px;font-family:monospace;font-size:11.5px;color:var(--text2)">' + _esc(fwd) + '</td>' +
+        '<td style="padding:8px">' + matchBadge + '</td>' +
+        '<td style="padding:8px;text-align:right">' +
+        '  <button class="btn btn-sm btn-primary" onclick="_pickHostForLink(' + h.id + ',\'' + _esc(profileName) + '\')">Vincular</button>' +
+        '</td></tr>';
+    }).join('') + '</tbody>' +
+    '    </table>' +
+    '  </div>' +
+    '  <div class="modal-footer">' +
+    '    <button type="button" class="btn" onclick="closeLinkToNpmModal()">Fechar</button>' +
+    '  </div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+}
+
+function closeLinkToNpmModal() {
+  const el = document.getElementById('_linkToNpmOverlay');
+  if (el) el.remove();
+}
+
+async function _pickHostForLink(hostId, profileName) {
+  closeLinkToNpmModal();
+  await linkProfileToNpmHost(profileName, hostId);
+}
+
+// Modal: pick an existing profile OR webhook to link to the given NPM host.
+async function openLinkProfileToHostModal(hostId) {
+  // Ensure both lists are fresh.
+  if (!_allProfiles || !_allProfiles.length) {
+    try { await fetchProfiles(); } catch { /* ignore */ }
+  }
+  if (!_allWebhooks || !_allWebhooks.length) {
+    try { await fetchWebhooks(); } catch { /* ignore */ }
+  }
+  const profileCandidates = (_allProfiles || []).filter(p => !p.npmProxyHostId);
+  const webhookCandidates = (_allWebhooks || []).filter(w => !w.npmProxyHostId);
+  if (!profileCandidates.length && !webhookCandidates.length) {
+    toast('Não há profiles nem webhooks livres para vincular.', 'error');
+    return;
+  }
+
+  // Find the host info for match highlighting.
+  let host = null;
+  try {
+    const r = await api('/admin/npm/proxy-hosts/' + hostId);
+    if (r.ok) host = (await r.json()).host || null;
+  } catch { /* ignore */ }
+  let nHost = '', nPort = 0;
+  if (host) { nHost = (host.forward_host || '').toLowerCase(); nPort = Number(host.forward_port || 0); }
+
+  const parseUrl = (s) => {
+    try {
+      const u = new URL(s);
+      return { h: u.hostname.toLowerCase(), p: u.port ? Number(u.port) : (u.protocol === 'https:' ? 443 : 80) };
+    } catch { return { h: '', p: 0 }; }
+  };
+  const profileTarget = (p) => parseUrl(p.targetUrl);
+  const webhookTarget = (w) => {
+    const first = w.targets && w.targets[0];
+    if (typeof first === 'string') return parseUrl(first);
+    if (first && typeof first === 'object' && first.url) return parseUrl(first.url);
+    return { h: '', p: 0 };
+  };
+
+  // Build a unified row list. Sort matches first, then by name.
+  const rows = []
+    .concat(profileCandidates.map(p => ({ kind: 'profile', name: p.name, targetStr: p.targetUrl || '', tgt: profileTarget(p) })))
+    .concat(webhookCandidates.map(w => {
+      const first = w.targets && w.targets[0];
+      const targetStr = typeof first === 'string' ? first : (first && first.url) || '(no target)';
+      return { kind: 'webhook', name: w.name, targetStr, tgt: webhookTarget(w) };
+    }));
+  rows.sort((a, b) => {
+    const am = (a.tgt.h === nHost && a.tgt.p === nPort) ? 0 : 1;
+    const bm = (b.tgt.h === nHost && b.tgt.p === nPort) ? 0 : 1;
+    return am - bm || a.name.localeCompare(b.name);
+  });
+
+  const hostFwd = host
+    ? (host.forward_scheme || 'http') + '://' + (host.forward_host || '?') + ':' + (host.forward_port || '?')
+    : '(unknown)';
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay active';
+  overlay.id = '_linkProfileToHostOverlay';
+  overlay.innerHTML =
+    '<div class="modal" style="max-width:760px">' +
+    '  <div class="modal-header">' +
+    '    <h3 style="margin:0">Vincular NPM host #' + hostId + ' a um profile ou webhook</h3>' +
+    '    <button type="button" class="btn btn-sm" onclick="closeLinkProfileToHostModal()">&times;</button>' +
+    '  </div>' +
+    '  <div class="modal-body" style="max-height:60vh;overflow-y:auto">' +
+    '    <div style="color:var(--text2);font-size:12.5px;margin-bottom:10px">' +
+    '      NPM host encaminha para <code style="font-family:monospace">' + _esc(hostFwd) + '</code>. ' +
+    '      Entradas com destino exactamente igual aparecem como <strong>match</strong>.' +
+    '    </div>' +
+    '    <table style="width:100%;border-collapse:collapse;font-size:13px">' +
+    '      <thead><tr style="text-align:left;color:var(--text3);border-bottom:1px solid var(--border)">' +
+    '        <th style="padding:6px 8px">Tipo</th>' +
+    '        <th style="padding:6px 8px">Nome</th>' +
+    '        <th style="padding:6px 8px">Target</th>' +
+    '        <th style="padding:6px 8px"></th>' +
+    '        <th style="padding:6px 8px;text-align:right"></th>' +
+    '      </tr></thead>' +
+    '      <tbody>' + (rows.length ? rows.map(r => {
+      const matches = nHost && r.tgt.h === nHost && r.tgt.p === nPort;
+      const matchBadge = matches
+        ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 8px;border-radius:10px;font-size:11px">match</span>'
+        : '<span style="background:var(--surface2);color:var(--text3);padding:2px 8px;border-radius:10px;font-size:11px">mismatch</span>';
+      const kindBadge = r.kind === 'profile'
+        ? '<span style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:10px;font-size:11px">Profile</span>'
+        : '<span style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:10px;font-size:11px">Webhook</span>';
+      const pickFn = r.kind === 'profile'
+        ? '_pickProfileForLink(\'' + _esc(r.name) + '\',' + hostId + ')'
+        : '_pickWebhookForLink(\'' + _esc(r.name) + '\',' + hostId + ')';
+      return '<tr style="border-bottom:1px solid var(--border)">' +
+        '<td style="padding:8px">' + kindBadge + '</td>' +
+        '<td style="padding:8px;font-weight:600">' + _esc(r.name) + '</td>' +
+        '<td style="padding:8px;font-family:monospace;font-size:11.5px;color:var(--text2)">' + _esc(r.targetStr) + '</td>' +
+        '<td style="padding:8px">' + matchBadge + '</td>' +
+        '<td style="padding:8px;text-align:right">' +
+        '  <button class="btn btn-sm btn-primary" onclick="' + pickFn + '">Vincular</button>' +
+        '</td></tr>';
+    }).join('') : '<tr><td colspan="5" style="padding:18px;text-align:center;color:var(--text3)">Sem entradas livres.</td></tr>') + '</tbody>' +
+    '    </table>' +
+    '  </div>' +
+    '  <div class="modal-footer">' +
+    '    <button type="button" class="btn" onclick="closeLinkProfileToHostModal()">Fechar</button>' +
+    '  </div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+}
+
+function closeLinkProfileToHostModal() {
+  const el = document.getElementById('_linkProfileToHostOverlay');
+  if (el) el.remove();
+}
+
+async function _pickProfileForLink(profileName, hostId) {
+  closeLinkProfileToHostModal();
+  await linkProfileToNpmHost(profileName, hostId);
+}
+
+async function _pickWebhookForLink(webhookName, hostId) {
+  closeLinkProfileToHostModal();
+  await linkWebhookToNpmHost(webhookName, hostId);
+}
+
+// Webhook ↔ NPM host linking (symmetric to linkProfileToNpmHost).
+async function linkWebhookToNpmHost(webhookName, hostId, opts) {
+  opts = opts || {};
+  if (!opts.skipConfirm) {
+    const msg = 'Vincular webhook "' + webhookName + '" ao host NPM #' + hostId
+      + '? O NPM passará a encaminhar tráfego para o webhook (em vez do destino actual).';
+    if (!(await showConfirm({ title: 'Vincular webhook ao NPM', message: msg, confirmText: 'Vincular' }))) return;
+  }
+  try {
+    const res = await api('/admin/npm/link-webhook', {
+      method: 'POST',
+      body: JSON.stringify({ webhookName, hostId, force: !!opts.force }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status === 409 && data && data.mismatch && !opts.force) {
+        const m = data.mismatch;
+        const detail = 'NPM #' + hostId + ' encaminha actualmente para ' + m.npm.host + ':' + m.npm.port
+          + '. Ao vincular, o NPM passa a encaminhar para o webhook, cujo primeiro target é '
+          + m.webhook.host + ':' + m.webhook.port + '. Se não forem o mesmo serviço, o tráfego que ia para '
+          + m.npm.host + ':' + m.npm.port + ' via este NPM host deixa de funcionar.';
+        const ok = await showConfirm({
+          title: 'Forward targets não coincidem',
+          message: 'O webhook e o NPM host apontam para destinos diferentes. Vincular mesmo assim?',
+          detail,
+          confirmText: 'Vincular mesmo assim',
+          danger: true,
+        });
+        if (!ok) return;
+        return linkWebhookToNpmHost(webhookName, hostId, { force: true, skipConfirm: true });
+      }
+      toast(data.error || 'Falha ao vincular', 'error');
+      return;
+    }
+    toast('Webhook "' + webhookName + '" vinculado ao NPM #' + hostId + (data.forced ? ' (forçado)' : ''));
+    try { await fetchWebhooks(); } catch { /* ignore */ }
+    try { if (typeof fetchNpmHostsTable === 'function') await fetchNpmHostsTable(); } catch { /* ignore */ }
+    try { if (typeof _npmImportHostsAll !== 'undefined' && _npmImportHostsAll.length) await fetchNpmProxyHosts(); } catch { /* ignore */ }
+  } catch (e) {
+    toast('Erro de rede: ' + e.message, 'error');
+  }
+}
+
+// Modal: pick an existing NPM host to link to the given webhook.
+async function openLinkToNpmModalForWebhook(webhookName) {
+  const webhook = (_allWebhooks || []).find(w => w.name === webhookName);
+  if (!webhook) { toast('Webhook não encontrado', 'error'); return; }
+  if (webhook.npmProxyHostId) { toast('Webhook já vinculado ao NPM #' + webhook.npmProxyHostId, 'error'); return; }
+
+  let hosts = [];
+  try {
+    const r = await api('/admin/npm/proxy-hosts');
+    if (!r.ok) { const d = await r.json().catch(() => ({})); toast(d.error || 'Falha ao carregar NPM hosts', 'error'); return; }
+    const d = await r.json();
+    hosts = (d.hosts || []).filter(h => !h.linkedProfile && !h.linkedWebhook);
+  } catch (e) { toast('Erro de rede: ' + e.message, 'error'); return; }
+  if (!hosts.length) { toast('Não há NPM hosts disponíveis para vincular.', 'error'); return; }
+
+  // First target for match highlighting.
+  let tHost = '', tPort = 0;
+  const first = webhook.targets && webhook.targets[0];
+  const firstUrl = typeof first === 'string' ? first : (first && first.url) || '';
+  if (firstUrl) {
+    try {
+      const u = new URL(firstUrl);
+      tHost = u.hostname.toLowerCase();
+      tPort = u.port ? Number(u.port) : (u.protocol === 'https:' ? 443 : 80);
+    } catch { /* ignore */ }
+  }
+
+  hosts.sort((a, b) => {
+    const am = ((a.forward_host || '').toLowerCase() === tHost && Number(a.forward_port) === tPort) ? 0 : 1;
+    const bm = ((b.forward_host || '').toLowerCase() === tHost && Number(b.forward_port) === tPort) ? 0 : 1;
+    return am - bm || (a.id - b.id);
+  });
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay active';
+  overlay.id = '_linkWebhookToNpmOverlay';
+  overlay.innerHTML =
+    '<div class="modal" style="max-width:720px">' +
+    '  <div class="modal-header">' +
+    '    <h3 style="margin:0">Vincular webhook "' + _esc(webhookName) + '" a um NPM host</h3>' +
+    '    <button type="button" class="btn btn-sm" onclick="closeLinkWebhookToNpmModal()">&times;</button>' +
+    '  </div>' +
+    '  <div class="modal-body" style="max-height:60vh;overflow-y:auto">' +
+    '    <div style="color:var(--text2);font-size:12.5px;margin-bottom:10px">' +
+    '      Primeiro target do webhook: <code style="font-family:monospace">' + _esc(firstUrl || '(sem target)') + '</code>. ' +
+    '      Hosts com destino exactamente igual aparecem marcados como <strong>match</strong>.' +
+    '    </div>' +
+    '    <table style="width:100%;border-collapse:collapse;font-size:13px">' +
+    '      <thead><tr style="text-align:left;color:var(--text3);border-bottom:1px solid var(--border)">' +
+    '        <th style="padding:6px 8px">#</th>' +
+    '        <th style="padding:6px 8px">Domains</th>' +
+    '        <th style="padding:6px 8px">Forwards to</th>' +
+    '        <th style="padding:6px 8px"></th>' +
+    '        <th style="padding:6px 8px;text-align:right"></th>' +
+    '      </tr></thead>' +
+    '      <tbody>' + hosts.map(h => {
+      const fh = (h.forward_host || '').toLowerCase();
+      const fp = Number(h.forward_port || 0);
+      const matches = (tHost && fh === tHost && fp === tPort);
+      const fwd = (h.forward_scheme || 'http') + '://' + (h.forward_host || '?') + ':' + (h.forward_port || '?');
+      const domains = (h.domain_names || []).length ? h.domain_names.join(', ') : '(no domains)';
+      const matchBadge = matches
+        ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 8px;border-radius:10px;font-size:11px">match</span>'
+        : '<span style="background:var(--surface2);color:var(--text3);padding:2px 8px;border-radius:10px;font-size:11px">mismatch</span>';
+      return '<tr style="border-bottom:1px solid var(--border)">' +
+        '<td style="padding:8px;color:var(--text3)">#' + h.id + '</td>' +
+        '<td style="padding:8px">' + _esc(domains) + '</td>' +
+        '<td style="padding:8px;font-family:monospace;font-size:11.5px;color:var(--text2)">' + _esc(fwd) + '</td>' +
+        '<td style="padding:8px">' + matchBadge + '</td>' +
+        '<td style="padding:8px;text-align:right">' +
+        '  <button class="btn btn-sm btn-primary" onclick="_pickHostForWebhookLink(' + h.id + ',\'' + _esc(webhookName) + '\')">Vincular</button>' +
+        '</td></tr>';
+    }).join('') + '</tbody>' +
+    '    </table>' +
+    '  </div>' +
+    '  <div class="modal-footer">' +
+    '    <button type="button" class="btn" onclick="closeLinkWebhookToNpmModal()">Fechar</button>' +
+    '  </div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+}
+
+function closeLinkWebhookToNpmModal() {
+  const el = document.getElementById('_linkWebhookToNpmOverlay');
+  if (el) el.remove();
+}
+
+async function _pickHostForWebhookLink(hostId, webhookName) {
+  closeLinkWebhookToNpmModal();
+  await linkWebhookToNpmHost(webhookName, hostId);
 }
 
 // Returns the first NPM host whose forward target matches the profile's target
@@ -720,19 +1117,7 @@ function renderProxyUsers(users) {
     const emailCell = u.email
       ? `<div style="font-size:12px;color:var(--text2)">${esc(u.email)}</div>`
       : `<span style="color:var(--text3)">—</span>`;
-    const canReset = !!u.email && (u.authSource || 'local') === 'local';
-    const resetBtn = canReset
-      ? `<button onclick="sendPasswordReset(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Email a password reset link to ${esc(u.email)}">Reset password</button>`
-      : '';
-    const actionsCell = `<button onclick="openEditProxyUserModal(${u.id})" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Edit">Edit</button>
-         <button onclick="openUserResourcesModal(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px" title="Manage resources">Resources</button>
-         ${resetBtn}
-         ${u.totpEnabled
-           ? `<button onclick="disable2fa(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--orange);font-size:11px;margin-right:4px" title="Disable 2FA (user will be notified by email)">Disable 2FA</button>`
-           : (u.force2faSetup
-             ? ''
-             : `<button onclick="force2fa(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--orange);font-size:11px;margin-right:4px" title="Require user to set up 2FA on next login">Force 2FA</button>`)}
-         <button onclick="deleteProxyUserAction(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px" title="Delete">Delete</button>`;
+    const actionsCell = `<button data-type="proxyUser" data-id="${u.id}" onclick="showContextMenu(event,this)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:2px 10px;cursor:pointer;color:var(--text2);font-size:18px;line-height:1.2;letter-spacing:1px" title="Actions">&#8942;</button>`;
     return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
       <td style="padding:8px 12px">${nameCell}</td>
       <td style="padding:8px">${emailCell}</td>
@@ -746,6 +1131,9 @@ function renderProxyUsers(users) {
 
 function closeNewProxyUserModal() {
   document.getElementById('newProxyUserModal').classList.remove('active');
+  // Restore password field visibility so a future create-user flow still works.
+  const pwGroup = document.getElementById('npuPasswordGroup');
+  if (pwGroup) pwGroup.style.display = '';
   _editUserId = null;
 }
 
@@ -760,7 +1148,9 @@ async function openEditProxyUserModal(id) {
   document.getElementById('npuEmail').value = user.email || '';
   document.getElementById('npuUsername').value = user.username;
   document.getElementById('npuPassword').value = '';
-  document.getElementById('npuPassword').placeholder = 'Leave blank to keep current password';
+  // Password changes are not allowed via the edit modal — admins must send a
+  // password reset link from the user's action menu instead.
+  document.getElementById('npuPasswordGroup').style.display = 'none';
   document.getElementById('npuIsAdmin').checked = !!user.isAdmin;
   // Hide the admin toggle when editing yourself — backend refuses self-demote.
   const isSelf = user.id === _currentUserId;
@@ -778,13 +1168,8 @@ async function saveEditProxyUser() {
   errEl.style.display = 'none';
   const fullName = document.getElementById('npuFullName').value.trim();
   const email = document.getElementById('npuEmail').value.trim();
-  const password = document.getElementById('npuPassword').value;
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = 'Invalid email.'; errEl.style.display = 'block'; return; }
   const body = { fullName, email };
-  if (password) {
-    if (password.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; errEl.style.display = 'block'; return; }
-    body.password = password;
-  }
   // Send isAdmin only when the toggle is visible (i.e. not self-edit) AND the
   // value actually changed — avoids no-op audit entries and accidental demotes.
   const adminGroupVisible = document.getElementById('npuIsAdminGroup').style.display !== 'none';
@@ -5825,7 +6210,10 @@ function renderNpmImportTable() {
       action = '<a href="javascript:void(0)" onclick="openLinkedWebhook(\'' + _esc(h.linkedWebhook) + '\')" style="color:var(--accent);font-size:12px">Open</a>';
     } else {
       badge = '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 8px;border-radius:10px;font-size:11px">Available</span>';
-      action = '<button class="btn btn-sm" onclick="adoptNpmHost(' + h.id + ')" title="Adopt as proxy with custom settings">Customize…</button>';
+      action = '<div style="display:inline-flex;gap:6px">'
+        + '<button class="btn btn-sm" onclick="adoptNpmHost(' + h.id + ')" title="Adopt as proxy with custom settings">Customize…</button>'
+        + '<button class="btn btn-sm" onclick="closeNpmImportModal();openLinkProfileToHostModal(' + h.id + ')" title="Link to an existing Midleman profile">Link…</button>'
+        + '</div>';
     }
     return '<tr style="border-bottom:1px solid var(--border)">' +
       '<td style="padding:8px 12px">' + checkbox + '</td>' +
@@ -6101,6 +6489,9 @@ function renderNpmHostsTable() {
     const editBtn = isLinked
       ? '<button type="button" class="btn btn-sm" onclick="openLinkedProfile(\'' + _esc(h.linkedProfile) + '\')" title="Open linked profile">Open profile</button>'
       : '<button type="button" class="btn btn-sm" onclick="openNpmHostModal(' + h.id + ')">Edit</button>';
+    const linkBtn = isLinked
+      ? ''
+      : '<button type="button" class="btn btn-sm" onclick="openLinkProfileToHostModal(' + h.id + ')" title="Link this host to an existing Midleman profile">Link…</button>';
     const delBtn = isLinked
       ? '<button type="button" class="btn btn-sm" disabled title="Release the linked profile first">Delete</button>'
       : '<button type="button" class="btn btn-sm" onclick="deleteNpmHost(' + h.id + ')" style="color:var(--err-text)">Delete</button>';
@@ -6110,7 +6501,7 @@ function renderNpmHostsTable() {
       '<td style="padding:10px 14px;color:var(--text2);font-family:monospace;font-size:11.5px">' + _esc(fwd) + '</td>' +
       '<td style="padding:10px 14px">' + sslBadge + '</td>' +
       '<td style="padding:10px 14px">' + enabledBadge + '</td>' +
-      '<td style="padding:10px 14px;text-align:right;white-space:nowrap"><div style="display:inline-flex;gap:6px">' + toggleAction + editBtn + delBtn + '</div></td>' +
+      '<td style="padding:10px 14px;text-align:right;white-space:nowrap"><div style="display:inline-flex;gap:6px">' + toggleAction + editBtn + linkBtn + delBtn + '</div></td>' +
       '</tr>';
   }).join('');
 }

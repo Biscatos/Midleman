@@ -1923,10 +1923,12 @@ const server = Bun.serve({
                     const userId = parseInt(url.pathname.split('/').pop()!, 10);
                     let body: any;
                     try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
-                    if (body.password) {
-                        if (body.password.length < 6) return jsonRes(400, { error: 'Password must be at least 6 characters' });
-                        const updated = await updateProxyUserPassword(userId, body.password);
-                        if (!updated) return jsonRes(404, { error: 'User not found' });
+                    // Direct password updates are not allowed via this endpoint —
+                    // admins must issue a reset link via POST .../password-reset
+                    // so the user sets their own password. This prevents admins
+                    // from learning or silently overriding user credentials.
+                    if (body.password !== undefined) {
+                        return jsonRes(400, { error: 'Direct password updates are not allowed. Send a password reset link instead.' });
                     }
                     if (typeof body.fullName === 'string' || typeof body.email === 'string') {
                         const current = getProxyUser(userId);
@@ -2733,15 +2735,19 @@ const server = Bun.serve({
                 }
 
                 // Link an existing profile to an existing NPM host (no new profile created).
-                // Body: { profileName: string, hostId: number }
-                // Requires that the NPM host's forward target matches the profile's targetUrl
-                // (host + port). Updates profile with NPM metadata, then redirects NPM → Midleman.
+                // Body: { profileName: string, hostId: number, force?: boolean }
+                // By default, requires that the NPM host's forward target matches the profile's
+                // targetUrl (host + port). With force=true, the mismatch check is skipped — the
+                // caller has acknowledged that the NPM host will be repointed to Midleman and
+                // that the original backend target may become unreachable via this NPM host.
+                // Updates profile with NPM metadata, then redirects NPM → Midleman.
                 if (url.pathname === '/admin/npm/link-profile' && req.method === 'POST') {
                     if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
                     let body: any;
                     try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
                     const profileName = String(body?.profileName || '').trim();
                     const hostId = Number(body?.hostId || 0);
+                    const force = body?.force === true;
                     if (!profileName || !hostId) return jsonRes(400, { error: 'profileName and hostId are required' });
                     const profile = config.proxyProfiles.find(p => p.name === profileName);
                     if (!profile) return jsonRes(404, { error: 'Profile not found' });
@@ -2766,8 +2772,12 @@ const server = Bun.serve({
                     const pPort = pu.port ? Number(pu.port) : (pu.protocol === 'https:' ? 443 : 80);
                     const nHost = (host.forward_host || '').toLowerCase();
                     const nPort = Number(host.forward_port || 0);
-                    if (pHost !== nHost || pPort !== nPort) {
-                        return jsonRes(409, { error: `Forward target mismatch: NPM points to ${nHost}:${nPort} but profile targets ${pHost}:${pPort}` });
+                    const mismatch = pHost !== nHost || pPort !== nPort;
+                    if (mismatch && !force) {
+                        return jsonRes(409, {
+                            error: `Forward target mismatch: NPM points to ${nHost}:${nPort} but profile targets ${pHost}:${pPort}`,
+                            mismatch: { npm: { host: nHost, port: nPort }, profile: { host: pHost, port: pPort } },
+                        });
                     }
 
                     const domains = (host.domain_names || []).filter(Boolean).map(d => d.toLowerCase());
@@ -2803,8 +2813,100 @@ const server = Bun.serve({
                     persistProfiles(config.proxyProfiles);
 
                     const me = getAuthedAdmin(req);
-                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.link_profile', targetType: 'profile', details: { profileName, hostId, domains }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
-                    return jsonRes(200, { ok: true, profileName, hostId, domains });
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'npm.link_profile', targetType: 'profile', details: { profileName, hostId, domains, forced: force, ...(mismatch ? { mismatch: { npm: `${nHost}:${nPort}`, profile: `${pHost}:${pPort}` } } : {}) }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { ok: true, profileName, hostId, domains, forced: force });
+                }
+
+                // Link an existing webhook to an existing NPM host.
+                // Body: { webhookName: string, hostId: number, force?: boolean }
+                // NPM is repointed to forward to the webhook's local port; the webhook
+                // remembers the NPM's previous forward target so it can be released later.
+                // The mismatch check compares the NPM forward target against the webhook's
+                // first target URL (best-effort, since webhooks may have multiple targets).
+                if (url.pathname === '/admin/npm/link-webhook' && req.method === 'POST') {
+                    if (!isNpmEnabled()) return jsonRes(400, { error: 'NPM integration is disabled' });
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
+                    const webhookName = String(body?.webhookName || '').trim();
+                    const hostId = Number(body?.hostId || 0);
+                    const force = body?.force === true;
+                    if (!webhookName || !hostId) return jsonRes(400, { error: 'webhookName and hostId are required' });
+                    const webhook = config.webhooks.find(w => w.name === webhookName);
+                    if (!webhook) return jsonRes(404, { error: 'Webhook not found' });
+                    if (webhook.npmProxyHostId) return jsonRes(409, { error: `Webhook is already linked to NPM host #${webhook.npmProxyHostId}` });
+                    const otherLinkedP = config.proxyProfiles.find(p => p.npmProxyHostId === hostId);
+                    if (otherLinkedP) return jsonRes(409, { error: `NPM host #${hostId} is already linked to profile "${otherLinkedP.name}"` });
+                    const otherLinkedW = config.webhooks.find(w => w.npmProxyHostId === hostId);
+                    if (otherLinkedW) return jsonRes(409, { error: `NPM host #${hostId} is already linked to webhook "${otherLinkedW.name}"` });
+                    if (!webhook.port) return jsonRes(409, { error: 'Webhook has no assigned port' });
+
+                    const { getProxyHost, updateProxyHost } = await import('./npm/client');
+                    let host: Awaited<ReturnType<typeof getProxyHost>>;
+                    try { host = await getProxyHost(hostId); } catch (e) {
+                        return jsonRes(502, { error: e instanceof Error ? e.message : 'Failed to fetch host from NPM' });
+                    }
+                    const scheme = host.forward_scheme === 'https' ? 'https' : 'http';
+                    const nHost = (host.forward_host || '').toLowerCase();
+                    const nPort = Number(host.forward_port || 0);
+
+                    // Mismatch check: compare NPM forward target to the webhook's first
+                    // target URL (string form only — typed destinations are best-effort).
+                    let wHost = '', wPort = 0;
+                    const firstTarget = webhook.targets?.[0];
+                    if (typeof firstTarget === 'string') {
+                        try {
+                            const wu = new URL(firstTarget);
+                            wHost = wu.hostname.toLowerCase();
+                            wPort = wu.port ? Number(wu.port) : (wu.protocol === 'https:' ? 443 : 80);
+                        } catch { /* invalid URL — fall through */ }
+                    }
+                    const mismatch = !!wHost && (wHost !== nHost || wPort !== nPort);
+                    if (mismatch && !force) {
+                        return jsonRes(409, {
+                            error: `Forward target mismatch: NPM points to ${nHost}:${nPort} but webhook's first target is ${wHost}:${wPort}`,
+                            mismatch: { npm: { host: nHost, port: nPort }, webhook: { host: wHost, port: wPort } },
+                        });
+                    }
+
+                    const domains = (host.domain_names || []).filter(Boolean).map(d => d.toLowerCase());
+                    const midlemanHost = (getNpmSettings()?.midlemanPublicHost || process.env.MIDLEMAN_PUBLIC_HOST || 'midleman');
+
+                    // Stash NPM's original forward so release can restore it later.
+                    webhook.npmProxyHostId = host.id;
+                    webhook.npmOriginalForwardHost = host.forward_host;
+                    webhook.npmOriginalForwardPort = host.forward_port;
+                    webhook.npmOriginalForwardScheme = scheme;
+                    webhook.publicHostnames = domains;
+                    persistWebhooks(config.webhooks);
+
+                    // Repoint NPM at the webhook's local port.
+                    try {
+                        await updateProxyHost(host.id, {
+                            domain_names: domains.length ? domains : (host.domain_names || []),
+                            forward_host: midlemanHost,
+                            forward_port: webhook.port,
+                            forward_scheme: 'http',
+                            allow_websocket_upgrade: host.allow_websocket_upgrade !== false,
+                        });
+                    } catch (e) {
+                        // Roll back the link fields on NPM update failure.
+                        webhook.npmProxyHostId = undefined;
+                        webhook.npmOriginalForwardHost = undefined;
+                        webhook.npmOriginalForwardPort = undefined;
+                        webhook.npmOriginalForwardScheme = undefined;
+                        persistWebhooks(config.webhooks);
+                        return jsonRes(502, { error: e instanceof Error ? e.message : 'Failed to update NPM host' });
+                    }
+
+                    const me = getAuthedAdmin(req);
+                    logAudit({
+                        actorUserId: me?.id, actorUsername: me?.username,
+                        action: 'npm.link_webhook',
+                        targetType: 'webhook',
+                        details: { webhookName, hostId, domains, forced: force, ...(mismatch ? { mismatch: { npm: `${nHost}:${nPort}`, webhook: `${wHost}:${wPort}` } } : {}) },
+                        ip: reqClientIp(req), userAgent: req.headers.get('user-agent'),
+                    });
+                    return jsonRes(200, { ok: true, webhookName, hostId, domains, forced: force });
                 }
 
                 // Release a webhook from its NPM link: restore NPM's original forward and clear the link.
