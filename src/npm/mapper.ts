@@ -6,8 +6,13 @@ import type { NpmProxyHostPayload, NpmCertificatePayload } from './types.js';
 export interface MapperContext {
     /** Hostname (or IP) that NPM uses as forward_host. Usually a docker service name. */
     midlemanPublicHost: string;
-    /** Fallback port when the profile has no dedicated `port`. */
+    /** Fallback port when neither the profile's user-set `port` nor a resolved
+     *  per-profile proxy-server port is available. Last-resort path-prefixed routing. */
     defaultBunPort: number;
+    /** Runtime port of the profile's dedicated proxy server (from port-manager).
+     *  Preferred over defaultBunPort so NPM forwards straight to the profile's
+     *  own listener instead of the shared main port + /proxy/{name}/ rewrite. */
+    resolvedProxyPort?: number;
 }
 
 /**
@@ -18,12 +23,15 @@ export interface MapperContext {
  */
 export function profileToNpmHost(profile: ProxyProfile, ctx: MapperContext): NpmProxyHostPayload {
     const hostnames = (profile.publicHostnames || []).map(h => h.trim().toLowerCase()).filter(Boolean);
-    const dedicatedPort = typeof profile.port === 'number' && profile.port > 0;
-    const forwardPort = dedicatedPort ? profile.port! : ctx.defaultBunPort;
+    const userDedicatedPort = typeof profile.port === 'number' && profile.port > 0 ? profile.port : 0;
+    const resolvedPort = typeof ctx.resolvedProxyPort === 'number' && ctx.resolvedProxyPort > 0 ? ctx.resolvedProxyPort : 0;
+    // Prefer the user-set port, then the runtime-assigned proxy-server port, then the shared main port.
+    const directPort = userDedicatedPort || resolvedPort;
+    const forwardPort = directPort || ctx.defaultBunPort;
 
-    // When using the shared main port, inject a /proxy/{name}/ rewrite via advanced_config.
+    // Only fall back to the shared main port + /proxy/{name}/ rewrite when no per-profile listener exists.
     const baseAdvanced = profile.advancedConfig?.trim() || '';
-    const injectedAdvanced = dedicatedPort
+    const injectedAdvanced = directPort
         ? baseAdvanced
         : [
             `location / { proxy_pass http://${ctx.midlemanPublicHost}:${ctx.defaultBunPort}/proxy/${profile.name}$request_uri; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header X-Midleman-Profile ${profile.name}; }`,

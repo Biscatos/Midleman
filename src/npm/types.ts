@@ -30,7 +30,7 @@ export interface NpmProxyHost {
     allow_websocket_upgrade?: boolean;
     caching_enabled?: boolean;
     meta?: Record<string, unknown>;
-    enabled?: boolean;
+    enabled?: boolean | number;
     locations?: Array<Record<string, unknown>>;
 }
 

@@ -2536,7 +2536,7 @@ const server = Bun.serve({
                                 certificate_id: typeof h.certificate_id === 'number' ? h.certificate_id : null,
                                 ssl_forced: !!h.ssl_forced,
                                 http2_support: !!h.http2_support,
-                                enabled: h.enabled !== false,
+                                enabled: h.enabled === true || h.enabled === 1 || h.enabled === '1',
                                 linkedProfile: linked?.kind === 'profile' ? linked.name : null,
                                 linkedWebhook: linked?.kind === 'webhook' ? linked.name : null,
                                 linkedKind: linked?.kind || null,

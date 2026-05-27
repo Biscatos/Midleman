@@ -12,6 +12,7 @@ import { persistProfiles } from '../core/store.js';
 import * as npm from './client.js';
 import { profileToNpmHost, profileToCertPayload, shouldSync } from './mapper.js';
 import { NpmError } from './client.js';
+import { getProxyServerPort } from '../servers/proxy-server.js';
 
 export interface SyncResult {
     ok: boolean;
@@ -78,6 +79,7 @@ export async function syncProfile(
         const fullPayload = profileToNpmHost(profile, {
             midlemanPublicHost: getMidlemanHost(),
             defaultBunPort: DEFAULT_BUN_PORT,
+            resolvedProxyPort: getProxyServerPort(profile.name),
         });
 
         let action: SyncResult['action'];
