@@ -459,7 +459,7 @@ async function openLinkToNpmModal(profileName) {
         '<td style="padding:8px;font-family:monospace;font-size:11.5px;color:var(--text2)">' + _esc(fwd) + '</td>' +
         '<td style="padding:8px">' + matchBadge + '</td>' +
         '<td style="padding:8px;text-align:right">' +
-        '  <button class="btn btn-sm btn-primary" onclick="_pickHostForLink(' + h.id + ',\'' + _esc(profileName) + '\')">Vincular</button>' +
+        '  <button class="btn btn-sm btn-primary" onclick="_pickHostForLink(' + h.id + ',\'' + _esc(profileName) + '\', event)">Vincular</button>' +
         '</td></tr>';
     }).join('') + '</tbody>' +
     '    </table>' +
@@ -476,9 +476,11 @@ function closeLinkToNpmModal() {
   if (el) el.remove();
 }
 
-async function _pickHostForLink(hostId, profileName) {
+async function _pickHostForLink(hostId, profileName, event) {
+  await withBusy(event, 'A vincular…', async () => {
+    await linkProfileToNpmHost(profileName, hostId);
+  });
   closeLinkToNpmModal();
-  await linkProfileToNpmHost(profileName, hostId);
 }
 
 // Modal: pick an existing profile OR webhook to link to the given NPM host.
@@ -568,8 +570,8 @@ async function openLinkProfileToHostModal(hostId) {
         ? '<span style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:10px;font-size:11px">Profile</span>'
         : '<span style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:10px;font-size:11px">Webhook</span>';
       const pickFn = r.kind === 'profile'
-        ? '_pickProfileForLink(\'' + _esc(r.name) + '\',' + hostId + ')'
-        : '_pickWebhookForLink(\'' + _esc(r.name) + '\',' + hostId + ')';
+        ? '_pickProfileForLink(\'' + _esc(r.name) + '\',' + hostId + ', event)'
+        : '_pickWebhookForLink(\'' + _esc(r.name) + '\',' + hostId + ', event)';
       return '<tr style="border-bottom:1px solid var(--border)">' +
         '<td style="padding:8px">' + kindBadge + '</td>' +
         '<td style="padding:8px;font-weight:600">' + _esc(r.name) + '</td>' +
@@ -593,14 +595,18 @@ function closeLinkProfileToHostModal() {
   if (el) el.remove();
 }
 
-async function _pickProfileForLink(profileName, hostId) {
+async function _pickProfileForLink(profileName, hostId, event) {
+  await withBusy(event, 'A vincular…', async () => {
+    await linkProfileToNpmHost(profileName, hostId);
+  });
   closeLinkProfileToHostModal();
-  await linkProfileToNpmHost(profileName, hostId);
 }
 
-async function _pickWebhookForLink(webhookName, hostId) {
+async function _pickWebhookForLink(webhookName, hostId, event) {
+  await withBusy(event, 'A vincular…', async () => {
+    await linkWebhookToNpmHost(webhookName, hostId);
+  });
   closeLinkProfileToHostModal();
-  await linkWebhookToNpmHost(webhookName, hostId);
 }
 
 // Webhook ↔ NPM host linking (symmetric to linkProfileToNpmHost).
@@ -6230,7 +6236,7 @@ function renderNpmImportTable() {
     } else {
       badge = '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 8px;border-radius:10px;font-size:11px">Available</span>';
       action = '<div style="display:inline-flex;gap:6px">'
-        + '<button class="btn btn-sm" onclick="adoptNpmHost(' + h.id + ')" title="Adopt as proxy with custom settings">Customize…</button>'
+        + '<button class="btn btn-sm" onclick="adoptNpmHost(' + h.id + ', event)" title="Adopt as proxy with custom settings">Customize…</button>'
         + '<button class="btn btn-sm" onclick="closeNpmImportModal();openLinkProfileToHostModal(' + h.id + ')" title="Link to an existing Midleman profile">Link…</button>'
         + '</div>';
     }
@@ -6317,43 +6323,43 @@ async function bulkAdoptNpmHosts() {
     if (tok) body.authToken = tok;
   }
   const btn = document.getElementById('npmBulkImportBtn');
-  btn.disabled = true;
   const status = document.getElementById('npmImportStatus');
   status.style.color = 'var(--text2)';
   status.textContent = 'Importing ' + ids.length + ' host' + (ids.length === 1 ? '' : 's') + '…';
-  try {
-    const res = await api('/admin/npm/proxy-hosts/bulk-adopt', { method: 'POST', body: JSON.stringify(body) });
-    const data = await res.json();
-    if (!res.ok) {
+  await withBusy(btn, 'A importar…', async () => {
+    try {
+      const res = await api('/admin/npm/proxy-hosts/bulk-adopt', { method: 'POST', body: JSON.stringify(body) });
+      const data = await res.json();
+      if (!res.ok) {
+        status.style.color = 'var(--err-text)';
+        status.textContent = data.error || 'Bulk import failed';
+        return;
+      }
+      const okCount = data.ok || 0;
+      const failCount = data.failed || 0;
+      toast(okCount + ' imported' + (failCount ? ', ' + failCount + ' failed' : ''));
+      if (failCount > 0) {
+        status.style.color = 'var(--err-text)';
+        status.innerHTML = (data.results || []).filter(r => !r.ok).map(r => '#' + r.hostId + ': ' + _esc(r.error || 'unknown')).join('<br>');
+      } else {
+        status.style.color = 'var(--ok-text)';
+        status.textContent = 'Done.';
+      }
+      if (importAs === 'webhook' && typeof fetchWebhooks === 'function') {
+        await fetchWebhooks();
+      } else {
+        await fetchProfiles();
+      }
+      await fetchNpmProxyHosts();
+    } catch (e) {
       status.style.color = 'var(--err-text)';
-      status.textContent = data.error || 'Bulk import failed';
-      btn.disabled = false;
-      return;
+      status.textContent = 'Network error: ' + e.message;
     }
-    const okCount = data.ok || 0;
-    const failCount = data.failed || 0;
-    toast(okCount + ' imported' + (failCount ? ', ' + failCount + ' failed' : ''));
-    if (failCount > 0) {
-      status.style.color = 'var(--err-text)';
-      status.innerHTML = (data.results || []).filter(r => !r.ok).map(r => '#' + r.hostId + ': ' + _esc(r.error || 'unknown')).join('<br>');
-    } else {
-      status.style.color = 'var(--ok-text)';
-      status.textContent = 'Done.';
-    }
-    if (importAs === 'webhook' && typeof fetchWebhooks === 'function') {
-      await fetchWebhooks();
-    } else {
-      await fetchProfiles();
-    }
-    await fetchNpmProxyHosts();
-  } catch (e) {
-    status.style.color = 'var(--err-text)';
-    status.textContent = 'Network error: ' + e.message;
-    btn.disabled = false;
-  }
+  });
 }
 
-async function adoptNpmHost(id) {
+async function adoptNpmHost(id, event) {
+  return withBusy(event, 'A carregar…', async () => {
   try {
     const res = await api('/admin/npm/proxy-hosts/' + id + '/preview-adopt');
     const data = await res.json();
@@ -6379,6 +6385,7 @@ async function adoptNpmHost(id) {
   } catch (e) {
     toast('Error: ' + e.message, 'error');
   }
+  });
 }
 
 function openLinkedProfile(name) {
@@ -6386,20 +6393,22 @@ function openLinkedProfile(name) {
   editProfile(name);
 }
 
-async function releaseProfileFromNpm() {
+async function releaseProfileFromNpm(event) {
   if (!editingProfile || !editingProfile.name) return;
   if (!(await showConfirm({ title: 'Libertar perfil do NPM', message: 'Libertar este perfil do host NPM? O NPM será restaurado para o destino de encaminhamento original.', confirmText: 'Libertar' }))) return;
-  try {
-    const res = await api('/admin/profiles/' + encodeURIComponent(editingProfile.name) + '/npm-release', { method: 'POST' });
-    const data = await res.json();
-    if (!res.ok || data.ok === false) return toast(data.error || 'Release failed', 'error');
-    toast('Released from NPM');
-    document.getElementById('pAdoptedBanner').style.display = 'none';
-    closeProfileModal();
-    await fetchProfiles();
-  } catch (e) {
-    toast('Error: ' + e.message, 'error');
-  }
+  await withBusy(event, 'A libertar…', async () => {
+    try {
+      const res = await api('/admin/profiles/' + encodeURIComponent(editingProfile.name) + '/npm-release', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || data.ok === false) return toast(data.error || 'Release failed', 'error');
+      toast('Released from NPM');
+      document.getElementById('pAdoptedBanner').style.display = 'none';
+      closeProfileModal();
+      await fetchProfiles();
+    } catch (e) {
+      toast('Error: ' + e.message, 'error');
+    }
+  });
 }
 
 // ─── NPM Proxy Host management (direct CRUD on NPM) ──────────────────────────
@@ -6503,8 +6512,8 @@ function renderNpmHostsTable() {
       : '';
     const isLinked = !!h.linkedProfile;
     const toggleAction = h.enabled
-      ? '<button type="button" class="btn btn-sm" onclick="toggleNpmHost(' + h.id + ', false)" title="Disable">Disable</button>'
-      : '<button type="button" class="btn btn-sm" onclick="toggleNpmHost(' + h.id + ', true)" title="Enable">Enable</button>';
+      ? '<button type="button" class="btn btn-sm" onclick="toggleNpmHost(' + h.id + ', false, event)" title="Disable">Disable</button>'
+      : '<button type="button" class="btn btn-sm" onclick="toggleNpmHost(' + h.id + ', true, event)" title="Enable">Enable</button>';
     const editBtn = isLinked
       ? '<button type="button" class="btn btn-sm" onclick="openLinkedProfile(\'' + _esc(h.linkedProfile) + '\')" title="Open linked profile">Open profile</button>'
       : '<button type="button" class="btn btn-sm" onclick="openNpmHostModal(' + h.id + ')">Edit</button>';
@@ -6513,7 +6522,7 @@ function renderNpmHostsTable() {
       : '<button type="button" class="btn btn-sm" onclick="openLinkProfileToHostModal(' + h.id + ')" title="Link this host to an existing Midleman profile">Link…</button>';
     const delBtn = isLinked
       ? '<button type="button" class="btn btn-sm" disabled title="Release the linked profile first">Delete</button>'
-      : '<button type="button" class="btn btn-sm" onclick="deleteNpmHost(' + h.id + ')" style="color:var(--err-text)">Delete</button>';
+      : '<button type="button" class="btn btn-sm" onclick="deleteNpmHost(' + h.id + ', event)" style="color:var(--err-text)">Delete</button>';
     return '<tr style="border-bottom:1px solid var(--border)">' +
       '<td style="padding:10px 14px;color:var(--text3)">#' + h.id + '</td>' +
       '<td style="padding:10px 14px">' + domainsHtml + linkedTag + '</td>' +
@@ -6538,29 +6547,33 @@ function onNpmPageSizeChange() {
   renderNpmHostsTable();
 }
 
-async function toggleNpmHost(id, enable) {
+async function toggleNpmHost(id, enable, event) {
   if (!enable && !(await showConfirm({ title: 'Desativar proxy host', message: 'Desativar proxy host #' + id + '? Deixará de servir pedidos até ser reativado.', confirmText: 'Desativar' }))) return;
-  try {
-    const path = '/admin/npm/proxy-hosts/' + id + '/' + (enable ? 'enable' : 'disable');
-    const res = await api(path, { method: 'POST' });
-    const d = await res.json();
-    if (!res.ok) return toast(d.error || 'Failed', 'error');
-    toast('Host ' + (enable ? 'enabled' : 'disabled'));
-    await fetchNpmHostsTable();
-  } catch (e) { toast('Error: ' + e.message, 'error'); }
+  await withBusy(event, enable ? 'A activar…' : 'A desactivar…', async () => {
+    try {
+      const path = '/admin/npm/proxy-hosts/' + id + '/' + (enable ? 'enable' : 'disable');
+      const res = await api(path, { method: 'POST' });
+      const d = await res.json();
+      if (!res.ok) return toast(d.error || 'Failed', 'error');
+      toast('Host ' + (enable ? 'enabled' : 'disabled'));
+      await fetchNpmHostsTable();
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
+  });
 }
 
-async function deleteNpmHost(id) {
+async function deleteNpmHost(id, event) {
   const host = _npmHostsAll.find(h => h.id === id);
   const domains = host ? (host.domain_names || []).join(', ') : '#' + id;
   if (!(await showConfirm({ title: 'Apagar proxy host', message: 'Apagar proxy host "' + domains + '"?', detail: 'Isto remove-o do NPM permanentemente. O certificado associado (se existir) não é apagado.', confirmText: 'Apagar' }))) return;
-  try {
-    const res = await api('/admin/npm/proxy-hosts/' + id, { method: 'DELETE' });
-    const d = await res.json();
-    if (!res.ok) return toast(d.error || 'Delete failed', 'error');
-    toast('Host deleted');
-    await fetchNpmHostsTable();
-  } catch (e) { toast('Error: ' + e.message, 'error'); }
+  await withBusy(event, 'A apagar…', async () => {
+    try {
+      const res = await api('/admin/npm/proxy-hosts/' + id, { method: 'DELETE' });
+      const d = await res.json();
+      if (!res.ok) return toast(d.error || 'Delete failed', 'error');
+      toast('Host deleted');
+      await fetchNpmHostsTable();
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
+  });
 }
 
 // Modal

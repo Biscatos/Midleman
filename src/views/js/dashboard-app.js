@@ -524,6 +524,27 @@ function toast(msg, type = 'success') {
   requestAnimationFrame(() => t.classList.add('show'));
   setTimeout(() => t.classList.remove('show'), 3000);
 }
+// Run an async task with a busy button: disables the button, swaps its label
+// for a spinner + busyLabel, and always restores the original markup/state.
+// Resolves with fn()'s return value. Caller may pass either a DOM element or
+// the event (we'll pick .currentTarget). No-op (still runs fn) if no element.
+async function withBusy(btnOrEvent, busyLabel, fn) {
+  let btn = btnOrEvent && btnOrEvent.currentTarget ? btnOrEvent.currentTarget : btnOrEvent;
+  if (!btn || !(btn instanceof HTMLElement)) return await fn();
+  const originalHtml = btn.innerHTML;
+  const wasDisabled = btn.disabled;
+  btn.disabled = true;
+  btn.setAttribute('aria-busy', 'true');
+  btn.innerHTML = '<span class="btn-spinner" aria-hidden="true"></span> ' + (busyLabel || 'A processar…');
+  try {
+    return await fn();
+  } finally {
+    btn.innerHTML = originalHtml;
+    btn.disabled = wasDisabled;
+    btn.removeAttribute('aria-busy');
+  }
+}
+
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function fmtNum(n) { if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'; if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K'; return String(n); }
 function fmtMs(ms) { if (!ms) return '0ms'; if (ms < 1) return ms.toFixed(2) + 'ms'; if (ms < 1000) return Math.round(ms) + 'ms'; return (ms / 1000).toFixed(2) + 's'; }
