@@ -253,6 +253,34 @@ export function dismissPendingRetry(id: string): boolean {
     return true;
 }
 
+// Cancel pending retries in bulk. The filter narrows what gets cancelled:
+//   - webhook:    only entries belonging to this webhook
+//   - ids:        only entries whose id is in this set (explicit selection)
+//   - targetUrls: only entries delivering to one of these destinations
+// Filters combine with AND. With no filter, every (non-running) entry is removed.
+// Entries with an attempt currently in flight (`running`) are always left alone
+// so we don't drop a delivery mid-request. Returns the number of entries removed.
+export function dismissAllPendingRetry(filter?: {
+    webhook?: string;
+    ids?: string[];
+    targetUrls?: string[];
+}): number {
+    const idSet = filter?.ids && filter.ids.length ? new Set(filter.ids) : null;
+    const urlSet = filter?.targetUrls && filter.targetUrls.length ? new Set(filter.targetUrls) : null;
+    let removed = 0;
+    for (let i = pendingRetryQueue.length - 1; i >= 0; i--) {
+        const e = pendingRetryQueue[i];
+        if (e.running) continue;
+        if (filter?.webhook && e.webhookName !== filter.webhook) continue;
+        if (idSet && !idSet.has(e.id)) continue;
+        if (urlSet && !urlSet.has(e.targetUrl)) continue;
+        pendingRetryQueue.splice(i, 1);
+        removed++;
+    }
+    if (removed > 0) flushPendingSync();
+    return removed;
+}
+
 function pendingMinInterval(pr: WebhookPersistentRetry): number {
     const perMin = Math.max(1, Math.min(600, pr.maxAttemptsPerMinute ?? 10));
     return Math.ceil(60_000 / perMin); // ms between attempts

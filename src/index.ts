@@ -15,7 +15,7 @@ import { migrateProfileCerts } from './core/cert-migration';
 import { scheduleAcmeRenewal, shutdownAcme, requestCertificate } from './sip/acme';
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort, isProxyServerRunning, setProxyLoginTemplate, setProxyLogo } from './servers/proxy-server';
 import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort, assignTcpUdpListenerPort, releaseProxyPort, releaseWebhookPort, releaseTcpUdpListenerPorts, getWebhookPort } from './servers/port-manager';
-import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState } from './servers/webhook-server';
+import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, dismissAllPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
 import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, cleanupExpiredPasswordResetTokens, findResetCandidateByEmail, logSmsSend,
@@ -1456,6 +1456,18 @@ const server = Bun.serve({
                         maxAttemptsPerMinute: e.persistentRetry.maxAttemptsPerMinute ?? 10,
                     }));
                     return jsonRes(200, { queue: safeEntries, total: safeEntries.length });
+                }
+
+                if (url.pathname === '/admin/webhooks/pending-retry/cancel-all' && req.method === 'POST') {
+                    const body = await req.json().catch(() => ({})) as { webhook?: string; ids?: unknown; targetUrls?: unknown };
+                    const ids = Array.isArray(body.ids) ? body.ids.filter((x): x is string => typeof x === 'string') : undefined;
+                    const targetUrls = Array.isArray(body.targetUrls) ? body.targetUrls.filter((x): x is string => typeof x === 'string') : undefined;
+                    const removed = dismissAllPendingRetry({
+                        webhook: body.webhook || undefined,
+                        ids,
+                        targetUrls,
+                    });
+                    return jsonRes(200, { status: 'cancelled', removed });
                 }
 
                 if (url.pathname.match(/^\/admin\/webhooks\/pending-retry\/[^/]+\/retry-now$/) && req.method === 'POST') {

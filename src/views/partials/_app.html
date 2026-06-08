@@ -2577,8 +2577,13 @@
     <div
       style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0">
       <h3 id="pendingRetryModalTitle" style="font-size:16px;font-weight:600">Pending Retries</h3>
-      <button onclick="closePendingRetryModal()"
-        style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button id="prCancelAllBtn" class="btn btn-danger"
+          style="display:none;padding:4px 14px;font-size:12px"
+          onclick="prCancelAll()">Cancelar todas</button>
+        <button onclick="closePendingRetryModal()"
+          style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
+      </div>
     </div>
     <div id="pendingRetryList" style="padding:16px;overflow-y:auto;flex:1"></div>
   </div>

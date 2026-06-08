@@ -2158,6 +2158,7 @@ async function dlqRetryOne(id) {
 // ─── Pending Retry Modal ─────────────────────────────────────────────────────
 let _prModalWebhook = null;
 let _prEntries = [];
+let _prSelected = new Set(); // ids selected for bulk cancel
 
 async function openPendingRetryModal(webhookName) {
   _prModalWebhook = webhookName || null;
@@ -2172,6 +2173,7 @@ function closePendingRetryModal() {
   document.getElementById('pendingRetryModal').style.display = 'none';
   _prModalWebhook = null;
   _prEntries = [];
+  _prSelected = new Set();
 }
 
 async function refreshPendingRetryModal() {
@@ -2180,38 +2182,112 @@ async function refreshPendingRetryModal() {
     const res = await api(url);
     const d = await res.json();
     _prEntries = d.queue || [];
+    // Drop selected ids that no longer exist after the refresh.
+    const live = new Set(_prEntries.map(e => e.id));
+    _prSelected = new Set([..._prSelected].filter(id => live.has(id)));
     renderPendingRetryEntries();
   } catch (e) { toast('Error loading pending retries: ' + e.message, 'error'); }
 }
 
 function renderPendingRetryEntries() {
   const c = document.getElementById('pendingRetryList');
+  const cancelAllBtn = document.getElementById('prCancelAllBtn');
   if (_prEntries.length === 0) {
     c.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3)">No pending retries.</div>';
+    if (cancelAllBtn) cancelAllBtn.style.display = 'none';
     return;
   }
-  c.innerHTML = _prEntries.map(e => {
-    const nextIn = Math.max(0, e.nextAttemptAt - Date.now());
-    const nextLabel = e.running ? 'running…' : (nextIn < 1000 ? 'now' : `in ${Math.ceil(nextIn / 1000)}s`);
-    const notifyBadge = e.notified ? '<span style="background:var(--orange-bg);color:var(--orange);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px">notified</span>' : '';
-    return `
-    <div id="pr-${esc(e.id)}" style="border:1px solid rgba(245,158,11,0.3);border-radius:6px;padding:10px 14px;margin-bottom:8px;background:rgba(245,158,11,0.06)">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span style="font-family:'SF Mono',Monaco,monospace;font-size:12px;color:var(--accent2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.targetUrl)}">${esc(e.method)} ${esc(e.targetUrl)}</span>
-        <span style="font-size:11px;color:var(--text3);white-space:nowrap">next: ${nextLabel}</span>
-      </div>
-      <div style="margin-top:4px;font-size:11px;color:var(--red)">${esc(e.lastError || '')}</div>
-      <div style="margin-top:2px;font-size:11px;color:var(--text3)">
-        <strong style="color:var(--orange)">${e.attempts}</strong> attempts &middot; ${e.maxAttemptsPerMinute}/min &middot;
-        notify @ ${esc(e.notifyEmail || 'no email')} ${notifyBadge} &middot;
-        req: ${esc(e.requestId.slice(0,8))}…
-      </div>
-      <div style="margin-top:8px;display:flex;gap:6px">
-        <button class="btn btn-sm" onclick="prRetryOne('${esc(e.id)}')" ${e.running ? 'disabled' : ''}>${e.running ? 'Running…' : 'Retry now'}</button>
-        <button class="btn btn-sm btn-danger" onclick="prDismissOne('${esc(e.id)}')">Cancel</button>
-      </div>
+  if (cancelAllBtn) cancelAllBtn.style.display = '';
+
+  // Group entries by destination (targetUrl) — each group is one "destinatário".
+  const groups = new Map();
+  for (const e of _prEntries) {
+    if (!groups.has(e.targetUrl)) groups.set(e.targetUrl, []);
+    groups.get(e.targetUrl).push(e);
+  }
+
+  const total = _prEntries.length;
+  const selectableIds = _prEntries.filter(e => !e.running).map(e => e.id);
+  const selectedCount = _prSelected.size;
+  const allSelected = selectableIds.length > 0 && selectableIds.every(id => _prSelected.has(id));
+
+  const toolbar = `
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;margin-bottom:10px;border:1px solid var(--border);border-radius:6px;background:var(--surface2)">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+        <input type="checkbox" ${allSelected ? 'checked' : ''} onclick="prToggleSelectAll(this.checked)">
+        Selecionar tudo
+      </label>
+      <span style="flex:1"></span>
+      <button class="btn btn-sm btn-danger" onclick="prCancelSelected()" ${selectedCount === 0 ? 'disabled' : ''}>
+        Cancelar selecionados (${selectedCount})
+      </button>
     </div>`;
+
+  const groupsHtml = [...groups.entries()].map(([targetUrl, entries]) => {
+    const groupSelectable = entries.filter(e => !e.running).map(e => e.id);
+    const groupAllSelected = groupSelectable.length > 0 && groupSelectable.every(id => _prSelected.has(id));
+    const header = `
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 4px;margin-bottom:4px">
+        <input type="checkbox" ${groupAllSelected ? 'checked' : ''} ${groupSelectable.length === 0 ? 'disabled' : ''}
+          onclick="prToggleGroup('${esc(targetUrl)}', this.checked)" title="Selecionar todas deste destinatário">
+        <span style="font-family:'SF Mono',Monaco,monospace;font-size:12px;color:var(--text2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(targetUrl)}">${esc(targetUrl)}</span>
+        <span style="font-size:11px;color:var(--text3);white-space:nowrap">${entries.length} pendente(s)</span>
+      </div>`;
+
+    const items = entries.map(e => {
+      const nextIn = Math.max(0, e.nextAttemptAt - Date.now());
+      const nextLabel = e.running ? 'running…' : (nextIn < 1000 ? 'now' : `in ${Math.ceil(nextIn / 1000)}s`);
+      const notifyBadge = e.notified ? '<span style="background:var(--orange-bg);color:var(--orange);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px">notified</span>' : '';
+      const checked = _prSelected.has(e.id) ? 'checked' : '';
+      return `
+      <div id="pr-${esc(e.id)}" style="display:flex;gap:10px;border:1px solid rgba(245,158,11,0.3);border-radius:6px;padding:10px 14px;margin-bottom:8px;background:rgba(245,158,11,0.06)">
+        <input type="checkbox" ${checked} ${e.running ? 'disabled' : ''} style="margin-top:2px"
+          onclick="prToggleOne('${esc(e.id)}', this.checked)">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-family:'SF Mono',Monaco,monospace;font-size:12px;color:var(--accent2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.targetUrl)}">${esc(e.method)} ${esc(e.targetUrl)}</span>
+            <span style="font-size:11px;color:var(--text3);white-space:nowrap">next: ${nextLabel}</span>
+          </div>
+          <div style="margin-top:4px;font-size:11px;color:var(--red)">${esc(e.lastError || '')}</div>
+          <div style="margin-top:2px;font-size:11px;color:var(--text3)">
+            <strong style="color:var(--orange)">${e.attempts}</strong> attempts &middot; ${e.maxAttemptsPerMinute}/min &middot;
+            notify @ ${esc(e.notifyEmail || 'no email')} ${notifyBadge} &middot;
+            req: ${esc(e.requestId.slice(0,8))}…
+          </div>
+          <div style="margin-top:8px;display:flex;gap:6px">
+            <button class="btn btn-sm" onclick="prRetryOne('${esc(e.id)}')" ${e.running ? 'disabled' : ''}>${e.running ? 'Running…' : 'Retry now'}</button>
+            <button class="btn btn-sm btn-danger" onclick="prDismissOne('${esc(e.id)}')">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+    return `<div style="margin-bottom:14px">${header}${items}</div>`;
   }).join('');
+
+  c.innerHTML = toolbar + groupsHtml;
+}
+
+function prToggleOne(id, checked) {
+  if (checked) _prSelected.add(id); else _prSelected.delete(id);
+  renderPendingRetryEntries();
+}
+
+function prToggleGroup(targetUrl, checked) {
+  for (const e of _prEntries) {
+    if (e.targetUrl !== targetUrl || e.running) continue;
+    if (checked) _prSelected.add(e.id); else _prSelected.delete(e.id);
+  }
+  renderPendingRetryEntries();
+}
+
+function prToggleSelectAll(checked) {
+  if (checked) {
+    for (const e of _prEntries) if (!e.running) _prSelected.add(e.id);
+  } else {
+    _prSelected.clear();
+  }
+  renderPendingRetryEntries();
 }
 
 async function prRetryOne(id) {
@@ -2235,6 +2311,49 @@ async function prDismissOne(id) {
     if (res.ok) { await refreshPendingRetryModal(); await fetchWebhooks(); }
     else toast('Cancel failed', 'error');
   } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function prCancelSelected() {
+  const ids = [..._prSelected];
+  if (ids.length === 0) return;
+  if (!(await showConfirm({
+    title: 'Cancelar novas tentativas selecionadas',
+    message: `Cancelar ${ids.length} nova(s) tentativa(s) selecionada(s)? As entregas serão abandonadas.`,
+    confirmText: 'Cancelar selecionados',
+  }))) return;
+  try {
+    const res = await api('/admin/webhooks/pending-retry/cancel-all', {
+      method: 'POST',
+      body: JSON.stringify({ webhook: _prModalWebhook || undefined, ids }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) toast(`${d.removed ?? 0} nova(s) tentativa(s) cancelada(s)`);
+    else toast('Falha ao cancelar', 'error');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+  await refreshPendingRetryModal();
+  await fetchWebhooks();
+}
+
+async function prCancelAll() {
+  const count = _prEntries.length;
+  if (!count) return;
+  if (!(await showConfirm({
+    title: 'Cancelar todas as novas tentativas',
+    message: `Cancelar todas as ${count} novas tentativas pendentes${_prModalWebhook ? ' de "' + _prModalWebhook + '"' : ''}? As entregas serão abandonadas. (As que estiverem a correr neste momento serão mantidas.)`,
+    confirmText: 'Cancelar todas',
+  }))) return;
+  const btn = document.getElementById('prCancelAllBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const body = _prModalWebhook ? { webhook: _prModalWebhook } : {};
+    const res = await api('/admin/webhooks/pending-retry/cancel-all', { method: 'POST', body: JSON.stringify(body) });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) toast(`${d.removed ?? 0} nova(s) tentativa(s) cancelada(s)`);
+    else toast('Falha ao cancelar', 'error');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+  if (btn) btn.disabled = false;
+  await refreshPendingRetryModal();
+  await fetchWebhooks();
 }
 
 async function dlqDismissOne(id) {
