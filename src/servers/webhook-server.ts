@@ -2,6 +2,7 @@ import type { WebhookDistributor, WebhookRetryConfig, WebhookPersistentRetry } f
 import { logRequest, headersToRecord, getLastWebhookActivity } from '../telemetry/request-log';
 import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { assertResolvedHostAllowed } from '../core/ssrf-guard';
+import { timingSafeEqualStr } from '../auth/auth';
 
 // Real socket peer IP, captured at the server boundary and looked up in the
 // inbound handler (X-Forwarded-For alone is spoofable).
@@ -713,7 +714,7 @@ async function handleWebhookFanout(
     // Meta (Facebook) Webhook Verification Handshake
     if (req.method === 'GET' && url.searchParams.get('hub.mode') === 'subscribe') {
         const verifyToken = url.searchParams.get('hub.verify_token');
-        if (webhook.authToken && verifyToken !== webhook.authToken) {
+        if (webhook.authToken && !timingSafeEqualStr(verifyToken, webhook.authToken)) {
              console.warn(`❌ [webhook:${webhook.name}] Meta Verification failed: Invalid hub.verify_token`);
              return new Response('Invalid verify_token', { status: 403 });
         }
@@ -725,7 +726,7 @@ async function handleWebhookFanout(
     // Auth check (per-webhook token)
     if (webhook.authToken) {
         const providedToken = req.headers.get('X-Forward-Token') || url.searchParams.get('token') || url.searchParams.get('hub.verify_token');
-        if (providedToken !== webhook.authToken) {
+        if (!timingSafeEqualStr(providedToken, webhook.authToken)) {
             console.warn(`❌ [webhook:${webhook.name}] Unauthorized ${req.method} from ${req.headers.get('X-Forwarded-For') || 'unknown'}`);
             return jsonResponse(401, {
                 error: 'Unauthorized',

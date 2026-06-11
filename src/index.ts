@@ -257,6 +257,19 @@ function reqClientIp(req: Request): string {
     return resolveClientIp(reqPeerIp.get(req), req.headers.get('x-forwarded-for'), getTrustProxyConfig());
 }
 
+/** True when the browser-facing connection is HTTPS, so session cookies should
+ *  carry the Secure flag. Honours COOKIE_SECURE (true/false) as an explicit
+ *  override; otherwise derives from the request protocol / X-Forwarded-Proto set
+ *  by a TLS-terminating reverse proxy. Over-setting Secure is never a security
+ *  risk (the browser just drops the cookie on plain HTTP). */
+function isSecureRequest(req: Request): boolean {
+    const override = process.env.COOKIE_SECURE;
+    if (override === 'true') return true;
+    if (override === 'false') return false;
+    if (req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() === 'https') return true;
+    try { return new URL(req.url).protocol === 'https:'; } catch { return false; }
+}
+
 // ─── Async startup: assign ports, then start per-profile and per-target servers ─
 
 // Build listener keys: "profileName:transport" for each listener across all profiles
@@ -450,7 +463,7 @@ const server = Bun.serve({
                 const headers: Record<string, string> = { 'Content-Type': 'application/json' };
                 // Stale cookie: exists but session is gone — clear it so login works cleanly
                 if (sessionId && !session) {
-                    headers['Set-Cookie'] = clearSessionCookie(config.auth.cookieName);
+                    headers['Set-Cookie'] = clearSessionCookie(config.auth.cookieName, isSecureRequest(req));
                 }
                 return new Response(body, { status: 200, headers });
             }
@@ -486,7 +499,7 @@ const server = Bun.serve({
                         status: 200,
                         headers: {
                             'Content-Type': 'application/json',
-                            'Set-Cookie': sessionCookie(sid, config.auth.cookieName, config.auth.sessionMaxAge),
+                            'Set-Cookie': sessionCookie(sid, config.auth.cookieName, config.auth.sessionMaxAge, isSecureRequest(req)),
                         },
                     });
                 } catch (err: any) {
@@ -624,7 +637,7 @@ const server = Bun.serve({
                     status: 200,
                     headers: {
                         'Content-Type': 'application/json',
-                        'Set-Cookie': clearSessionCookie(config.auth.cookieName),
+                        'Set-Cookie': clearSessionCookie(config.auth.cookieName, isSecureRequest(req)),
                     },
                 });
             }
@@ -1505,7 +1518,10 @@ const server = Bun.serve({
                             name: webhook.name,
                             targets: webhook.targets,
                             port: webhook.port,
-                            authToken: webhook.authToken || '',
+                            // Never return the inbound auth token in plaintext — it is a
+                            // shared secret. The form only sends a new value when the admin
+                            // types one; otherwise the existing token is preserved on save.
+                            hasAuthToken: !!webhook.authToken,
                             retry: webhook.retry,
                             allowedIps: webhook.allowedIps || [],
                             silenceAlert: webhook.silenceAlert,
@@ -1560,6 +1576,9 @@ const server = Bun.serve({
                     if (existingIdx >= 0) {
                         // Preserve NPM adoption fields across edits — they're not exposed in the form.
                         const prev = config.webhooks[existingIdx];
+                        // Preserve the existing inbound auth token when the form did not
+                        // submit a new one (it is no longer sent back to the client).
+                        if (!webhookWithPort.authToken && prev.authToken) webhookWithPort.authToken = prev.authToken;
                         if (prev.npmProxyHostId !== undefined) webhookWithPort.npmProxyHostId = prev.npmProxyHostId;
                         if (prev.npmOriginalForwardHost) webhookWithPort.npmOriginalForwardHost = prev.npmOriginalForwardHost;
                         if (prev.npmOriginalForwardPort !== undefined) webhookWithPort.npmOriginalForwardPort = prev.npmOriginalForwardPort;

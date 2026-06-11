@@ -1,5 +1,5 @@
 import type { ProxyProfile } from '../core/types';
-import { handleDirectProxy, rememberPeerIp } from '../proxy/proxy';
+import { handleDirectProxy, rememberPeerIp, isSecureRequest } from '../proxy/proxy';
 import { resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { verifyProxyUserCredentials, signJwt, verifyJwt, getJwtMaxAge, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, proxyUserHasProfile, createProxyLoginChallenge, consumeProxyLoginChallenge, peekProxyLoginChallenge, generateTotpSecret, verifyTotp, setupProxyUserTotp, userIdToUuid, upsertLdapShadowProxyUserDetailed, assignProxyUserToProfile, getProxyUserTotpSecret, logAudit, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, findResetCandidateByEmail, getProxyUser, updateProxyUserPassword } from '../auth/auth';
 import { isSmtpConfigured, sendMail, renderPasswordResetEmail } from '../core/smtp';
@@ -246,7 +246,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                             status: 200,
                             headers: {
                                 'Content-Type': 'application/json',
-                                'Set-Cookie': `__midleman_auth_${profile.name}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}`,
+                                'Set-Cookie': `__midleman_auth_${profile.name}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/;${isSecureRequest(req) ? ' Secure;' : ''} Max-Age=${maxAge}`,
                             },
                         });
                     }
@@ -439,7 +439,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                         status: 200,
                         headers: {
                             'Content-Type': 'application/json',
-                            'Set-Cookie': `__midleman_auth_${profile.name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`,
+                            'Set-Cookie': `__midleman_auth_${profile.name}=; HttpOnly; SameSite=Lax; Path=/;${isSecureRequest(req) ? ' Secure;' : ''} Max-Age=0`,
                         },
                     });
                 }

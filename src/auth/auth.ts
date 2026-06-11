@@ -2097,12 +2097,12 @@ export function parseCookies(req: Request): Record<string, string> {
     return result;
 }
 
-export function sessionCookie(sessionId: string, cookieName: string, maxAge: number): string {
-    return `${cookieName}=${sessionId}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}`;
+export function sessionCookie(sessionId: string, cookieName: string, maxAge: number, secure = false): string {
+    return `${cookieName}=${sessionId}; HttpOnly; SameSite=Strict; Path=/;${secure ? ' Secure;' : ''} Max-Age=${maxAge}`;
 }
 
-export function clearSessionCookie(cookieName: string): string {
-    return `${cookieName}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`;
+export function clearSessionCookie(cookieName: string, secure = false): string {
+    return `${cookieName}=; HttpOnly; SameSite=Strict; Path=/;${secure ? ' Secure;' : ''} Max-Age=0`;
 }
 
 // ─── Invite Tokens ───────────────────────────────────────────────────────────
