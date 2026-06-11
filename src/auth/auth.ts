@@ -4,6 +4,20 @@ import { resolve } from 'path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import type { AuthUser, ProxyUser } from '../core/types';
 
+// ─── Security primitives ──────────────────────────────────────────────────────
+
+/**
+ * Constant-time string comparison for secrets (tokens, access keys, client
+ * secrets). Hashes both inputs first so the comparison is length-independent
+ * and never leaks length via early return. Returns false for non-string input.
+ */
+export function timingSafeEqualStr(a: string | null | undefined, b: string | null | undefined): boolean {
+    if (typeof a !== 'string' || typeof b !== 'string') return false;
+    const ha = createHash('sha256').update(a).digest();
+    const hb = createHash('sha256').update(b).digest();
+    return timingSafeEqual(ha, hb);
+}
+
 // ─── Database ────────────────────────────────────────────────────────────────
 
 let db: Database | null = null;

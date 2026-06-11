@@ -1,8 +1,17 @@
 import type { ProxyProfile } from '../core/types';
 import { startProxySpan, endProxySpan, recordProxyBlocked, recordProxyRedirect } from '../telemetry/telemetry';
 import { logRequest, captureRequestBody, captureResponseBody, headersToRecord } from '../telemetry/request-log';
-import { isIpAllowed } from '../core/ip-filter';
+import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { verifyJwt, logAudit } from '../auth/auth';
+
+// The real socket peer IP, captured at the server boundary (Bun's
+// server.requestIP) and looked up here per request. We avoid threading it
+// through every signature by keying a WeakMap on the Request object.
+const reqPeerIp = new WeakMap<Request, string>();
+/** Records the socket peer IP for a request. Call once at the server boundary. */
+export function rememberPeerIp(req: Request, peerIp: string | null | undefined): void {
+    if (peerIp) reqPeerIp.set(req, peerIp);
+}
 
 // ─── Access Key Session Cache ───────────────────────────────────────────────
 // When a page is loaded with a valid ?key=, we cache the authorization so that
@@ -14,9 +23,11 @@ import { verifyJwt, logAudit } from '../auth/auth';
 const SESSION_TTL = 5 * 60 * 1000;
 
 function getClientIP(req: Request): string {
-    return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-        || req.headers.get('x-real-ip')
-        || 'unknown';
+    return resolveClientIp(
+        reqPeerIp.get(req),
+        req.headers.get('x-forwarded-for'),
+        getTrustProxyConfig(),
+    );
 }
 
 /** Path allowlist matcher. Each pattern is either an exact path or a prefix

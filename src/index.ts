@@ -22,6 +22,7 @@ import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, genera
 listNotificationGroups, getNotificationGroup, createNotificationGroup, updateNotificationGroup, deleteNotificationGroup,
 addNotificationGroupMember, removeNotificationGroupMember,
 listNotificationRules, createNotificationRule, updateNotificationRule, deleteNotificationRule,
+timingSafeEqualStr,
 type NotificationSeverity, type NotificationChannel } from './auth/auth';
 import { emitNotificationEvent, dispatchTestToGroup } from './core/notifications';
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
@@ -32,6 +33,7 @@ import { initSms, getSmsConfig, publicSmsConfig, validateSmsInput, saveSmsConfig
 import { initNpmSettings, getNpmSettings, publicNpmSettings, validateNpmInput, saveNpmSettings, deleteNpmSettings, isNpmEnabled, decryptNpmPassword } from './core/npm-settings';
 import { isNpmCertVolumePresent, startCertWatcher, onCertReloaded } from './certs/npm-cert-loader';
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleOauthSmsOtp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
+import { resolveClientIp, getTrustProxyConfig } from './core/ip-filter';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
 import { resolve } from 'path';
@@ -220,12 +222,14 @@ function checkAdminAuth(req: Request, url: URL): Response | null {
     // 2. Fall back to X-Forward-Token (API clients, backwards compat)
     if (config.authToken) {
         const token = req.headers.get('X-Forward-Token') || url.searchParams.get('token');
-        if (token === config.authToken) return null;
+        if (token && timingSafeEqualStr(token, config.authToken)) return null;
     }
 
-    // 3. If no users exist yet, allow access (setup mode)
-    if (!hasUsers()) return null;
-
+    // NOTE: there is deliberately no "setup mode" bypass here. Bootstrap routes
+    // (/auth/setup, /auth/register) are handled earlier in the request pipeline
+    // and carry their own `hasUsers()` guards. The /admin/* surface must never be
+    // reachable without credentials, even before the first admin is created —
+    // otherwise an attacker can hijack a fresh instance during the setup window.
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' }
@@ -241,10 +245,16 @@ function getAuthedAdmin(req: Request): import('./core/types').AuthUser | null {
     return session?.user || null;
 }
 
-/** Returns IP from common headers. */
+// Real socket peer IP captured at the server boundary; see rememberPeerIp.
+const reqPeerIp = new WeakMap<Request, string>();
+function rememberPeerIp(req: Request, peerIp: string | null | undefined): void {
+    if (peerIp) reqPeerIp.set(req, peerIp);
+}
+
+/** Resolves the trusted client IP (socket peer + X-Forwarded-For only when the
+ *  peer is a configured trusted proxy). Never trusts raw XFF from untrusted peers. */
 function reqClientIp(req: Request): string {
-    return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-        || req.headers.get('x-real-ip') || 'unknown';
+    return resolveClientIp(reqPeerIp.get(req), req.headers.get('x-forwarded-for'), getTrustProxyConfig());
 }
 
 // ─── Async startup: assign ports, then start per-profile and per-target servers ─
@@ -333,7 +343,8 @@ const jwksPortRaw = process.env.JWKS_PORT;
 const jwksServer = jwksPortRaw ? Bun.serve({
     port: parseInt(jwksPortRaw, 10),
     idleTimeout: 0,
-    async fetch(req: Request): Promise<Response> {
+    async fetch(req: Request, srv): Promise<Response> {
+        rememberPeerIp(req, srv?.requestIP?.(req)?.address ?? null);
         const url = new URL(req.url);
         const path = url.pathname;
 
@@ -383,7 +394,8 @@ const server = Bun.serve({
     idleTimeout: 0,
     maxRequestBodySize: 50 * 1024 * 1024, // 50MB
 
-    async fetch(req: Request): Promise<Response> {
+    async fetch(req: Request, srv): Promise<Response> {
+        rememberPeerIp(req, srv?.requestIP?.(req)?.address ?? null);
         // ── ACME HTTP-01 challenge — must respond before any auth or shutdown check ──
         const url0 = new URL(req.url);
         if (url0.pathname.startsWith('/.well-known/acme-challenge/')) {
@@ -468,7 +480,7 @@ const server = Bun.serve({
                 if (!verifyTotp(totpSecret, totpCode)) return jsonRes(400, { error: 'Invalid TOTP code. Scan the QR code and enter the 6-digit code.' });
                 try {
                     const user = await createUser(username, password, totpSecret);
-                    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+                    const clientIp = reqClientIp(req);
                     const sid = createSession(user.id, clientIp, req.headers.get('user-agent') || '');
                     return new Response(JSON.stringify({ status: 'ok', username: user.username }), {
                         status: 200,

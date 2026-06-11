@@ -1,6 +1,11 @@
 import type { WebhookDistributor, WebhookRetryConfig, WebhookPersistentRetry } from '../core/types';
 import { logRequest, headersToRecord, getLastWebhookActivity } from '../telemetry/request-log';
-import { isIpAllowed } from '../core/ip-filter';
+import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
+import { assertResolvedHostAllowed } from '../core/ssrf-guard';
+
+// Real socket peer IP, captured at the server boundary and looked up in the
+// inbound handler (X-Forwarded-For alone is spoofable).
+const reqPeerIp = new WeakMap<Request, string>();
 import {
     loadPersistedDlq, persistDlq, type StoredFailedFanout,
     loadPersistedPendingRetry, persistPendingRetry, type StoredPendingRetry,
@@ -391,11 +396,16 @@ async function attemptPendingRetry(entry: PendingRetry): Promise<void> {
         const headers = new Headers(entry.headers);
         const body = entry.body ?? undefined;
         const label = `pending:${entry.webhookName} → ${entry.targetUrl}`;
+        // Re-validate the target on every persistent retry: the entry is loaded
+        // from disk (pending-retry.json) and could have been tampered with, and
+        // DNS may have rebound since it was enqueued.
+        await assertResolvedHostAllowed(entry.targetUrl);
         // Single-shot attempt — no inner retries, the scheduler IS the retry loop
         const res = await fetch(entry.targetUrl, {
             method: entry.method,
             headers,
             body: body as any,
+            redirect: 'manual',
             tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' },
         } as RequestInit);
         entry.attempts += 1;
@@ -511,6 +521,11 @@ async function fetchWithRetry(
         return retryOn.includes(status);
     }
 
+    // SSRF guard: resolve the target host and reject internal/metadata addresses
+    // before any network egress. Thrown here (not inside the retry loop) so a
+    // blocked target fails permanently instead of retrying forever.
+    await assertResolvedHostAllowed(url);
+
     const attemptLog: import('../telemetry/request-log').AttemptRecord[] = [];
     let lastError: unknown;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -525,7 +540,7 @@ async function fetchWithRetry(
 
         const attemptStart = performance.now();
         try {
-            const res = await fetch(url, { ...init, tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' } } as RequestInit);
+            const res = await fetch(url, { ...init, redirect: 'manual', tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' } } as RequestInit);
             // Cap fanout response capture at 4KB for logging — skip for large/unknown-size responses.
             const resContentLength = parseInt(res.headers.get('content-length') || '-1', 10);
             const resText = resContentLength < 0 || resContentLength <= 4096
@@ -741,7 +756,7 @@ async function handleWebhookFanout(
         }
     }
 
-    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown';
+    const clientIp = resolveClientIp(reqPeerIp.get(req), req.headers.get('x-forwarded-for'), getTrustProxyConfig());
 
     if (!isIpAllowed(clientIp, webhook.allowedIps)) {
         console.warn(`🚫 [webhook:${webhook.name}]: blocked IP ${clientIp}`);
@@ -1050,7 +1065,9 @@ export function startWebhookServer(webhook: WebhookDistributor): WebhookServer {
         idleTimeout: 0,
         maxRequestBodySize: 50 * 1024 * 1024, // 50MB
 
-        async fetch(req: Request): Promise<Response> {
+        async fetch(req: Request, srv): Promise<Response> {
+            const peer = srv?.requestIP?.(req)?.address ?? null;
+            if (peer) reqPeerIp.set(req, peer);
             if (ws.isShuttingDown) {
                 return jsonResponse(503, { error: 'Service Unavailable', message: 'Server is shutting down' });
             }
