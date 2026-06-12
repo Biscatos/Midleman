@@ -2599,7 +2599,7 @@
       <div style="margin-top:18px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Inbound Security</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
         <div>
-          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Verify Token <span style="color:var(--text3)">(hub.verify_token / X-Forward-Token)</span></label>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Verify Token <span style="color:var(--text3)" title="Required on every POST when set: send X-Forward-Token header or ?token= in the URL. For Meta's webhook, register the callback URL with ?token=… baked in. Also used as hub.verify_token in the handshake.">(hub.verify_token / X-Forward-Token / ?token=)</span></label>
           <div style="display:flex;gap:6px">
             <input id="cnVerifyToken" type="text" placeholder="shared secret" style="flex:1;min-width:0;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
             <button type="button" class="btn btn-sm" onclick="generateConnectorToken()" title="Generate a random token" style="white-space:nowrap">Generate</button>
@@ -2642,6 +2642,16 @@
           <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Session TTL (minutes)</label>
           <input id="cnSessionTtl" type="number" placeholder="120" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
         </div>
+      </div>
+
+      <!-- ── Auto-reply ── -->
+      <div style="margin-top:18px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Auto-Reply</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--text);cursor:pointer">
+        <input id="cnAutoReplyEnabled" type="checkbox" onchange="connectorAutoReplyChanged()"> Send an automatic reply on the first customer message of each session
+      </label>
+      <div id="cnAutoReplySection" style="display:none;margin-top:8px">
+        <textarea id="cnAutoReplyText" rows="2" maxlength="2000" placeholder="Obrigado pelo seu contacto! Em breve será atendido por um dos nossos agentes." style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></textarea>
+        <div style="margin-top:4px;font-size:11px;color:var(--text3)">Sent once per session — to the customer (via Meta/webhooks, like an agent reply with userType "AUTO") and mirrored into the GoContact chat so the agent sees it.</div>
       </div>
 
       <!-- ── Agent replies ── -->

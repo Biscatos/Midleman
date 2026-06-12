@@ -84,6 +84,14 @@ export interface GoContactConnector {
    *  webhook fan-out without deleting the configured targets. */
   webhooksEnabled?: boolean;
 
+  /** Automatic reply sent once per session, on the customer's first message —
+   *  delivered to the customer (Meta and/or webhooks, same plumbing as agent
+   *  replies) and also posted into the GoContact chat so the agent sees it. */
+  autoReply?: {
+    enabled: boolean;
+    text: string;
+  };
+
   /** Poller cadence in ms (default 4000, min 1000). */
   pollIntervalMs?: number;
   /** Idle session expiry in minutes (default 120, like the original Redis TTL). */
@@ -176,6 +184,16 @@ export function validateConnectorInput(input: unknown): string | null {
   if (c.replyToMeta !== undefined && typeof c.replyToMeta !== 'boolean') return '"replyToMeta" must be a boolean';
   if (c.phoneNumberFilter !== undefined && (!Array.isArray(c.phoneNumberFilter) || (c.phoneNumberFilter as unknown[]).some(x => typeof x !== 'string'))) {
     return '"phoneNumberFilter" must be an array of phone_number_id strings';
+  }
+
+  if (c.autoReply !== undefined) {
+    if (typeof c.autoReply !== 'object' || c.autoReply === null) return '"autoReply" must be an object';
+    const ar = c.autoReply as Record<string, unknown>;
+    if (typeof ar.enabled !== 'boolean') return '"autoReply.enabled" must be a boolean';
+    if (ar.enabled) {
+      if (!ar.text || typeof ar.text !== 'string' || !(ar.text as string).trim()) return '"autoReply.text" is required when auto-reply is enabled';
+      if ((ar.text as string).length > 2000) return '"autoReply.text" must be 2000 characters or fewer';
+    }
   }
 
   if (c.webhookTargets !== undefined) {

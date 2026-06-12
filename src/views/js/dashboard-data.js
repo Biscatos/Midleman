@@ -2148,6 +2148,11 @@ function connectorReplyToMetaChanged() {
   document.getElementById('cnMetaSection').style.display = (replyOn || isMeta) ? 'block' : 'none';
 }
 
+function connectorAutoReplyChanged() {
+  const on = document.getElementById('cnAutoReplyEnabled').checked;
+  document.getElementById('cnAutoReplySection').style.display = on ? 'block' : 'none';
+}
+
 function connectorWebhooksEnabledChanged() {
   const on = document.getElementById('cnWebhooksEnabled').checked;
   const ta = document.getElementById('cnWebhookTargets');
@@ -2181,6 +2186,9 @@ function openConnectorModal(connector = null) {
   document.getElementById('cnSessionTtl').value = connector?.sessionTtlMinutes || '';
   document.getElementById('cnMetaToken').value = '';
   document.getElementById('cnPhoneFilter').value = (connector?.phoneNumberFilter || []).join(', ');
+  document.getElementById('cnAutoReplyEnabled').checked = !!connector?.autoReply?.enabled;
+  document.getElementById('cnAutoReplyText').value = connector?.autoReply?.text || '';
+  connectorAutoReplyChanged();
   document.getElementById('cnMetaToken').placeholder = connector?.meta?.hasAccessToken ? '(kept — type to replace)' : '';
   document.getElementById('cnReplyToMeta').checked = connector ? !!connector.replyToMeta : false;
   document.getElementById('cnWebhookTargets').value = (connector?.webhookTargets || []).map(t => t.url).join('\n');
@@ -2222,6 +2230,10 @@ async function saveConnector() {
   if (metaToken || _editingConnector) body.meta = { accessToken: metaToken || undefined };
   const phoneFilter = document.getElementById('cnPhoneFilter').value.split(',').map(s => s.trim()).filter(Boolean);
   body.phoneNumberFilter = phoneFilter;
+  body.autoReply = {
+    enabled: document.getElementById('cnAutoReplyEnabled').checked,
+    text: document.getElementById('cnAutoReplyText').value.trim(),
+  };
   const targets = document.getElementById('cnWebhookTargets').value
     .split('\n').map(s => s.trim()).filter(Boolean).map(url => ({ url }));
   if (targets.length) body.webhookTargets = targets;

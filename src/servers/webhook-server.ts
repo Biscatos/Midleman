@@ -1134,7 +1134,9 @@ export async function stopWebhookServer(name: string, graceful: boolean = true):
         }
     }
 
-    ws.server.stop();
+    // Force-close active connections — kept-alive client sockets would
+    // otherwise stay pinned to this dead instance after a restart (503s).
+    ws.server.stop(true);
     servers.delete(name);
     console.log(`🛑 Webhook "${name}" stopped${graceful ? ' gracefully' : ' immediately'}`);
 }

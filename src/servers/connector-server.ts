@@ -19,7 +19,7 @@ import type { GoContactConnector, NormalizedInboundMessage, ConnectorWebhookTarg
 import { GoContactClient, stripHtml, type GoAgentMessage, type GoFile } from '../gocontact/client';
 import {
     getSession, upsertSession, touchSession, deleteSession, updateSessionToken,
-    updateSessionLastInbound, listActiveSessions, purgeExpiredSessions, type ConnectorSession,
+    updateSessionLastInbound, markSessionAutoReplied, listActiveSessions, purgeExpiredSessions, type ConnectorSession,
 } from '../gocontact/sessions';
 import { logRequest, headersToRecord } from '../telemetry/request-log';
 import { enqueueFailedFanout } from './webhook-server';
@@ -398,6 +398,7 @@ async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage)
         dialogGroupId: handles.dialogGroupId,
         phoneNumberId: msg.phoneNumberId || '',
         lastInboundMsgId: '',
+        autoReplied: false,
         createdAt: Date.now(),
         lastActivityAt: Date.now(),
     };
@@ -468,6 +469,50 @@ async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage
     markSessionHot(c, session.chatId);
     cs.stats.inboundMessages++;
     cs.stats.lastInboundAt = Date.now();
+
+    // Auto-reply: once per session, on the first customer message.
+    if (c.autoReply?.enabled && c.autoReply.text?.trim() && !session.autoReplied) {
+        session.autoReplied = true;
+        markSessionAutoReplied(c.name, session.chatId);
+        void sendAutoReply(cs, session, c.autoReply.text.trim());
+    }
+}
+
+/** Deliver the connector's auto-reply: to the customer through the regular
+ *  agent-reply plumbing (Meta and/or webhooks) AND into the GoContact chat so
+ *  the agent sees what was already answered. Best-effort, fires once. */
+async function sendAutoReply(cs: ConnectorServer, session: ConnectorSession, text: string): Promise<void> {
+    const c = cs.connector;
+    const event: AgentEvent = {
+        connector: c.name,
+        channel: c.channel,
+        event: 'agent_message',
+        chatId: session.customerId,
+        displayName: session.displayName,
+        phoneNumberId: session.phoneNumberId || undefined,
+        message: {
+            uuid: `autoreply-${session.dialogGroupUuid}`,
+            text,
+            timestamp: Date.now(),
+            agentName: 'Auto-Reply',
+            userType: 'AUTO',
+            file: null,
+        },
+    };
+    try {
+        await fanoutAgentEvent(cs, session, event);
+        console.log(`🤖 [connector:${c.name}] Auto-reply sent to ${session.customerId}`);
+    } catch (err) {
+        console.warn(`⚠️ [connector:${c.name}] Auto-reply delivery failed:`, err instanceof Error ? err.message : err);
+    }
+    // Mirror it into the GoContact chat (visible to the agent on pickup).
+    try {
+        await cs.client.sendClientMessage(
+            session.token, session.accessKey, session.dialogGroupUuid,
+            '🤖 Auto-Reply', 'MSG', text);
+    } catch (err) {
+        console.warn(`⚠️ [connector:${c.name}] Auto-reply mirror to GoContact failed:`, err instanceof Error ? err.message : err);
+    }
 }
 
 // ─── Outbound fan-out (agent → customer / bot) ──────────────────────────────
@@ -823,11 +868,14 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
         return jsonResponse(401, { error: 'Unauthorized', message: 'Your IP address is not allowed.' });
     }
 
-    // Token auth for non-Meta posts (Meta signs with X-Hub-Signature-256, but the
-    // verify token via query/header keeps parity with webhook distributors).
-    if (c.verifyToken && c.channel !== 'meta-whatsapp') {
+    // Inbound auth: when a verify token is configured it is ALWAYS required on
+    // POSTs (X-Forward-Token header or ?token= query). When pointing Meta's
+    // webhook directly here, register the callback URL with the token baked
+    // in (https://host/path?token=xxx) — Meta preserves the query string.
+    if (c.verifyToken) {
         const provided = req.headers.get('X-Forward-Token') || url.searchParams.get('token');
         if (!timingSafeEqualStr(provided, c.verifyToken)) {
+            console.warn(`❌ [connector:${c.name}] Unauthorized POST from ${clientIp}: missing/invalid token`);
             return jsonResponse(401, { error: 'Unauthorized', message: 'Valid X-Forward-Token header or ?token= is required' });
         }
     }
@@ -974,7 +1022,10 @@ export async function stopConnectorServer(name: string, graceful = true): Promis
             await Bun.sleep(200);
         }
     }
-    cs.server?.stop();
+    // Force-close active connections: with idleTimeout 0, a gateway's
+    // kept-alive sockets would otherwise stay pinned to this (now dead)
+    // instance and keep getting 503s after a restart.
+    cs.server?.stop(true);
     servers.delete(name);
     console.log(`🛑 Connector "${name}" stopped`);
 }
