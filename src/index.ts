@@ -1765,7 +1765,12 @@ const server = Bun.serve({
                             input.gocontact.password = prev.gocontact.password;
                         }
                         if (!input.verifyToken && prev.verifyToken) input.verifyToken = prev.verifyToken;
-                        if (input.meta && typeof input.meta === 'object' && !input.meta.accessToken && prev.meta?.accessToken) {
+                        // The form omits `meta` entirely when its fields are blank —
+                        // carry the stored credentials over so editing unrelated
+                        // settings never requires re-entering the Meta token.
+                        if (!input.meta && prev.meta) {
+                            input.meta = { ...prev.meta };
+                        } else if (input.meta && typeof input.meta === 'object' && !input.meta.accessToken && prev.meta?.accessToken) {
                             input.meta.accessToken = prev.meta.accessToken;
                         }
                     }

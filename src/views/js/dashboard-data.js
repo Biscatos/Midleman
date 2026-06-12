@@ -2218,7 +2218,9 @@ async function saveConnector() {
   if (verifyToken) body.verifyToken = verifyToken;
   const phoneId = document.getElementById('cnMetaPhoneId').value.trim();
   const metaToken = document.getElementById('cnMetaToken').value.trim();
-  if (phoneId || metaToken) body.meta = { phoneNumberId: phoneId, accessToken: metaToken || undefined };
+  // Always send meta when editing so the server can merge the stored token;
+  // blank token = keep current (never echoed back to the form).
+  if (phoneId || metaToken || _editingConnector) body.meta = { phoneNumberId: phoneId, accessToken: metaToken || undefined };
   const targets = document.getElementById('cnWebhookTargets').value
     .split('\n').map(s => s.trim()).filter(Boolean).map(url => ({ url }));
   if (targets.length) body.webhookTargets = targets;
