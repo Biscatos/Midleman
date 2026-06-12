@@ -1695,6 +1695,7 @@ const server = Bun.serve({
                         } : null,
                         replyToMeta: !!c.replyToMeta,
                         webhookTargets: c.webhookTargets || [],
+                        webhooksEnabled: c.webhooksEnabled !== false,
                         pollIntervalMs: c.pollIntervalMs ?? 4000,
                         sessionTtlMinutes: c.sessionTtlMinutes ?? 120,
                         allowPrivateTargets: c.allowPrivateTargets !== false,
@@ -1803,6 +1804,7 @@ const server = Bun.serve({
                         };
                     }
                     if (Array.isArray(input.webhookTargets) && input.webhookTargets.length) connector.webhookTargets = input.webhookTargets;
+                    if (typeof input.webhooksEnabled === 'boolean') connector.webhooksEnabled = input.webhooksEnabled;
                     if (typeof input.pollIntervalMs === 'number') connector.pollIntervalMs = input.pollIntervalMs;
                     if (typeof input.sessionTtlMinutes === 'number') connector.sessionTtlMinutes = input.sessionTtlMinutes;
                     if (typeof input.allowPrivateTargets === 'boolean') connector.allowPrivateTargets = input.allowPrivateTargets;

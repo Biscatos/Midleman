@@ -518,7 +518,7 @@ async function fanoutAgentEvent(cs: ConnectorServer, session: ConnectorSession |
     if (c.replyToMeta && event.event === 'agent_message' && event.message) {
         jobs.push(sendToMeta(c, event.chatId, event.message.text, event.message.file, session?.phoneNumberId));
     }
-    for (const target of c.webhookTargets || []) {
+    for (const target of (c.webhooksEnabled !== false ? c.webhookTargets || [] : [])) {
         // agent_message: single shot per tick — the poll loop + per-message
         // backoff is the retry mechanism. chat_closed: 3 attempts, then DLQ.
         let job = postWebhookTarget(c, target, event, event.event === 'chat_closed' ? 3 : 1);

@@ -2666,6 +2666,9 @@
       </div>
 
       <div style="margin-top:14px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer;margin-bottom:6px">
+          <input id="cnWebhooksEnabled" type="checkbox" checked onchange="connectorWebhooksEnabledChanged()"> Deliver events to webhook targets
+        </label>
         <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Webhook Targets <span style="color:var(--text3)">(agent replies POSTed here — one URL per line)</span></label>
         <textarea id="cnWebhookTargets" rows="3" placeholder="https://o-meu-bot.exemplo.com/gocontact-events" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px;font-family:'SF Mono',Monaco,monospace"></textarea>
       </div>

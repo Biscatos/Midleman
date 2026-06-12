@@ -2105,7 +2105,11 @@ function renderConnectors(connectors) {
         : '<span style="background:var(--surface2);color:var(--text3);padding:2px 8px;border-radius:4px;font-size:11px">Disabled</span>');
     const replies = [
       cn.replyToMeta ? 'Meta' : null,
-      (cn.webhookTargets && cn.webhookTargets.length) ? cn.webhookTargets.length + ' webhook(s)' : null,
+      (cn.webhookTargets && cn.webhookTargets.length)
+        ? (cn.webhooksEnabled === false
+            ? '<span style="color:var(--text3);text-decoration:line-through" title="Webhook delivery paused">' + cn.webhookTargets.length + ' webhook(s)</span>'
+            : cn.webhookTargets.length + ' webhook(s)')
+        : null,
     ].filter(Boolean).join(' + ') || '<span style="color:var(--text3)">none</span>';
     const stats = cn.stats || {};
     const activity = `↓${stats.inboundMessages || 0} ↑${stats.agentMessages || 0}` +
@@ -2144,6 +2148,13 @@ function connectorReplyToMetaChanged() {
   document.getElementById('cnMetaSection').style.display = (replyOn || isMeta) ? 'block' : 'none';
 }
 
+function connectorWebhooksEnabledChanged() {
+  const on = document.getElementById('cnWebhooksEnabled').checked;
+  const ta = document.getElementById('cnWebhookTargets');
+  ta.disabled = !on;
+  ta.style.opacity = on ? '1' : '0.5';
+}
+
 function generateConnectorToken() {
   const bytes = new Uint8Array(24);
   crypto.getRandomValues(bytes);
@@ -2173,6 +2184,8 @@ function openConnectorModal(connector = null) {
   document.getElementById('cnMetaToken').placeholder = connector?.meta?.hasAccessToken ? '(kept — type to replace)' : '';
   document.getElementById('cnReplyToMeta').checked = connector ? !!connector.replyToMeta : false;
   document.getElementById('cnWebhookTargets').value = (connector?.webhookTargets || []).map(t => t.url).join('\n');
+  document.getElementById('cnWebhooksEnabled').checked = connector ? connector.webhooksEnabled !== false : true;
+  connectorWebhooksEnabledChanged();
   document.getElementById('cnAllowedIps').value = (connector?.allowedIps || []).join(', ');
   document.getElementById('cnEnabled').checked = connector ? connector.enabled !== false : true;
   connectorReplyToMetaChanged();
@@ -2209,6 +2222,7 @@ async function saveConnector() {
   const targets = document.getElementById('cnWebhookTargets').value
     .split('\n').map(s => s.trim()).filter(Boolean).map(url => ({ url }));
   if (targets.length) body.webhookTargets = targets;
+  body.webhooksEnabled = document.getElementById('cnWebhooksEnabled').checked;
   const pollInterval = parseInt(document.getElementById('cnPollInterval').value, 10);
   if (pollInterval) body.pollIntervalMs = pollInterval;
   const ttl = parseInt(document.getElementById('cnSessionTtl').value, 10);

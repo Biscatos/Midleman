@@ -75,6 +75,9 @@ export interface GoContactConnector {
 
   /** Agent replies (and chat-closed events) are also POSTed to each of these. */
   webhookTargets?: ConnectorWebhookTarget[];
+  /** Master switch for webhook delivery (default true). Lets you pause the
+   *  webhook fan-out without deleting the configured targets. */
+  webhooksEnabled?: boolean;
 
   /** Poller cadence in ms (default 4000, min 1000). */
   pollIntervalMs?: number;
@@ -181,8 +184,11 @@ export function validateConnectorInput(input: unknown): string | null {
     }
   }
 
-  if (c.replyToMeta !== true && (!Array.isArray(c.webhookTargets) || c.webhookTargets.length === 0)) {
-    return 'Agent replies need at least one destination: enable "replyToMeta" or add a webhook target';
+  if (c.webhooksEnabled !== undefined && typeof c.webhooksEnabled !== 'boolean') return '"webhooksEnabled" must be a boolean';
+
+  const webhooksActive = c.webhooksEnabled !== false && Array.isArray(c.webhookTargets) && c.webhookTargets.length > 0;
+  if (c.replyToMeta !== true && !webhooksActive) {
+    return 'Agent replies need at least one active destination: enable "replyToMeta" or add (and enable) a webhook target';
   }
 
   if (c.pollIntervalMs !== undefined && (typeof c.pollIntervalMs !== 'number' || c.pollIntervalMs < 1000 || c.pollIntervalMs > 300_000)) {
