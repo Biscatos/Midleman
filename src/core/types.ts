@@ -124,7 +124,15 @@ export interface WebhookDistributor {
   targets: (string | WebhookDestination)[];      // Array of upstream destinations
   authToken?: string;     // Optional auth token to restrict inbound requests
   retry?: WebhookRetryConfig; // Default retry config for all targets (can be overridden per-destination)
-  allowedIps?: string[];  // Optional IP allowlist (exact, CIDR, wildcard). Empty = unrestricted.
+  allowedIps?: string[];  // Optional inbound IP allowlist (exact, CIDR, wildcard). Empty = unrestricted.
+  /** SSRF policy for OUTBOUND fan-out destinations of this webhook.
+   *  When true, private/internal ranges (RFC1918, CGNAT, ULA) are permitted as
+   *  targets. Loopback and link-local/metadata stay blocked unless explicitly
+   *  listed in targetAllowedCidrs. Defaults to the global env policy when unset. */
+  allowPrivateTargets?: boolean;
+  /** Explicit per-webhook CIDR allowlist for outbound targets. Overrides every
+   *  block (including loopback/metadata) for matching addresses. */
+  targetAllowedCidrs?: string[];
   silenceAlert?: WebhookSilenceAlert; // Optional inactivity notifier
   /** Persisted JSON test payload used by the dashboard editor to preview
    *  template interpolation. Has no runtime effect on delivery. */

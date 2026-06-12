@@ -1,12 +1,21 @@
 import type { WebhookDistributor, WebhookRetryConfig, WebhookPersistentRetry } from '../core/types';
 import { logRequest, headersToRecord, getLastWebhookActivity } from '../telemetry/request-log';
 import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
-import { assertResolvedHostAllowed } from '../core/ssrf-guard';
+import { assertResolvedHostAllowed, webhookSsrfPolicy, type SsrfPolicyOverride } from '../core/ssrf-guard';
 import { timingSafeEqualStr } from '../auth/auth';
 
 // Real socket peer IP, captured at the server boundary and looked up in the
 // inbound handler (X-Forwarded-For alone is spoofable).
 const reqPeerIp = new WeakMap<Request, string>();
+
+// Per-webhook outbound SSRF policy, keyed by webhook name. Kept current as
+// servers start/restart so DLQ and pending-retry paths (which only carry the
+// webhook name) apply the same policy as the live fan-out. Missing entry =
+// fall back to the global env default.
+const webhookSsrfPolicies = new Map<string, SsrfPolicyOverride>();
+function policyFor(webhookName: string): SsrfPolicyOverride | undefined {
+    return webhookSsrfPolicies.get(webhookName);
+}
 import {
     loadPersistedDlq, persistDlq, type StoredFailedFanout,
     loadPersistedPendingRetry, persistPendingRetry, type StoredPendingRetry,
@@ -121,6 +130,7 @@ export async function retryFailedFanout(id: string): Promise<{ ok: boolean; stat
             { method: entry.method, headers, body },
             entry.retryConfig,
             `DLQ:${entry.webhookName} → ${entry.targetUrl}`,
+            policyFor(entry.webhookName),
         );
 
         if (res.status >= 200 && res.status < 300) {
@@ -400,7 +410,7 @@ async function attemptPendingRetry(entry: PendingRetry): Promise<void> {
         // Re-validate the target on every persistent retry: the entry is loaded
         // from disk (pending-retry.json) and could have been tampered with, and
         // DNS may have rebound since it was enqueued.
-        await assertResolvedHostAllowed(entry.targetUrl);
+        await assertResolvedHostAllowed(entry.targetUrl, policyFor(entry.webhookName));
         // Single-shot attempt — no inner retries, the scheduler IS the retry loop
         const res = await fetch(entry.targetUrl, {
             method: entry.method,
@@ -510,6 +520,7 @@ async function fetchWithRetry(
     init: RequestInit,
     retry: WebhookRetryConfig | undefined,
     label: string,
+    ssrf?: SsrfPolicyOverride,
 ): Promise<{ res: Response; resText: string | null; attempts: number; attemptLog: import('../telemetry/request-log').AttemptRecord[] }> {
     const maxRetries = retry?.maxRetries ?? 0;
     const baseDelay = retry?.retryDelayMs ?? 1000;
@@ -525,7 +536,7 @@ async function fetchWithRetry(
     // SSRF guard: resolve the target host and reject internal/metadata addresses
     // before any network egress. Thrown here (not inside the retry loop) so a
     // blocked target fails permanently instead of retrying forever.
-    await assertResolvedHostAllowed(url);
+    await assertResolvedHostAllowed(url, ssrf);
 
     const attemptLog: import('../telemetry/request-log').AttemptRecord[] = [];
     let lastError: unknown;
@@ -897,6 +908,7 @@ async function handleWebhookFanout(
                 { method: tMethod, headers: tHeaders, body: tBody },
                 effectiveRetry,
                 `webhook:${webhook.name} → ${tUrl}`,
+                webhookSsrfPolicy(webhook),
             );
 
             const fetchDuration = performance.now() - fetchStart;
@@ -1054,6 +1066,10 @@ function jsonResponse(status: number, body: Record<string, unknown>): Response {
 // ─── Server Lifecycle ───────────────────────────────────────────────────────
 
 export function startWebhookServer(webhook: WebhookDistributor): WebhookServer {
+    // Register this webhook's outbound SSRF policy so DLQ/pending-retry paths
+    // (which only carry the name) apply the same per-webhook rules as live fan-out.
+    webhookSsrfPolicies.set(webhook.name, webhookSsrfPolicy(webhook));
+
     const ws: WebhookServer = {
         webhook,
         server: null!,

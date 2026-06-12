@@ -113,6 +113,7 @@ const IpTagInput = (() => {
 
 IpTagInput.init('pAllowedIps');
 IpTagInput.init('wAllowedIps');
+IpTagInput.init('wTargetAllowedCidrs');
 
 // ─── Action Dropdown Menu ────────────────────────────────────────────────────
 let _activeMenu = null;
@@ -3170,6 +3171,8 @@ function openWebhookModal(webhook = null) {
     ? '•••••••• (configurado — deixe vazio para manter)'
     : '';
   IpTagInput.setValue('wAllowedIps', webhook?.allowedIps || []);
+  document.getElementById('wAllowPrivateTargets').checked = !!(webhook && webhook.allowPrivateTargets);
+  IpTagInput.setValue('wTargetAllowedCidrs', webhook?.targetAllowedCidrs || []);
 
   // Restore persisted test payload (used by the body template editor preview)
   const savedTp = webhook?.testPayload || '';
@@ -3293,6 +3296,8 @@ async function saveWebhook() {
   if (targetsRaw.length === 0) return toast('At least one valid destination is required', 'error');
   const at = document.getElementById('wAuthToken').value.trim(); if (at) body.authToken = at;
   const wIps = IpTagInput.getValue('wAllowedIps'); if (wIps.length) body.allowedIps = wIps;
+  body.allowPrivateTargets = document.getElementById('wAllowPrivateTargets').checked;
+  const wCidrs = IpTagInput.getValue('wTargetAllowedCidrs'); if (wCidrs.length) body.targetAllowedCidrs = wCidrs;
 
   const tp = (document.getElementById('wTestPayload').value || '').trim();
   if (tp) body.testPayload = tp;

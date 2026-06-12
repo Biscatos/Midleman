@@ -338,6 +338,8 @@ interface StoredWebhook {
     authToken?: string;
     retry?: import('./types').WebhookRetryConfig;
     allowedIps?: string[];
+    allowPrivateTargets?: boolean;
+    targetAllowedCidrs?: string[];
     silenceAlert?: import('./types').WebhookSilenceAlert;
     testPayload?: string;
     npmProxyHostId?: number;
@@ -366,6 +368,8 @@ export function loadPersistedWebhooks(): WebhookDistributor[] {
                 authToken: w.authToken,
                 retry: w.retry,
                 allowedIps: w.allowedIps?.length ? w.allowedIps : undefined,
+                allowPrivateTargets: w.allowPrivateTargets,
+                targetAllowedCidrs: w.targetAllowedCidrs?.length ? w.targetAllowedCidrs : undefined,
                 silenceAlert: w.silenceAlert,
                 testPayload: w.testPayload,
                 npmProxyHostId: w.npmProxyHostId,
@@ -393,6 +397,8 @@ export function persistWebhooks(webhooks: WebhookDistributor[]): void {
             authToken: w.authToken,
             retry: w.retry,
             allowedIps: w.allowedIps?.length ? w.allowedIps : undefined,
+            allowPrivateTargets: w.allowPrivateTargets,
+            targetAllowedCidrs: w.targetAllowedCidrs?.length ? w.targetAllowedCidrs : undefined,
             silenceAlert: w.silenceAlert,
             testPayload: w.testPayload,
             npmProxyHostId: w.npmProxyHostId,
@@ -522,6 +528,20 @@ export function validateWebhookInput(input: unknown): string | null {
         return '"targets" must be a non-empty array of destinations';
     }
 
+    // Outbound SSRF policy for this webhook (per-webhook, set from the UI).
+    if (w.allowPrivateTargets !== undefined && typeof w.allowPrivateTargets !== 'boolean') {
+        return '"allowPrivateTargets" must be a boolean';
+    }
+    if (w.targetAllowedCidrs !== undefined) {
+        if (!Array.isArray(w.targetAllowedCidrs) || w.targetAllowedCidrs.some(c => typeof c !== 'string')) {
+            return '"targetAllowedCidrs" must be an array of CIDR strings';
+        }
+    }
+    const ssrfOverride = {
+        allowPrivate: w.allowPrivateTargets as boolean | undefined,
+        allowedCidrs: w.targetAllowedCidrs as string[] | undefined,
+    };
+
     if (w.testPayload !== undefined && w.testPayload !== null) {
         if (typeof w.testPayload !== 'string') return '"testPayload" must be a string';
         if (w.testPayload.length > 100_000) return '"testPayload" exceeds 100KB limit';
@@ -541,12 +561,12 @@ export function validateWebhookInput(input: unknown): string | null {
 
     for (const target of w.targets) {
         if (typeof target === 'string') {
-            try { assertSafeOutboundUrl(target); }
+            try { assertSafeOutboundUrl(target, ssrfOverride); }
             catch (e) { return e instanceof SsrfBlockedError ? `"${target}": ${e.message}` : `"${target}" is not a valid URL`; }
         } else if (typeof target === 'object' && target !== null) {
             const dest = target as Record<string, unknown>;
             if (typeof dest.url !== 'string') return 'Custom action must have a valid string "url"';
-            try { assertSafeOutboundUrl(dest.url); }
+            try { assertSafeOutboundUrl(dest.url, ssrfOverride); }
             catch (e) { return e instanceof SsrfBlockedError ? `"${dest.url}": ${e.message}` : `"${dest.url}" is not a valid URL`; }
             if (dest.method && typeof dest.method !== 'string') return '"method" must be a string';
             if (dest.bodyTemplate && typeof dest.bodyTemplate !== 'string') return '"bodyTemplate" must be a string';
