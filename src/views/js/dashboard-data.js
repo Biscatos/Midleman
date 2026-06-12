@@ -2179,7 +2179,6 @@ function openConnectorModal(connector = null) {
   document.getElementById('cnGoDomainUuid').value = connector?.gocontact?.domainUuid || '';
   document.getElementById('cnPollInterval').value = connector?.pollIntervalMs || '';
   document.getElementById('cnSessionTtl').value = connector?.sessionTtlMinutes || '';
-  document.getElementById('cnMetaPhoneId').value = connector?.meta?.phoneNumberId || '';
   document.getElementById('cnMetaToken').value = '';
   document.getElementById('cnMetaToken').placeholder = connector?.meta?.hasAccessToken ? '(kept — type to replace)' : '';
   document.getElementById('cnReplyToMeta').checked = connector ? !!connector.replyToMeta : false;
@@ -2216,11 +2215,10 @@ async function saveConnector() {
   if (password) body.gocontact.password = password;
   const verifyToken = document.getElementById('cnVerifyToken').value.trim();
   if (verifyToken) body.verifyToken = verifyToken;
-  const phoneId = document.getElementById('cnMetaPhoneId').value.trim();
   const metaToken = document.getElementById('cnMetaToken').value.trim();
   // Always send meta when editing so the server can merge the stored token;
-  // blank token = keep current (never echoed back to the form).
-  if (phoneId || metaToken || _editingConnector) body.meta = { phoneNumberId: phoneId, accessToken: metaToken || undefined };
+  // blank token = keep current. phoneNumberId is auto-captured per session.
+  if (metaToken || _editingConnector) body.meta = { accessToken: metaToken || undefined };
   const targets = document.getElementById('cnWebhookTargets').value
     .split('\n').map(s => s.trim()).filter(Boolean).map(url => ({ url }));
   if (targets.length) body.webhookTargets = targets;

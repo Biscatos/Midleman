@@ -2650,15 +2650,10 @@
         <input id="cnReplyToMeta" type="checkbox" onchange="connectorReplyToMetaChanged()"> Send agent replies directly to the customer via Meta Graph API
       </label>
       <div id="cnMetaSection" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2)">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-          <div>
-            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Phone Number ID <span style="color:var(--text3)">(optional — auto-captured from inbound payloads)</span></label>
-            <input id="cnMetaPhoneId" type="text" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
-          </div>
-          <div>
-            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Access Token <span style="color:var(--text3)">(blank keeps current)</span></label>
-            <input id="cnMetaToken" type="password" autocomplete="new-password" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
-          </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Access Token <span style="color:var(--text3)">(blank keeps current)</span></label>
+          <input id="cnMetaToken" type="password" autocomplete="new-password" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          <div style="margin-top:6px;font-size:11px;color:var(--text3)">The business phone number is detected automatically from each inbound payload (metadata.phone_number_id) — replies go out via the same number the customer wrote to.</div>
         </div>
         <div id="cnMetaMediaHint" style="display:none;margin-top:8px;font-size:11px;color:var(--text3)">
           The Access Token is also used to download inbound WhatsApp media — without it, customer attachments are skipped.

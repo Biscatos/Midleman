@@ -1770,8 +1770,9 @@ const server = Bun.serve({
                         // settings never requires re-entering the Meta token.
                         if (!input.meta && prev.meta) {
                             input.meta = { ...prev.meta };
-                        } else if (input.meta && typeof input.meta === 'object' && !input.meta.accessToken && prev.meta?.accessToken) {
-                            input.meta.accessToken = prev.meta.accessToken;
+                        } else if (input.meta && typeof input.meta === 'object') {
+                            if (!input.meta.accessToken && prev.meta?.accessToken) input.meta.accessToken = prev.meta.accessToken;
+                            if (!input.meta.phoneNumberId && prev.meta?.phoneNumberId) input.meta.phoneNumberId = prev.meta.phoneNumberId;
                         }
                     }
 
