@@ -1,5 +1,6 @@
 import type { ProxyProfile } from '../core/types';
-import { handleDirectProxy } from '../proxy/proxy';
+import { handleDirectProxy, rememberPeerIp, isSecureRequest } from '../proxy/proxy';
+import { resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { verifyProxyUserCredentials, signJwt, verifyJwt, getJwtMaxAge, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, proxyUserHasProfile, createProxyLoginChallenge, consumeProxyLoginChallenge, peekProxyLoginChallenge, generateTotpSecret, verifyTotp, setupProxyUserTotp, userIdToUuid, upsertLdapShadowProxyUserDetailed, assignProxyUserToProfile, getProxyUserTotpSecret, logAudit, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, findResetCandidateByEmail, getProxyUser, updateProxyUserPassword } from '../auth/auth';
 import { isSmtpConfigured, sendMail, renderPasswordResetEmail } from '../core/smtp';
 import { readFileSync } from 'fs';
@@ -74,9 +75,12 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
         port,
         idleTimeout: 0,
         maxRequestBodySize: 50 * 1024 * 1024, // 50MB
-        async fetch(req: Request): Promise<Response> {
+        async fetch(req: Request, srv): Promise<Response> {
             const startTime = performance.now();
             const url = new URL(req.url);
+            // Capture the real socket peer IP before any handler reads the
+            // (spoofable) X-Forwarded-For header.
+            rememberPeerIp(req, srv?.requestIP?.(req)?.address ?? null);
 
             // ── Serve static assets (logo, favicon) for login page ──
             if (url.pathname === '/logo.png' || url.pathname === '/favicon.ico' || url.pathname === '/favicon.png') {
@@ -92,7 +96,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
             if (profile.authMode === 'login') {
                 // GET /auth/login — serve login page
                 if (url.pathname === '/auth/login' && req.method === 'GET') {
-                    const loginTitle = profile.loginTitle || 'Midleman';
+                    const loginTitle = escapeHtmlAttr(profile.loginTitle || 'Midleman');
                     const loginLogoUrl = safeLogoUrl(profile.loginLogo, profile.targetUrl);
                     const consent = resolveProfileConsent(profile);
                     const html = proxyLoginHtml
@@ -111,7 +115,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
 
                 // POST /auth/login — Step 1: verify credentials, return challenge token
                 if (url.pathname === '/auth/login' && req.method === 'POST') {
-                    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+                    const clientIp = resolveClientIp(srv?.requestIP?.(req)?.address ?? null, req.headers.get('x-forwarded-for'), getTrustProxyConfig());
                     const userAgent = req.headers.get('user-agent');
 
                     let body: any;
@@ -242,7 +246,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                             status: 200,
                             headers: {
                                 'Content-Type': 'application/json',
-                                'Set-Cookie': `__midleman_auth_${profile.name}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}`,
+                                'Set-Cookie': `__midleman_auth_${profile.name}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/;${isSecureRequest(req) ? ' Secure;' : ''} Max-Age=${maxAge}`,
                             },
                         });
                     }
@@ -268,7 +272,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
 
                 // POST /auth/totp — Step 2: verify TOTP code (or setup + verify)
                 if (url.pathname === '/auth/totp' && req.method === 'POST') {
-                    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+                    const clientIp = resolveClientIp(srv?.requestIP?.(req)?.address ?? null, req.headers.get('x-forwarded-for'), getTrustProxyConfig());
                     const userAgent = req.headers.get('user-agent');
 
                     let body: any;
@@ -313,7 +317,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
 
                 // POST /auth/forgot — self-service password reset (always 200).
                 if (url.pathname === '/auth/forgot' && req.method === 'POST') {
-                    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+                    const clientIp = resolveClientIp(srv?.requestIP?.(req)?.address ?? null, req.headers.get('x-forwarded-for'), getTrustProxyConfig());
                     const userAgent = req.headers.get('user-agent');
                     let body: any;
                     try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
@@ -373,7 +377,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
 
                 // POST /auth/reset — { token, password } → set new password.
                 if (url.pathname === '/auth/reset' && req.method === 'POST') {
-                    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+                    const clientIp = resolveClientIp(srv?.requestIP?.(req)?.address ?? null, req.headers.get('x-forwarded-for'), getTrustProxyConfig());
                     const userAgent = req.headers.get('user-agent');
                     let body: any;
                     try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
@@ -412,7 +416,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
 
                 // POST /auth/logout — clear JWT cookie
                 if (url.pathname === '/auth/logout' && req.method === 'POST') {
-                    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+                    const clientIp = resolveClientIp(srv?.requestIP?.(req)?.address ?? null, req.headers.get('x-forwarded-for'), getTrustProxyConfig());
                     const userAgent = req.headers.get('user-agent');
                     const cookies = req.headers.get('cookie') || '';
                     const m = cookies.match(new RegExp(`(?:^|;\\s*)__midleman_auth_${profile.name}=([^;]+)`));
@@ -435,14 +439,14 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                         status: 200,
                         headers: {
                             'Content-Type': 'application/json',
-                            'Set-Cookie': `__midleman_auth_${profile.name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`,
+                            'Set-Cookie': `__midleman_auth_${profile.name}=; HttpOnly; SameSite=Lax; Path=/;${isSecureRequest(req) ? ' Secure;' : ''} Max-Age=0`,
                         },
                     });
                 }
             }
 
             const renderLoginHtml = (profileName: string, require2fa: boolean) => {
-                const loginTitle = profile.loginTitle || 'Midleman';
+                const loginTitle = escapeHtmlAttr(profile.loginTitle || 'Midleman');
                 const loginLogoUrl = safeLogoUrl(profile.loginLogo, profile.targetUrl);
                 const consent = resolveProfileConsent(profile);
                 return proxyLoginHtml

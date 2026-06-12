@@ -4,6 +4,20 @@ import { resolve } from 'path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import type { AuthUser, ProxyUser } from '../core/types';
 
+// ─── Security primitives ──────────────────────────────────────────────────────
+
+/**
+ * Constant-time string comparison for secrets (tokens, access keys, client
+ * secrets). Hashes both inputs first so the comparison is length-independent
+ * and never leaks length via early return. Returns false for non-string input.
+ */
+export function timingSafeEqualStr(a: string | null | undefined, b: string | null | undefined): boolean {
+    if (typeof a !== 'string' || typeof b !== 'string') return false;
+    const ha = createHash('sha256').update(a).digest();
+    const hb = createHash('sha256').update(b).digest();
+    return timingSafeEqual(ha, hb);
+}
+
 // ─── Database ────────────────────────────────────────────────────────────────
 
 let db: Database | null = null;
@@ -2083,12 +2097,12 @@ export function parseCookies(req: Request): Record<string, string> {
     return result;
 }
 
-export function sessionCookie(sessionId: string, cookieName: string, maxAge: number): string {
-    return `${cookieName}=${sessionId}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}`;
+export function sessionCookie(sessionId: string, cookieName: string, maxAge: number, secure = false): string {
+    return `${cookieName}=${sessionId}; HttpOnly; SameSite=Strict; Path=/;${secure ? ' Secure;' : ''} Max-Age=${maxAge}`;
 }
 
-export function clearSessionCookie(cookieName: string): string {
-    return `${cookieName}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`;
+export function clearSessionCookie(cookieName: string, secure = false): string {
+    return `${cookieName}=; HttpOnly; SameSite=Strict; Path=/;${secure ? ' Secure;' : ''} Max-Age=0`;
 }
 
 // ─── Invite Tokens ───────────────────────────────────────────────────────────

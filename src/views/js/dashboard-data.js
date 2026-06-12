@@ -3161,7 +3161,14 @@ function openWebhookModal(webhook = null) {
       addWebhookTarget(''); // one empty default
   }
   
-  document.getElementById('wAuthToken').value = webhook ? (webhook.authToken || '') : '';
+  // The auth token is never sent back to the client. Leave the field empty and
+  // signal that one is already configured via the placeholder; submitting an
+  // empty field preserves the existing token server-side.
+  const wAuthTokenEl = document.getElementById('wAuthToken');
+  wAuthTokenEl.value = '';
+  wAuthTokenEl.placeholder = (webhook && webhook.hasAuthToken)
+    ? '•••••••• (configurado — deixe vazio para manter)'
+    : '';
   IpTagInput.setValue('wAllowedIps', webhook?.allowedIps || []);
 
   // Restore persisted test payload (used by the body template editor preview)

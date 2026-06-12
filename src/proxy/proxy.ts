@@ -1,8 +1,17 @@
 import type { ProxyProfile } from '../core/types';
 import { startProxySpan, endProxySpan, recordProxyBlocked, recordProxyRedirect } from '../telemetry/telemetry';
 import { logRequest, captureRequestBody, captureResponseBody, headersToRecord } from '../telemetry/request-log';
-import { isIpAllowed } from '../core/ip-filter';
-import { verifyJwt, logAudit } from '../auth/auth';
+import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
+import { verifyJwt, logAudit, timingSafeEqualStr } from '../auth/auth';
+
+// The real socket peer IP, captured at the server boundary (Bun's
+// server.requestIP) and looked up here per request. We avoid threading it
+// through every signature by keying a WeakMap on the Request object.
+const reqPeerIp = new WeakMap<Request, string>();
+/** Records the socket peer IP for a request. Call once at the server boundary. */
+export function rememberPeerIp(req: Request, peerIp: string | null | undefined): void {
+    if (peerIp) reqPeerIp.set(req, peerIp);
+}
 
 // ─── Access Key Session Cache ───────────────────────────────────────────────
 // When a page is loaded with a valid ?key=, we cache the authorization so that
@@ -13,10 +22,33 @@ import { verifyJwt, logAudit } from '../auth/auth';
 // Cookie max-age for access key sessions (5 minutes)
 const SESSION_TTL = 5 * 60 * 1000;
 
+/** Escapes regex metacharacters so a (client-controlled) profile name can be
+ *  safely interpolated into a dynamic RegExp without injection or ReDoS. */
+function escapeRegex(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** True when the browser-facing connection is HTTPS — used to add the Secure
+ *  flag to auth/access-key cookies. COOKIE_SECURE overrides; otherwise derived
+ *  from the request protocol / X-Forwarded-Proto. */
+export function isSecureRequest(req: Request): boolean {
+    const override = process.env.COOKIE_SECURE;
+    if (override === 'true') return true;
+    if (override === 'false') return false;
+    if (req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() === 'https') return true;
+    try { return new URL(req.url).protocol === 'https:'; } catch { return false; }
+}
+/** Returns "; Secure" when the request is HTTPS, else "". */
+function secureAttr(req: Request): string {
+    return isSecureRequest(req) ? '; Secure' : '';
+}
+
 function getClientIP(req: Request): string {
-    return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-        || req.headers.get('x-real-ip')
-        || 'unknown';
+    return resolveClientIp(
+        reqPeerIp.get(req),
+        req.headers.get('x-forwarded-for'),
+        getTrustProxyConfig(),
+    );
 }
 
 /** Path allowlist matcher. Each pattern is either an exact path or a prefix
@@ -116,7 +148,7 @@ function getProfileMap(profiles: ProxyProfile[]): Map<string, CachedProfile> {
  */
 function checkProxyLoginAuth(req: Request, profileName: string): { username: string; token: string } | null {
     const cookies = req.headers.get('cookie') || '';
-    const m = cookies.match(new RegExp(`(?:^|;\\s*)__midleman_auth_${profileName}=([^;]+)`));
+    const m = cookies.match(new RegExp(`(?:^|;\\s*)__midleman_auth_${escapeRegex(profileName)}=([^;]+)`));
     if (!m) return null;
     const token = decodeURIComponent(m[1]);
     const payload = verifyJwt(token);
@@ -196,7 +228,7 @@ export async function handleProxyRequest(
             }
             // Also check for profile-scoped access key cookie
             if (resolvedProfileName && !resolvedKey) {
-                const keyMatch = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${resolvedProfileName}=([^;]+)`));
+                const keyMatch = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${escapeRegex(resolvedProfileName)}=([^;]+)`));
                 if (keyMatch) resolvedKey = decodeURIComponent(keyMatch[1]);
             }
         }
@@ -300,13 +332,13 @@ export async function handleProxyRequest(
 
         // A. X-Mid-Api-Key header — for API clients / Postman (no redirect, no cookie)
         const headerKey = req.headers.get('x-mid-api-key');
-        if (headerKey === profile.accessKey) {
+        if (timingSafeEqualStr(headerKey, profile.accessKey)) {
             validatedAccessKey = profile.accessKey;
             logAudit({ action: 'proxy.accesskey.success', actorUsername: 'apikey', details: { profile: profileName, via: 'header', path: remainingPath }, ip: clientIP, userAgent: req.headers.get('user-agent') });
         }
 
         // B. Direct ?key= — redirect to strip key from URL and set cookie first.
-        if (!validatedAccessKey && providedKey === profile.accessKey) {
+        if (!validatedAccessKey && timingSafeEqualStr(providedKey, profile.accessKey)) {
             logAudit({ action: 'proxy.accesskey.success', actorUsername: 'apikey', details: { profile: profileName, via: 'query', path: remainingPath }, ip: clientIP, userAgent: req.headers.get('user-agent') });
             if (isBrowser) {
                 const clean = new URL(url.toString());
@@ -315,7 +347,7 @@ export async function handleProxyRequest(
                     status: 302,
                     headers: {
                         'Location': clean.pathname + clean.search,
-                        'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(providedKey)}; Path=/proxy/${profileName}/; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
+                        'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(profile.accessKey)}; Path=/proxy/${profileName}/; SameSite=Lax${secureAttr(req)}; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
                     },
                 });
             }
@@ -325,8 +357,8 @@ export async function handleProxyRequest(
         // C. Profile-scoped cookie
         if (!validatedAccessKey && isBrowser) {
             const cookies = req.headers.get('cookie') || '';
-            const m = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${profileName}=([^;]+)`));
-            if (m && decodeURIComponent(m[1]) === profile.accessKey) {
+            const m = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${escapeRegex(profileName)}=([^;]+)`));
+            if (m && timingSafeEqualStr(decodeURIComponent(m[1]), profile.accessKey)) {
                 validatedAccessKey = profile.accessKey;
             }
         }
@@ -665,9 +697,9 @@ if(location.pathname===P.slice(0,-1)){_r.call(history,null,"",P+location.search+
         html = html.replace(/(<head[^>]*>(?:<base[^>]*>)?)/i, `$1${patchScript}`);
 
         // 5. Set cookies for deep sub-resource resolution (CSS → fonts)
-        responseHeaders.append('Set-Cookie', `__proxy_profile=${profileName}; Path=/proxy/${profileName}/; SameSite=Lax`);
+        responseHeaders.append('Set-Cookie', `__proxy_profile=${profileName}; Path=/proxy/${profileName}/; SameSite=Lax${secureAttr(req)}`);
         if (validatedAccessKey) {
-            responseHeaders.append('Set-Cookie', `__pk_${profileName}=${encodeURIComponent(validatedAccessKey)}; Path=/proxy/${profileName}/; SameSite=Lax`);
+            responseHeaders.append('Set-Cookie', `__pk_${profileName}=${encodeURIComponent(validatedAccessKey)}; Path=/proxy/${profileName}/; SameSite=Lax${secureAttr(req)}`);
         }
 
         responseHeaders.delete('content-length');
@@ -708,9 +740,9 @@ if(location.pathname===P.slice(0,-1)){_r.call(history,null,"",P+location.search+
     // Set profile cookies only for browser sub-resources (CSS, JS, fonts, images)
     // API clients should not receive or depend on cookies
     if (isBrowser || isAssetRequest(remainingPath, accept)) {
-        responseHeaders.append('Set-Cookie', `__proxy_profile=${profileName}; Path=/proxy/${profileName}/; SameSite=Lax`);
+        responseHeaders.append('Set-Cookie', `__proxy_profile=${profileName}; Path=/proxy/${profileName}/; SameSite=Lax${secureAttr(req)}`);
         if (validatedAccessKey) {
-            responseHeaders.append('Set-Cookie', `__pk_${profileName}=${encodeURIComponent(validatedAccessKey)}; Path=/proxy/${profileName}/; SameSite=Lax`);
+            responseHeaders.append('Set-Cookie', `__pk_${profileName}=${encodeURIComponent(validatedAccessKey)}; Path=/proxy/${profileName}/; SameSite=Lax${secureAttr(req)}`);
         }
     }
 
@@ -807,12 +839,12 @@ export async function handleDirectProxy(
 
         // A. X-Mid-Api-Key header — for API clients / Postman (no redirect, no cookie)
         const headerKey = req.headers.get('x-mid-api-key');
-        if (headerKey === profile.accessKey) {
+        if (timingSafeEqualStr(headerKey, profile.accessKey)) {
             validatedAccessKey = profile.accessKey;
         }
 
         // B. Direct ?key= — redirect to strip key from URL and set cookie first.
-        if (!validatedAccessKey && providedKey === profile.accessKey) {
+        if (!validatedAccessKey && timingSafeEqualStr(providedKey, profile.accessKey)) {
             if (isBrowser) {
                 const clean = new URL(url.toString());
                 clean.searchParams.delete('key');
@@ -820,7 +852,7 @@ export async function handleDirectProxy(
                     status: 302,
                     headers: {
                         'Location': clean.pathname + clean.search,
-                        'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(providedKey)}; Path=/; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
+                        'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(profile.accessKey)}; Path=/; SameSite=Lax${secureAttr(req)}; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
                     },
                 });
             }
@@ -831,8 +863,8 @@ export async function handleDirectProxy(
         //    Cookie name includes profileName so different proxies never share auth state.
         if (!validatedAccessKey && isBrowser) {
             const cookies = req.headers.get('cookie') || '';
-            const m = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${profileName}=([^;]+)`));
-            if (m && decodeURIComponent(m[1]) === profile.accessKey) {
+            const m = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${escapeRegex(profileName)}=([^;]+)`));
+            if (m && timingSafeEqualStr(decodeURIComponent(m[1]), profile.accessKey)) {
                 validatedAccessKey = profile.accessKey;
             }
         }
@@ -1060,7 +1092,7 @@ export async function handleDirectProxy(
     // Set profile-scoped access key cookie only for browser sessions
     // API clients should not receive or depend on cookies
     if (validatedAccessKey && isBrowser) {
-        responseHeaders.append('Set-Cookie', `__pk_${profileName}=${encodeURIComponent(validatedAccessKey)}; Path=/; SameSite=Lax`);
+        responseHeaders.append('Set-Cookie', `__pk_${profileName}=${encodeURIComponent(validatedAccessKey)}; Path=/; SameSite=Lax${secureAttr(req)}`);
     }
 
     return new Response(targetResponse.body, {

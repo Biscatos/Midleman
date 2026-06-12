@@ -1,6 +1,7 @@
 import type { ProxyProfile, WebhookDistributor, TcpUdpProfile, NpmCustomLocation } from './types';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname, resolve } from 'path';
+import { assertSafeOutboundUrl, SsrfBlockedError } from './ssrf-guard';
 
 /**
  * JSON-serializable version of ProxyProfile
@@ -540,11 +541,13 @@ export function validateWebhookInput(input: unknown): string | null {
 
     for (const target of w.targets) {
         if (typeof target === 'string') {
-            try { new URL(target); } catch { return `"${target}" is not a valid URL`; }
+            try { assertSafeOutboundUrl(target); }
+            catch (e) { return e instanceof SsrfBlockedError ? `"${target}": ${e.message}` : `"${target}" is not a valid URL`; }
         } else if (typeof target === 'object' && target !== null) {
             const dest = target as Record<string, unknown>;
             if (typeof dest.url !== 'string') return 'Custom action must have a valid string "url"';
-            try { new URL(dest.url); } catch { return `"${dest.url}" is not a valid URL`; }
+            try { assertSafeOutboundUrl(dest.url); }
+            catch (e) { return e instanceof SsrfBlockedError ? `"${dest.url}": ${e.message}` : `"${dest.url}" is not a valid URL`; }
             if (dest.method && typeof dest.method !== 'string') return '"method" must be a string';
             if (dest.bodyTemplate && typeof dest.bodyTemplate !== 'string') return '"bodyTemplate" must be a string';
             if (dest.dropEmpty !== undefined && typeof dest.dropEmpty !== 'boolean') return '"dropEmpty" must be a boolean';

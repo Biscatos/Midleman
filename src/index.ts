@@ -22,6 +22,7 @@ import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, genera
 listNotificationGroups, getNotificationGroup, createNotificationGroup, updateNotificationGroup, deleteNotificationGroup,
 addNotificationGroupMember, removeNotificationGroupMember,
 listNotificationRules, createNotificationRule, updateNotificationRule, deleteNotificationRule,
+timingSafeEqualStr,
 type NotificationSeverity, type NotificationChannel } from './auth/auth';
 import { emitNotificationEvent, dispatchTestToGroup } from './core/notifications';
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
@@ -32,6 +33,7 @@ import { initSms, getSmsConfig, publicSmsConfig, validateSmsInput, saveSmsConfig
 import { initNpmSettings, getNpmSettings, publicNpmSettings, validateNpmInput, saveNpmSettings, deleteNpmSettings, isNpmEnabled, decryptNpmPassword } from './core/npm-settings';
 import { isNpmCertVolumePresent, startCertWatcher, onCertReloaded } from './certs/npm-cert-loader';
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleOauthSmsOtp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
+import { resolveClientIp, getTrustProxyConfig } from './core/ip-filter';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
 import { resolve } from 'path';
@@ -220,12 +222,14 @@ function checkAdminAuth(req: Request, url: URL): Response | null {
     // 2. Fall back to X-Forward-Token (API clients, backwards compat)
     if (config.authToken) {
         const token = req.headers.get('X-Forward-Token') || url.searchParams.get('token');
-        if (token === config.authToken) return null;
+        if (token && timingSafeEqualStr(token, config.authToken)) return null;
     }
 
-    // 3. If no users exist yet, allow access (setup mode)
-    if (!hasUsers()) return null;
-
+    // NOTE: there is deliberately no "setup mode" bypass here. Bootstrap routes
+    // (/auth/setup, /auth/register) are handled earlier in the request pipeline
+    // and carry their own `hasUsers()` guards. The /admin/* surface must never be
+    // reachable without credentials, even before the first admin is created —
+    // otherwise an attacker can hijack a fresh instance during the setup window.
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' }
@@ -241,10 +245,29 @@ function getAuthedAdmin(req: Request): import('./core/types').AuthUser | null {
     return session?.user || null;
 }
 
-/** Returns IP from common headers. */
+// Real socket peer IP captured at the server boundary; see rememberPeerIp.
+const reqPeerIp = new WeakMap<Request, string>();
+function rememberPeerIp(req: Request, peerIp: string | null | undefined): void {
+    if (peerIp) reqPeerIp.set(req, peerIp);
+}
+
+/** Resolves the trusted client IP (socket peer + X-Forwarded-For only when the
+ *  peer is a configured trusted proxy). Never trusts raw XFF from untrusted peers. */
 function reqClientIp(req: Request): string {
-    return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-        || req.headers.get('x-real-ip') || 'unknown';
+    return resolveClientIp(reqPeerIp.get(req), req.headers.get('x-forwarded-for'), getTrustProxyConfig());
+}
+
+/** True when the browser-facing connection is HTTPS, so session cookies should
+ *  carry the Secure flag. Honours COOKIE_SECURE (true/false) as an explicit
+ *  override; otherwise derives from the request protocol / X-Forwarded-Proto set
+ *  by a TLS-terminating reverse proxy. Over-setting Secure is never a security
+ *  risk (the browser just drops the cookie on plain HTTP). */
+function isSecureRequest(req: Request): boolean {
+    const override = process.env.COOKIE_SECURE;
+    if (override === 'true') return true;
+    if (override === 'false') return false;
+    if (req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() === 'https') return true;
+    try { return new URL(req.url).protocol === 'https:'; } catch { return false; }
 }
 
 // ─── Async startup: assign ports, then start per-profile and per-target servers ─
@@ -333,7 +356,8 @@ const jwksPortRaw = process.env.JWKS_PORT;
 const jwksServer = jwksPortRaw ? Bun.serve({
     port: parseInt(jwksPortRaw, 10),
     idleTimeout: 0,
-    async fetch(req: Request): Promise<Response> {
+    async fetch(req: Request, srv): Promise<Response> {
+        rememberPeerIp(req, srv?.requestIP?.(req)?.address ?? null);
         const url = new URL(req.url);
         const path = url.pathname;
 
@@ -383,7 +407,8 @@ const server = Bun.serve({
     idleTimeout: 0,
     maxRequestBodySize: 50 * 1024 * 1024, // 50MB
 
-    async fetch(req: Request): Promise<Response> {
+    async fetch(req: Request, srv): Promise<Response> {
+        rememberPeerIp(req, srv?.requestIP?.(req)?.address ?? null);
         // ── ACME HTTP-01 challenge — must respond before any auth or shutdown check ──
         const url0 = new URL(req.url);
         if (url0.pathname.startsWith('/.well-known/acme-challenge/')) {
@@ -438,7 +463,7 @@ const server = Bun.serve({
                 const headers: Record<string, string> = { 'Content-Type': 'application/json' };
                 // Stale cookie: exists but session is gone — clear it so login works cleanly
                 if (sessionId && !session) {
-                    headers['Set-Cookie'] = clearSessionCookie(config.auth.cookieName);
+                    headers['Set-Cookie'] = clearSessionCookie(config.auth.cookieName, isSecureRequest(req));
                 }
                 return new Response(body, { status: 200, headers });
             }
@@ -468,13 +493,13 @@ const server = Bun.serve({
                 if (!verifyTotp(totpSecret, totpCode)) return jsonRes(400, { error: 'Invalid TOTP code. Scan the QR code and enter the 6-digit code.' });
                 try {
                     const user = await createUser(username, password, totpSecret);
-                    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+                    const clientIp = reqClientIp(req);
                     const sid = createSession(user.id, clientIp, req.headers.get('user-agent') || '');
                     return new Response(JSON.stringify({ status: 'ok', username: user.username }), {
                         status: 200,
                         headers: {
                             'Content-Type': 'application/json',
-                            'Set-Cookie': sessionCookie(sid, config.auth.cookieName, config.auth.sessionMaxAge),
+                            'Set-Cookie': sessionCookie(sid, config.auth.cookieName, config.auth.sessionMaxAge, isSecureRequest(req)),
                         },
                     });
                 } catch (err: any) {
@@ -612,7 +637,7 @@ const server = Bun.serve({
                     status: 200,
                     headers: {
                         'Content-Type': 'application/json',
-                        'Set-Cookie': clearSessionCookie(config.auth.cookieName),
+                        'Set-Cookie': clearSessionCookie(config.auth.cookieName, isSecureRequest(req)),
                     },
                 });
             }
@@ -1493,7 +1518,10 @@ const server = Bun.serve({
                             name: webhook.name,
                             targets: webhook.targets,
                             port: webhook.port,
-                            authToken: webhook.authToken || '',
+                            // Never return the inbound auth token in plaintext — it is a
+                            // shared secret. The form only sends a new value when the admin
+                            // types one; otherwise the existing token is preserved on save.
+                            hasAuthToken: !!webhook.authToken,
                             retry: webhook.retry,
                             allowedIps: webhook.allowedIps || [],
                             silenceAlert: webhook.silenceAlert,
@@ -1548,6 +1576,9 @@ const server = Bun.serve({
                     if (existingIdx >= 0) {
                         // Preserve NPM adoption fields across edits — they're not exposed in the form.
                         const prev = config.webhooks[existingIdx];
+                        // Preserve the existing inbound auth token when the form did not
+                        // submit a new one (it is no longer sent back to the client).
+                        if (!webhookWithPort.authToken && prev.authToken) webhookWithPort.authToken = prev.authToken;
                         if (prev.npmProxyHostId !== undefined) webhookWithPort.npmProxyHostId = prev.npmProxyHostId;
                         if (prev.npmOriginalForwardHost) webhookWithPort.npmOriginalForwardHost = prev.npmOriginalForwardHost;
                         if (prev.npmOriginalForwardPort !== undefined) webhookWithPort.npmOriginalForwardPort = prev.npmOriginalForwardPort;
