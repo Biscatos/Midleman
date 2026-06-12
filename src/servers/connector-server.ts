@@ -109,6 +109,32 @@ function clearDeliveryFailure(connector: string, uuid: string): void {
 const pendingFileFirstSeen = new Map<string, number>();
 const PENDING_FILE_GRACE_MS = 90_000;
 
+// ─── Adaptive per-session polling ────────────────────────────────────────────
+// Hot conversations poll at the configured (fast) interval; every empty poll
+// stretches that session's interval ×1.5 up to 8× (capped at 60s). Any
+// activity — inbound customer message or an agent reply — snaps it back to
+// fast. Active chats feel real-time, idle ones barely cost requests.
+
+interface SessionPollState { intervalMs: number; nextPollAt: number }
+const sessionPollState = new Map<string, SessionPollState>();
+
+function fastIntervalMs(c: GoContactConnector): number {
+    return Math.max(1000, c.pollIntervalMs ?? 4000);
+}
+
+function maxIntervalMs(c: GoContactConnector): number {
+    return Math.min(60_000, fastIntervalMs(c) * 8);
+}
+
+/** Snap a session back to the fast polling rate (called on any activity). */
+function markSessionHot(c: GoContactConnector, chatId: string): void {
+    sessionPollState.set(`${c.name}:${chatId}`, { intervalMs: fastIntervalMs(c), nextPollAt: 0 });
+}
+
+function dropSessionPollState(connector: string, chatId: string): void {
+    sessionPollState.delete(`${connector}:${chatId}`);
+}
+
 function ssrfPolicy(c: GoContactConnector): SsrfPolicyOverride {
     return { allowPrivate: c.allowPrivateTargets, allowedCidrs: c.targetAllowedCidrs };
 }
@@ -435,6 +461,8 @@ async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage
     // read receipt on the channel (WhatsApp blue ticks).
     if (msg.messageId) updateSessionLastInbound(c.name, msg.chatId, msg.messageId);
     touchSession(c.name, msg.chatId);
+    // Customer just wrote — an agent/queue reply is most likely now.
+    markSessionHot(c, msg.chatId);
     cs.stats.inboundMessages++;
     cs.stats.lastInboundAt = Date.now();
 }
@@ -558,7 +586,7 @@ async function fanoutAgentEvent(cs: ConnectorServer, session: ConnectorSession |
 
 // ─── Poller ──────────────────────────────────────────────────────────────────
 
-async function pollSession(cs: ConnectorServer, session: ConnectorSession): Promise<void> {
+async function pollSession(cs: ConnectorServer, session: ConnectorSession): Promise<number> {
     const c = cs.connector;
 
     if (!cs.client.tokenIsFresh(session.token)) {
@@ -568,7 +596,7 @@ async function pollSession(cs: ConnectorServer, session: ConnectorSession): Prom
     }
 
     const messages = await cs.client.fetchNewMessages(session.token, session.accessKey);
-    if (messages.length === 0) return;
+    if (messages.length === 0) return 0;
 
     for (const m of messages) {
         // Respect the per-message backoff window before re-attempting delivery.
@@ -592,6 +620,7 @@ async function pollSession(cs: ConnectorServer, session: ConnectorSession): Prom
             }
         }
     }
+    return messages.length;
 }
 
 async function processAgentMessage(cs: ConnectorServer, session: ConnectorSession, m: GoAgentMessage): Promise<void> {
@@ -601,6 +630,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
     if (m.msgtype === 'LEAVE') {
         try { await cs.client.markAsRead(session.token, session.accessKey, m.uuid); } catch { /* session dies anyway */ }
         deleteSession(c.name, session.chatId);
+        dropSessionPollState(c.name, session.chatId);
         console.log(`👋 [connector:${c.name}] Agent closed chat ${session.chatId}`);
         const event: AgentEvent = {
             connector: c.name, channel: c.channel, event: 'chat_closed', reason: 'agent',
@@ -707,27 +737,46 @@ async function pollTick(cs: ConnectorServer): Promise<void> {
     if (cs.polling || cs.isShuttingDown) return;
     cs.polling = true;
     try {
-        const ttl = cs.connector.sessionTtlMinutes ?? 120;
-        const expired = purgeExpiredSessions(cs.connector.name, ttl);
+        const c = cs.connector;
+        const ttl = c.sessionTtlMinutes ?? 120;
+        const expired = purgeExpiredSessions(c.name, ttl);
         for (const s of expired) {
-            console.log(`⌛ [connector:${cs.connector.name}] Session ${s.chatId} expired after ${ttl}min idle`);
+            console.log(`⌛ [connector:${c.name}] Session ${s.chatId} expired after ${ttl}min idle`);
+            dropSessionPollState(c.name, s.chatId);
             const event: AgentEvent = {
-                connector: cs.connector.name, channel: cs.connector.channel, event: 'chat_closed', reason: 'expired',
+                connector: c.name, channel: c.channel, event: 'chat_closed', reason: 'expired',
                 chatId: s.chatId, displayName: s.displayName,
                 phoneNumberId: s.phoneNumberId || undefined, message: null,
             };
             fanoutAgentEvent(cs, null, event).catch(err =>
-                console.warn(`⚠️ [connector:${cs.connector.name}] chat_closed(expired) fan-out failed:`, err instanceof Error ? err.message : err));
+                console.warn(`⚠️ [connector:${c.name}] chat_closed(expired) fan-out failed:`, err instanceof Error ? err.message : err));
         }
-        const sessions = listActiveSessions(cs.connector.name, ttl);
-        if (sessions.length === 0) return;
+        // Adaptive scheduling: only poll the sessions that are due.
+        const now = Date.now();
+        const due = listActiveSessions(c.name, ttl).filter(s => {
+            const state = sessionPollState.get(`${c.name}:${s.chatId}`);
+            return !state || state.nextPollAt <= now;
+        });
+        if (due.length === 0) return;
         // Bounded parallelism: poll in batches so a large session count degrades
         // into longer effective latency instead of a thundering herd against
         // GoContact. The reentrancy guard above keeps overlapping ticks out.
         const BATCH = 25;
-        for (let i = 0; i < sessions.length; i += BATCH) {
+        for (let i = 0; i < due.length; i += BATCH) {
             if (cs.isShuttingDown) return;
-            await Promise.allSettled(sessions.slice(i, i + BATCH).map(s => pollSession(cs, s)));
+            const batch = due.slice(i, i + BATCH);
+            const results = await Promise.allSettled(batch.map(s => pollSession(cs, s)));
+            // Reschedule each polled session: activity → fast; empty → back off.
+            results.forEach((r, idx) => {
+                const s = batch[idx];
+                const key = `${c.name}:${s.chatId}`;
+                const prev = sessionPollState.get(key)?.intervalMs ?? fastIntervalMs(c);
+                const gotMessages = r.status === 'fulfilled' && r.value > 0;
+                const intervalMs = gotMessages
+                    ? fastIntervalMs(c)
+                    : Math.min(maxIntervalMs(c), Math.round(prev * 1.5));
+                sessionPollState.set(key, { intervalMs, nextPollAt: Date.now() + intervalMs });
+            });
         }
     } catch (err) {
         cs.stats.lastError = err instanceof Error ? err.message : String(err);
@@ -888,9 +937,10 @@ export function startConnectorServer(connector: GoContactConnector): ConnectorSe
             },
         });
 
-        const interval = Math.max(1000, connector.pollIntervalMs ?? 4000);
-        cs.pollTimer = setInterval(() => { void pollTick(cs); }, interval);
-        console.log(`💬 Connector "${connector.name}" (${connector.channel}) on :${cs.server.port} — polling agent replies every ${interval}ms`);
+        // The scheduler ticks every second; each session is only actually
+        // polled when due per its adaptive interval (fast..8×fast, max 60s).
+        cs.pollTimer = setInterval(() => { void pollTick(cs); }, 1000);
+        console.log(`💬 Connector "${connector.name}" (${connector.channel}) on :${cs.server.port} — adaptive polling ${fastIntervalMs(connector)}–${maxIntervalMs(connector)}ms`);
     } else {
         console.log(`💬 Connector "${connector.name}" loaded (disabled)`);
     }
@@ -959,6 +1009,7 @@ export async function closeConnectorSession(connectorName: string, chatId: strin
         console.warn(`⚠️ [connector:${connectorName}] LEAVE for ${chatId} failed:`, err instanceof Error ? err.message : err);
     }
     deleteSession(connectorName, chatId);
+    dropSessionPollState(connectorName, chatId);
     const event: AgentEvent = {
         connector: connectorName, channel: cs.connector.channel, event: 'chat_closed', reason: 'admin',
         chatId, displayName: session.displayName,
