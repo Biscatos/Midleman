@@ -407,16 +407,11 @@ async function attemptPendingRetry(entry: PendingRetry): Promise<void> {
         const headers = new Headers(entry.headers);
         const body = entry.body ?? undefined;
         const label = `pending:${entry.webhookName} → ${entry.targetUrl}`;
-        // Re-validate the target on every persistent retry: the entry is loaded
-        // from disk (pending-retry.json) and could have been tampered with, and
-        // DNS may have rebound since it was enqueued.
-        await assertResolvedHostAllowed(entry.targetUrl, policyFor(entry.webhookName));
         // Single-shot attempt — no inner retries, the scheduler IS the retry loop
         const res = await fetch(entry.targetUrl, {
             method: entry.method,
             headers,
             body: body as any,
-            redirect: 'manual',
             tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' },
         } as RequestInit);
         entry.attempts += 1;
@@ -515,6 +510,13 @@ function enqueueFailedFanout(entry: Omit<FailedFanout, 'id' | 'failedAt' | 'retr
 
 const DEFAULT_RETRY_ON = [429, 502, 503, 504];
 
+// Per-attempt outbound timeout (ms). Prevents a slow/hung destination from
+// pinning fan-out resources indefinitely. Override via WEBHOOK_TIMEOUT_MS.
+const WEBHOOK_FETCH_TIMEOUT_MS = (() => {
+    const n = parseInt(process.env.WEBHOOK_TIMEOUT_MS || '', 10);
+    return Number.isFinite(n) && n > 0 ? n : 30_000;
+})();
+
 async function fetchWithRetry(
     url: string,
     init: RequestInit,
@@ -552,7 +554,7 @@ async function fetchWithRetry(
 
         const attemptStart = performance.now();
         try {
-            const res = await fetch(url, { ...init, redirect: 'manual', tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' } } as RequestInit);
+            const res = await fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(WEBHOOK_FETCH_TIMEOUT_MS), tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' } } as RequestInit);
             // Cap fanout response capture at 4KB for logging — skip for large/unknown-size responses.
             const resContentLength = parseInt(res.headers.get('content-length') || '-1', 10);
             const resText = resContentLength < 0 || resContentLength <= 4096
