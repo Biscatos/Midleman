@@ -1026,11 +1026,14 @@ export function generateTotpSecret(username: string): { secret: string; otpauthU
 export function verifyTotp(secret: string, code: string): boolean {
     const key = base32Decode(secret);
     const now = BigInt(Math.floor(Date.now() / 1000 / 30));
-    // Accept current + 1 forward window only (clock skew tolerance, no replay of past codes)
+    const provided = code.trim();
+    // Accept current + 1 forward window only (clock skew tolerance, no replay of past codes).
+    // Constant-time compare each candidate so a near-miss code can't be distinguished by timing.
+    let ok = false;
     for (let i = 0n; i <= 1n; i++) {
-        if (generateHotp(key, now + i) === code.trim()) return true;
+        if (timingSafeEqualStr(generateHotp(key, now + i), provided)) ok = true;
     }
-    return false;
+    return ok;
 }
 
 // ─── Sessions ────────────────────────────────────────────────────────────────

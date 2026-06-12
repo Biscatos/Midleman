@@ -11,15 +11,17 @@
  *     defeat DNS-rebinding (a name that resolved public at config time but points
  *     at 169.254.169.254 at request time).
  *
- * Because Midleman legitimately relays to internal services on some
- * deployments, private ranges (RFC1918, CGNAT, ULA) are blocked BY DEFAULT but
- * can be opted back in:
- *   WEBHOOK_ALLOW_PRIVATE_TARGETS=true        → permit all private ranges
+ * Because Midleman legitimately relays to internal services (e.g. FusionPBX),
+ * private ranges (RFC1918, CGNAT, ULA) are ALLOWED BY DEFAULT. This can be
+ * tightened globally or per-webhook:
+ *   WEBHOOK_ALLOW_PRIVATE_TARGETS=false       → block private ranges globally
+ *   per-webhook allowPrivateTargets=false     → block them for one webhook (UI)
  *   WEBHOOK_TARGET_ALLOWED_CIDRS=10.0.0.0/8,… → explicit allowlist (overrides
  *                                               every block, including loopback)
  * Loopback, link-local (incl. the cloud metadata IP 169.254.169.254) and the
  * unspecified address are ALWAYS blocked unless explicitly allowlisted, because
- * they are never legitimate webhook destinations.
+ * they are never legitimate webhook destinations — even when private ranges are
+ * allowed.
  */
 
 import { isIP } from 'node:net';
@@ -54,21 +56,41 @@ const V4_ALWAYS_BLOCK = ['0.0.0.0/8', '127.0.0.0/8', '169.254.0.0/16', '255.255.
 // Private/internal — blocked by default, opt-in via env.
 const V4_PRIVATE = ['10.0.0.0/8', '100.64.0.0/10', '172.16.0.0/12', '192.0.0.0/24', '192.168.0.0/16', '198.18.0.0/15'];
 
-interface SsrfPolicy {
+export interface SsrfPolicy {
     allowPrivate: boolean;
     allowedCidrs: string[];
 }
 
-let _policy: SsrfPolicy | null = null;
-function getPolicy(): SsrfPolicy {
-    if (!_policy) {
-        _policy = {
-            allowPrivate: process.env.WEBHOOK_ALLOW_PRIVATE_TARGETS === 'true',
+/** Per-call policy override, typically supplied per-webhook from the UI. */
+export interface SsrfPolicyOverride {
+    allowPrivate?: boolean;
+    allowedCidrs?: string[];
+}
+
+let _envPolicy: SsrfPolicy | null = null;
+function getEnvPolicy(): SsrfPolicy {
+    if (!_envPolicy) {
+        _envPolicy = {
+            // Private/internal RFC1918/ULA ranges are ALLOWED by default — Midleman
+            // is commonly used to relay to internal services (e.g. FusionPBX). Set
+            // WEBHOOK_ALLOW_PRIVATE_TARGETS=false to lock this down globally.
+            // Loopback and link-local/metadata stay blocked regardless (see blockedReason).
+            allowPrivate: process.env.WEBHOOK_ALLOW_PRIVATE_TARGETS !== 'false',
             allowedCidrs: (process.env.WEBHOOK_TARGET_ALLOWED_CIDRS || '')
                 .split(/[\n,]+/).map(s => s.trim()).filter(Boolean),
         };
     }
-    return _policy;
+    return _envPolicy;
+}
+
+/** Resolves the effective policy: per-call override wins per field, else the
+ *  global env default. */
+function resolvePolicy(override?: SsrfPolicyOverride): SsrfPolicy {
+    const env = getEnvPolicy();
+    return {
+        allowPrivate: override?.allowPrivate ?? env.allowPrivate,
+        allowedCidrs: override?.allowedCidrs && override.allowedCidrs.length ? override.allowedCidrs : env.allowedCidrs,
+    };
 }
 
 /** Normalises an IPv4-mapped IPv6 address (::ffff:a.b.c.d) to its IPv4 form. */
@@ -78,9 +100,8 @@ function unmapV4(ip: string): string {
 }
 
 /** Classifies a resolved IP literal. Returns null if allowed, or a reason string. */
-function blockedReason(rawIp: string): string | null {
+function blockedReason(rawIp: string, policy: SsrfPolicy): string | null {
     const ip = unmapV4(rawIp);
-    const policy = getPolicy();
 
     // Explicit allowlist overrides every block.
     const v4 = isIP(ip) === 4;
@@ -90,7 +111,7 @@ function blockedReason(rawIp: string): string | null {
     if (v4) {
         if (V4_ALWAYS_BLOCK.some(c => inV4Cidr(ip, c))) return `blocked address ${ip} (loopback/link-local/reserved)`;
         if (V4_PRIVATE.some(c => inV4Cidr(ip, c))) {
-            return policy.allowPrivate ? null : `private address ${ip} blocked (set WEBHOOK_ALLOW_PRIVATE_TARGETS=true to permit)`;
+            return policy.allowPrivate ? null : `private address ${ip} blocked (enable "Allow private/internal destinations" for this webhook to permit)`;
         }
         return null;
     }
@@ -103,7 +124,7 @@ function blockedReason(rawIp: string): string | null {
         return `blocked IPv6 link-local ${ip}`; // fe80::/10
     }
     if (/^f[cd]/.test(lower)) { // fc00::/7 unique-local
-        return policy.allowPrivate ? null : `IPv6 unique-local ${ip} blocked (set WEBHOOK_ALLOW_PRIVATE_TARGETS=true to permit)`;
+        return policy.allowPrivate ? null : `IPv6 unique-local ${ip} blocked (enable "Allow private/internal destinations" for this webhook to permit)`;
     }
     return null;
 }
@@ -113,7 +134,8 @@ function blockedReason(rawIp: string): string | null {
  * IP-literal hosts that fall in a blocked range. Does NOT resolve DNS — use
  * assertResolvedHostAllowed at dispatch time for that. Throws SsrfBlockedError.
  */
-export function assertSafeOutboundUrl(rawUrl: string): URL {
+export function assertSafeOutboundUrl(rawUrl: string, override?: SsrfPolicyOverride): URL {
+    const policy = resolvePolicy(override);
     let u: URL;
     try { u = new URL(rawUrl); } catch { throw new SsrfBlockedError(`invalid URL: ${rawUrl}`); }
     if (u.protocol !== 'http:' && u.protocol !== 'https:') {
@@ -122,11 +144,10 @@ export function assertSafeOutboundUrl(rawUrl: string): URL {
     let host = u.hostname;
     if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
     if (host.toLowerCase() === 'localhost') {
-        const policy = getPolicy();
         if (!policy.allowedCidrs.length && !policy.allowPrivate) throw new SsrfBlockedError('blocked host "localhost"');
     }
     if (isIP(host)) {
-        const reason = blockedReason(host);
+        const reason = blockedReason(host, policy);
         if (reason) throw new SsrfBlockedError(reason);
     }
     return u;
@@ -137,8 +158,9 @@ export function assertSafeOutboundUrl(rawUrl: string): URL {
  * address against the policy. Throws SsrfBlockedError on any blocked address.
  * Call immediately before fetch() to defeat DNS rebinding.
  */
-export async function assertResolvedHostAllowed(rawUrl: string): Promise<void> {
-    const u = assertSafeOutboundUrl(rawUrl);
+export async function assertResolvedHostAllowed(rawUrl: string, override?: SsrfPolicyOverride): Promise<void> {
+    const policy = resolvePolicy(override);
+    const u = assertSafeOutboundUrl(rawUrl, override);
     let host = u.hostname;
     if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
 
@@ -153,7 +175,12 @@ export async function assertResolvedHostAllowed(rawUrl: string): Promise<void> {
     }
     if (!addrs.length) throw new SsrfBlockedError(`no addresses resolved for "${host}"`);
     for (const { address } of addrs) {
-        const reason = blockedReason(address);
+        const reason = blockedReason(address, policy);
         if (reason) throw new SsrfBlockedError(`${host} resolves to ${reason}`);
     }
+}
+
+/** Builds an SsrfPolicyOverride from a webhook's persisted SSRF fields. */
+export function webhookSsrfPolicy(w: { allowPrivateTargets?: boolean; targetAllowedCidrs?: string[] }): SsrfPolicyOverride {
+    return { allowPrivate: w.allowPrivateTargets, allowedCidrs: w.targetAllowedCidrs };
 }

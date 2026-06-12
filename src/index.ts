@@ -1524,6 +1524,8 @@ const server = Bun.serve({
                             hasAuthToken: !!webhook.authToken,
                             retry: webhook.retry,
                             allowedIps: webhook.allowedIps || [],
+                            allowPrivateTargets: webhook.allowPrivateTargets !== false,
+                            targetAllowedCidrs: webhook.targetAllowedCidrs || [],
                             silenceAlert: webhook.silenceAlert,
                             testPayload: webhook.testPayload,
                             running: status?.running ?? false,
@@ -1554,6 +1556,8 @@ const server = Bun.serve({
                     if (input.authToken) webhook.authToken = input.authToken as string;
                     if (input.retry && typeof input.retry === 'object') webhook.retry = input.retry as import('./core/types').WebhookRetryConfig;
                     if (Array.isArray(input.allowedIps) && input.allowedIps.length) webhook.allowedIps = input.allowedIps as string[];
+                    if (typeof input.allowPrivateTargets === 'boolean') webhook.allowPrivateTargets = input.allowPrivateTargets;
+                    if (Array.isArray(input.targetAllowedCidrs) && input.targetAllowedCidrs.length) webhook.targetAllowedCidrs = (input.targetAllowedCidrs as string[]).map(s => String(s).trim()).filter(Boolean);
                     if (input.silenceAlert && typeof input.silenceAlert === 'object') webhook.silenceAlert = input.silenceAlert as import('./core/types').WebhookSilenceAlert;
                     if (typeof input.testPayload === 'string' && input.testPayload.trim()) webhook.testPayload = input.testPayload;
 

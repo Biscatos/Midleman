@@ -2417,6 +2417,18 @@
           <div id="wAllowedIps" class="ip-tag-wrap"></div>
         </div>
 
+        <!-- Outbound destination policy (SSRF) -->
+        <div class="form-group span-2">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none"><input type="checkbox"
+              id="wAllowPrivateTargets" style="cursor:pointer">Allow destinations on private/internal networks <span
+              style="color:var(--text3);font-weight:400;font-size:11px">— on by default. Loopback &amp; cloud-metadata
+              (169.254.169.254) stay blocked unless listed below.</span></label>
+          <div style="margin-top:8px"><label style="font-size:11px;color:var(--text3);font-weight:400">Outbound target
+              CIDR allowlist (optional — overrides every block for matching destinations)</label>
+            <div id="wTargetAllowedCidrs" class="ip-tag-wrap"></div>
+          </div>
+        </div>
+
         <!-- Default Retry Config -->
         <div class="form-group span-2">
           <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
