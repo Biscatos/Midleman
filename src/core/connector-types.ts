@@ -69,6 +69,11 @@ export interface GoContactConnector {
 
   /** Required when channel = meta-whatsapp or when replyToMeta is true. */
   meta?: MetaSettings;
+  /** Only process inbound messages whose metadata.phone_number_id is in this
+   *  list (empty/unset = accept all). Lets several connectors — one per brand,
+   *  each with its own GoContact channel — share the same inbound feed: each
+   *  picks only its own business number. */
+  phoneNumberFilter?: string[];
   /** When true, agent replies are sent directly to the customer via the
    *  Meta Graph API (text and media). */
   replyToMeta?: boolean;
@@ -169,6 +174,9 @@ export function validateConnectorInput(input: unknown): string | null {
   }
 
   if (c.replyToMeta !== undefined && typeof c.replyToMeta !== 'boolean') return '"replyToMeta" must be a boolean';
+  if (c.phoneNumberFilter !== undefined && (!Array.isArray(c.phoneNumberFilter) || (c.phoneNumberFilter as unknown[]).some(x => typeof x !== 'string'))) {
+    return '"phoneNumberFilter" must be an array of phone_number_id strings';
+  }
 
   if (c.webhookTargets !== undefined) {
     if (!Array.isArray(c.webhookTargets)) return '"webhookTargets" must be an array';

@@ -17,7 +17,12 @@ import type { GoToken } from './client';
 
 export interface ConnectorSession {
     connector: string;
-    chatId: string;            // channel-stable id (e.g. WhatsApp wa_id)
+    /** Session key. For Meta this is "{phone_number_id}:{wa_id}" so the same
+     *  customer talking to several business numbers gets one GoContact chat
+     *  per number; for channels without a business number it is the chat id. */
+    chatId: string;
+    /** The customer's own id (e.g. WhatsApp wa_id) — what replies are sent to. */
+    customerId: string;
     displayName: string;
     token: GoToken;
     domainUuid: string;
@@ -48,6 +53,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     dialog_group_uuid TEXT NOT NULL,
     dialog_group_id   TEXT NOT NULL DEFAULT '',
     phone_number_id   TEXT NOT NULL DEFAULT '',
+    customer_id       TEXT NOT NULL DEFAULT '',
     last_inbound_msg_id TEXT NOT NULL DEFAULT '',
     created_at        INTEGER NOT NULL,
     last_activity_at  INTEGER NOT NULL,
@@ -65,6 +71,7 @@ export function initConnectorSessions(dataDir: string): void {
     // Migration for stores created before phone_number_id existed.
     try { db.exec("ALTER TABLE sessions ADD COLUMN phone_number_id TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
     try { db.exec("ALTER TABLE sessions ADD COLUMN last_inbound_msg_id TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
+    try { db.exec("ALTER TABLE sessions ADD COLUMN customer_id TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
     console.log(`💬 GoContact session store: ${dbPath}`);
 }
 
@@ -77,6 +84,7 @@ function rowToSession(r: any): ConnectorSession {
     return {
         connector: r.connector,
         chatId: r.chat_id,
+        customerId: r.customer_id || r.chat_id,
         displayName: r.display_name,
         token: { token: r.token, expireTimestamp: r.token_expires_at },
         domainUuid: r.domain_uuid,
@@ -101,16 +109,16 @@ export function upsertSession(s: ConnectorSession): void {
     if (!db) return;
     db.query(`
         INSERT INTO sessions (connector, chat_id, display_name, token, token_expires_at, domain_uuid,
-                              access_key, dialog_group_uuid, dialog_group_id, phone_number_id, last_inbound_msg_id, created_at, last_activity_at)
+                              access_key, dialog_group_uuid, dialog_group_id, phone_number_id, customer_id, last_inbound_msg_id, created_at, last_activity_at)
         VALUES ($connector, $chatId, $displayName, $token, $tokenExp, $domainUuid,
-                $accessKey, $dgUuid, $dgId, $phoneId, $lastInbound, $createdAt, $lastActivity)
+                $accessKey, $dgUuid, $dgId, $phoneId, $customerId, $lastInbound, $createdAt, $lastActivity)
         ON CONFLICT(connector, chat_id) DO UPDATE SET
             display_name = $displayName, token = $token, token_expires_at = $tokenExp,
             domain_uuid = $domainUuid, access_key = $accessKey,
             dialog_group_uuid = $dgUuid, dialog_group_id = $dgId,
-            phone_number_id = $phoneId, last_inbound_msg_id = $lastInbound, last_activity_at = $lastActivity
+            phone_number_id = $phoneId, customer_id = $customerId, last_inbound_msg_id = $lastInbound, last_activity_at = $lastActivity
     `).run({
-        $connector: s.connector, $chatId: s.chatId, $displayName: s.displayName,
+        $connector: s.connector, $chatId: s.chatId, $customerId: s.customerId, $displayName: s.displayName,
         $token: s.token.token, $tokenExp: s.token.expireTimestamp,
         $domainUuid: s.domainUuid, $accessKey: s.accessKey,
         $dgUuid: s.dialogGroupUuid, $dgId: s.dialogGroupId, $phoneId: s.phoneNumberId,

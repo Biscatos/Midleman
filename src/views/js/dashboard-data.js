@@ -2180,6 +2180,7 @@ function openConnectorModal(connector = null) {
   document.getElementById('cnPollInterval').value = connector?.pollIntervalMs || '';
   document.getElementById('cnSessionTtl').value = connector?.sessionTtlMinutes || '';
   document.getElementById('cnMetaToken').value = '';
+  document.getElementById('cnPhoneFilter').value = (connector?.phoneNumberFilter || []).join(', ');
   document.getElementById('cnMetaToken').placeholder = connector?.meta?.hasAccessToken ? '(kept — type to replace)' : '';
   document.getElementById('cnReplyToMeta').checked = connector ? !!connector.replyToMeta : false;
   document.getElementById('cnWebhookTargets').value = (connector?.webhookTargets || []).map(t => t.url).join('\n');
@@ -2219,6 +2220,8 @@ async function saveConnector() {
   // Always send meta when editing so the server can merge the stored token;
   // blank token = keep current. phoneNumberId is auto-captured per session.
   if (metaToken || _editingConnector) body.meta = { accessToken: metaToken || undefined };
+  const phoneFilter = document.getElementById('cnPhoneFilter').value.split(',').map(s => s.trim()).filter(Boolean);
+  body.phoneNumberFilter = phoneFilter;
   const targets = document.getElementById('cnWebhookTargets').value
     .split('\n').map(s => s.trim()).filter(Boolean).map(url => ({ url }));
   if (targets.length) body.webhookTargets = targets;

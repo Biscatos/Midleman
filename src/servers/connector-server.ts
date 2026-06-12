@@ -359,34 +359,37 @@ async function sendMetaReadReceipt(c: GoContactConnector, phoneNumberId: string,
 
 // ─── Session management ──────────────────────────────────────────────────────
 
+/** Session key: one GoContact chat per (business number, customer) pair, so a
+ *  customer talking to several numbers of the same WABA gets separate chats
+ *  with correctly routed replies. */
+function sessionKeyFor(msg: NormalizedInboundMessage): string {
+    return msg.phoneNumberId ? `${msg.phoneNumberId}:${msg.chatId}` : msg.chatId;
+}
+
 /** Get a live session or bootstrap a new one (token → … → dialog group + JOIN). */
 async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage): Promise<ConnectorSession> {
     const c = cs.connector;
     const ttl = c.sessionTtlMinutes ?? 120;
-    const existing = getSession(c.name, msg.chatId);
+    const key = sessionKeyFor(msg);
+    const existing = getSession(c.name, key);
 
     if (existing && Date.now() - existing.lastActivityAt < ttl * 60_000) {
         // Refresh the bearer token in place when it is close to expiry.
         if (!cs.client.tokenIsFresh(existing.token)) {
             const token = await cs.client.requestToken();
             existing.token = token;
-            updateSessionToken(c.name, msg.chatId, token);
-        }
-        // Keep the receiving business number current (it can change if the
-        // customer writes to a different number of the same WABA).
-        if (msg.phoneNumberId && msg.phoneNumberId !== existing.phoneNumberId) {
-            existing.phoneNumberId = msg.phoneNumberId;
-            upsertSession({ ...existing, lastActivityAt: Date.now() });
+            updateSessionToken(c.name, key, token);
         }
         return existing;
     }
 
-    if (existing) deleteSession(c.name, msg.chatId);
+    if (existing) deleteSession(c.name, key);
 
     const handles = await cs.client.openSession(msg.displayName, msg.chatId);
     const session: ConnectorSession = {
         connector: c.name,
-        chatId: msg.chatId,
+        chatId: key,
+        customerId: msg.chatId,
         displayName: msg.displayName,
         token: handles.token,
         domainUuid: handles.domainUuid,
@@ -406,7 +409,7 @@ async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage)
     } catch (err) {
         console.warn(`⚠️ [connector:${c.name}] JOIN failed for ${msg.chatId}:`, err instanceof Error ? err.message : err);
     }
-    console.log(`💬 [connector:${c.name}] New webchat session for ${msg.chatId} (${session.dialogGroupUuid})`);
+    console.log(`💬 [connector:${c.name}] New webchat session for ${key} (${session.dialogGroupUuid})`);
     return session;
 }
 
@@ -459,10 +462,10 @@ async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage
     }
     // Remember the customer's message id so the agent's reply can trigger a
     // read receipt on the channel (WhatsApp blue ticks).
-    if (msg.messageId) updateSessionLastInbound(c.name, msg.chatId, msg.messageId);
-    touchSession(c.name, msg.chatId);
+    if (msg.messageId) updateSessionLastInbound(c.name, session.chatId, msg.messageId);
+    touchSession(c.name, session.chatId);
     // Customer just wrote — an agent/queue reply is most likely now.
-    markSessionHot(c, msg.chatId);
+    markSessionHot(c, session.chatId);
     cs.stats.inboundMessages++;
     cs.stats.lastInboundAt = Date.now();
 }
@@ -634,7 +637,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
         console.log(`👋 [connector:${c.name}] Agent closed chat ${session.chatId}`);
         const event: AgentEvent = {
             connector: c.name, channel: c.channel, event: 'chat_closed', reason: 'agent',
-            chatId: session.chatId, displayName: session.displayName,
+            chatId: session.customerId, displayName: session.displayName,
             phoneNumberId: session.phoneNumberId || undefined, message: null,
         };
         // Best-effort: the session is gone either way.
@@ -650,7 +653,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
         console.log(`🙋 [connector:${c.name}] Agent "${m.displayname}" joined chat ${session.chatId}`);
         const event: AgentEvent = {
             connector: c.name, channel: c.channel, event: 'agent_joined',
-            chatId: session.chatId, displayName: session.displayName,
+            chatId: session.customerId, displayName: session.displayName,
             phoneNumberId: session.phoneNumberId || undefined,
             message: { uuid: m.uuid, text: null, timestamp: m.timestamp || Date.now(), agentName: m.displayname, userType: m.usertype || undefined, file: null },
         };
@@ -697,7 +700,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
         connector: c.name,
         channel: c.channel,
         event: 'agent_message',
-        chatId: session.chatId,
+        chatId: session.customerId,
         displayName: session.displayName,
         phoneNumberId: session.phoneNumberId || undefined,
         message: {
@@ -745,7 +748,7 @@ async function pollTick(cs: ConnectorServer): Promise<void> {
             dropSessionPollState(c.name, s.chatId);
             const event: AgentEvent = {
                 connector: c.name, channel: c.channel, event: 'chat_closed', reason: 'expired',
-                chatId: s.chatId, displayName: s.displayName,
+                chatId: s.customerId, displayName: s.displayName,
                 phoneNumberId: s.phoneNumberId || undefined, message: null,
             };
             fanoutAgentEvent(cs, null, event).catch(err =>
@@ -838,7 +841,17 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
         return jsonResponse(400, { error: 'Bad Request', message: 'Body must be valid JSON' });
     }
 
-    const messages = c.channel === 'meta-whatsapp' ? parseMetaPayload(payload) : parseGenericPayload(payload);
+    let messages = c.channel === 'meta-whatsapp' ? parseMetaPayload(payload) : parseGenericPayload(payload);
+
+    // Brand routing: when a filter is set, this connector only handles its own
+    // business number(s) — other connectors sharing the same feed pick theirs.
+    if (c.phoneNumberFilter && c.phoneNumberFilter.length > 0) {
+        const before = messages.length;
+        messages = messages.filter(m => m.phoneNumberId && c.phoneNumberFilter!.includes(m.phoneNumberId));
+        if (before > 0 && messages.length === 0) {
+            return jsonResponse(200, { status: 'ignored', reason: 'phone_number_id not handled by this connector', requestId });
+        }
+    }
 
     if (messages.length === 0) {
         // Meta sends statuses/read-receipts on the same webhook — only warn when
@@ -1012,7 +1025,7 @@ export async function closeConnectorSession(connectorName: string, chatId: strin
     dropSessionPollState(connectorName, chatId);
     const event: AgentEvent = {
         connector: connectorName, channel: cs.connector.channel, event: 'chat_closed', reason: 'admin',
-        chatId, displayName: session.displayName,
+        chatId: session.customerId, displayName: session.displayName,
         phoneNumberId: session.phoneNumberId || undefined, message: null,
     };
     fanoutAgentEvent(cs, null, event).catch(err =>

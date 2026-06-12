@@ -2654,6 +2654,10 @@
           <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Access Token <span style="color:var(--text3)">(blank keeps current)</span></label>
           <input id="cnMetaToken" type="password" autocomplete="new-password" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
           <div style="margin-top:6px;font-size:11px;color:var(--text3)">The business phone number is detected automatically from each inbound payload (metadata.phone_number_id) — replies go out via the same number the customer wrote to.</div>
+          <div style="margin-top:10px">
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Phone Number Filter <span style="color:var(--text3)">(optional — comma-separated phone_number_ids; only these are processed. Use when several connectors, one per brand/queue, share the same inbound feed.)</span></label>
+            <input id="cnPhoneFilter" type="text" placeholder="879847985208219, 946854641852538" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          </div>
         </div>
         <div id="cnMetaMediaHint" style="display:none;margin-top:8px;font-size:11px;color:var(--text3)">
           The Access Token is also used to download inbound WhatsApp media — without it, customer attachments are skipped.
