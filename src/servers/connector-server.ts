@@ -868,11 +868,14 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
         return jsonResponse(401, { error: 'Unauthorized', message: 'Your IP address is not allowed.' });
     }
 
-    // Token auth for non-Meta posts (Meta signs with X-Hub-Signature-256, but the
-    // verify token via query/header keeps parity with webhook distributors).
-    if (c.verifyToken && c.channel !== 'meta-whatsapp') {
+    // Inbound auth: when a verify token is configured it is ALWAYS required on
+    // POSTs (X-Forward-Token header or ?token= query). When pointing Meta's
+    // webhook directly here, register the callback URL with the token baked
+    // in (https://host/path?token=xxx) — Meta preserves the query string.
+    if (c.verifyToken) {
         const provided = req.headers.get('X-Forward-Token') || url.searchParams.get('token');
         if (!timingSafeEqualStr(provided, c.verifyToken)) {
+            console.warn(`❌ [connector:${c.name}] Unauthorized POST from ${clientIp}: missing/invalid token`);
             return jsonResponse(401, { error: 'Unauthorized', message: 'Valid X-Forward-Token header or ?token= is required' });
         }
     }
