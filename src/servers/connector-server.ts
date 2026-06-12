@@ -1022,7 +1022,10 @@ export async function stopConnectorServer(name: string, graceful = true): Promis
             await Bun.sleep(200);
         }
     }
-    cs.server?.stop();
+    // Force-close active connections: with idleTimeout 0, a gateway's
+    // kept-alive sockets would otherwise stay pinned to this (now dead)
+    // instance and keep getting 503s after a restart.
+    cs.server?.stop(true);
     servers.delete(name);
     console.log(`🛑 Connector "${name}" stopped`);
 }
