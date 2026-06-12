@@ -214,7 +214,7 @@ function showContextMenu(e, btn) {
 
 // ─── Data Fetch ──────────────────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchConsentPages(), fetchLdapConfigs(), fetchLdapAdoptions()]);
+  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchConnectors(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchConsentPages(), fetchLdapConfigs(), fetchLdapAdoptions()]);
 }
 
 async function fetchHealth() {
@@ -2076,6 +2076,218 @@ function renderWebhooks(webhooks) {
   </td>
 </tr>`;
   }).join('');
+}
+
+// ─── GoContact Connectors ────────────────────────────────────────────────────
+let _allConnectors = [];
+
+async function fetchConnectors() {
+  try {
+    const res = await api('/admin/connectors');
+    if (!res.ok) return;
+    const d = await res.json();
+    _allConnectors = d.connectors || [];
+    renderConnectors(_allConnectors);
+    const badge = document.getElementById('navConnectorBadge');
+    if (badge) badge.textContent = _allConnectors.length;
+  } catch { }
+}
+
+function renderConnectors(connectors) {
+  const c = document.getElementById('connectorListBody');
+  if (!c) return;
+  if (connectors.length === 0) { c.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No connectors yet. Click "+ New Connector".</td></tr>'; return; }
+  c.innerHTML = connectors.map(cn => {
+    const statusBadge = cn.running
+      ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px">Running</span>'
+      : (cn.enabled
+        ? '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>'
+        : '<span style="background:var(--surface2);color:var(--text3);padding:2px 8px;border-radius:4px;font-size:11px">Disabled</span>');
+    const replies = [
+      cn.replyToMeta ? 'Meta' : null,
+      (cn.webhookTargets && cn.webhookTargets.length) ? cn.webhookTargets.length + ' webhook(s)' : null,
+    ].filter(Boolean).join(' + ') || '<span style="color:var(--text3)">none</span>';
+    const stats = cn.stats || {};
+    const activity = `↓${stats.inboundMessages || 0} ↑${stats.agentMessages || 0}` +
+      (stats.lastError ? ` <span style="color:var(--red)" title="${esc(stats.lastError)}">⚠</span>` : '');
+    return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
+  <td style="padding:8px 12px;font-weight:600">${esc(cn.name)}</td>
+  <td style="padding:8px">${statusBadge}</td>
+  <td style="padding:8px;color:var(--text2)">${esc(cn.channel)}</td>
+  <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${cn.port ?? '--'}</td>
+  <td style="padding:8px;color:var(--text2)">${replies}</td>
+  <td style="padding:8px;color:var(--text2);font-family:'SF Mono',Monaco,monospace;font-size:12px" title="received / agent replies">${activity}</td>
+  <td style="padding:8px 12px;text-align:right;white-space:nowrap">
+    <button class="btn btn-sm" onclick="openConnectorSessionsModal('${esc(cn.name)}')">Sessions</button>
+    <button class="btn btn-sm" onclick="editConnector('${esc(cn.name)}')">Edit</button>
+    <button class="btn btn-sm" onclick="restartConnectorAction('${esc(cn.name)}')">Restart</button>
+    <button class="btn btn-sm btn-danger" onclick="deleteConnector('${esc(cn.name)}')">Delete</button>
+  </td>
+</tr>`;
+  }).join('');
+}
+
+let _editingConnector = null;
+
+function connectorChannelChanged() {
+  const isMeta = document.getElementById('cnChannel').value === 'meta-whatsapp';
+  const hint = document.getElementById('cnMetaMediaHint');
+  if (hint) hint.style.display = isMeta ? 'block' : 'none';
+  connectorReplyToMetaChanged();
+}
+
+function connectorReplyToMetaChanged() {
+  // Meta credentials are needed to reply via Graph API AND to download inbound
+  // WhatsApp media — show the section for either case.
+  const replyOn = document.getElementById('cnReplyToMeta').checked;
+  const isMeta = document.getElementById('cnChannel').value === 'meta-whatsapp';
+  document.getElementById('cnMetaSection').style.display = (replyOn || isMeta) ? 'block' : 'none';
+}
+
+function generateConnectorToken() {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  const token = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  document.getElementById('cnVerifyToken').value = token;
+}
+
+function openConnectorModal(connector = null) {
+  _editingConnector = connector ? connector.name : null;
+  document.getElementById('connectorModalTitle').textContent = connector ? 'Edit Connector — ' + connector.name : 'New Connector';
+  document.getElementById('cnName').value = connector?.name || '';
+  document.getElementById('cnName').disabled = !!connector;
+  document.getElementById('cnChannel').value = connector?.channel || 'meta-whatsapp';
+  document.getElementById('cnPort').value = connector?.port || '';
+  document.getElementById('cnVerifyToken').value = '';
+  document.getElementById('cnVerifyToken').placeholder = connector?.hasVerifyToken ? '(kept — type to replace)' : 'shared secret';
+  document.getElementById('cnGoBaseUrl').value = connector?.gocontact?.baseUrl || '';
+  document.getElementById('cnGoUsername').value = connector?.gocontact?.username || '';
+  document.getElementById('cnGoPassword').value = '';
+  document.getElementById('cnGoPassword').placeholder = connector?.gocontact?.hasPassword ? '(kept — type to replace)' : '';
+  document.getElementById('cnGoHashKey').value = connector?.gocontact?.hashKey || '';
+  document.getElementById('cnGoDomainUuid').value = connector?.gocontact?.domainUuid || '';
+  document.getElementById('cnPollInterval').value = connector?.pollIntervalMs || '';
+  document.getElementById('cnSessionTtl').value = connector?.sessionTtlMinutes || '';
+  document.getElementById('cnMetaPhoneId').value = connector?.meta?.phoneNumberId || '';
+  document.getElementById('cnMetaToken').value = '';
+  document.getElementById('cnMetaToken').placeholder = connector?.meta?.hasAccessToken ? '(kept — type to replace)' : '';
+  document.getElementById('cnReplyToMeta').checked = connector ? !!connector.replyToMeta : false;
+  document.getElementById('cnWebhookTargets').value = (connector?.webhookTargets || []).map(t => t.url).join('\n');
+  document.getElementById('cnAllowedIps').value = (connector?.allowedIps || []).join(', ');
+  document.getElementById('cnEnabled').checked = connector ? connector.enabled !== false : true;
+  connectorReplyToMetaChanged();
+  connectorChannelChanged();
+  document.getElementById('connectorModal').style.display = 'block';
+}
+
+function closeConnectorModal() {
+  document.getElementById('connectorModal').style.display = 'none';
+  _editingConnector = null;
+}
+
+async function saveConnector() {
+  const body = {
+    name: document.getElementById('cnName').value.trim().toLowerCase(),
+    channel: document.getElementById('cnChannel').value,
+    port: parseInt(document.getElementById('cnPort').value, 10) || 0,
+    enabled: document.getElementById('cnEnabled').checked,
+    gocontact: {
+      baseUrl: document.getElementById('cnGoBaseUrl').value.trim(),
+      username: document.getElementById('cnGoUsername').value.trim(),
+      hashKey: document.getElementById('cnGoHashKey').value.trim(),
+      domainUuid: document.getElementById('cnGoDomainUuid').value.trim() || undefined,
+    },
+    replyToMeta: document.getElementById('cnReplyToMeta').checked,
+  };
+  const password = document.getElementById('cnGoPassword').value;
+  if (password) body.gocontact.password = password;
+  const verifyToken = document.getElementById('cnVerifyToken').value.trim();
+  if (verifyToken) body.verifyToken = verifyToken;
+  const phoneId = document.getElementById('cnMetaPhoneId').value.trim();
+  const metaToken = document.getElementById('cnMetaToken').value.trim();
+  if (phoneId || metaToken) body.meta = { phoneNumberId: phoneId, accessToken: metaToken || undefined };
+  const targets = document.getElementById('cnWebhookTargets').value
+    .split('\n').map(s => s.trim()).filter(Boolean).map(url => ({ url }));
+  if (targets.length) body.webhookTargets = targets;
+  const pollInterval = parseInt(document.getElementById('cnPollInterval').value, 10);
+  if (pollInterval) body.pollIntervalMs = pollInterval;
+  const ttl = parseInt(document.getElementById('cnSessionTtl').value, 10);
+  if (ttl) body.sessionTtlMinutes = ttl;
+  const ips = document.getElementById('cnAllowedIps').value.split(',').map(s => s.trim()).filter(Boolean);
+  if (ips.length) body.allowedIps = ips;
+
+  try {
+    const res = await api('/admin/connectors', { method: 'POST', body: JSON.stringify(body) });
+    const d = await res.json();
+    if (res.ok) { toast('Connector ' + (d.status || 'saved') + ' (port ' + d.port + ')'); closeConnectorModal(); await fetchConnectors(); }
+    else toast(d.error || 'Failed', 'error');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function editConnector(name) {
+  try {
+    const res = await api('/admin/connectors/' + encodeURIComponent(name));
+    if (!res.ok) return toast('Not found', 'error');
+    openConnectorModal((await res.json()).connector);
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteConnector(name) {
+  if (!(await showConfirm({ title: 'Apagar connector', message: 'Apagar connector "' + name + '" e todas as sessões ativas?', confirmText: 'Apagar' }))) return;
+  try {
+    const res = await api('/admin/connectors/' + encodeURIComponent(name), { method: 'DELETE' });
+    if (res.ok) { toast('Deleted'); await fetchConnectors(); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function restartConnectorAction(name) {
+  try {
+    const res = await api('/admin/connectors/' + encodeURIComponent(name) + '/restart', { method: 'POST' });
+    const d = await res.json();
+    if (res.ok) { toast('Restarted'); await fetchConnectors(); } else toast(d.error || 'Failed', 'error');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+let _sessionsModalConnector = null;
+
+async function openConnectorSessionsModal(name) {
+  _sessionsModalConnector = name;
+  document.getElementById('connectorSessionsTitle').textContent = 'Active Sessions — ' + name;
+  document.getElementById('connectorSessionsModal').style.display = 'block';
+  await refreshConnectorSessions();
+}
+
+function closeConnectorSessionsModal() {
+  document.getElementById('connectorSessionsModal').style.display = 'none';
+  _sessionsModalConnector = null;
+}
+
+async function refreshConnectorSessions() {
+  if (!_sessionsModalConnector) return;
+  const c = document.getElementById('connectorSessionsList');
+  try {
+    const res = await api('/admin/connectors/sessions?connector=' + encodeURIComponent(_sessionsModalConnector));
+    const d = await res.json();
+    const sessions = d.sessions || [];
+    if (sessions.length === 0) { c.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3)">No active sessions.</div>'; return; }
+    c.innerHTML = sessions.map(s => `
+      <div style="border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-bottom:8px;background:var(--surface2);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:13px">${esc(s.displayName)} <span style="color:var(--text3);font-weight:400">(${esc(s.chatId)})</span></div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">dialog: ${esc(s.dialogGroupUuid)} &middot; started ${new Date(s.createdAt).toLocaleString()} &middot; last activity ${new Date(s.lastActivityAt).toLocaleString()}</div>
+        </div>
+        <button class="btn btn-sm btn-danger" onclick="closeConnectorChat('${esc(s.connector)}','${esc(s.chatId)}')">Close</button>
+      </div>`).join('');
+  } catch (e) { c.innerHTML = '<div style="padding:24px;text-align:center;color:var(--red)">Error: ' + esc(e.message) + '</div>'; }
+}
+
+async function closeConnectorChat(connector, chatId) {
+  if (!(await showConfirm({ title: 'Fechar sessão', message: 'Fechar a sessão de "' + chatId + '"? Será enviado LEAVE à GoContact.', confirmText: 'Fechar' }))) return;
+  try {
+    const res = await api('/admin/connectors/' + encodeURIComponent(connector) + '/sessions/' + encodeURIComponent(chatId), { method: 'DELETE' });
+    if (res.ok) { toast('Session closed'); await refreshConnectorSessions(); }
+    else toast((await res.json()).error || 'Failed', 'error');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 // ─── DLQ Modal ───────────────────────────────────────────────────────────────

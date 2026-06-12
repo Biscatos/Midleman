@@ -491,7 +491,7 @@ export async function retryPendingNow(id: string): Promise<{ ok: boolean; status
 
 const DLQ_MAX_BODY_SIZE = 256 * 1024; // 256KB per entry body
 
-function enqueueFailedFanout(entry: Omit<FailedFanout, 'id' | 'failedAt' | 'retrying'>) {
+export function enqueueFailedFanout(entry: Omit<FailedFanout, 'id' | 'failedAt' | 'retrying'>) {
     if (deadLetterQueue.length >= DLQ_MAX_SIZE) {
         deadLetterQueue.shift(); // drop oldest
     }

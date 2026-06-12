@@ -593,6 +593,34 @@ export function validateWebhookInput(input: unknown): string | null {
     return null;
 }
 
+// ─── GoContact Connector Persistence ─────────────────────────────────────────
+
+const CONNECTORS_FILE = resolve(DATA_DIR, 'connectors.json');
+
+export function loadPersistedConnectors(): import('./connector-types').GoContactConnector[] {
+    try {
+        if (!existsSync(CONNECTORS_FILE)) return [];
+        const raw = readFileSync(CONNECTORS_FILE, 'utf-8');
+        const stored: import('./connector-types').GoContactConnector[] = JSON.parse(raw);
+        return stored
+            .filter(c => c.name && c.gocontact?.baseUrl)
+            .map(c => ({ ...c, name: c.name.toLowerCase() }));
+    } catch (err) {
+        console.warn('⚠️  Could not load connectors.json:', err instanceof Error ? err.message : err);
+        return [];
+    }
+}
+
+export function persistConnectors(connectors: import('./connector-types').GoContactConnector[]): void {
+    try {
+        ensureDataDir();
+        writeFileSync(CONNECTORS_FILE, JSON.stringify(connectors, null, 2), 'utf-8');
+    } catch (err) {
+        console.error('❌ Could not save connectors.json:', err instanceof Error ? err.message : err);
+        throw err;
+    }
+}
+
 // ─── TCP/UDP Profile Persistence ─────────────────────────────────────────────
 
 export function loadPersistedTcpUdpProfiles(): TcpUdpProfile[] {
