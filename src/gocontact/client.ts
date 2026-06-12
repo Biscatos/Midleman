@@ -1,0 +1,319 @@
+/**
+ * GoContact webchat protocol client.
+ *
+ * Implements the "traditional" webchat plugin API (poll/new-webchat-service/*)
+ * used internally by GoContact's own widget — extracted from a proven C#
+ * integration. Flow:
+ *
+ *   1. POST poll/auth/token                       (Basic user:pass)  → bearer token
+ *   2. GET  poll/api/domains/nameconversion       → domain_uuid
+ *   3. GET  …/webchats/schedule/{uuid}/{hashKey}  → channel online?
+ *   4. POST …/plugin/access-key                   → accessKey
+ *   5. POST …/plugin/{accessKey}/new-dialog-group → dialogGroupUuid (the chat)
+ *
+ * Then per message:
+ *   POST …/plugin/{accessKey}/client-message      (episodeObj JOIN/MSG/LEAVE/FILESEND)
+ *   GET  …/plugin/{accessKey}/new-client-messages (agent replies — poll)
+ *   POST …/plugin/{accessKey}/mark-as-read        (server-side dedup)
+ *   POST …/upload                                 (multipart file upload)
+ */
+
+import type { GoContactSettings } from '../core/connector-types';
+
+export type GoMsgType = 'JOIN' | 'MSG' | 'LEAVE' | 'FILESEND';
+
+export interface GoToken {
+    token: string;
+    /** Unix seconds. */
+    expireTimestamp: number;
+}
+
+export interface GoFile {
+    filename: string;
+    size: string | number;
+    mimetype: string;
+    url: string;
+    filestatus: string | boolean;
+}
+
+export interface GoAgentMessage {
+    usertype: string;        // "AGENT"
+    displayname: string;
+    msgtype: string;         // "MSG" | "FILESEND" | "LEAVE"
+    msg: string;
+    file: GoFile | null;
+    uuid: string;            // episode uuid — used for mark-as-read
+    timestamp: number;
+}
+
+export interface GoSessionHandles {
+    token: GoToken;
+    domainUuid: string;
+    accessKey: string;
+    dialogGroupUuid: string;
+    dialogGroupId: string;
+}
+
+class GoContactError extends Error {
+    constructor(step: string, detail: string) {
+        super(`GoContact ${step} failed: ${detail}`);
+        this.name = 'GoContactError';
+    }
+}
+
+const FETCH_TIMEOUT_MS = 30_000;
+
+export class GoContactClient {
+    private readonly base: string;
+    constructor(private readonly cfg: GoContactSettings) {
+        this.base = cfg.baseUrl.endsWith('/') ? cfg.baseUrl : cfg.baseUrl + '/';
+    }
+
+    /** Domain name = part of the login e-mail after "@" (matches the original integration). */
+    get domainName(): string {
+        return this.cfg.username.split('@')[1] || '';
+    }
+
+    /** Episode timestamps are Unix ms shifted by the configured offset (default UTC+1). */
+    episodeTimestamp(): number {
+        const offset = this.cfg.timestampOffsetHours ?? 1;
+        return Date.now() + offset * 3_600_000;
+    }
+
+    private url(path: string): string {
+        return this.base + path.replace(/^\//, '');
+    }
+
+    private async request(path: string, init: RequestInit, step: string): Promise<any> {
+        const res = await fetch(this.url(path), {
+            ...init,
+            signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+            tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' },
+        } as RequestInit);
+        const text = await res.text().catch(() => '');
+        if (res.status < 200 || res.status >= 300) {
+            throw new GoContactError(step, `HTTP ${res.status} ${text.slice(0, 300)}`);
+        }
+        try { return text ? JSON.parse(text) : {}; }
+        catch { throw new GoContactError(step, `invalid JSON response: ${text.slice(0, 300)}`); }
+    }
+
+    private bearer(token: GoToken): Record<string, string> {
+        return { 'Authorization': `Bearer ${token.token}`, 'Connection': 'Keep-Alive' };
+    }
+
+    // ── Session establishment ───────────────────────────────────────────────
+
+    async requestToken(): Promise<GoToken> {
+        const basic = Buffer.from(`${this.cfg.username}:${this.cfg.password}`).toString('base64');
+        const data = await this.request('poll/auth/token', {
+            method: 'POST',
+            headers: { 'Authorization': `Basic ${basic}`, 'Connection': 'Keep-Alive' },
+        }, 'token');
+        if (!data.token) throw new GoContactError('token', data.message || 'no token in response');
+        const expire = typeof data.expire_timestamp === 'number'
+            ? data.expire_timestamp
+            : Math.floor(Date.now() / 1000) + (typeof data.expire_in === 'number' ? data.expire_in : 3600);
+        return { token: data.token, expireTimestamp: expire };
+    }
+
+    tokenIsFresh(token: GoToken, marginSeconds = 60): boolean {
+        return token.expireTimestamp - marginSeconds > Math.floor(Date.now() / 1000);
+    }
+
+    async getDomainUuid(token: GoToken): Promise<string> {
+        const data = await this.request(
+            `poll/api/domains/nameconversion?domain_name=${encodeURIComponent(this.domainName)}`,
+            { method: 'GET', headers: this.bearer(token) },
+            'domain lookup',
+        );
+        if (!data.domain_uuid) throw new GoContactError('domain lookup', `no domain_uuid for "${this.domainName}"`);
+        return data.domain_uuid;
+    }
+
+    async isChannelOnline(token: GoToken, domainUuid: string): Promise<boolean> {
+        const data = await this.request(
+            `poll/new-webchat-service/webchats/schedule/${domainUuid}/${this.cfg.hashKey}`,
+            { method: 'GET', headers: this.bearer(token) },
+            'channel status',
+        );
+        return data.online === true;
+    }
+
+    async requestAccessKey(token: GoToken, domainUuid: string): Promise<string> {
+        const data = await this.request('poll/new-webchat-service/plugin/access-key', {
+            method: 'POST',
+            headers: { ...this.bearer(token), 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ domainUuid, hashKey: this.cfg.hashKey }),
+        }, 'access key');
+        if (!data.accessKey) throw new GoContactError('access key', 'no accessKey in response');
+        return data.accessKey;
+    }
+
+    async createDialogGroup(token: GoToken, accessKey: string, displayName: string, contact: string): Promise<{ uuid: string; id: string }> {
+        const data = await this.request(`poll/new-webchat-service/plugin/${accessKey}/new-dialog-group`, {
+            method: 'POST',
+            headers: { ...this.bearer(token), 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({
+                originPath: '/',
+                loginFields: [
+                    { label: 'Nome', field: 'contact', searchable: false, require: true, extrafieldlabel: 'Contact+Name', isExtraField: false, value: displayName },
+                    { label: 'Contacto', field: 'first_phone', searchable: true, require: true, extrafieldlabel: '1st+phone', isExtraField: false, value: contact },
+                ],
+                language: this.cfg.language || 'en',
+            }),
+        }, 'new dialog group');
+        const uuid = data.dialogGroupUuid || data.dialog_group_uuid;
+        if (!uuid) throw new GoContactError('new dialog group', data.message || 'no dialogGroupUuid in response');
+        return { uuid, id: String(data.dialogGroupId ?? data.dialog_group_id ?? '') };
+    }
+
+    /** Full session bootstrap: token → domain → online check → access key → dialog group.
+     *  When the config carries an explicit domainUuid (from the embed script's
+     *  `_domain`), the nameconversion lookup is skipped. */
+    async openSession(displayName: string, contact: string): Promise<GoSessionHandles> {
+        const token = await this.requestToken();
+        const domainUuid = this.cfg.domainUuid || await this.getDomainUuid(token);
+        const online = await this.isChannelOnline(token, domainUuid);
+        if (!online) throw new GoContactError('channel status', `webchat channel is offline (domain ${this.domainName})`);
+        const accessKey = await this.requestAccessKey(token, domainUuid);
+        const dg = await this.createDialogGroup(token, accessKey, displayName, contact);
+        return { token, domainUuid, accessKey, dialogGroupUuid: dg.uuid, dialogGroupId: dg.id };
+    }
+
+    // ── Messaging ───────────────────────────────────────────────────────────
+
+    async sendClientMessage(
+        token: GoToken, accessKey: string, dialogGroupUuid: string,
+        displayName: string, msgType: GoMsgType, msg: string, file: GoFile | null = null,
+    ): Promise<{ episodeUuid: string | null }> {
+        const data = await this.request(`poll/new-webchat-service/plugin/${accessKey}/client-message`, {
+            method: 'POST',
+            headers: { ...this.bearer(token), 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                episodeObj: {
+                    usertype: 'CLIENT',
+                    displayname: displayName,
+                    msgtype: msgType,
+                    msg: msgType === 'FILESEND' ? '' : msg,
+                    options: '',
+                    optionstype: '',
+                    rating: '',
+                    file,
+                    timestamp: this.episodeTimestamp(),
+                    uuid: dialogGroupUuid,
+                    status: '',
+                },
+            }),
+        }, `client-message (${msgType})`);
+        return { episodeUuid: data?.data?.episode?.uuid ?? null };
+    }
+
+    /** Poll agent replies for one session. Returns [] when nothing pending. */
+    async fetchNewMessages(token: GoToken, accessKey: string): Promise<GoAgentMessage[]> {
+        const data = await this.request(`poll/new-webchat-service/plugin/${accessKey}/new-client-messages`, {
+            method: 'GET',
+            headers: this.bearer(token),
+        }, 'new-client-messages');
+        if (data.error === true || !Array.isArray(data.data)) return [];
+        return (data.data as any[]).map(m => {
+            // Normalize the file object — field names/casing vary between
+            // GoContact versions (url/Url/path, filename/FileName/name, …).
+            const rawFile = m.file ?? m.File ?? null;
+            let file: GoFile | null = null;
+            if (rawFile && typeof rawFile === 'object') {
+                const url = rawFile.url ?? rawFile.Url ?? rawFile.path ?? rawFile.Path ?? rawFile.filepath ?? null;
+                if (!url && String(m.msgtype ?? m.MsgType ?? '') === 'FILESEND') {
+                    // Discovery aid: dump the untouched episode so we can spot
+                    // where (or whether) the download URL actually lives.
+                    console.log(`🔍 [gocontact] FILESEND without url — original episode: ${JSON.stringify(m).slice(0, 800)}`);
+                }
+                file = {
+                    filename: String(rawFile.filename ?? rawFile.FileName ?? rawFile.name ?? rawFile.Name ?? 'file'),
+                    size: rawFile.size ?? rawFile.Size ?? 0,
+                    mimetype: String(rawFile.mimetype ?? rawFile.MimeType ?? rawFile.mime_type ?? 'application/octet-stream'),
+                    url: url ? String(url) : '',
+                    filestatus: rawFile.filestatus ?? rawFile.FileStatus ?? '',
+                };
+            }
+            return {
+                usertype: String(m.usertype ?? m.Usertype ?? ''),
+                displayname: String(m.displayname ?? m.Displayname ?? ''),
+                msgtype: String(m.msgtype ?? m.MsgType ?? ''),
+                msg: String(m.msg ?? m.Msg ?? ''),
+                file,
+                uuid: String(m.uuid ?? m.Uuid ?? ''),
+                timestamp: Number(m.timestamp ?? m.Timestamp ?? 0),
+            };
+        });
+    }
+
+    /** Server-side dedup: a message marked as read is not returned again. */
+    async markAsRead(token: GoToken, accessKey: string, messageUuid: string): Promise<boolean> {
+        const data = await this.request(`poll/new-webchat-service/plugin/${accessKey}/mark-as-read`, {
+            method: 'POST',
+            headers: { ...this.bearer(token), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dialogUuid: messageUuid }),
+        }, 'mark-as-read');
+        return data.error !== true;
+    }
+
+    // ── Files ───────────────────────────────────────────────────────────────
+
+    /**
+     * Multipart upload of a customer file, attaching the binary to an already
+     * created FILESEND episode. Flow (mirrors GoContact's own widget):
+     *   1. POST client-message (FILESEND, file metadata) → episode uuid
+     *   2. POST upload with chat_uuid=dialogGroupUuid, dialog_uuid=EPISODE uuid
+     */
+    async uploadFile(
+        token: GoToken, handles: { dialogGroupUuid: string; episodeUuid: string; domainUuid: string },
+        bytes: Uint8Array, filename: string, mimetype: string,
+    ): Promise<void> {
+        const form = new FormData();
+        form.append('file', new Blob([bytes], { type: mimetype }), filename);
+        form.append('chat_uuid', handles.dialogGroupUuid);
+        form.append('dialog_uuid', handles.episodeUuid);
+        form.append('domain', handles.domainUuid);
+
+        const res = await fetch(this.url('poll/new-webchat-service/upload'), {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token.token}`, 'Accept': 'application/json' },
+            body: form,
+            signal: AbortSignal.timeout(120_000),
+            tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' },
+        } as RequestInit);
+        const text = await res.text().catch(() => '');
+        if (res.status !== 200 && res.status !== 201) {
+            throw new GoContactError('upload', `HTTP ${res.status} ${text.slice(0, 300)}`);
+        }
+        if (text.toLowerCase().includes('"error"') && !text.toLowerCase().includes('"error":false')) {
+            throw new GoContactError('upload', `rejected: ${text.slice(0, 300)}`);
+        }
+    }
+
+    /** Build the public URL of an agent attachment ({base}/{bucket}{relativePath}).
+     *  Some episodes (e.g. automatic messages) carry a file object with a null
+     *  url — returns '' for those. */
+    agentFileUrl(relativeUrl: string | null | undefined): string {
+        if (!relativeUrl || typeof relativeUrl !== 'string') return '';
+        if (/^https?:\/\//i.test(relativeUrl)) return relativeUrl;
+        const bucket = (this.cfg.storageBucket ?? 'storage').replace(/^\/|\/$/g, '');
+        const rel = relativeUrl.startsWith('/') ? relativeUrl : '/' + relativeUrl;
+        return this.base.replace(/\/$/, '') + (bucket ? `/${bucket}` : '') + rel;
+    }
+}
+
+/** Strip HTML tags and &nbsp; entities from agent messages (same cleanup as the
+ *  original integration — GoContact agents can produce rich text). */
+export function stripHtml(html: string): string {
+    return html
+        .replace(/<[^>]*>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .trim();
+}

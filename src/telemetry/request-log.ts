@@ -119,7 +119,7 @@ export function shutdownRequestLog(): void {
 
 export interface RequestLogEntry {
     requestId: string;
-    type: 'target' | 'proxy' | 'webhook' | 'webhook-fanout';
+    type: 'target' | 'proxy' | 'webhook' | 'webhook-fanout' | 'connector' | 'connector-fanout';
     profileName?: string;
     targetName?: string;
     method: string;

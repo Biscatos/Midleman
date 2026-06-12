@@ -5,7 +5,11 @@ import {
     loadPersistedProfiles, persistProfiles, mergeProfiles, validateProfileInput,
     loadPersistedWebhooks, persistWebhooks, validateWebhookInput,
     loadPersistedTcpUdpProfiles, persistTcpUdpProfiles, validateTcpUdpProfileInput,
+    loadPersistedConnectors, persistConnectors,
 } from './core/store';
+import { validateConnectorInput, type GoContactConnector } from './core/connector-types';
+import { startConnectorServer, stopConnectorServer, stopAllConnectors, restartConnector, getConnectorStatus, closeConnectorSession } from './servers/connector-server';
+import { initConnectorSessions, shutdownConnectorSessions, listSessions as listConnectorSessions, deleteConnectorSessions } from './gocontact/sessions';
 import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry/telemetry';
 import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart } from './telemetry/request-log';
 import { initSipLog, shutdownSipLog, querySipLogs, getSipLogDetail, getSipLogStats } from './telemetry/sip-log';
@@ -14,7 +18,7 @@ import { initCertStore, shutdownCertStore, listCerts, getCert, getCertByDomain, 
 import { migrateProfileCerts } from './core/cert-migration';
 import { scheduleAcmeRenewal, shutdownAcme, requestCertificate } from './sip/acme';
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort, isProxyServerRunning, setProxyLoginTemplate, setProxyLogo } from './servers/proxy-server';
-import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort, assignTcpUdpListenerPort, releaseProxyPort, releaseWebhookPort, releaseTcpUdpListenerPorts, getWebhookPort } from './servers/port-manager';
+import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort, assignTcpUdpListenerPort, releaseProxyPort, releaseWebhookPort, releaseTcpUdpListenerPorts, getWebhookPort, assignConnectorPort, releaseConnectorPort, getConnectorPort } from './servers/port-manager';
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, dismissAllPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
@@ -55,6 +59,9 @@ config.proxyProfiles = mergeProfiles(config.proxyProfiles, persistedProfiles);
 // Load persisted webhooks
 config.webhooks = loadPersistedWebhooks();
 
+// Load persisted GoContact connectors
+let connectors: GoContactConnector[] = loadPersistedConnectors();
+
 // Merge TCP/UDP profiles: env vars as base, persisted (UI-created) take precedence
 const persistedTcpUdpProfiles = loadPersistedTcpUdpProfiles();
 const tcpUdpEnvNames = new Set(persistedTcpUdpProfiles.map(p => p.name));
@@ -74,6 +81,10 @@ initSipLog(config.requestLog);
 
 // Initialize raw TCP/TLS connection logging (separate SQLite db)
 initConnLog(config.requestLog);
+
+// Initialize GoContact connector session store (SQLite) — must precede
+// connector server startup so the poller can resume persisted sessions.
+initConnectorSessions(config.requestLog.dataDir);
 
 // Initialize central certificate store (SQLite-backed). Must come BEFORE any
 // TCP/UDP server starts so the migration step can populate it from legacy
@@ -282,6 +293,7 @@ const portAssignments = await assignAllPorts(
     config.webhooks.map(w => w.name),
     tcpUdpListenerKeys,
     config.port,
+    connectors.map(c => c.name),
 );
 
 // Track profiles whose dedicated port shifted at boot — the upcoming NPM
@@ -320,6 +332,19 @@ for (const webhook of config.webhooks) {
         startWebhookServer(w);
     } catch (err) {
         console.error(`❌ Failed to start webhook "${webhook.name}":`, err instanceof Error ? err.message : err);
+    }
+}
+
+// Start GoContact connectors (inbound listener + agent-reply poller)
+if (connectors.length > 0) {
+    console.log(`💬 Connectors: ${connectors.map(c => c.name).join(', ')}`);
+    for (const connector of connectors) {
+        const assignedPort = portAssignments.connectors[connector.name];
+        try {
+            startConnectorServer({ ...connector, port: assignedPort });
+        } catch (err) {
+            console.error(`❌ Failed to start connector "${connector.name}":`, err instanceof Error ? err.message : err);
+        }
     }
 }
 
@@ -1640,6 +1665,198 @@ const server = Bun.serve({
 
                     console.log(`🗑️  Webhook "${name}" deleted`);
                     return jsonRes(200, { status: 'deleted', webhook: name });
+                }
+
+                // ── GoContact Connectors ──
+                const redactConnector = (c: GoContactConnector) => {
+                    const status = getConnectorStatus().find(s => s.name === c.name);
+                    return {
+                        name: c.name,
+                        channel: c.channel,
+                        enabled: c.enabled !== false,
+                        port: status?.port ?? getConnectorPort(c.name) ?? c.port,
+                        running: status?.running ?? false,
+                        gocontact: {
+                            baseUrl: c.gocontact.baseUrl,
+                            username: c.gocontact.username,
+                            hashKey: c.gocontact.hashKey,
+                            domainUuid: c.gocontact.domainUuid || '',
+                            language: c.gocontact.language || 'en',
+                            timestampOffsetHours: c.gocontact.timestampOffsetHours ?? 1,
+                            storageBucket: c.gocontact.storageBucket || 'storage',
+                            hasPassword: !!c.gocontact.password,
+                        },
+                        hasVerifyToken: !!c.verifyToken,
+                        allowedIps: c.allowedIps || [],
+                        meta: c.meta ? {
+                            phoneNumberId: c.meta.phoneNumberId,
+                            graphVersion: c.meta.graphVersion || 'v21.0',
+                            hasAccessToken: !!c.meta.accessToken,
+                        } : null,
+                        replyToMeta: !!c.replyToMeta,
+                        phoneNumberFilter: c.phoneNumberFilter || [],
+                        webhookTargets: c.webhookTargets || [],
+                        webhooksEnabled: c.webhooksEnabled !== false,
+                        pollIntervalMs: c.pollIntervalMs ?? 4000,
+                        sessionTtlMinutes: c.sessionTtlMinutes ?? 120,
+                        allowPrivateTargets: c.allowPrivateTargets !== false,
+                        targetAllowedCidrs: c.targetAllowedCidrs || [],
+                        stats: status?.stats ?? null,
+                    };
+                };
+
+                if (url.pathname === '/admin/connectors' && req.method === 'GET') {
+                    return jsonRes(200, { connectors: connectors.map(redactConnector) });
+                }
+
+                if (url.pathname === '/admin/connectors/sessions' && req.method === 'GET') {
+                    const filter = url.searchParams.get('connector') || undefined;
+                    const sessions = listConnectorSessions(filter).map(s => ({
+                        connector: s.connector,
+                        chatId: s.chatId,
+                        displayName: s.displayName,
+                        phoneNumberId: s.phoneNumberId || null,
+                        dialogGroupUuid: s.dialogGroupUuid,
+                        createdAt: s.createdAt,
+                        lastActivityAt: s.lastActivityAt,
+                    }));
+                    return jsonRes(200, { sessions, total: sessions.length });
+                }
+
+                if (url.pathname.match(/^\/admin\/connectors\/[^/]+\/restart$/) && req.method === 'POST') {
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
+                    const connector = connectors.find(c => c.name === name);
+                    if (!connector) return jsonRes(404, { error: `Connector "${name}" not found` });
+                    try {
+                        const portToUse = getConnectorPort(name) || connector.port;
+                        await restartConnector({ ...connector, port: portToUse });
+                        return jsonRes(200, { status: 'restarted', connector: name });
+                    } catch (err) {
+                        return jsonRes(500, { error: `Failed to restart: ${err instanceof Error ? err.message : err}` });
+                    }
+                }
+
+                if (url.pathname.match(/^\/admin\/connectors\/[^/]+\/sessions\/[^/]+$/) && req.method === 'DELETE') {
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
+                    const chatId = decodeURIComponent(url.pathname.split('/')[5] || '');
+                    const result = await closeConnectorSession(name, chatId);
+                    return result.ok
+                        ? jsonRes(200, { status: 'closed', chatId })
+                        : jsonRes(404, { error: result.error });
+                }
+
+                if (url.pathname.match(/^\/admin\/connectors\/[^/]+$/) && req.method === 'GET') {
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
+                    const connector = connectors.find(c => c.name === name);
+                    if (!connector) return jsonRes(404, { error: `Connector "${name}" not found` });
+                    return jsonRes(200, { connector: redactConnector(connector) });
+                }
+
+                if (url.pathname === '/admin/connectors' && req.method === 'POST') {
+                    let body: unknown;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
+
+                    const input = body as Record<string, any>;
+                    const existingIdx = connectors.findIndex(c => c.name === String(input.name || '').toLowerCase());
+                    const prev = existingIdx >= 0 ? connectors[existingIdx] : null;
+
+                    // Preserve secrets the form did not resubmit (they are never sent back).
+                    if (prev) {
+                        if (input.gocontact && typeof input.gocontact === 'object' && !input.gocontact.password) {
+                            input.gocontact.password = prev.gocontact.password;
+                        }
+                        if (!input.verifyToken && prev.verifyToken) input.verifyToken = prev.verifyToken;
+                        // The form omits `meta` entirely when its fields are blank —
+                        // carry the stored credentials over so editing unrelated
+                        // settings never requires re-entering the Meta token.
+                        if (!input.meta && prev.meta) {
+                            input.meta = { ...prev.meta };
+                        } else if (input.meta && typeof input.meta === 'object') {
+                            if (!input.meta.accessToken && prev.meta?.accessToken) input.meta.accessToken = prev.meta.accessToken;
+                            if (!input.meta.phoneNumberId && prev.meta?.phoneNumberId) input.meta.phoneNumberId = prev.meta.phoneNumberId;
+                        }
+                    }
+
+                    const error = validateConnectorInput(input);
+                    if (error) return jsonRes(400, { error });
+                    if (!input.gocontact.password) return jsonRes(400, { error: '"gocontact.password" is required' });
+                    if (input.replyToMeta === true && !input.meta?.accessToken) {
+                        return jsonRes(400, { error: '"meta.accessToken" is required to reply via Meta' });
+                    }
+
+                    const connector: GoContactConnector = {
+                        name: String(input.name).toLowerCase(),
+                        port: input.port ? parseInt(String(input.port), 10) : 0,
+                        enabled: input.enabled !== false,
+                        channel: input.channel,
+                        gocontact: {
+                            baseUrl: String(input.gocontact.baseUrl),
+                            username: String(input.gocontact.username),
+                            password: String(input.gocontact.password),
+                            hashKey: String(input.gocontact.hashKey),
+                            domainUuid: input.gocontact.domainUuid ? String(input.gocontact.domainUuid).trim() : undefined,
+                            language: input.gocontact.language ? String(input.gocontact.language) : undefined,
+                            timestampOffsetHours: typeof input.gocontact.timestampOffsetHours === 'number' ? input.gocontact.timestampOffsetHours : undefined,
+                            storageBucket: input.gocontact.storageBucket ? String(input.gocontact.storageBucket) : undefined,
+                        },
+                        replyToMeta: input.replyToMeta === true,
+                    };
+                    if (input.verifyToken) connector.verifyToken = String(input.verifyToken);
+                    if (Array.isArray(input.allowedIps) && input.allowedIps.length) connector.allowedIps = input.allowedIps.map((s: unknown) => String(s).trim()).filter(Boolean);
+                    if (input.meta && (input.meta.accessToken || input.meta.phoneNumberId)) {
+                        connector.meta = {
+                            accessToken: String(input.meta.accessToken || ''),
+                            phoneNumberId: String(input.meta.phoneNumberId || ''),
+                            graphVersion: input.meta.graphVersion ? String(input.meta.graphVersion) : undefined,
+                        };
+                    }
+                    if (Array.isArray(input.webhookTargets) && input.webhookTargets.length) connector.webhookTargets = input.webhookTargets;
+                    if (typeof input.webhooksEnabled === 'boolean') connector.webhooksEnabled = input.webhooksEnabled;
+                    if (Array.isArray(input.phoneNumberFilter)) {
+                        const filter = (input.phoneNumberFilter as unknown[]).map(x => String(x).trim()).filter(Boolean);
+                        if (filter.length) connector.phoneNumberFilter = filter;
+                    }
+                    if (typeof input.pollIntervalMs === 'number') connector.pollIntervalMs = input.pollIntervalMs;
+                    if (typeof input.sessionTtlMinutes === 'number') connector.sessionTtlMinutes = input.sessionTtlMinutes;
+                    if (typeof input.allowPrivateTargets === 'boolean') connector.allowPrivateTargets = input.allowPrivateTargets;
+                    if (Array.isArray(input.targetAllowedCidrs) && input.targetAllowedCidrs.length) connector.targetAllowedCidrs = (input.targetAllowedCidrs as string[]).map(s => String(s).trim()).filter(Boolean);
+
+                    // Port: preserve the current one on update unless explicitly changed
+                    let portToUse = connector.port;
+                    if (prev && portToUse === 0) {
+                        const existingPort = getConnectorPort(connector.name) || prev.port || 0;
+                        if (existingPort > 0) portToUse = existingPort;
+                    }
+                    const excludePorts = getConnectorStatus().filter(s => s.name !== connector.name).map(s => s.port || 0).filter(Boolean);
+                    const assignedPort = await assignConnectorPort(connector.name, portToUse, config.port, excludePorts);
+                    const connectorWithPort = { ...connector, port: assignedPort };
+
+                    if (existingIdx >= 0) connectors[existingIdx] = connectorWithPort;
+                    else connectors.push(connectorWithPort);
+                    persistConnectors(connectors);
+
+                    try {
+                        await restartConnector(connectorWithPort);
+                    } catch (err) {
+                        console.error(`⚠️  Connector "${connector.name}" saved but failed to start:`, err);
+                    }
+
+                    const action = existingIdx >= 0 ? 'updated' : 'created';
+                    console.log(`✅ Connector "${connector.name}" ${action} (port ${assignedPort})`);
+                    return jsonRes(200, { status: action, connector: connector.name, port: assignedPort });
+                }
+
+                if (url.pathname.match(/^\/admin\/connectors\/[^/]+$/) && req.method === 'DELETE') {
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
+                    const idx = connectors.findIndex(c => c.name === name);
+                    if (idx === -1) return jsonRes(404, { error: `Connector "${name}" not found` });
+                    connectors.splice(idx, 1);
+                    persistConnectors(connectors);
+                    await stopConnectorServer(name);
+                    releaseConnectorPort(name);
+                    const removedSessions = deleteConnectorSessions(name);
+                    console.log(`🗑️  Connector "${name}" deleted (${removedSessions} session(s) removed)`);
+                    return jsonRes(200, { status: 'deleted', connector: name });
                 }
 
                 // ── Config ──
@@ -4026,6 +4243,7 @@ const shutdown = async (signal: string) => {
     stopPendingRetryScheduler();
     stopSilenceAlertScheduler();
     await stopAllWebhooks();
+    await stopAllConnectors();
 
     // Wait for main server requests
     const maxWait = 10_000;
@@ -4044,6 +4262,7 @@ const shutdown = async (signal: string) => {
     shutdownRequestLog();
     shutdownSipLog();
     shutdownConnLog();
+    shutdownConnectorSessions();
     shutdownAcme();
     shutdownCertStore();
     shutdownLdap();

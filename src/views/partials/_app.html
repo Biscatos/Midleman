@@ -71,6 +71,13 @@
         <span class="sidebar-link-label">Webhooks</span>
         <span class="sidebar-badge" id="navWebhookBadge">0</span>
       </button>
+      <button class="sidebar-link" data-page="connectors" data-tooltip="GoContact Connectors" onclick="navigate('connectors')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+        </svg>
+        <span class="sidebar-link-label">Connectors</span>
+        <span class="sidebar-badge" id="navConnectorBadge">0</span>
+      </button>
       <button class="sidebar-link" data-page="tcpudp" data-tooltip="TCP/UDP" onclick="navigate('tcpudp')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="2.5" y="9" width="5" height="6" rx="1.5"/>
@@ -332,6 +339,8 @@
 
               <option value="proxy">Proxy</option>
               <option value="webhook">Webhook</option>
+              <option value="connector">Connector</option>
+              <option value="connector-fanout">Connector Fan-out</option>
             </select>
             <select id="rlMethod"
               style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
@@ -694,6 +703,37 @@
               <tr>
                 <td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td>
               </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ CONNECTORS (GoContact) ═══ -->
+    <div class="page" id="pageConnectors">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h2>GoContact Connectors</h2>
+          <p>Bridge digital channels (WhatsApp, generic JSON) into GoContact webchat sessions and fan agent replies back out.</p>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="openConnectorModal()">+ New Connector</button>
+      </div>
+      <div class="card">
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table id="connectorTable" style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--surface2);text-align:left">
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Status</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Channel</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Port</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Replies To</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Activity</th>
+                <th style="padding:10px 12px"></th>
+              </tr>
+            </thead>
+            <tbody id="connectorListBody">
+              <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
             </tbody>
           </table>
         </div>
@@ -2518,6 +2558,136 @@
       <button class="btn btn-sm" onclick="closeWebhookModal()">Cancel</button>
       <button class="btn btn-primary btn-sm" onclick="saveWebhook()">Save Webhook</button>
     </div>
+  </div>
+</div>
+
+<!-- Connector Modal -->
+<div id="connectorModal"
+  style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:1000;overflow-y:auto;padding:24px">
+  <div style="max-width:680px;margin:0 auto;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);display:flex;flex-direction:column;max-height:calc(100vh - 48px)">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border);flex-shrink:0">
+      <h3 id="connectorModalTitle" style="font-size:16px;font-weight:600">New Connector</h3>
+      <button onclick="closeConnectorModal()" style="background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer">&times;</button>
+    </div>
+    <div style="padding:16px 20px;overflow-y:auto">
+      <!-- ── General ── -->
+      <div style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">General</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Name</label>
+          <input id="cnName" type="text" placeholder="bfa-whatsapp" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Inbound Channel</label>
+          <select id="cnChannel" onchange="connectorChannelChanged()" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+            <option value="meta-whatsapp">Meta WhatsApp Cloud API</option>
+            <option value="generic">Generic JSON</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Port <span style="color:var(--text3)">(0 = auto)</span></label>
+          <input id="cnPort" type="number" placeholder="0" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+        </div>
+        <div style="display:flex;align-items:flex-end;padding-bottom:7px">
+          <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer">
+            <input id="cnEnabled" type="checkbox" checked> Enabled
+          </label>
+        </div>
+      </div>
+
+      <!-- ── Inbound security ── -->
+      <div style="margin-top:18px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Inbound Security</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Verify Token <span style="color:var(--text3)">(hub.verify_token / X-Forward-Token)</span></label>
+          <div style="display:flex;gap:6px">
+            <input id="cnVerifyToken" type="text" placeholder="shared secret" style="flex:1;min-width:0;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+            <button type="button" class="btn btn-sm" onclick="generateConnectorToken()" title="Generate a random token" style="white-space:nowrap">Generate</button>
+          </div>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Allowed IPs <span style="color:var(--text3)">(comma separated, blank = unrestricted)</span></label>
+          <input id="cnAllowedIps" type="text" placeholder="157.240.0.0/16, 31.13.24.0/21" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+        </div>
+      </div>
+
+      <!-- ── GoContact ── -->
+      <div style="margin-top:18px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">GoContact</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
+        <div style="grid-column:1 / -1">
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Base URL</label>
+          <input id="cnGoBaseUrl" type="text" placeholder="https://instancia.gocontact.com/" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Username (e-mail)</label>
+          <input id="cnGoUsername" type="text" placeholder="user@dominio.com" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Password <span style="color:var(--text3)">(blank keeps current)</span></label>
+          <input id="cnGoPassword" type="password" autocomplete="new-password" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Webchat Hash Key <span style="color:var(--text3)">(embed script: _hashkey)</span></label>
+          <input id="cnGoHashKey" type="text" placeholder="38cdbe9e9d0d..." style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Domain UUID <span style="color:var(--text3)">(embed script: _domain — optional)</span></label>
+          <input id="cnGoDomainUuid" type="text" placeholder="e1b0c3d8-5d74-4719-9404-..." style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Fast poll interval (ms) <span style="color:var(--text3)" title="Active chats are polled at this rate; idle ones back off automatically up to 8× (max 60s) and snap back on activity.">ⓘ adaptive</span></label>
+          <input id="cnPollInterval" type="number" placeholder="4000" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Session TTL (minutes)</label>
+          <input id="cnSessionTtl" type="number" placeholder="120" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+        </div>
+      </div>
+
+      <!-- ── Agent replies ── -->
+      <div style="margin-top:18px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Agent Replies</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--text);cursor:pointer">
+        <input id="cnReplyToMeta" type="checkbox" onchange="connectorReplyToMetaChanged()"> Send agent replies directly to the customer via Meta Graph API
+      </label>
+      <div id="cnMetaSection" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2)">
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Access Token <span style="color:var(--text3)">(blank keeps current)</span></label>
+          <input id="cnMetaToken" type="password" autocomplete="new-password" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          <div style="margin-top:6px;font-size:11px;color:var(--text3)">The business phone number is detected automatically from each inbound payload (metadata.phone_number_id) — replies go out via the same number the customer wrote to.</div>
+          <div style="margin-top:10px">
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Phone Number Filter <span style="color:var(--text3)">(optional — comma-separated phone_number_ids; only these are processed. Use when several connectors, one per brand/queue, share the same inbound feed.)</span></label>
+            <input id="cnPhoneFilter" type="text" placeholder="879847985208219, 946854641852538" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          </div>
+        </div>
+        <div id="cnMetaMediaHint" style="display:none;margin-top:8px;font-size:11px;color:var(--text3)">
+          The Access Token is also used to download inbound WhatsApp media — without it, customer attachments are skipped.
+        </div>
+      </div>
+
+      <div style="margin-top:14px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer;margin-bottom:6px">
+          <input id="cnWebhooksEnabled" type="checkbox" checked onchange="connectorWebhooksEnabledChanged()"> Deliver events to webhook targets
+        </label>
+        <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Webhook Targets <span style="color:var(--text3)">(agent replies POSTed here — one URL per line)</span></label>
+        <textarea id="cnWebhookTargets" rows="3" placeholder="https://o-meu-bot.exemplo.com/gocontact-events" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px;font-family:'SF Mono',Monaco,monospace"></textarea>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border);flex-shrink:0;background:var(--surface);border-radius:0 0 var(--radius) var(--radius)">
+      <button class="btn btn-sm" onclick="closeConnectorModal()">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="saveConnector()">Save Connector</button>
+    </div>
+  </div>
+</div>
+
+<!-- Connector Sessions Modal -->
+<div id="connectorSessionsModal"
+  style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:1000;overflow-y:auto;padding:24px">
+  <div style="max-width:760px;margin:0 auto;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border)">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border)">
+      <h3 id="connectorSessionsTitle" style="font-size:16px;font-weight:600">Active Sessions</h3>
+      <button onclick="closeConnectorSessionsModal()" style="background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer">&times;</button>
+    </div>
+    <div id="connectorSessionsList" style="padding:16px 20px;max-height:60vh;overflow-y:auto"></div>
   </div>
 </div>
 

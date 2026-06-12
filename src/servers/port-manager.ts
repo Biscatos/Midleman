@@ -7,6 +7,7 @@ interface PortMap {
     proxies: Record<string, number>;
     webhooks: Record<string, number>;
     tcpUdp: Record<string, number>;
+    connectors: Record<string, number>;
 }
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -15,7 +16,7 @@ const DATA_DIR = process.env.DATA_DIR || resolve(process.cwd(), 'data');
 const PORTS_FILE = resolve(DATA_DIR, 'ports.json');
 export const PORT_RANGE_START = parseInt(process.env.PORT_RANGE_START || '4000', 10);
 
-let portMap: PortMap = { proxies: {}, webhooks: {}, tcpUdp: {} };
+let portMap: PortMap = { proxies: {}, webhooks: {}, tcpUdp: {}, connectors: {} };
 
 // ─── Persistence ─────────────────────────────────────────────────────────────
 
@@ -24,6 +25,7 @@ export function loadPortAssignments(): void {
         portMap = JSON.parse(readFileSync(PORTS_FILE, 'utf-8'));
         if (!portMap.webhooks) portMap.webhooks = {};
         if (!portMap.tcpUdp) portMap.tcpUdp = {};
+        if (!portMap.connectors) portMap.connectors = {};
         // Migrate old format: keys without colon → e.g. "meta" → discard (will be re-assigned)
         for (const key of Object.keys(portMap.tcpUdp)) {
             if (!key.includes(':')) {
@@ -32,7 +34,7 @@ export function loadPortAssignments(): void {
             }
         }
     } catch {
-        portMap = { proxies: {}, webhooks: {}, tcpUdp: {} };
+        portMap = { proxies: {}, webhooks: {}, tcpUdp: {}, connectors: {} };
     }
 }
 
@@ -87,7 +89,8 @@ export async function assignAllPorts(
     webhookNames: string[],
     tcpUdpNames: string[],
     adminPort: number,
-): Promise<{ proxies: Record<string, number>; webhooks: Record<string, number>; tcpUdp: Record<string, number> }> {
+    connectorNames: string[] = [],
+): Promise<{ proxies: Record<string, number>; webhooks: Record<string, number>; tcpUdp: Record<string, number>; connectors: Record<string, number> }> {
     const used = new Set<number>([adminPort]);
 
     // Boot path: trust persisted ports as long as they don't collide *inside*
@@ -125,9 +128,16 @@ export async function assignAllPorts(
         used.add(port);
     }
 
-    portMap = { proxies, webhooks: webhookPorts, tcpUdp: tcpUdpPorts };
+    const connectorPorts: Record<string, number> = {};
+    for (const name of connectorNames) {
+        const port = await takePreferred(portMap.connectors?.[name]);
+        connectorPorts[name] = port;
+        used.add(port);
+    }
+
+    portMap = { proxies, webhooks: webhookPorts, tcpUdp: tcpUdpPorts, connectors: connectorPorts };
     save();
-    return { proxies, webhooks: webhookPorts, tcpUdp: tcpUdpPorts };
+    return { proxies, webhooks: webhookPorts, tcpUdp: tcpUdpPorts, connectors: connectorPorts };
 }
 
 /**
@@ -226,6 +236,40 @@ export function releaseTcpUdpPort(name: string): void {
 }
 export function getTcpUdpPort(name: string): number | undefined {
     return getTcpUdpListenerPort(name, 'tcp');
+}
+
+// ─── Connector ports ──────────────────────────────────────────────────────────
+
+/** Assign a port for a GoContact connector (explicit or auto). */
+export async function assignConnectorPort(name: string, configuredPort: number, adminPort: number, excludePorts: number[]): Promise<number> {
+    if (!portMap.connectors) portMap.connectors = {};
+    if (configuredPort > 0) {
+        portMap.connectors[name] = configuredPort;
+        save();
+        return configuredPort;
+    }
+    const others = Object.entries(portMap.connectors).filter(([k]) => k !== name).map(([, v]) => v);
+    const used = new Set<number>([
+        adminPort, ...excludePorts,
+        ...Object.values(portMap.proxies),
+        ...Object.values(portMap.webhooks || {}),
+        ...Object.values(portMap.tcpUdp || {}),
+        ...others,
+    ]);
+    const port = await allocate(used, portMap.connectors[name]);
+    portMap.connectors[name] = port;
+    save();
+    return port;
+}
+
+export function releaseConnectorPort(name: string): void {
+    if (!portMap.connectors) return;
+    delete portMap.connectors[name];
+    save();
+}
+
+export function getConnectorPort(name: string): number | undefined {
+    return portMap.connectors?.[name];
 }
 
 export function getAllAssignedPorts(): PortMap {

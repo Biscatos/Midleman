@@ -1027,10 +1027,12 @@ export function verifyTotp(secret: string, code: string): boolean {
     const key = base32Decode(secret);
     const now = BigInt(Math.floor(Date.now() / 1000 / 30));
     const provided = code.trim();
-    // Accept current + 1 forward window only (clock skew tolerance, no replay of past codes).
+    // Accept previous, current and next window (±30s clock skew tolerance — the
+    // standard RFC 6238 validation window). A device or server clock off by more
+    // than 30s otherwise locks every login out.
     // Constant-time compare each candidate so a near-miss code can't be distinguished by timing.
     let ok = false;
-    for (let i = 0n; i <= 1n; i++) {
+    for (let i = -1n; i <= 1n; i++) {
         if (timingSafeEqualStr(generateHotp(key, now + i), provided)) ok = true;
     }
     return ok;
