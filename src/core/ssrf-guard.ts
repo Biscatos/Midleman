@@ -11,15 +11,17 @@
  *     defeat DNS-rebinding (a name that resolved public at config time but points
  *     at 169.254.169.254 at request time).
  *
- * Because Midleman legitimately relays to internal services on some
- * deployments, private ranges (RFC1918, CGNAT, ULA) are blocked BY DEFAULT but
- * can be opted back in:
- *   WEBHOOK_ALLOW_PRIVATE_TARGETS=true        → permit all private ranges
+ * Because Midleman legitimately relays to internal services (e.g. FusionPBX),
+ * private ranges (RFC1918, CGNAT, ULA) are ALLOWED BY DEFAULT. This can be
+ * tightened globally or per-webhook:
+ *   WEBHOOK_ALLOW_PRIVATE_TARGETS=false       → block private ranges globally
+ *   per-webhook allowPrivateTargets=false     → block them for one webhook (UI)
  *   WEBHOOK_TARGET_ALLOWED_CIDRS=10.0.0.0/8,… → explicit allowlist (overrides
  *                                               every block, including loopback)
  * Loopback, link-local (incl. the cloud metadata IP 169.254.169.254) and the
  * unspecified address are ALWAYS blocked unless explicitly allowlisted, because
- * they are never legitimate webhook destinations.
+ * they are never legitimate webhook destinations — even when private ranges are
+ * allowed.
  */
 
 import { isIP } from 'node:net';
@@ -69,7 +71,11 @@ let _envPolicy: SsrfPolicy | null = null;
 function getEnvPolicy(): SsrfPolicy {
     if (!_envPolicy) {
         _envPolicy = {
-            allowPrivate: process.env.WEBHOOK_ALLOW_PRIVATE_TARGETS === 'true',
+            // Private/internal RFC1918/ULA ranges are ALLOWED by default — Midleman
+            // is commonly used to relay to internal services (e.g. FusionPBX). Set
+            // WEBHOOK_ALLOW_PRIVATE_TARGETS=false to lock this down globally.
+            // Loopback and link-local/metadata stay blocked regardless (see blockedReason).
+            allowPrivate: process.env.WEBHOOK_ALLOW_PRIVATE_TARGETS !== 'false',
             allowedCidrs: (process.env.WEBHOOK_TARGET_ALLOWED_CIDRS || '')
                 .split(/[\n,]+/).map(s => s.trim()).filter(Boolean),
         };
@@ -105,7 +111,7 @@ function blockedReason(rawIp: string, policy: SsrfPolicy): string | null {
     if (v4) {
         if (V4_ALWAYS_BLOCK.some(c => inV4Cidr(ip, c))) return `blocked address ${ip} (loopback/link-local/reserved)`;
         if (V4_PRIVATE.some(c => inV4Cidr(ip, c))) {
-            return policy.allowPrivate ? null : `private address ${ip} blocked (set WEBHOOK_ALLOW_PRIVATE_TARGETS=true to permit)`;
+            return policy.allowPrivate ? null : `private address ${ip} blocked (enable "Allow private/internal destinations" for this webhook to permit)`;
         }
         return null;
     }
@@ -118,7 +124,7 @@ function blockedReason(rawIp: string, policy: SsrfPolicy): string | null {
         return `blocked IPv6 link-local ${ip}`; // fe80::/10
     }
     if (/^f[cd]/.test(lower)) { // fc00::/7 unique-local
-        return policy.allowPrivate ? null : `IPv6 unique-local ${ip} blocked (set WEBHOOK_ALLOW_PRIVATE_TARGETS=true to permit)`;
+        return policy.allowPrivate ? null : `IPv6 unique-local ${ip} blocked (enable "Allow private/internal destinations" for this webhook to permit)`;
     }
     return null;
 }

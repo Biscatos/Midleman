@@ -1524,7 +1524,7 @@ const server = Bun.serve({
                             hasAuthToken: !!webhook.authToken,
                             retry: webhook.retry,
                             allowedIps: webhook.allowedIps || [],
-                            allowPrivateTargets: !!webhook.allowPrivateTargets,
+                            allowPrivateTargets: webhook.allowPrivateTargets !== false,
                             targetAllowedCidrs: webhook.targetAllowedCidrs || [],
                             silenceAlert: webhook.silenceAlert,
                             testPayload: webhook.testPayload,

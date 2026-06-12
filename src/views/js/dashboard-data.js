@@ -3171,7 +3171,9 @@ function openWebhookModal(webhook = null) {
     ? '•••••••• (configurado — deixe vazio para manter)'
     : '';
   IpTagInput.setValue('wAllowedIps', webhook?.allowedIps || []);
-  document.getElementById('wAllowPrivateTargets').checked = !!(webhook && webhook.allowPrivateTargets);
+  // Private/internal destinations are allowed by default; checkbox reflects the
+  // stored value (true unless explicitly disabled), checked for new webhooks.
+  document.getElementById('wAllowPrivateTargets').checked = webhook ? (webhook.allowPrivateTargets !== false) : true;
   IpTagInput.setValue('wTargetAllowedCidrs', webhook?.targetAllowedCidrs || []);
 
   // Restore persisted test payload (used by the body template editor preview)
