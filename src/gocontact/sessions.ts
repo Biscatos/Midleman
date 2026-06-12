@@ -35,6 +35,8 @@ export interface ConnectorSession {
     /** Channel message id of the customer's latest inbound message (e.g. the
      *  WhatsApp wamid) — used to send a read receipt when the agent replies. */
     lastInboundMsgId: string;
+    /** True once the connector's auto-reply fired for this session. */
+    autoReplied: boolean;
     createdAt: number;         // Unix ms
     lastActivityAt: number;    // Unix ms — bumped on every send/receive
 }
@@ -54,6 +56,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     dialog_group_id   TEXT NOT NULL DEFAULT '',
     phone_number_id   TEXT NOT NULL DEFAULT '',
     customer_id       TEXT NOT NULL DEFAULT '',
+    auto_replied      INTEGER NOT NULL DEFAULT 0,
     last_inbound_msg_id TEXT NOT NULL DEFAULT '',
     created_at        INTEGER NOT NULL,
     last_activity_at  INTEGER NOT NULL,
@@ -72,6 +75,7 @@ export function initConnectorSessions(dataDir: string): void {
     try { db.exec("ALTER TABLE sessions ADD COLUMN phone_number_id TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
     try { db.exec("ALTER TABLE sessions ADD COLUMN last_inbound_msg_id TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
     try { db.exec("ALTER TABLE sessions ADD COLUMN customer_id TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
+    try { db.exec("ALTER TABLE sessions ADD COLUMN auto_replied INTEGER NOT NULL DEFAULT 0"); } catch { /* already present */ }
     console.log(`💬 GoContact session store: ${dbPath}`);
 }
 
@@ -93,6 +97,7 @@ function rowToSession(r: any): ConnectorSession {
         dialogGroupId: r.dialog_group_id,
         phoneNumberId: r.phone_number_id || '',
         lastInboundMsgId: r.last_inbound_msg_id || '',
+        autoReplied: !!r.auto_replied,
         createdAt: r.created_at,
         lastActivityAt: r.last_activity_at,
     };
@@ -131,6 +136,12 @@ export function touchSession(connector: string, chatId: string): void {
     if (!db) return;
     db.query('UPDATE sessions SET last_activity_at = $now WHERE connector = $c AND chat_id = $id')
         .run({ $now: Date.now(), $c: connector, $id: chatId });
+}
+
+export function markSessionAutoReplied(connector: string, chatId: string): void {
+    if (!db) return;
+    db.query('UPDATE sessions SET auto_replied = 1 WHERE connector = $c AND chat_id = $id')
+        .run({ $c: connector, $id: chatId });
 }
 
 export function updateSessionLastInbound(connector: string, chatId: string, messageId: string): void {

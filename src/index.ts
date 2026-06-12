@@ -1695,6 +1695,7 @@ const server = Bun.serve({
                         } : null,
                         replyToMeta: !!c.replyToMeta,
                         phoneNumberFilter: c.phoneNumberFilter || [],
+                        autoReply: c.autoReply || { enabled: false, text: '' },
                         webhookTargets: c.webhookTargets || [],
                         webhooksEnabled: c.webhooksEnabled !== false,
                         pollIntervalMs: c.pollIntervalMs ?? 4000,
@@ -1815,6 +1816,12 @@ const server = Bun.serve({
                     if (Array.isArray(input.phoneNumberFilter)) {
                         const filter = (input.phoneNumberFilter as unknown[]).map(x => String(x).trim()).filter(Boolean);
                         if (filter.length) connector.phoneNumberFilter = filter;
+                    }
+                    if (input.autoReply && typeof input.autoReply === 'object') {
+                        connector.autoReply = {
+                            enabled: input.autoReply.enabled === true,
+                            text: String(input.autoReply.text || ''),
+                        };
                     }
                     if (typeof input.pollIntervalMs === 'number') connector.pollIntervalMs = input.pollIntervalMs;
                     if (typeof input.sessionTtlMinutes === 'number') connector.sessionTtlMinutes = input.sessionTtlMinutes;

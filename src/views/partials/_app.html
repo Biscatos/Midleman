@@ -2644,6 +2644,16 @@
         </div>
       </div>
 
+      <!-- ── Auto-reply ── -->
+      <div style="margin-top:18px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Auto-Reply</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--text);cursor:pointer">
+        <input id="cnAutoReplyEnabled" type="checkbox" onchange="connectorAutoReplyChanged()"> Send an automatic reply on the first customer message of each session
+      </label>
+      <div id="cnAutoReplySection" style="display:none;margin-top:8px">
+        <textarea id="cnAutoReplyText" rows="2" maxlength="2000" placeholder="Obrigado pelo seu contacto! Em breve será atendido por um dos nossos agentes." style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></textarea>
+        <div style="margin-top:4px;font-size:11px;color:var(--text3)">Sent once per session — to the customer (via Meta/webhooks, like an agent reply with userType "AUTO") and mirrored into the GoContact chat so the agent sees it.</div>
+      </div>
+
       <!-- ── Agent replies ── -->
       <div style="margin-top:18px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Agent Replies</div>
       <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--text);cursor:pointer">
