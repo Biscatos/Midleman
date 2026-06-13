@@ -470,8 +470,11 @@ async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage
     cs.stats.inboundMessages++;
     cs.stats.lastInboundAt = Date.now();
 
-    // Auto-reply: once per session, on the first customer message.
-    if (c.autoReply?.enabled && c.autoReply.text?.trim() && !session.autoReplied) {
+    // Auto-reply: once per session, on the first customer message. An expiry
+    // date (when set) silently disables it — a forgotten holiday/campaign
+    // notice stops by itself.
+    const autoReplyExpired = !!c.autoReply?.expiresAt && Date.now() > Date.parse(c.autoReply.expiresAt);
+    if (c.autoReply?.enabled && !autoReplyExpired && c.autoReply.text?.trim() && !session.autoReplied) {
         session.autoReplied = true;
         markSessionAutoReplied(c.name, session.chatId);
         void sendAutoReply(cs, session, c.autoReply.text.trim());

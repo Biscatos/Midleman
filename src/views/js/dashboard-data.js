@@ -2188,6 +2188,19 @@ function openConnectorModal(connector = null) {
   document.getElementById('cnPhoneFilter').value = (connector?.phoneNumberFilter || []).join(', ');
   document.getElementById('cnAutoReplyEnabled').checked = !!connector?.autoReply?.enabled;
   document.getElementById('cnAutoReplyText').value = connector?.autoReply?.text || '';
+  const arExpires = connector?.autoReply?.expiresAt || '';
+  // ISO → datetime-local (local timezone, minute precision)
+  let localValue = '';
+  if (arExpires) {
+    const d = new Date(arExpires);
+    if (!isNaN(d.getTime())) {
+      const pad = n => String(n).padStart(2, '0');
+      localValue = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+  }
+  document.getElementById('cnAutoReplyExpires').value = localValue;
+  const expiredBadge = document.getElementById('cnAutoReplyExpiredBadge');
+  expiredBadge.style.display = (arExpires && Date.parse(arExpires) < Date.now() && connector?.autoReply?.enabled) ? 'inline-block' : 'none';
   connectorAutoReplyChanged();
   document.getElementById('cnMetaToken').placeholder = connector?.meta?.hasAccessToken ? '(kept — type to replace)' : '';
   document.getElementById('cnReplyToMeta').checked = connector ? !!connector.replyToMeta : false;
@@ -2234,6 +2247,8 @@ async function saveConnector() {
     enabled: document.getElementById('cnAutoReplyEnabled').checked,
     text: document.getElementById('cnAutoReplyText').value.trim(),
   };
+  const arExpiresLocal = document.getElementById('cnAutoReplyExpires').value;
+  if (arExpiresLocal) body.autoReply.expiresAt = new Date(arExpiresLocal).toISOString();
   const targets = document.getElementById('cnWebhookTargets').value
     .split('\n').map(s => s.trim()).filter(Boolean).map(url => ({ url }));
   if (targets.length) body.webhookTargets = targets;

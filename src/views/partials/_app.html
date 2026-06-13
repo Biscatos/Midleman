@@ -2651,7 +2651,15 @@
       </label>
       <div id="cnAutoReplySection" style="display:none;margin-top:8px">
         <textarea id="cnAutoReplyText" rows="2" maxlength="2000" placeholder="Obrigado pelo seu contacto! Em breve será atendido por um dos nossos agentes." style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></textarea>
-        <div style="margin-top:4px;font-size:11px;color:var(--text3)">Sent once per session — to the customer (via Meta/webhooks, like an agent reply with userType "AUTO") and mirrored into the GoContact chat so the agent sees it.</div>
+        <div style="display:flex;gap:12px;align-items:flex-end;margin-top:8px;flex-wrap:wrap">
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Active until <span style="color:var(--text3)">(blank = forever)</span></label>
+            <input id="cnAutoReplyExpires" type="datetime-local" style="padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          </div>
+          <button type="button" class="btn btn-sm" onclick="document.getElementById('cnAutoReplyExpires').value=''" style="margin-bottom:1px">Forever</button>
+          <span id="cnAutoReplyExpiredBadge" style="display:none;background:var(--red-bg);color:var(--red);padding:3px 8px;border-radius:4px;font-size:11px;margin-bottom:4px">Expired — not firing</span>
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text3)">Sent once per session — to the customer (via Meta/webhooks, like an agent reply with userType "AUTO") and mirrored into the GoContact chat so the agent sees it. After the expiry date it stops firing automatically.</div>
       </div>
 
       <!-- ── Agent replies ── -->
