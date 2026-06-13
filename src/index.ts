@@ -1822,6 +1822,9 @@ const server = Bun.serve({
                             enabled: input.autoReply.enabled === true,
                             text: String(input.autoReply.text || ''),
                         };
+                        if (input.autoReply.expiresAt && typeof input.autoReply.expiresAt === 'string') {
+                            connector.autoReply.expiresAt = input.autoReply.expiresAt;
+                        }
                     }
                     if (typeof input.pollIntervalMs === 'number') connector.pollIntervalMs = input.pollIntervalMs;
                     if (typeof input.sessionTtlMinutes === 'number') connector.sessionTtlMinutes = input.sessionTtlMinutes;

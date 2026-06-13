@@ -90,6 +90,10 @@ export interface GoContactConnector {
   autoReply?: {
     enabled: boolean;
     text: string;
+    /** ISO datetime after which the auto-reply stops firing automatically
+     *  (e.g. a campaign/holiday notice you might forget to turn off).
+     *  Unset = active forever while enabled. */
+    expiresAt?: string;
   };
 
   /** Poller cadence in ms (default 4000, min 1000). */
@@ -193,6 +197,9 @@ export function validateConnectorInput(input: unknown): string | null {
     if (ar.enabled) {
       if (!ar.text || typeof ar.text !== 'string' || !(ar.text as string).trim()) return '"autoReply.text" is required when auto-reply is enabled';
       if ((ar.text as string).length > 2000) return '"autoReply.text" must be 2000 characters or fewer';
+    }
+    if (ar.expiresAt !== undefined && ar.expiresAt !== '') {
+      if (typeof ar.expiresAt !== 'string' || isNaN(Date.parse(ar.expiresAt))) return '"autoReply.expiresAt" must be a valid ISO datetime (or empty for no expiry)';
     }
   }
 
