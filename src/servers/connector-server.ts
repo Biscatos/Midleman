@@ -289,30 +289,67 @@ function smoochAuthHeader(c: GoContactConnector): string {
 }
 
 /**
- * Parse a Sunshine Conversations webhook. CRITICAL: the conversation:message
- * trigger fires for EVERY author — including the `business` messages this
- * connector itself sends. We accept only `author.type === "user"`, otherwise
- * each agent reply we push to Smooch would loop straight back in.
+ * Parse a Sunshine Conversations webhook. Handles both shapes:
+ *   • v2:  { events: [{ type:"conversation:message", payload:{ conversation:{id},
+ *           message:{ author:{type}, content:{type,text,mediaUrl} } } }] }
+ *   • v1.x: { trigger:"message:appUser", conversation:{_id}, appUser:{…},
+ *           messages:[{ role, type, text, mediaUrl, mediaType, name, _id }] }
+ *
+ * CRITICAL anti-echo: Sunshine emits an event for EVERY author, including the
+ * `business` messages this connector itself sends. We accept only the customer
+ * (v2 author.type "user" / v1 role "appUser"), otherwise each agent reply we
+ * push to Smooch loops straight back into GoContact.
  */
 function parseSmoochPayload(payload: any): NormalizedInboundMessage[] {
     const out: NormalizedInboundMessage[] = [];
-    const events = Array.isArray(payload?.events) ? payload.events
-        : Array.isArray(payload?.messages) ? payload.messages.map((m: any) => ({ type: 'conversation:message', payload: m }))
-        : [];
+
+    // ── v1.x: top-level conversation + messages[] keyed by `role` ──
+    if (Array.isArray(payload?.messages) && !Array.isArray(payload?.events)) {
+        const conversationId = String(payload?.conversation?._id ?? payload?.conversation?.id ?? '');
+        const appUserName = [payload?.appUser?.givenName, payload?.appUser?.surname].filter(Boolean).join(' ').trim();
+        if (!conversationId) return out;
+        for (const m of payload.messages) {
+            if (String(m?.role || '').toLowerCase() !== 'appuser') continue; // anti-echo
+            const norm: NormalizedInboundMessage = {
+                chatId: conversationId,
+                displayName: String(m?.name || appUserName || conversationId),
+                messageId: String(m?._id || m?.source?.originalMessageId || ''),
+            };
+            const type = String(m?.type || '').toLowerCase();
+            if (type === 'text') {
+                norm.text = String(m?.text ?? '');
+            } else if (type === 'image' || type === 'file') {
+                if (m?.mediaUrl) {
+                    norm.file = {
+                        url: String(m.mediaUrl),
+                        mimetype: m.mediaType ? String(m.mediaType) : undefined,
+                        filename: m.altText ? String(m.altText) : undefined,
+                        size: typeof m.mediaSize === 'number' ? m.mediaSize : undefined,
+                    };
+                }
+                if (m?.text) norm.text = String(m.text);
+            } else {
+                continue;
+            }
+            if (norm.text || norm.file) out.push(norm);
+        }
+        return out;
+    }
+
+    // ── v2: events[].payload with author.type ──
+    const events = Array.isArray(payload?.events) ? payload.events : [];
     for (const ev of events) {
         if (ev?.type && ev.type !== 'conversation:message') continue;
         const p = ev?.payload ?? ev;
         const conversationId = String(p?.conversation?.id ?? p?.conversation?._id ?? '');
         const message = p?.message ?? p;
         const author = message?.author ?? {};
-        // Anti-echo: only the end customer's messages enter GoContact.
-        if (String(author.type || '').toLowerCase() !== 'user') continue;
+        if (String(author.type || '').toLowerCase() !== 'user') continue; // anti-echo
         if (!conversationId) continue;
 
-        const displayName = String(author.displayName || author.userId || conversationId);
         const norm: NormalizedInboundMessage = {
             chatId: conversationId,
-            displayName,
+            displayName: String(author.displayName || author.userId || conversationId),
             messageId: message?.id ? String(message.id) : undefined,
         };
         const content = message?.content ?? {};
@@ -320,10 +357,9 @@ function parseSmoochPayload(payload: any): NormalizedInboundMessage[] {
         if (type === 'text') {
             norm.text = String(content.text ?? '');
         } else if (type === 'image' || type === 'file') {
-            const mediaUrl = content.mediaUrl ? String(content.mediaUrl) : undefined;
-            if (mediaUrl) {
+            if (content.mediaUrl) {
                 norm.file = {
-                    url: mediaUrl,
+                    url: String(content.mediaUrl),
                     mimetype: content.mediaType ? String(content.mediaType) : undefined,
                     filename: content.altText ? String(content.altText) : undefined,
                     size: typeof content.mediaSize === 'number' ? content.mediaSize : undefined,
@@ -331,7 +367,7 @@ function parseSmoochPayload(payload: any): NormalizedInboundMessage[] {
             }
             if (content.text) norm.text = String(content.text);
         } else {
-            continue; // carousel/form/location/etc. — not handled
+            continue;
         }
         if (norm.text || norm.file) out.push(norm);
     }
