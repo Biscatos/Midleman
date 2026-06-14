@@ -15,6 +15,7 @@
  *   • Agent LEAVE closes the session and emits a `chat_closed` event.
  */
 
+import { log } from '../core/logger';
 import type { GoContactConnector, NormalizedInboundMessage, ConnectorWebhookTarget } from '../core/connector-types';
 import { GoContactClient, GoContactError, stripHtml, type GoAgentMessage, type GoFile } from '../gocontact/client';
 import {
@@ -195,7 +196,7 @@ function notifyConnectorError(
         subject: `Connector ${cs.connector.name}: ${subject}`,
         body,
         payload: { connector: cs.connector.name, channel: cs.connector.channel, ...extra },
-    }).catch(e => console.warn(`📧 [connector:${cs.connector.name}] notification pipeline error:`, e));
+    }).catch(e => log.warn(`📧 [connector:${cs.connector.name}] notification pipeline error:`, e));
 }
 
 function jsonResponse(status: number, body: Record<string, unknown>): Response {
@@ -643,9 +644,9 @@ async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage)
     try {
         await cs.client.sendClientMessage(session.accessKey, session.dialogGroupUuid, session.displayName, 'JOIN', '');
     } catch (err) {
-        console.warn(`⚠️ [connector:${c.name}] JOIN failed for ${msg.chatId}:`, err instanceof Error ? err.message : err);
+        log.warn(`⚠️ [connector:${c.name}] JOIN failed for ${msg.chatId}:`, err instanceof Error ? err.message : err);
     }
-    console.log(`💬 [connector:${c.name}] New webchat session for ${key} (${session.dialogGroupUuid})`);
+    log.info(`💬 [connector:${c.name}] New webchat session for ${key} (${session.dialogGroupUuid})`);
     return session;
 }
 
@@ -662,7 +663,7 @@ async function injectInbound(cs: ConnectorServer, session: ConnectorSession, msg
                 downloaded = await downloadDirectUrl(c, msg.file.url);
             } catch (err) {
                 if (!msg.file.metaMediaId) throw err;
-                console.warn(`⚠️ [connector:${c.name}] Direct media URL failed (${err instanceof Error ? err.message : err}) — falling back to Graph API media id`);
+                log.warn(`⚠️ [connector:${c.name}] Direct media URL failed (${err instanceof Error ? err.message : err}) — falling back to Graph API media id`);
             }
         }
         if (!downloaded) {
@@ -713,7 +714,7 @@ async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage
             if (!isDialogGone(err)) throw err;
             // GoContact dropped the dialog — recreate and retry once. Safe from
             // duplicates because we hold the per-customer lock here.
-            console.warn(`♻️ [connector:${c.name}] Dialog gone (404) for ${msg.chatId} — recreating session and retrying`);
+            log.warn(`♻️ [connector:${c.name}] Dialog gone (404) for ${msg.chatId} — recreating session and retrying`);
             deleteSession(c.name, session.chatId);
             dropSessionPollState(c.name, session.chatId);
             session = await ensureSession(cs, msg);
@@ -762,9 +763,9 @@ async function sendAutoReply(cs: ConnectorServer, session: ConnectorSession, tex
     };
     try {
         await fanoutAgentEvent(cs, session, event);
-        console.log(`🤖 [connector:${c.name}] Auto-reply sent to ${session.customerId}`);
+        log.info(`🤖 [connector:${c.name}] Auto-reply sent to ${session.customerId}`);
     } catch (err) {
-        console.warn(`⚠️ [connector:${c.name}] Auto-reply delivery failed:`, err instanceof Error ? err.message : err);
+        log.warn(`⚠️ [connector:${c.name}] Auto-reply delivery failed:`, err instanceof Error ? err.message : err);
     }
     // Mirror it into the GoContact chat (visible to the agent on pickup).
     try {
@@ -772,7 +773,7 @@ async function sendAutoReply(cs: ConnectorServer, session: ConnectorSession, tex
             session.accessKey, session.dialogGroupUuid,
             '🤖 Auto-Reply', 'MSG', text);
     } catch (err) {
-        console.warn(`⚠️ [connector:${c.name}] Auto-reply mirror to GoContact failed:`, err instanceof Error ? err.message : err);
+        log.warn(`⚠️ [connector:${c.name}] Auto-reply mirror to GoContact failed:`, err instanceof Error ? err.message : err);
     }
 }
 
@@ -883,7 +884,7 @@ async function fanoutAgentEvent(cs: ConnectorServer, session: ConnectorSession |
                     lastError: errMsg,
                     totalAttempts: 3,
                 });
-                console.warn(`📥 [connector:${c.name}] chat_closed → ${target.url} failed (${errMsg}) — parked in DLQ for replay`);
+                log.warn(`📥 [connector:${c.name}] chat_closed → ${target.url} failed (${errMsg}) — parked in DLQ for replay`);
             });
         }
         jobs.push(job);
@@ -917,11 +918,11 @@ async function pollSession(cs: ConnectorServer, session: ConnectorSession): Prom
             cs.stats.lastError = errMsg;
             if (m.uuid) {
                 const { attempts, delayMs } = recordDeliveryFailure(c.name, m.uuid);
-                console.error(`❌ [connector:${c.name}] Agent message ${m.uuid} for ${session.chatId} not delivered (attempt ${attempts}, next retry in ${Math.round(delayMs / 1000)}s):`, errMsg);
+                log.error(`❌ [connector:${c.name}] Agent message ${m.uuid} for ${session.chatId} not delivered (attempt ${attempts}, next retry in ${Math.round(delayMs / 1000)}s):`, errMsg);
                 // First failure: dump the raw episode so unexpected shapes
                 // (automatic messages, odd file objects) are diagnosable.
                 if (attempts === 1) {
-                    console.error(`   raw episode: ${JSON.stringify(m).slice(0, 500)}`);
+                    log.error(`   raw episode: ${JSON.stringify(m).slice(0, 500)}`);
                 }
                 // Notify once the failure persists (not on a single transient blip).
                 if (attempts >= 3) {
@@ -931,7 +932,7 @@ async function pollSession(cs: ConnectorServer, session: ConnectorSession): Prom
                         { chatId: session.chatId, messageUuid: m.uuid, attempts, lastError: errMsg });
                 }
             } else {
-                console.error(`❌ [connector:${c.name}] Agent message for ${session.chatId} not delivered:`, errMsg);
+                log.error(`❌ [connector:${c.name}] Agent message for ${session.chatId} not delivered:`, errMsg);
             }
         }
     }
@@ -946,7 +947,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
         try { await cs.client.markAsRead(session.accessKey, m.uuid); } catch { /* session dies anyway */ }
         deleteSession(c.name, session.chatId);
         dropSessionPollState(c.name, session.chatId);
-        console.log(`👋 [connector:${c.name}] Agent closed chat ${session.chatId}`);
+        log.info(`👋 [connector:${c.name}] Agent closed chat ${session.chatId}`);
         const event: AgentEvent = {
             connector: c.name, channel: c.channel, event: 'chat_closed', reason: 'agent',
             chatId: session.customerId, displayName: session.displayName,
@@ -954,7 +955,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
         };
         // Best-effort: the session is gone either way.
         try { await fanoutAgentEvent(cs, null, event); } catch (err) {
-            console.warn(`⚠️ [connector:${c.name}] chat_closed fan-out failed:`, err instanceof Error ? err.message : err);
+            log.warn(`⚠️ [connector:${c.name}] chat_closed fan-out failed:`, err instanceof Error ? err.message : err);
         }
         return;
     }
@@ -962,7 +963,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
     // Agent joined the conversation — notify the webhooks (fire-and-forget).
     if (m.msgtype === 'JOIN') {
         try { if (m.uuid) await cs.client.markAsRead(session.accessKey, m.uuid); } catch { /* non-critical */ }
-        console.log(`🙋 [connector:${c.name}] Agent "${m.displayname}" joined chat ${session.chatId}`);
+        log.info(`🙋 [connector:${c.name}] Agent "${m.displayname}" joined chat ${session.chatId}`);
         const event: AgentEvent = {
             connector: c.name, channel: c.channel, event: 'agent_joined',
             chatId: session.customerId, displayName: session.displayName,
@@ -970,7 +971,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
             message: { uuid: m.uuid, text: null, timestamp: m.timestamp || Date.now(), agentName: m.displayname, userType: m.usertype || undefined, file: null },
         };
         fanoutAgentEvent(cs, session, event).catch(err =>
-            console.warn(`⚠️ [connector:${c.name}] agent_joined fan-out failed:`, err instanceof Error ? err.message : err));
+            log.warn(`⚠️ [connector:${c.name}] agent_joined fan-out failed:`, err instanceof Error ? err.message : err));
         return;
     }
 
@@ -987,7 +988,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
                 return; // wait — do NOT mark as read yet
             }
             pendingFileFirstSeen.delete(key);
-            console.log(`🚮 [connector:${c.name}] Dropping FILESEND ${m.uuid} on chat ${session.chatId} — no url after ${PENDING_FILE_GRACE_MS / 1000}s (upload failed/rejected)`);
+            log.info(`🚮 [connector:${c.name}] Dropping FILESEND ${m.uuid} on chat ${session.chatId} — no url after ${PENDING_FILE_GRACE_MS / 1000}s (upload failed/rejected)`);
             await cs.client.markAsRead(session.accessKey, m.uuid);
             clearDeliveryFailure(c.name, m.uuid);
         }
@@ -998,7 +999,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
     if (m.msgtype !== 'MSG' && m.msgtype !== 'FILESEND') {
         // Unknown episode type — surface it so we learn what GoContact emits
         // (typing? read receipts?). Mark as read so it doesn't repeat forever.
-        console.log(`❓ [connector:${c.name}] Unhandled agent msgtype "${m.msgtype}" (usertype=${m.usertype}) on chat ${session.chatId} — ignored`);
+        log.info(`❓ [connector:${c.name}] Unhandled agent msgtype "${m.msgtype}" (usertype=${m.usertype}) on chat ${session.chatId} — ignored`);
         try { if (m.uuid) await cs.client.markAsRead(session.accessKey, m.uuid); } catch { /* non-critical */ }
         return;
     }
@@ -1041,7 +1042,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
     if (c.channel === 'meta-whatsapp' && directReplyEnabled(c) && session.lastInboundMsgId && session.phoneNumberId) {
         sendMetaReadReceipt(c, session.phoneNumberId, session.lastInboundMsgId)
             .then(() => { session.lastInboundMsgId = ''; updateSessionLastInbound(c.name, session.chatId, ''); })
-            .catch(err => console.warn(`⚠️ [connector:${c.name}] read receipt failed:`, err instanceof Error ? err.message : err));
+            .catch(err => log.warn(`⚠️ [connector:${c.name}] read receipt failed:`, err instanceof Error ? err.message : err));
     }
 
     // Only after successful delivery — mark-as-read is the dedup/ack.
@@ -1056,7 +1057,7 @@ async function pollTick(cs: ConnectorServer): Promise<void> {
         const ttl = c.sessionTtlMinutes ?? 120;
         const expired = purgeExpiredSessions(c.name, ttl);
         for (const s of expired) {
-            console.log(`⌛ [connector:${c.name}] Session ${s.chatId} expired after ${ttl}min idle`);
+            log.info(`⌛ [connector:${c.name}] Session ${s.chatId} expired after ${ttl}min idle`);
             dropSessionPollState(c.name, s.chatId);
             const event: AgentEvent = {
                 connector: c.name, channel: c.channel, event: 'chat_closed', reason: 'expired',
@@ -1064,7 +1065,7 @@ async function pollTick(cs: ConnectorServer): Promise<void> {
                 phoneNumberId: s.phoneNumberId || undefined, message: null,
             };
             fanoutAgentEvent(cs, null, event).catch(err =>
-                console.warn(`⚠️ [connector:${c.name}] chat_closed(expired) fan-out failed:`, err instanceof Error ? err.message : err));
+                log.warn(`⚠️ [connector:${c.name}] chat_closed(expired) fan-out failed:`, err instanceof Error ? err.message : err));
         }
         // Adaptive scheduling: only poll the sessions that are due.
         const now = Date.now();
@@ -1095,7 +1096,7 @@ async function pollTick(cs: ConnectorServer): Promise<void> {
         }
     } catch (err) {
         cs.stats.lastError = err instanceof Error ? err.message : String(err);
-        console.error(`❌ [connector:${cs.connector.name}] poll tick error:`, cs.stats.lastError);
+        log.error(`❌ [connector:${cs.connector.name}] poll tick error:`, cs.stats.lastError);
         // A poll-tick failure usually means the whole connector is down (bad
         // credentials, GoContact unreachable) — worth a notification.
         notifyConnectorError(cs, 'connector.poll_error', 'polling agent replies failed',
@@ -1122,10 +1123,10 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
     if (req.method === 'GET' && url.searchParams.get('hub.mode') === 'subscribe') {
         const verifyToken = url.searchParams.get('hub.verify_token');
         if (c.verifyToken && !timingSafeEqualStr(verifyToken, c.verifyToken)) {
-            console.warn(`❌ [connector:${c.name}] Meta verification failed: invalid hub.verify_token`);
+            log.warn(`❌ [connector:${c.name}] Meta verification failed: invalid hub.verify_token`);
             return new Response('Invalid verify_token', { status: 403 });
         }
-        console.log(`✅ [connector:${c.name}] Answered Meta webhook verification challenge`);
+        log.info(`✅ [connector:${c.name}] Answered Meta webhook verification challenge`);
         return new Response(url.searchParams.get('hub.challenge') || '', { status: 200 });
     }
 
@@ -1135,7 +1136,7 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
 
     const clientIp = resolveClientIp(reqPeerIp.get(req), req.headers.get('x-forwarded-for'), getTrustProxyConfig());
     if (!isIpAllowed(clientIp, c.allowedIps)) {
-        console.warn(`🚫 [connector:${c.name}] blocked IP ${clientIp}`);
+        log.warn(`🚫 [connector:${c.name}] blocked IP ${clientIp}`);
         return jsonResponse(401, { error: 'Unauthorized', message: 'Your IP address is not allowed.' });
     }
 
@@ -1160,7 +1161,7 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
         const sigOk = !!smoochSecret &&
             verifySmoochSignature(smoochSecret, rawBody, req.headers.get('X-Smooch-Signature'));
         if (!tokenOk && !sigOk) {
-            console.warn(`❌ [connector:${c.name}] Unauthorized POST from ${clientIp}: missing/invalid token or signature`);
+            log.warn(`❌ [connector:${c.name}] Unauthorized POST from ${clientIp}: missing/invalid token or signature`);
             return jsonResponse(401, { error: 'Unauthorized', message: 'Valid token or webhook signature is required' });
         }
     }
@@ -1187,7 +1188,7 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
             (Array.isArray(payload?.entry) &&
                 payload.entry.some((e: any) => e?.changes?.some((ch: any) => Array.isArray(ch?.value?.statuses)))));
         if (!isMetaStatusPayload) {
-            console.warn(`⚠️ [connector:${c.name}] Payload produced 0 messages (channel=${c.channel}). Body preview: ${rawBody.slice(0, 300)}`);
+            log.warn(`⚠️ [connector:${c.name}] Payload produced 0 messages (channel=${c.channel}). Body preview: ${rawBody.slice(0, 300)}`);
         }
     }
 
@@ -1200,7 +1201,7 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
                 } catch (err) {
                     const errMsg = err instanceof Error ? err.message : String(err);
                     cs.stats.lastError = errMsg;
-                    console.error(`❌ [connector:${c.name}] Failed to inject message from ${msg.chatId} into GoContact:`, errMsg);
+                    log.error(`❌ [connector:${c.name}] Failed to inject message from ${msg.chatId} into GoContact:`, errMsg);
                     notifyConnectorError(cs, 'connector.inbound_failed', 'failed to inject a customer message into GoContact',
                         `Chat ${msg.chatId}\nLast error: ${errMsg}`, { chatId: msg.chatId, lastError: errMsg });
                     logRequest({
@@ -1268,14 +1269,14 @@ export function startConnectorServer(connector: GoContactConnector): ConnectorSe
                 try {
                     return await handleInbound(req, cs);
                 } catch (error) {
-                    console.error(`❌ [connector:${connector.name}] Error:`, error);
+                    log.error(`❌ [connector:${connector.name}] Error:`, error);
                     return jsonResponse(500, { error: 'Internal Server Error' });
                 } finally {
                     cs.activeRequests--;
                 }
             },
             error(error) {
-                console.error(`[connector:${connector.name}] Server error:`, error);
+                log.error(`[connector:${connector.name}] Server error:`, error);
                 return jsonResponse(500, { error: 'Internal Server Error' });
             },
         });
@@ -1283,9 +1284,9 @@ export function startConnectorServer(connector: GoContactConnector): ConnectorSe
         // The scheduler ticks every second; each session is only actually
         // polled when due per its adaptive interval (fast..8×fast, max 60s).
         cs.pollTimer = setInterval(() => { void pollTick(cs); }, 1000);
-        console.log(`💬 Connector "${connector.name}" (${connector.channel}) on :${cs.server.port} — adaptive polling ${fastIntervalMs(connector)}–${maxIntervalMs(connector)}ms`);
+        log.info(`💬 Connector "${connector.name}" (${connector.channel}) on :${cs.server.port} — adaptive polling ${fastIntervalMs(connector)}–${maxIntervalMs(connector)}ms`);
     } else {
-        console.log(`💬 Connector "${connector.name}" loaded (disabled)`);
+        log.info(`💬 Connector "${connector.name}" loaded (disabled)`);
     }
 
     servers.set(connector.name, cs);
@@ -1309,7 +1310,7 @@ export async function stopConnectorServer(name: string, graceful = true): Promis
     // instance and keep getting 503s after a restart.
     cs.server?.stop(true);
     servers.delete(name);
-    console.log(`🛑 Connector "${name}" stopped`);
+    log.info(`🛑 Connector "${name}" stopped`);
 }
 
 export async function stopAllConnectors(): Promise<void> {
@@ -1352,7 +1353,7 @@ export async function closeConnectorSession(connectorName: string, chatId: strin
     try {
         await cs.client.sendClientMessage(session.accessKey, session.dialogGroupUuid, session.displayName, 'LEAVE', '');
     } catch (err) {
-        console.warn(`⚠️ [connector:${connectorName}] LEAVE for ${chatId} failed:`, err instanceof Error ? err.message : err);
+        log.warn(`⚠️ [connector:${connectorName}] LEAVE for ${chatId} failed:`, err instanceof Error ? err.message : err);
     }
     deleteSession(connectorName, chatId);
     dropSessionPollState(connectorName, chatId);
@@ -1362,6 +1363,6 @@ export async function closeConnectorSession(connectorName: string, chatId: strin
         phoneNumberId: session.phoneNumberId || undefined, message: null,
     };
     fanoutAgentEvent(cs, null, event).catch(err =>
-        console.warn(`⚠️ [connector:${connectorName}] chat_closed(admin) fan-out failed:`, err instanceof Error ? err.message : err));
+        log.warn(`⚠️ [connector:${connectorName}] chat_closed(admin) fan-out failed:`, err instanceof Error ? err.message : err));
     return { ok: true };
 }

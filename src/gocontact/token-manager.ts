@@ -18,6 +18,7 @@
  * the token war back. See gocontact-connector memory note.
  */
 
+import { log } from '../core/logger';
 import type { GoToken } from './client';
 
 interface Entry {

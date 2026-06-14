@@ -18,6 +18,7 @@
  *   POST …/upload                                 (multipart file upload)
  */
 
+import { log } from '../core/logger';
 import type { GoContactSettings } from '../core/connector-types';
 import { getSharedToken, refreshIfCurrent } from './token-manager';
 
@@ -252,7 +253,7 @@ export class GoContactClient {
                 if (!url && String(m.msgtype ?? m.MsgType ?? '') === 'FILESEND') {
                     // Discovery aid: dump the untouched episode so we can spot
                     // where (or whether) the download URL actually lives.
-                    console.log(`🔍 [gocontact] FILESEND without url — original episode: ${JSON.stringify(m).slice(0, 800)}`);
+                    log.info(`🔍 [gocontact] FILESEND without url — original episode: ${JSON.stringify(m).slice(0, 800)}`);
                 }
                 file = {
                     filename: String(rawFile.filename ?? rawFile.FileName ?? rawFile.name ?? rawFile.Name ?? 'file'),

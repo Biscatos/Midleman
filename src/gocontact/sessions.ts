@@ -10,6 +10,7 @@
  * reading agent replies for every active session after a reboot.
  */
 
+import { log } from '../core/logger';
 import { Database } from 'bun:sqlite';
 import { resolve } from 'path';
 import { mkdirSync } from 'fs';
@@ -77,7 +78,7 @@ export function initConnectorSessions(dataDir: string): void {
     try { db.exec("ALTER TABLE sessions ADD COLUMN last_inbound_msg_id TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
     try { db.exec("ALTER TABLE sessions ADD COLUMN customer_id TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
     try { db.exec("ALTER TABLE sessions ADD COLUMN auto_replied INTEGER NOT NULL DEFAULT 0"); } catch { /* already present */ }
-    console.log(`💬 GoContact session store: ${dbPath}`);
+    log.info(`💬 GoContact session store: ${dbPath}`);
 }
 
 export function shutdownConnectorSessions(): void {
