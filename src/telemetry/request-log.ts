@@ -182,8 +182,8 @@ function buildParams(entry: RequestLogEntry) {
         $profileName: entry.profileName || null,
         $targetName: entry.targetName || null,
         $method: entry.method,
-        $path: entry.path,
-        $targetUrl: entry.targetUrl,
+        $path: redactUrlSecrets(entry.path),
+        $targetUrl: redactUrlSecrets(entry.targetUrl),
         $clientIp: entry.clientIp || null,
         $reqHeaders: JSON.stringify(entry.reqHeaders),
         $reqBody: entry.reqBody ? truncateBody(entry.reqBody) : null,
@@ -194,7 +194,7 @@ function buildParams(entry: RequestLogEntry) {
         $resBody: entry.resBody ? truncateBody(entry.resBody) : null,
         $resBodySize: entry.resBodySize || 0,
         $durationMs: entry.durationMs || null,
-        $error: entry.error || null,
+        $error: redactUrlSecrets(entry.error) || null,
         $attempts: entry.attempts && entry.attempts.length > 0 ? JSON.stringify(entry.attempts) : null,
     };
 }
@@ -316,6 +316,27 @@ export function headersToRecord(headers: Headers): Record<string, string> {
         result[key] = REDACTED_HEADERS.has(key.toLowerCase()) ? '[redacted]' : value;
     });
     return result;
+}
+
+// Query-string params that carry secrets and must never be persisted to the
+// request log (they show up in path/targetUrl when a caller passes a token in
+// the URL, e.g. ?token=, ?key=, ?hub.verify_token=).
+const SECRET_QUERY_PARAMS = new Set([
+    'token', 'key', 'access_key', 'accesskey', 'apikey', 'api_key',
+    'verify_token', 'hub.verify_token', 'secret', 'password', 'passwd', 'pwd',
+    'signature', 'sig', 'auth', 'authorization', 'access_token',
+]);
+
+/** Replace secret query-string values with [redacted] in any path or URL.
+ *  Works on bare paths ("/x?token=…") and full URLs alike, leaving everything
+ *  else untouched. */
+export function redactUrlSecrets(s: string | null | undefined): string | null {
+    if (!s || s.indexOf('=') < 0) return s ?? null;
+    return s.replace(/([?&])([^=&#]+)=([^&#]*)/g, (full, sep: string, rawKey: string) => {
+        let name = rawKey;
+        try { name = decodeURIComponent(rawKey); } catch { /* keep raw */ }
+        return SECRET_QUERY_PARAMS.has(name.toLowerCase()) ? `${sep}${rawKey}=[redacted]` : full;
+    });
 }
 
 // ─── Query API ──────────────────────────────────────────────────────────────
