@@ -58,6 +58,10 @@ export interface GoSessionHandles {
 export class GoContactError extends Error {
     /** Upstream HTTP status, when the failure came from a response. */
     readonly status?: number;
+    /** True when the upstream signalled the dialog/session no longer exists
+     *  (HTTP 404, or a 200 body with `error: true`). The connector treats this
+     *  as "dialog gone" and recreates the session before retrying once. */
+    dialogGone?: boolean;
     constructor(step: string, detail: string, status?: number) {
         super(`GoContact ${step} failed: ${detail}`);
         this.name = 'GoContactError';
@@ -234,6 +238,16 @@ export class GoContactClient {
                 },
             }),
         }, `client-message (${msgType})`);
+        // GoContact answers 2xx even when the dialog has been closed/expired
+        // server-side, signalling it with `error: true` in the body (same
+        // convention as new-client-messages). Treat that as "dialog gone" so
+        // the connector recreates the session and retries — otherwise the
+        // message is silently dropped (episodeUuid would just be null).
+        if (data?.error === true) {
+            const e = new GoContactError(`client-message (${msgType})`, data.message || 'upstream returned error=true (dialog likely closed/expired)');
+            e.dialogGone = true;
+            throw e;
+        }
         return { episodeUuid: data?.data?.episode?.uuid ?? null };
     }
 

@@ -602,9 +602,11 @@ function withSessionLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
     return result;
 }
 
-/** True when an error is GoContact saying the dialog no longer exists (404). */
+/** True when an error is GoContact saying the dialog no longer exists:
+ *  either an HTTP 404, or a 2xx body flagged `error: true` (closed/expired
+ *  dialog) that sendClientMessage surfaces as `dialogGone`. */
 function isDialogGone(err: unknown): boolean {
-    return err instanceof GoContactError && err.status === 404;
+    return err instanceof GoContactError && (err.status === 404 || err.dialogGone === true);
 }
 
 /** Get a live session or bootstrap a new one (token → … → dialog group + JOIN). */
