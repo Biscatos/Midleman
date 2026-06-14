@@ -15,17 +15,20 @@
  *   • Agent LEAVE closes the session and emits a `chat_closed` event.
  */
 
+import { log } from '../core/logger';
 import type { GoContactConnector, NormalizedInboundMessage, ConnectorWebhookTarget } from '../core/connector-types';
-import { GoContactClient, stripHtml, type GoAgentMessage, type GoFile } from '../gocontact/client';
+import { GoContactClient, GoContactError, stripHtml, type GoAgentMessage, type GoFile } from '../gocontact/client';
 import {
-    getSession, upsertSession, touchSession, deleteSession, updateSessionToken,
+    getSession, upsertSession, touchSession, deleteSession,
     updateSessionLastInbound, markSessionAutoReplied, listActiveSessions, purgeExpiredSessions, type ConnectorSession,
 } from '../gocontact/sessions';
 import { logRequest, headersToRecord } from '../telemetry/request-log';
 import { enqueueFailedFanout } from './webhook-server';
+import { emitNotificationEvent, hasAnyRuleMatching } from '../core/notifications';
 import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { assertResolvedHostAllowed, type SsrfPolicyOverride } from '../core/ssrf-guard';
 import { timingSafeEqualStr } from '../auth/auth';
+import { createHmac } from 'crypto';
 
 // ─── Types & State ───────────────────────────────────────────────────────────
 
@@ -137,6 +140,63 @@ function dropSessionPollState(connector: string, chatId: string): void {
 
 function ssrfPolicy(c: GoContactConnector): SsrfPolicyOverride {
     return { allowPrivate: c.allowPrivateTargets, allowedCidrs: c.targetAllowedCidrs };
+}
+
+/** Direct-reply flag, honouring the legacy `replyToMeta` alias. */
+function directReplyEnabled(c: GoContactConnector): boolean {
+    return c.directReply === true || c.replyToMeta === true;
+}
+
+/** True for a usable http(s) media URL (guards against null/empty/relative). */
+function isHttpUrl(u: string | null | undefined): boolean {
+    return typeof u === 'string' && /^https?:\/\//i.test(u);
+}
+
+// ─── Connector error notifications ────────────────────────────────────────────
+// Connector errors fire in hot loops (poll every few seconds, every failed
+// delivery). Route them through Midleman's notification pipeline, but throttle
+// per (connector, category) so a persistently broken connector can't spam
+// email/SMS — at most one notification per category per cooldown window.
+
+const NOTIFY_COOLDOWN_MS = (() => {
+    const n = parseInt(process.env.CONNECTOR_NOTIFY_COOLDOWN_MS || '', 10);
+    return Number.isFinite(n) && n > 0 ? n : 10 * 60_000; // 10 min default
+})();
+const lastNotifiedAt = new Map<string, number>();
+
+/**
+ * Report a connector error through the notification pipeline (category
+ * "connector.*", severity warning). Cheap no-op when no rule matches; throttled
+ * per (connector, category). Fire-and-forget — never blocks the hot path.
+ */
+function notifyConnectorError(
+    cs: ConnectorServer, category: string, subject: string, detail: string,
+    extra: Record<string, unknown> = {},
+): void {
+    const severity = 'warning' as const;
+    if (!hasAnyRuleMatching(category, severity)) return;
+    const key = `${cs.connector.name}:${category}`;
+    const now = Date.now();
+    if (now - (lastNotifiedAt.get(key) ?? 0) < NOTIFY_COOLDOWN_MS) return;
+    lastNotifiedAt.set(key, now);
+
+    const body = [
+        `Connector "${cs.connector.name}" (${cs.connector.channel}) reported an error.`,
+        ``,
+        subject,
+        ``,
+        detail,
+        ``,
+        `Further "${category}" alerts for this connector are muted for ${Math.round(NOTIFY_COOLDOWN_MS / 60_000)} min.`,
+        `Open the dashboard to inspect: /admin#connectors`,
+    ].join('\n');
+
+    emitNotificationEvent({
+        category, severity,
+        subject: `Connector ${cs.connector.name}: ${subject}`,
+        body,
+        payload: { connector: cs.connector.name, channel: cs.connector.channel, ...extra },
+    }).catch(e => log.warn(`📧 [connector:${cs.connector.name}] notification pipeline error:`, e));
 }
 
 function jsonResponse(status: number, body: Record<string, unknown>): Response {
@@ -269,6 +329,153 @@ function parseGenericPayload(payload: any): NormalizedInboundMessage[] {
     return out;
 }
 
+// ─── Smooch / Sunshine Conversations adapter ─────────────────────────────────
+
+function smoochBase(c: GoContactConnector): string {
+    const b = (c.smooch?.baseUrl || 'https://api.smooch.io').replace(/\/$/, '');
+    return b;
+}
+
+function smoochAuthHeader(c: GoContactConnector): string {
+    const s = c.smooch!;
+    if (s.bearerToken) return `Bearer ${s.bearerToken}`;
+    return 'Basic ' + Buffer.from(`${s.keyId}:${s.keySecret}`).toString('base64');
+}
+
+/**
+ * Parse a Sunshine Conversations webhook. Handles both shapes:
+ *   • v2:  { events: [{ type:"conversation:message", payload:{ conversation:{id},
+ *           message:{ author:{type}, content:{type,text,mediaUrl} } } }] }
+ *   • v1.x: { trigger:"message:appUser", conversation:{_id}, appUser:{…},
+ *           messages:[{ role, type, text, mediaUrl, mediaType, name, _id }] }
+ *
+ * CRITICAL anti-echo: Sunshine emits an event for EVERY author, including the
+ * `business` messages this connector itself sends. We accept only the customer
+ * (v2 author.type "user" / v1 role "appUser"), otherwise each agent reply we
+ * push to Smooch loops straight back into GoContact.
+ */
+function parseSmoochPayload(payload: any): NormalizedInboundMessage[] {
+    const out: NormalizedInboundMessage[] = [];
+
+    // ── v1.x: top-level conversation + messages[] keyed by `role` ──
+    if (Array.isArray(payload?.messages) && !Array.isArray(payload?.events)) {
+        const conversationId = String(payload?.conversation?._id ?? payload?.conversation?.id ?? '');
+        const appUserName = [payload?.appUser?.givenName, payload?.appUser?.surname].filter(Boolean).join(' ').trim();
+        if (!conversationId) return out;
+        for (const m of payload.messages) {
+            if (String(m?.role || '').toLowerCase() !== 'appuser') continue; // anti-echo
+            const norm: NormalizedInboundMessage = {
+                chatId: conversationId,
+                displayName: String(m?.name || appUserName || conversationId),
+                messageId: String(m?._id || m?.source?.originalMessageId || ''),
+            };
+            const type = String(m?.type || '').toLowerCase();
+            if (type === 'text') {
+                norm.text = String(m?.text ?? '');
+            } else if (type === 'image' || type === 'file') {
+                if (m?.mediaUrl) {
+                    norm.file = {
+                        url: String(m.mediaUrl),
+                        mimetype: m.mediaType ? String(m.mediaType) : undefined,
+                        filename: m.altText ? String(m.altText) : undefined,
+                        size: typeof m.mediaSize === 'number' ? m.mediaSize : undefined,
+                    };
+                }
+                if (m?.text) norm.text = String(m.text);
+            } else {
+                continue;
+            }
+            if (norm.text || norm.file) out.push(norm);
+        }
+        return out;
+    }
+
+    // ── v2: events[].payload with author.type ──
+    const events = Array.isArray(payload?.events) ? payload.events : [];
+    for (const ev of events) {
+        if (ev?.type && ev.type !== 'conversation:message') continue;
+        const p = ev?.payload ?? ev;
+        const conversationId = String(p?.conversation?.id ?? p?.conversation?._id ?? '');
+        const message = p?.message ?? p;
+        const author = message?.author ?? {};
+        if (String(author.type || '').toLowerCase() !== 'user') continue; // anti-echo
+        if (!conversationId) continue;
+
+        const norm: NormalizedInboundMessage = {
+            chatId: conversationId,
+            displayName: String(author.displayName || author.userId || conversationId),
+            messageId: message?.id ? String(message.id) : undefined,
+        };
+        const content = message?.content ?? {};
+        const type = String(content.type || '').toLowerCase();
+        if (type === 'text') {
+            norm.text = String(content.text ?? '');
+        } else if (type === 'image' || type === 'file') {
+            if (content.mediaUrl) {
+                norm.file = {
+                    url: String(content.mediaUrl),
+                    mimetype: content.mediaType ? String(content.mediaType) : undefined,
+                    filename: content.altText ? String(content.altText) : undefined,
+                    size: typeof content.mediaSize === 'number' ? content.mediaSize : undefined,
+                };
+            }
+            if (content.text) norm.text = String(content.text);
+        } else {
+            continue;
+        }
+        if (norm.text || norm.file) out.push(norm);
+    }
+    return out;
+}
+
+/** Send an agent reply to the customer through Sunshine Conversations. */
+async function sendToSmooch(c: GoContactConnector, conversationId: string, text: string | null, file: { url: string; mimetype: string; filename?: string } | null): Promise<void> {
+    const s = c.smooch;
+    if (!s?.appId || (!s.bearerToken && !(s.keyId && s.keySecret))) throw new Error('Smooch credentials not configured');
+    let content: Record<string, unknown>;
+    if (file && isHttpUrl(file.url)) {
+        content = {
+            type: file.mimetype.startsWith('image/') ? 'image' : 'file',
+            mediaUrl: file.url,
+            ...(file.filename ? { altText: file.filename } : {}),
+            ...(text ? { text } : {}),
+        };
+    } else {
+        // No usable media URL → degrade to a text note instead of sending an
+        // invalid mediaUrl (which Smooch rejects with a 400 uri-format error).
+        const body = text || (file?.filename ? `📎 ${file.filename}` : '');
+        if (!body) throw new Error('Nothing to send (no text and no usable media URL)');
+        content = { type: 'text', text: body };
+    }
+    const url = `${smoochBase(c)}/v2/apps/${encodeURIComponent(s.appId)}/conversations/${encodeURIComponent(conversationId)}/messages`;
+    const reqBody = JSON.stringify({ author: { type: 'business' }, content });
+    const started = performance.now();
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Authorization': smoochAuthHeader(c), 'Content-Type': 'application/json' },
+        body: reqBody,
+        signal: AbortSignal.timeout(30_000),
+    });
+    const resText = await res.text().catch(() => '');
+    logRequest({
+        requestId: crypto.randomUUID(), type: 'connector-fanout', targetName: c.name,
+        method: 'POST', path: '/smooch/reply', targetUrl: url,
+        reqHeaders: { 'Content-Type': 'application/json' }, reqBody, reqBodySize: reqBody.length,
+        resStatus: res.status, resStatusText: res.statusText,
+        resBody: resText.slice(0, 2000), durationMs: performance.now() - started,
+    });
+    if (!res.ok) {
+        throw new Error(`Smooch send failed: HTTP ${res.status} ${resText.slice(0, 300)}`);
+    }
+}
+
+/** Verify the X-Smooch-Signature header (HMAC-SHA256 of the raw body, base64). */
+function verifySmoochSignature(secret: string, rawBody: string, signature: string | null): boolean {
+    if (!signature) return false;
+    const expected = createHmac('sha256', secret).update(rawBody).digest('base64');
+    return timingSafeEqualStr(expected, signature.trim());
+}
+
 /** Resolve a Meta media id to a downloadable URL + bytes (Graph API, two hops). */
 async function downloadMetaMedia(c: GoContactConnector, mediaId: string): Promise<{ bytes: Uint8Array; mimetype: string; filename?: string }> {
     if (!c.meta?.accessToken) throw new Error('Meta accessToken not configured — cannot download media');
@@ -317,6 +524,11 @@ async function downloadDirectUrl(c: GoContactConnector, url: string): Promise<{ 
 async function sendToMeta(c: GoContactConnector, chatId: string, text: string | null, file: { url: string; mimetype: string; filename?: string } | null, sessionPhoneNumberId?: string): Promise<void> {
     const phoneNumberId = sessionPhoneNumberId || c.meta?.phoneNumberId;
     if (!c.meta?.accessToken || !phoneNumberId) throw new Error('Meta credentials not configured (accessToken + phone_number_id)');
+    // Degrade to text if there's no usable media URL (Meta rejects an empty link).
+    if (file && !isHttpUrl(file.url)) {
+        text = text || (file.filename ? `📎 ${file.filename}` : text);
+        file = null;
+    }
     let body: Record<string, unknown>;
     if (file) {
         const kind = file.mimetype.startsWith('image/') ? 'image'
@@ -330,15 +542,25 @@ async function sendToMeta(c: GoContactConnector, chatId: string, text: string | 
     } else {
         body = { messaging_product: 'whatsapp', recipient_type: 'individual', to: chatId, type: 'text', text: { body: text ?? '' } };
     }
-    const res = await fetch(`${graphBase(c)}/${phoneNumberId}/messages`, {
+    const metaUrl = `${graphBase(c)}/${phoneNumberId}/messages`;
+    const reqBody = JSON.stringify(body);
+    const started = performance.now();
+    const res = await fetch(metaUrl, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${c.meta.accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: reqBody,
         signal: AbortSignal.timeout(30_000),
     });
+    const resText = await res.text().catch(() => '');
+    logRequest({
+        requestId: crypto.randomUUID(), type: 'connector-fanout', targetName: c.name,
+        method: 'POST', path: '/meta/reply', targetUrl: metaUrl,
+        reqHeaders: { 'Content-Type': 'application/json' }, reqBody, reqBodySize: reqBody.length,
+        resStatus: res.status, resStatusText: res.statusText,
+        resBody: resText.slice(0, 2000), durationMs: performance.now() - started,
+    });
     if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        throw new Error(`Meta send failed: HTTP ${res.status} ${errText.slice(0, 300)}`);
+        throw new Error(`Meta send failed: HTTP ${res.status} ${resText.slice(0, 300)}`);
     }
 }
 
@@ -366,6 +588,25 @@ function sessionKeyFor(msg: NormalizedInboundMessage): string {
     return msg.phoneNumberId ? `${msg.phoneNumberId}:${msg.chatId}` : msg.chatId;
 }
 
+// Per-(connector, session) mutex. Serializes inbound handling for one customer
+// so two concurrent messages can never both create a dialog group (no
+// duplicate sessions) — and, as a bonus, preserves message order per customer.
+const sessionLocks = new Map<string, Promise<unknown>>();
+function withSessionLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = (sessionLocks.get(key) ?? Promise.resolve()).catch(() => {});
+    const result = prev.then(fn);
+    const tail = result.catch(() => {});
+    sessionLocks.set(key, tail);
+    // Drop the map entry once idle (this is still the tail and it has settled).
+    tail.then(() => { if (sessionLocks.get(key) === tail) sessionLocks.delete(key); });
+    return result;
+}
+
+/** True when an error is GoContact saying the dialog no longer exists (404). */
+function isDialogGone(err: unknown): boolean {
+    return err instanceof GoContactError && err.status === 404;
+}
+
 /** Get a live session or bootstrap a new one (token → … → dialog group + JOIN). */
 async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage): Promise<ConnectorSession> {
     const c = cs.connector;
@@ -373,13 +614,9 @@ async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage)
     const key = sessionKeyFor(msg);
     const existing = getSession(c.name, key);
 
+    // The bearer token is shared per user by the token manager, so a live
+    // session needs no token upkeep — just reuse it.
     if (existing && Date.now() - existing.lastActivityAt < ttl * 60_000) {
-        // Refresh the bearer token in place when it is close to expiry.
-        if (!cs.client.tokenIsFresh(existing.token)) {
-            const token = await cs.client.requestToken();
-            existing.token = token;
-            updateSessionToken(c.name, key, token);
-        }
         return existing;
     }
 
@@ -391,7 +628,6 @@ async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage)
         chatId: key,
         customerId: msg.chatId,
         displayName: msg.displayName,
-        token: handles.token,
         domainUuid: handles.domainUuid,
         accessKey: handles.accessKey,
         dialogGroupUuid: handles.dialogGroupUuid,
@@ -406,19 +642,18 @@ async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage)
 
     // Announce the customer in the chat (mirrors the original JOIN episode).
     try {
-        await cs.client.sendClientMessage(session.token, session.accessKey, session.dialogGroupUuid, session.displayName, 'JOIN', '');
+        await cs.client.sendClientMessage(session.accessKey, session.dialogGroupUuid, session.displayName, 'JOIN', '');
     } catch (err) {
-        console.warn(`⚠️ [connector:${c.name}] JOIN failed for ${msg.chatId}:`, err instanceof Error ? err.message : err);
+        log.warn(`⚠️ [connector:${c.name}] JOIN failed for ${msg.chatId}:`, err instanceof Error ? err.message : err);
     }
-    console.log(`💬 [connector:${c.name}] New webchat session for ${key} (${session.dialogGroupUuid})`);
+    log.info(`💬 [connector:${c.name}] New webchat session for ${key} (${session.dialogGroupUuid})`);
     return session;
 }
 
-/** Inject one normalized inbound message into GoContact (text and/or file). */
-async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage): Promise<void> {
+/** Push one message's payload (file and/or text) into a GoContact dialog.
+ *  Throws GoContactError(status 404) if the dialog no longer exists. */
+async function injectInbound(cs: ConnectorServer, session: ConnectorSession, msg: NormalizedInboundMessage): Promise<void> {
     const c = cs.connector;
-    const session = await ensureSession(cs, msg);
-
     if (msg.file) {
         // Prefer a direct (signed) URL when the gateway provides one — no Meta
         // token needed. Fall back to the Graph API media-id exchange.
@@ -428,7 +663,7 @@ async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage
                 downloaded = await downloadDirectUrl(c, msg.file.url);
             } catch (err) {
                 if (!msg.file.metaMediaId) throw err;
-                console.warn(`⚠️ [connector:${c.name}] Direct media URL failed (${err instanceof Error ? err.message : err}) — falling back to Graph API media id`);
+                log.warn(`⚠️ [connector:${c.name}] Direct media URL failed (${err instanceof Error ? err.message : err}) — falling back to Graph API media id`);
             }
         }
         if (!downloaded) {
@@ -449,36 +684,60 @@ async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage
             filestatus: '',
         };
         const { episodeUuid } = await cs.client.sendClientMessage(
-            session.token, session.accessKey, session.dialogGroupUuid, session.displayName, 'FILESEND', '', goFile);
+            session.accessKey, session.dialogGroupUuid, session.displayName, 'FILESEND', '', goFile);
         if (!episodeUuid) throw new Error('FILESEND episode created but no episode uuid returned — cannot attach file');
         // 2. Attach the binary to that episode.
         await cs.client.uploadFile(
-            session.token,
             { dialogGroupUuid: session.dialogGroupUuid, episodeUuid, domainUuid: session.domainUuid },
             bytes, filename, effectiveMime,
         );
     }
     if (msg.text) {
-        await cs.client.sendClientMessage(session.token, session.accessKey, session.dialogGroupUuid, session.displayName, 'MSG', msg.text);
+        await cs.client.sendClientMessage(session.accessKey, session.dialogGroupUuid, session.displayName, 'MSG', msg.text);
     }
-    // Remember the customer's message id so the agent's reply can trigger a
-    // read receipt on the channel (WhatsApp blue ticks).
-    if (msg.messageId) updateSessionLastInbound(c.name, session.chatId, msg.messageId);
-    touchSession(c.name, session.chatId);
-    // Customer just wrote — an agent/queue reply is most likely now.
-    markSessionHot(c, session.chatId);
-    cs.stats.inboundMessages++;
-    cs.stats.lastInboundAt = Date.now();
+}
 
-    // Auto-reply: once per session, on the first customer message. An expiry
-    // date (when set) silently disables it — a forgotten holiday/campaign
-    // notice stops by itself.
-    const autoReplyExpired = !!c.autoReply?.expiresAt && Date.now() > Date.parse(c.autoReply.expiresAt);
-    if (c.autoReply?.enabled && !autoReplyExpired && c.autoReply.text?.trim() && !session.autoReplied) {
-        session.autoReplied = true;
-        markSessionAutoReplied(c.name, session.chatId);
-        void sendAutoReply(cs, session, c.autoReply.text.trim());
-    }
+/**
+ * Inject one inbound message into GoContact, serialized per customer so two
+ * concurrent messages never create duplicate dialogs. If GoContact has expired
+ * or closed the dialog (404), drop the stale local session, open a fresh one
+ * and retry once.
+ */
+async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage): Promise<void> {
+    const c = cs.connector;
+    const lockKey = `${c.name}:${sessionKeyFor(msg)}`;
+    await withSessionLock(lockKey, async () => {
+        let session = await ensureSession(cs, msg);
+        try {
+            await injectInbound(cs, session, msg);
+        } catch (err) {
+            if (!isDialogGone(err)) throw err;
+            // GoContact dropped the dialog — recreate and retry once. Safe from
+            // duplicates because we hold the per-customer lock here.
+            log.warn(`♻️ [connector:${c.name}] Dialog gone (404) for ${msg.chatId} — recreating session and retrying`);
+            deleteSession(c.name, session.chatId);
+            dropSessionPollState(c.name, session.chatId);
+            session = await ensureSession(cs, msg);
+            await injectInbound(cs, session, msg);
+        }
+
+        // Post-delivery bookkeeping (only after a successful inject).
+        if (msg.messageId) updateSessionLastInbound(c.name, session.chatId, msg.messageId);
+        touchSession(c.name, session.chatId);
+        markSessionHot(c, session.chatId); // customer just wrote — agent reply likely soon
+        cs.stats.inboundMessages++;
+        cs.stats.lastInboundAt = Date.now();
+
+        // Auto-reply: once per session, on the first customer message. An expiry
+        // date (when set) silently disables it — a forgotten campaign notice
+        // stops by itself.
+        const autoReplyExpired = !!c.autoReply?.expiresAt && Date.now() > Date.parse(c.autoReply.expiresAt);
+        if (c.autoReply?.enabled && !autoReplyExpired && c.autoReply.text?.trim() && !session.autoReplied) {
+            session.autoReplied = true;
+            markSessionAutoReplied(c.name, session.chatId);
+            void sendAutoReply(cs, session, c.autoReply.text.trim());
+        }
+    });
 }
 
 /** Deliver the connector's auto-reply: to the customer through the regular
@@ -504,17 +763,17 @@ async function sendAutoReply(cs: ConnectorServer, session: ConnectorSession, tex
     };
     try {
         await fanoutAgentEvent(cs, session, event);
-        console.log(`🤖 [connector:${c.name}] Auto-reply sent to ${session.customerId}`);
+        log.info(`🤖 [connector:${c.name}] Auto-reply sent to ${session.customerId}`);
     } catch (err) {
-        console.warn(`⚠️ [connector:${c.name}] Auto-reply delivery failed:`, err instanceof Error ? err.message : err);
+        log.warn(`⚠️ [connector:${c.name}] Auto-reply delivery failed:`, err instanceof Error ? err.message : err);
     }
     // Mirror it into the GoContact chat (visible to the agent on pickup).
     try {
         await cs.client.sendClientMessage(
-            session.token, session.accessKey, session.dialogGroupUuid,
+            session.accessKey, session.dialogGroupUuid,
             '🤖 Auto-Reply', 'MSG', text);
     } catch (err) {
-        console.warn(`⚠️ [connector:${c.name}] Auto-reply mirror to GoContact failed:`, err instanceof Error ? err.message : err);
+        log.warn(`⚠️ [connector:${c.name}] Auto-reply mirror to GoContact failed:`, err instanceof Error ? err.message : err);
     }
 }
 
@@ -594,8 +853,13 @@ async function fanoutAgentEvent(cs: ConnectorServer, session: ConnectorSession |
     const c = cs.connector;
     const jobs: Promise<void>[] = [];
 
-    if (c.replyToMeta && event.event === 'agent_message' && event.message) {
-        jobs.push(sendToMeta(c, event.chatId, event.message.text, event.message.file, session?.phoneNumberId));
+    // Direct reply to the customer through this connector's channel provider.
+    if (directReplyEnabled(c) && event.event === 'agent_message' && event.message) {
+        if (c.channel === 'meta-whatsapp') {
+            jobs.push(sendToMeta(c, event.chatId, event.message.text, event.message.file, session?.phoneNumberId));
+        } else if (c.channel === 'smooch') {
+            jobs.push(sendToSmooch(c, event.chatId, event.message.text, event.message.file));
+        }
     }
     for (const target of (c.webhooksEnabled !== false ? c.webhookTargets || [] : [])) {
         // agent_message: single shot per tick — the poll loop + per-message
@@ -620,7 +884,7 @@ async function fanoutAgentEvent(cs: ConnectorServer, session: ConnectorSession |
                     lastError: errMsg,
                     totalAttempts: 3,
                 });
-                console.warn(`📥 [connector:${c.name}] chat_closed → ${target.url} failed (${errMsg}) — parked in DLQ for replay`);
+                log.warn(`📥 [connector:${c.name}] chat_closed → ${target.url} failed (${errMsg}) — parked in DLQ for replay`);
             });
         }
         jobs.push(job);
@@ -640,13 +904,7 @@ async function fanoutAgentEvent(cs: ConnectorServer, session: ConnectorSession |
 async function pollSession(cs: ConnectorServer, session: ConnectorSession): Promise<number> {
     const c = cs.connector;
 
-    if (!cs.client.tokenIsFresh(session.token)) {
-        const token = await cs.client.requestToken();
-        session.token = token;
-        updateSessionToken(c.name, session.chatId, token);
-    }
-
-    const messages = await cs.client.fetchNewMessages(session.token, session.accessKey);
+    const messages = await cs.client.fetchNewMessages(session.accessKey);
     if (messages.length === 0) return 0;
 
     for (const m of messages) {
@@ -660,14 +918,21 @@ async function pollSession(cs: ConnectorServer, session: ConnectorSession): Prom
             cs.stats.lastError = errMsg;
             if (m.uuid) {
                 const { attempts, delayMs } = recordDeliveryFailure(c.name, m.uuid);
-                console.error(`❌ [connector:${c.name}] Agent message ${m.uuid} for ${session.chatId} not delivered (attempt ${attempts}, next retry in ${Math.round(delayMs / 1000)}s):`, errMsg);
+                log.error(`❌ [connector:${c.name}] Agent message ${m.uuid} for ${session.chatId} not delivered (attempt ${attempts}, next retry in ${Math.round(delayMs / 1000)}s):`, errMsg);
                 // First failure: dump the raw episode so unexpected shapes
                 // (automatic messages, odd file objects) are diagnosable.
                 if (attempts === 1) {
-                    console.error(`   raw episode: ${JSON.stringify(m).slice(0, 500)}`);
+                    log.error(`   raw episode: ${JSON.stringify(m).slice(0, 500)}`);
+                }
+                // Notify once the failure persists (not on a single transient blip).
+                if (attempts >= 3) {
+                    notifyConnectorError(cs, 'connector.delivery_failed',
+                        `agent reply delivery failing (${attempts} attempts)`,
+                        `Chat ${session.chatId}\nMessage ${m.uuid}\nLast error: ${errMsg}`,
+                        { chatId: session.chatId, messageUuid: m.uuid, attempts, lastError: errMsg });
                 }
             } else {
-                console.error(`❌ [connector:${c.name}] Agent message for ${session.chatId} not delivered:`, errMsg);
+                log.error(`❌ [connector:${c.name}] Agent message for ${session.chatId} not delivered:`, errMsg);
             }
         }
     }
@@ -679,10 +944,10 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
 
     // Agent closed the chat.
     if (m.msgtype === 'LEAVE') {
-        try { await cs.client.markAsRead(session.token, session.accessKey, m.uuid); } catch { /* session dies anyway */ }
+        try { await cs.client.markAsRead(session.accessKey, m.uuid); } catch { /* session dies anyway */ }
         deleteSession(c.name, session.chatId);
         dropSessionPollState(c.name, session.chatId);
-        console.log(`👋 [connector:${c.name}] Agent closed chat ${session.chatId}`);
+        log.info(`👋 [connector:${c.name}] Agent closed chat ${session.chatId}`);
         const event: AgentEvent = {
             connector: c.name, channel: c.channel, event: 'chat_closed', reason: 'agent',
             chatId: session.customerId, displayName: session.displayName,
@@ -690,15 +955,15 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
         };
         // Best-effort: the session is gone either way.
         try { await fanoutAgentEvent(cs, null, event); } catch (err) {
-            console.warn(`⚠️ [connector:${c.name}] chat_closed fan-out failed:`, err instanceof Error ? err.message : err);
+            log.warn(`⚠️ [connector:${c.name}] chat_closed fan-out failed:`, err instanceof Error ? err.message : err);
         }
         return;
     }
 
     // Agent joined the conversation — notify the webhooks (fire-and-forget).
     if (m.msgtype === 'JOIN') {
-        try { if (m.uuid) await cs.client.markAsRead(session.token, session.accessKey, m.uuid); } catch { /* non-critical */ }
-        console.log(`🙋 [connector:${c.name}] Agent "${m.displayname}" joined chat ${session.chatId}`);
+        try { if (m.uuid) await cs.client.markAsRead(session.accessKey, m.uuid); } catch { /* non-critical */ }
+        log.info(`🙋 [connector:${c.name}] Agent "${m.displayname}" joined chat ${session.chatId}`);
         const event: AgentEvent = {
             connector: c.name, channel: c.channel, event: 'agent_joined',
             chatId: session.customerId, displayName: session.displayName,
@@ -706,7 +971,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
             message: { uuid: m.uuid, text: null, timestamp: m.timestamp || Date.now(), agentName: m.displayname, userType: m.usertype || undefined, file: null },
         };
         fanoutAgentEvent(cs, session, event).catch(err =>
-            console.warn(`⚠️ [connector:${c.name}] agent_joined fan-out failed:`, err instanceof Error ? err.message : err));
+            log.warn(`⚠️ [connector:${c.name}] agent_joined fan-out failed:`, err instanceof Error ? err.message : err));
         return;
     }
 
@@ -723,8 +988,8 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
                 return; // wait — do NOT mark as read yet
             }
             pendingFileFirstSeen.delete(key);
-            console.log(`🚮 [connector:${c.name}] Dropping FILESEND ${m.uuid} on chat ${session.chatId} — no url after ${PENDING_FILE_GRACE_MS / 1000}s (upload failed/rejected)`);
-            await cs.client.markAsRead(session.token, session.accessKey, m.uuid);
+            log.info(`🚮 [connector:${c.name}] Dropping FILESEND ${m.uuid} on chat ${session.chatId} — no url after ${PENDING_FILE_GRACE_MS / 1000}s (upload failed/rejected)`);
+            await cs.client.markAsRead(session.accessKey, m.uuid);
             clearDeliveryFailure(c.name, m.uuid);
         }
         return;
@@ -734,13 +999,13 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
     if (m.msgtype !== 'MSG' && m.msgtype !== 'FILESEND') {
         // Unknown episode type — surface it so we learn what GoContact emits
         // (typing? read receipts?). Mark as read so it doesn't repeat forever.
-        console.log(`❓ [connector:${c.name}] Unhandled agent msgtype "${m.msgtype}" (usertype=${m.usertype}) on chat ${session.chatId} — ignored`);
-        try { if (m.uuid) await cs.client.markAsRead(session.token, session.accessKey, m.uuid); } catch { /* non-critical */ }
+        log.info(`❓ [connector:${c.name}] Unhandled agent msgtype "${m.msgtype}" (usertype=${m.usertype}) on chat ${session.chatId} — ignored`);
+        try { if (m.uuid) await cs.client.markAsRead(session.accessKey, m.uuid); } catch { /* non-critical */ }
         return;
     }
     if (!m.uuid || wasDelivered(c.name, m.uuid)) {
         // Already fanned out but mark-as-read failed last time — just retry the mark.
-        if (m.uuid) await cs.client.markAsRead(session.token, session.accessKey, m.uuid);
+        if (m.uuid) await cs.client.markAsRead(session.accessKey, m.uuid);
         return;
     }
 
@@ -773,15 +1038,15 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
     touchSession(c.name, session.chatId);
 
     // Agent replied → mark the customer's last message as read on WhatsApp
-    // (blue ticks). Only when Midleman owns the Meta side (replyToMeta).
-    if (c.replyToMeta && session.lastInboundMsgId && session.phoneNumberId) {
+    // (blue ticks). Meta-specific, only when Midleman owns the Meta side.
+    if (c.channel === 'meta-whatsapp' && directReplyEnabled(c) && session.lastInboundMsgId && session.phoneNumberId) {
         sendMetaReadReceipt(c, session.phoneNumberId, session.lastInboundMsgId)
             .then(() => { session.lastInboundMsgId = ''; updateSessionLastInbound(c.name, session.chatId, ''); })
-            .catch(err => console.warn(`⚠️ [connector:${c.name}] read receipt failed:`, err instanceof Error ? err.message : err));
+            .catch(err => log.warn(`⚠️ [connector:${c.name}] read receipt failed:`, err instanceof Error ? err.message : err));
     }
 
     // Only after successful delivery — mark-as-read is the dedup/ack.
-    await cs.client.markAsRead(session.token, session.accessKey, m.uuid);
+    await cs.client.markAsRead(session.accessKey, m.uuid);
 }
 
 async function pollTick(cs: ConnectorServer): Promise<void> {
@@ -792,7 +1057,7 @@ async function pollTick(cs: ConnectorServer): Promise<void> {
         const ttl = c.sessionTtlMinutes ?? 120;
         const expired = purgeExpiredSessions(c.name, ttl);
         for (const s of expired) {
-            console.log(`⌛ [connector:${c.name}] Session ${s.chatId} expired after ${ttl}min idle`);
+            log.info(`⌛ [connector:${c.name}] Session ${s.chatId} expired after ${ttl}min idle`);
             dropSessionPollState(c.name, s.chatId);
             const event: AgentEvent = {
                 connector: c.name, channel: c.channel, event: 'chat_closed', reason: 'expired',
@@ -800,7 +1065,7 @@ async function pollTick(cs: ConnectorServer): Promise<void> {
                 phoneNumberId: s.phoneNumberId || undefined, message: null,
             };
             fanoutAgentEvent(cs, null, event).catch(err =>
-                console.warn(`⚠️ [connector:${c.name}] chat_closed(expired) fan-out failed:`, err instanceof Error ? err.message : err));
+                log.warn(`⚠️ [connector:${c.name}] chat_closed(expired) fan-out failed:`, err instanceof Error ? err.message : err));
         }
         // Adaptive scheduling: only poll the sessions that are due.
         const now = Date.now();
@@ -831,7 +1096,11 @@ async function pollTick(cs: ConnectorServer): Promise<void> {
         }
     } catch (err) {
         cs.stats.lastError = err instanceof Error ? err.message : String(err);
-        console.error(`❌ [connector:${cs.connector.name}] poll tick error:`, cs.stats.lastError);
+        log.error(`❌ [connector:${cs.connector.name}] poll tick error:`, cs.stats.lastError);
+        // A poll-tick failure usually means the whole connector is down (bad
+        // credentials, GoContact unreachable) — worth a notification.
+        notifyConnectorError(cs, 'connector.poll_error', 'polling agent replies failed',
+            `Last error: ${cs.stats.lastError}`, { lastError: cs.stats.lastError });
     } finally {
         cs.polling = false;
     }
@@ -854,10 +1123,10 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
     if (req.method === 'GET' && url.searchParams.get('hub.mode') === 'subscribe') {
         const verifyToken = url.searchParams.get('hub.verify_token');
         if (c.verifyToken && !timingSafeEqualStr(verifyToken, c.verifyToken)) {
-            console.warn(`❌ [connector:${c.name}] Meta verification failed: invalid hub.verify_token`);
+            log.warn(`❌ [connector:${c.name}] Meta verification failed: invalid hub.verify_token`);
             return new Response('Invalid verify_token', { status: 403 });
         }
-        console.log(`✅ [connector:${c.name}] Answered Meta webhook verification challenge`);
+        log.info(`✅ [connector:${c.name}] Answered Meta webhook verification challenge`);
         return new Response(url.searchParams.get('hub.challenge') || '', { status: 200 });
     }
 
@@ -867,20 +1136,8 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
 
     const clientIp = resolveClientIp(reqPeerIp.get(req), req.headers.get('x-forwarded-for'), getTrustProxyConfig());
     if (!isIpAllowed(clientIp, c.allowedIps)) {
-        console.warn(`🚫 [connector:${c.name}] blocked IP ${clientIp}`);
+        log.warn(`🚫 [connector:${c.name}] blocked IP ${clientIp}`);
         return jsonResponse(401, { error: 'Unauthorized', message: 'Your IP address is not allowed.' });
-    }
-
-    // Inbound auth: when a verify token is configured it is ALWAYS required on
-    // POSTs (X-Forward-Token header or ?token= query). When pointing Meta's
-    // webhook directly here, register the callback URL with the token baked
-    // in (https://host/path?token=xxx) — Meta preserves the query string.
-    if (c.verifyToken) {
-        const provided = req.headers.get('X-Forward-Token') || url.searchParams.get('token');
-        if (!timingSafeEqualStr(provided, c.verifyToken)) {
-            console.warn(`❌ [connector:${c.name}] Unauthorized POST from ${clientIp}: missing/invalid token`);
-            return jsonResponse(401, { error: 'Unauthorized', message: 'Valid X-Forward-Token header or ?token= is required' });
-        }
     }
 
     let payload: any;
@@ -892,7 +1149,26 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
         return jsonResponse(400, { error: 'Bad Request', message: 'Body must be valid JSON' });
     }
 
-    let messages = c.channel === 'meta-whatsapp' ? parseMetaPayload(payload) : parseGenericPayload(payload);
+    // Inbound auth. Two independent mechanisms, either sufficient:
+    //  • verifyToken — X-Forward-Token header or ?token= query (all channels).
+    //    For a direct Meta webhook, bake ?token= into the callback URL.
+    //  • Smooch X-Smooch-Signature — HMAC-SHA256 of the raw body with the
+    //    webhook shared secret (smooch channel only).
+    const smoochSecret = c.channel === 'smooch' ? c.smooch?.webhookSecret : undefined;
+    if (c.verifyToken || smoochSecret) {
+        const tokenOk = !!c.verifyToken &&
+            timingSafeEqualStr(req.headers.get('X-Forward-Token') || url.searchParams.get('token'), c.verifyToken);
+        const sigOk = !!smoochSecret &&
+            verifySmoochSignature(smoochSecret, rawBody, req.headers.get('X-Smooch-Signature'));
+        if (!tokenOk && !sigOk) {
+            log.warn(`❌ [connector:${c.name}] Unauthorized POST from ${clientIp}: missing/invalid token or signature`);
+            return jsonResponse(401, { error: 'Unauthorized', message: 'Valid token or webhook signature is required' });
+        }
+    }
+
+    let messages = c.channel === 'meta-whatsapp' ? parseMetaPayload(payload)
+        : c.channel === 'smooch' ? parseSmoochPayload(payload)
+        : parseGenericPayload(payload);
 
     // Brand routing: when a filter is set, this connector only handles its own
     // business number(s) — other connectors sharing the same feed pick theirs.
@@ -912,7 +1188,7 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
             (Array.isArray(payload?.entry) &&
                 payload.entry.some((e: any) => e?.changes?.some((ch: any) => Array.isArray(ch?.value?.statuses)))));
         if (!isMetaStatusPayload) {
-            console.warn(`⚠️ [connector:${c.name}] Payload produced 0 messages (channel=${c.channel}). Body preview: ${rawBody.slice(0, 300)}`);
+            log.warn(`⚠️ [connector:${c.name}] Payload produced 0 messages (channel=${c.channel}). Body preview: ${rawBody.slice(0, 300)}`);
         }
     }
 
@@ -925,7 +1201,9 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
                 } catch (err) {
                     const errMsg = err instanceof Error ? err.message : String(err);
                     cs.stats.lastError = errMsg;
-                    console.error(`❌ [connector:${c.name}] Failed to inject message from ${msg.chatId} into GoContact:`, errMsg);
+                    log.error(`❌ [connector:${c.name}] Failed to inject message from ${msg.chatId} into GoContact:`, errMsg);
+                    notifyConnectorError(cs, 'connector.inbound_failed', 'failed to inject a customer message into GoContact',
+                        `Chat ${msg.chatId}\nLast error: ${errMsg}`, { chatId: msg.chatId, lastError: errMsg });
                     logRequest({
                         requestId, type: 'connector', targetName: c.name,
                         method: 'POST', path: url.pathname, targetUrl: c.gocontact.baseUrl, clientIp,
@@ -945,6 +1223,8 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
     if (messages.length === 0) {
         resJson.hint = c.channel === 'meta-whatsapp'
             ? 'No messages extracted — send the Meta webhook envelope ({"entry":[{"changes":[{"value":{…}}]}]}) or a bare value object ({"messaging_product":"whatsapp","contacts":[…],"messages":[…]})'
+            : c.channel === 'smooch'
+            ? 'No user messages extracted — expects a Sunshine Conversations conversation:message event with author.type "user" (business/echo messages are ignored by design)'
             : 'No messages extracted — expected {"chatId":"…","name":"…","text":"…"} or {"messages":[…]}';
     }
     const resPayload = JSON.stringify(resJson);
@@ -989,14 +1269,14 @@ export function startConnectorServer(connector: GoContactConnector): ConnectorSe
                 try {
                     return await handleInbound(req, cs);
                 } catch (error) {
-                    console.error(`❌ [connector:${connector.name}] Error:`, error);
+                    log.error(`❌ [connector:${connector.name}] Error:`, error);
                     return jsonResponse(500, { error: 'Internal Server Error' });
                 } finally {
                     cs.activeRequests--;
                 }
             },
             error(error) {
-                console.error(`[connector:${connector.name}] Server error:`, error);
+                log.error(`[connector:${connector.name}] Server error:`, error);
                 return jsonResponse(500, { error: 'Internal Server Error' });
             },
         });
@@ -1004,9 +1284,9 @@ export function startConnectorServer(connector: GoContactConnector): ConnectorSe
         // The scheduler ticks every second; each session is only actually
         // polled when due per its adaptive interval (fast..8×fast, max 60s).
         cs.pollTimer = setInterval(() => { void pollTick(cs); }, 1000);
-        console.log(`💬 Connector "${connector.name}" (${connector.channel}) on :${cs.server.port} — adaptive polling ${fastIntervalMs(connector)}–${maxIntervalMs(connector)}ms`);
+        log.info(`💬 Connector "${connector.name}" (${connector.channel}) on :${cs.server.port} — adaptive polling ${fastIntervalMs(connector)}–${maxIntervalMs(connector)}ms`);
     } else {
-        console.log(`💬 Connector "${connector.name}" loaded (disabled)`);
+        log.info(`💬 Connector "${connector.name}" loaded (disabled)`);
     }
 
     servers.set(connector.name, cs);
@@ -1030,7 +1310,7 @@ export async function stopConnectorServer(name: string, graceful = true): Promis
     // instance and keep getting 503s after a restart.
     cs.server?.stop(true);
     servers.delete(name);
-    console.log(`🛑 Connector "${name}" stopped`);
+    log.info(`🛑 Connector "${name}" stopped`);
 }
 
 export async function stopAllConnectors(): Promise<void> {
@@ -1048,7 +1328,7 @@ export function getConnectorServers(): Map<string, ConnectorServer> {
 
 export function getConnectorStatus(): Array<{
     name: string; channel: string; port: number | null; running: boolean; enabled: boolean;
-    pollIntervalMs: number; replyToMeta: boolean; webhookTargets: number;
+    pollIntervalMs: number; directReply: boolean; webhookTargets: number;
     stats: ConnectorServer['stats'];
 }> {
     return Array.from(servers.values()).map(cs => ({
@@ -1058,7 +1338,7 @@ export function getConnectorStatus(): Array<{
         running: !!cs.server && !cs.isShuttingDown,
         enabled: cs.connector.enabled !== false,
         pollIntervalMs: Math.max(1000, cs.connector.pollIntervalMs ?? 4000),
-        replyToMeta: !!cs.connector.replyToMeta,
+        directReply: directReplyEnabled(cs.connector),
         webhookTargets: cs.connector.webhookTargets?.length ?? 0,
         stats: cs.stats,
     }));
@@ -1071,9 +1351,9 @@ export async function closeConnectorSession(connectorName: string, chatId: strin
     const session = getSession(connectorName, chatId);
     if (!session) return { ok: false, error: 'Session not found' };
     try {
-        await cs.client.sendClientMessage(session.token, session.accessKey, session.dialogGroupUuid, session.displayName, 'LEAVE', '');
+        await cs.client.sendClientMessage(session.accessKey, session.dialogGroupUuid, session.displayName, 'LEAVE', '');
     } catch (err) {
-        console.warn(`⚠️ [connector:${connectorName}] LEAVE for ${chatId} failed:`, err instanceof Error ? err.message : err);
+        log.warn(`⚠️ [connector:${connectorName}] LEAVE for ${chatId} failed:`, err instanceof Error ? err.message : err);
     }
     deleteSession(connectorName, chatId);
     dropSessionPollState(connectorName, chatId);
@@ -1083,6 +1363,6 @@ export async function closeConnectorSession(connectorName: string, chatId: strin
         phoneNumberId: session.phoneNumberId || undefined, message: null,
     };
     fanoutAgentEvent(cs, null, event).catch(err =>
-        console.warn(`⚠️ [connector:${connectorName}] chat_closed(admin) fan-out failed:`, err instanceof Error ? err.message : err));
+        log.warn(`⚠️ [connector:${connectorName}] chat_closed(admin) fan-out failed:`, err instanceof Error ? err.message : err));
     return { ok: true };
 }

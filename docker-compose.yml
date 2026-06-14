@@ -23,6 +23,9 @@ services:
       - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-midleman}
       - OTEL_METRICS_INTERVAL=${OTEL_METRICS_INTERVAL:-15000}
       - PORT_RANGE_START=${PORT_RANGE_START:-4000}
+      # Log verbosity: error | warn | info | debug (default info). Set to "warn"
+      # or "error" to keep the container quiet (only problems).
+      - LOG_LEVEL=${LOG_LEVEL:-info}
       # ─── NPM integration (optional addon) ───────────────────────────────
       # Uncomment to bootstrap settings from env. Credentials are still managed
       # in the dashboard (encrypted at rest). The cert volume below is also opt-in.
@@ -38,6 +41,14 @@ services:
       # internal ACME renewer is disabled (NPM owns Let's Encrypt).
       # - reverse_proxy_letsencrypt:/etc/letsencrypt:ro
     restart: unless-stopped
+    # Cap container log size so it can never fill the disk: 3 files × 20MB = 60MB
+    # max, oldest rotated out. This is the real fix for unbounded log growth —
+    # it bounds ALL output (including errors), independent of LOG_LEVEL.
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
     # depends_on:
       # otel-collector:
       #   condition: service_started

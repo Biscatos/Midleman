@@ -1581,6 +1581,10 @@
                 <option value="webhook.*">webhook.*</option>
                 <option value="webhook.retry_exhausted">webhook.retry_exhausted</option>
                 <option value="webhook.recovered">webhook.recovered</option>
+                <option value="connector.*">connector.* (GoContact connectors)</option>
+                <option value="connector.inbound_failed">connector.inbound_failed</option>
+                <option value="connector.delivery_failed">connector.delivery_failed</option>
+                <option value="connector.poll_error">connector.poll_error</option>
                 <option value="auth.*">auth.*</option>
                 <option value="ldap.*">ldap.*</option>
                 <option value="cert.*">cert.*</option>
@@ -2581,6 +2585,7 @@
           <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Inbound Channel</label>
           <select id="cnChannel" onchange="connectorChannelChanged()" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
             <option value="meta-whatsapp">Meta WhatsApp Cloud API</option>
+            <option value="smooch">Sunshine Conversations (Smooch)</option>
             <option value="generic">Generic JSON</option>
           </select>
         </div>
@@ -2662,25 +2667,54 @@
         <div style="margin-top:6px;font-size:11px;color:var(--text3)">Sent once per session — to the customer (via Meta/webhooks, like an agent reply with userType "AUTO") and mirrored into the GoContact chat so the agent sees it. After the expiry date it stops firing automatically.</div>
       </div>
 
-      <!-- ── Agent replies ── -->
-      <div style="margin-top:18px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Agent Replies</div>
-      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--text);cursor:pointer">
-        <input id="cnReplyToMeta" type="checkbox" onchange="connectorReplyToMetaChanged()"> Send agent replies directly to the customer via Meta Graph API
-      </label>
-      <div id="cnMetaSection" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2)">
-        <div>
-          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Access Token <span style="color:var(--text3)">(blank keeps current)</span></label>
-          <input id="cnMetaToken" type="password" autocomplete="new-password" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
-          <div style="margin-top:6px;font-size:11px;color:var(--text3)">The business phone number is detected automatically from each inbound payload (metadata.phone_number_id) — replies go out via the same number the customer wrote to.</div>
-          <div style="margin-top:10px">
-            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Phone Number Filter <span style="color:var(--text3)">(optional — comma-separated phone_number_ids; only these are processed. Use when several connectors, one per brand/queue, share the same inbound feed.)</span></label>
-            <input id="cnPhoneFilter" type="text" placeholder="879847985208219, 946854641852538" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
-          </div>
-        </div>
-        <div id="cnMetaMediaHint" style="display:none;margin-top:8px;font-size:11px;color:var(--text3)">
-          The Access Token is also used to download inbound WhatsApp media — without it, customer attachments are skipped.
+      <!-- ── Channel provider credentials ── -->
+      <div id="cnProviderHeader" style="display:none;margin-top:18px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Channel Provider</div>
+      <!-- Meta -->
+      <div id="cnMetaSection" style="display:none;margin-top:8px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2)">
+        <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Meta Access Token <span style="color:var(--text3)">(blank keeps current)</span></label>
+        <input id="cnMetaToken" type="password" autocomplete="new-password" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+        <div style="margin-top:6px;font-size:11px;color:var(--text3)">The business phone number is detected automatically from each inbound payload (metadata.phone_number_id) — replies go out via the same number the customer wrote to. The token also downloads inbound WhatsApp media; without it, attachments are skipped.</div>
+        <div style="margin-top:10px">
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Phone Number Filter <span style="color:var(--text3)">(optional — comma-separated phone_number_ids; only these are processed. Use when several connectors, one per brand/queue, share the same inbound feed.)</span></label>
+          <input id="cnPhoneFilter" type="text" placeholder="879847985208219, 946854641852538" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
         </div>
       </div>
+      <!-- Smooch -->
+      <div id="cnSmoochSection" style="display:none;margin-top:8px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2)">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">App ID</label>
+            <input id="cnSmoochAppId" type="text" placeholder="5f...d3e" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Base URL <span style="color:var(--text3)">(blank = api.smooch.io)</span></label>
+            <input id="cnSmoochBaseUrl" type="text" placeholder="https://api.smooch.io  ·  or https://{sub}.zendesk.com/sc" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">API Key ID</label>
+            <input id="cnSmoochKeyId" type="text" placeholder="app_..." style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">API Key Secret <span style="color:var(--text3)">(blank keeps current)</span></label>
+            <input id="cnSmoochKeySecret" type="password" autocomplete="new-password" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Bearer Token <span style="color:var(--text3)">(alt. to key id/secret — blank keeps current)</span></label>
+            <input id="cnSmoochBearer" type="password" autocomplete="new-password" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Webhook Secret <span style="color:var(--text3)">(X-Smooch-Signature — blank keeps current)</span></label>
+            <input id="cnSmoochWebhookSecret" type="password" autocomplete="new-password" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          </div>
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:var(--text3)">Basic auth (Key ID + Secret, scope "app") is recommended — non-expiring. The Webhook Secret verifies inbound <code>X-Smooch-Signature</code> (HMAC-SHA256); alternatively use the Verify Token above.</div>
+      </div>
+
+      <!-- ── Agent replies ── -->
+      <div style="margin-top:18px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Agent Replies</div>
+      <label id="cnDirectReplyRow" style="display:none;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--text);cursor:pointer">
+        <input id="cnDirectReply" type="checkbox"> Send agent replies directly to the customer via the channel provider
+      </label>
 
       <div style="margin-top:14px">
         <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer;margin-bottom:6px">

@@ -604,7 +604,12 @@ export function loadPersistedConnectors(): import('./connector-types').GoContact
         const stored: import('./connector-types').GoContactConnector[] = JSON.parse(raw);
         return stored
             .filter(c => c.name && c.gocontact?.baseUrl)
-            .map(c => ({ ...c, name: c.name.toLowerCase() }));
+            .map(c => {
+                const conn = { ...c, name: c.name.toLowerCase() };
+                // Back-compat: legacy Meta-only connectors used replyToMeta.
+                if (conn.directReply === undefined && conn.replyToMeta === true) conn.directReply = true;
+                return conn;
+            });
     } catch (err) {
         console.warn('⚠️  Could not load connectors.json:', err instanceof Error ? err.message : err);
         return [];

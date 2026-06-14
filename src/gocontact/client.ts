@@ -18,7 +18,9 @@
  *   POST …/upload                                 (multipart file upload)
  */
 
+import { log } from '../core/logger';
 import type { GoContactSettings } from '../core/connector-types';
+import { getSharedToken, refreshIfCurrent } from './token-manager';
 
 export type GoMsgType = 'JOIN' | 'MSG' | 'LEAVE' | 'FILESEND';
 
@@ -47,17 +49,19 @@ export interface GoAgentMessage {
 }
 
 export interface GoSessionHandles {
-    token: GoToken;
     domainUuid: string;
     accessKey: string;
     dialogGroupUuid: string;
     dialogGroupId: string;
 }
 
-class GoContactError extends Error {
-    constructor(step: string, detail: string) {
+export class GoContactError extends Error {
+    /** Upstream HTTP status, when the failure came from a response. */
+    readonly status?: number;
+    constructor(step: string, detail: string, status?: number) {
         super(`GoContact ${step} failed: ${detail}`);
         this.name = 'GoContactError';
+        this.status = status;
     }
 }
 
@@ -65,8 +69,12 @@ const FETCH_TIMEOUT_MS = 30_000;
 
 export class GoContactClient {
     private readonly base: string;
+    private readonly tokenKey: string;
     constructor(private readonly cfg: GoContactSettings) {
         this.base = cfg.baseUrl.endsWith('/') ? cfg.baseUrl : cfg.baseUrl + '/';
+        // Tokens are shared per (instance, login user) — every connector with
+        // the same credentials reuses one token instead of fighting over it.
+        this.tokenKey = `${this.base}|${this.cfg.username}`;
     }
 
     /** Domain name = part of the login e-mail after "@" (matches the original integration). */
@@ -84,32 +92,20 @@ export class GoContactClient {
         return this.base + path.replace(/^\//, '');
     }
 
-    private async request(path: string, init: RequestInit, step: string): Promise<any> {
-        const res = await fetch(this.url(path), {
-            ...init,
+    /** Raw token fetch (Basic auth). Goes through the shared manager — never
+     *  call directly except as the manager's refresh function. */
+    private async fetchTokenFromServer(): Promise<GoToken> {
+        const basic = Buffer.from(`${this.cfg.username}:${this.cfg.password}`).toString('base64');
+        const res = await fetch(this.url('poll/auth/token'), {
+            method: 'POST',
+            headers: { 'Authorization': `Basic ${basic}`, 'Connection': 'Keep-Alive' },
             signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
             tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' },
         } as RequestInit);
         const text = await res.text().catch(() => '');
-        if (res.status < 200 || res.status >= 300) {
-            throw new GoContactError(step, `HTTP ${res.status} ${text.slice(0, 300)}`);
-        }
-        try { return text ? JSON.parse(text) : {}; }
-        catch { throw new GoContactError(step, `invalid JSON response: ${text.slice(0, 300)}`); }
-    }
-
-    private bearer(token: GoToken): Record<string, string> {
-        return { 'Authorization': `Bearer ${token.token}`, 'Connection': 'Keep-Alive' };
-    }
-
-    // ── Session establishment ───────────────────────────────────────────────
-
-    async requestToken(): Promise<GoToken> {
-        const basic = Buffer.from(`${this.cfg.username}:${this.cfg.password}`).toString('base64');
-        const data = await this.request('poll/auth/token', {
-            method: 'POST',
-            headers: { 'Authorization': `Basic ${basic}`, 'Connection': 'Keep-Alive' },
-        }, 'token');
+        if (res.status < 200 || res.status >= 300) throw new GoContactError('token', `HTTP ${res.status} ${text.slice(0, 300)}`);
+        let data: any = {};
+        try { data = text ? JSON.parse(text) : {}; } catch { throw new GoContactError('token', `invalid JSON: ${text.slice(0, 300)}`); }
         if (!data.token) throw new GoContactError('token', data.message || 'no token in response');
         const expire = typeof data.expire_timestamp === 'number'
             ? data.expire_timestamp
@@ -117,43 +113,76 @@ export class GoContactClient {
         return { token: data.token, expireTimestamp: expire };
     }
 
-    tokenIsFresh(token: GoToken, marginSeconds = 60): boolean {
-        return token.expireTimestamp - marginSeconds > Math.floor(Date.now() / 1000);
+    /** The current shared token for this user (cached, single-flight refresh). */
+    getToken(): Promise<GoToken> {
+        return getSharedToken(this.tokenKey, () => this.fetchTokenFromServer());
     }
 
-    async getDomainUuid(token: GoToken): Promise<string> {
-        const data = await this.request(
+    /**
+     * Authenticated request with one-shot 401 re-auth: gets the shared token,
+     * sends the request, and on 401 refreshes-if-current (reusing a token
+     * another caller may have already rotated) and retries once.
+     */
+    private async authedRequest(path: string, init: RequestInit, step: string): Promise<any> {
+        const send = async (tok: GoToken): Promise<Response> => {
+            const headers = new Headers(init.headers as Record<string, string> | undefined);
+            headers.set('Authorization', `Bearer ${tok.token}`);
+            headers.set('Connection', 'Keep-Alive');
+            return fetch(this.url(path), {
+                ...init, headers,
+                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+                tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' },
+            } as RequestInit);
+        };
+        let token = await this.getToken();
+        let res = await send(token);
+        if (res.status === 401) {
+            token = await refreshIfCurrent(this.tokenKey, token, () => this.fetchTokenFromServer());
+            res = await send(token);
+        }
+        const text = await res.text().catch(() => '');
+        if (res.status < 200 || res.status >= 300) {
+            throw new GoContactError(step, `HTTP ${res.status} ${text.slice(0, 300)}`, res.status);
+        }
+        try { return text ? JSON.parse(text) : {}; }
+        catch { throw new GoContactError(step, `invalid JSON response: ${text.slice(0, 300)}`); }
+    }
+
+    // ── Session establishment ───────────────────────────────────────────────
+
+    async getDomainUuid(): Promise<string> {
+        const data = await this.authedRequest(
             `poll/api/domains/nameconversion?domain_name=${encodeURIComponent(this.domainName)}`,
-            { method: 'GET', headers: this.bearer(token) },
+            { method: 'GET' },
             'domain lookup',
         );
         if (!data.domain_uuid) throw new GoContactError('domain lookup', `no domain_uuid for "${this.domainName}"`);
         return data.domain_uuid;
     }
 
-    async isChannelOnline(token: GoToken, domainUuid: string): Promise<boolean> {
-        const data = await this.request(
+    async isChannelOnline(domainUuid: string): Promise<boolean> {
+        const data = await this.authedRequest(
             `poll/new-webchat-service/webchats/schedule/${domainUuid}/${this.cfg.hashKey}`,
-            { method: 'GET', headers: this.bearer(token) },
+            { method: 'GET' },
             'channel status',
         );
         return data.online === true;
     }
 
-    async requestAccessKey(token: GoToken, domainUuid: string): Promise<string> {
-        const data = await this.request('poll/new-webchat-service/plugin/access-key', {
+    async requestAccessKey(domainUuid: string): Promise<string> {
+        const data = await this.authedRequest('poll/new-webchat-service/plugin/access-key', {
             method: 'POST',
-            headers: { ...this.bearer(token), 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({ domainUuid, hashKey: this.cfg.hashKey }),
         }, 'access key');
         if (!data.accessKey) throw new GoContactError('access key', 'no accessKey in response');
         return data.accessKey;
     }
 
-    async createDialogGroup(token: GoToken, accessKey: string, displayName: string, contact: string): Promise<{ uuid: string; id: string }> {
-        const data = await this.request(`poll/new-webchat-service/plugin/${accessKey}/new-dialog-group`, {
+    async createDialogGroup(accessKey: string, displayName: string, contact: string): Promise<{ uuid: string; id: string }> {
+        const data = await this.authedRequest(`poll/new-webchat-service/plugin/${accessKey}/new-dialog-group`, {
             method: 'POST',
-            headers: { ...this.bearer(token), 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({
                 originPath: '/',
                 loginFields: [
@@ -172,24 +201,23 @@ export class GoContactClient {
      *  When the config carries an explicit domainUuid (from the embed script's
      *  `_domain`), the nameconversion lookup is skipped. */
     async openSession(displayName: string, contact: string): Promise<GoSessionHandles> {
-        const token = await this.requestToken();
-        const domainUuid = this.cfg.domainUuid || await this.getDomainUuid(token);
-        const online = await this.isChannelOnline(token, domainUuid);
+        const domainUuid = this.cfg.domainUuid || await this.getDomainUuid();
+        const online = await this.isChannelOnline(domainUuid);
         if (!online) throw new GoContactError('channel status', `webchat channel is offline (domain ${this.domainName})`);
-        const accessKey = await this.requestAccessKey(token, domainUuid);
-        const dg = await this.createDialogGroup(token, accessKey, displayName, contact);
-        return { token, domainUuid, accessKey, dialogGroupUuid: dg.uuid, dialogGroupId: dg.id };
+        const accessKey = await this.requestAccessKey(domainUuid);
+        const dg = await this.createDialogGroup(accessKey, displayName, contact);
+        return { domainUuid, accessKey, dialogGroupUuid: dg.uuid, dialogGroupId: dg.id };
     }
 
     // ── Messaging ───────────────────────────────────────────────────────────
 
     async sendClientMessage(
-        token: GoToken, accessKey: string, dialogGroupUuid: string,
+        accessKey: string, dialogGroupUuid: string,
         displayName: string, msgType: GoMsgType, msg: string, file: GoFile | null = null,
     ): Promise<{ episodeUuid: string | null }> {
-        const data = await this.request(`poll/new-webchat-service/plugin/${accessKey}/client-message`, {
+        const data = await this.authedRequest(`poll/new-webchat-service/plugin/${accessKey}/client-message`, {
             method: 'POST',
-            headers: { ...this.bearer(token), 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 episodeObj: {
                     usertype: 'CLIENT',
@@ -210,10 +238,9 @@ export class GoContactClient {
     }
 
     /** Poll agent replies for one session. Returns [] when nothing pending. */
-    async fetchNewMessages(token: GoToken, accessKey: string): Promise<GoAgentMessage[]> {
-        const data = await this.request(`poll/new-webchat-service/plugin/${accessKey}/new-client-messages`, {
+    async fetchNewMessages(accessKey: string): Promise<GoAgentMessage[]> {
+        const data = await this.authedRequest(`poll/new-webchat-service/plugin/${accessKey}/new-client-messages`, {
             method: 'GET',
-            headers: this.bearer(token),
         }, 'new-client-messages');
         if (data.error === true || !Array.isArray(data.data)) return [];
         return (data.data as any[]).map(m => {
@@ -226,7 +253,7 @@ export class GoContactClient {
                 if (!url && String(m.msgtype ?? m.MsgType ?? '') === 'FILESEND') {
                     // Discovery aid: dump the untouched episode so we can spot
                     // where (or whether) the download URL actually lives.
-                    console.log(`🔍 [gocontact] FILESEND without url — original episode: ${JSON.stringify(m).slice(0, 800)}`);
+                    log.info(`🔍 [gocontact] FILESEND without url — original episode: ${JSON.stringify(m).slice(0, 800)}`);
                 }
                 file = {
                     filename: String(rawFile.filename ?? rawFile.FileName ?? rawFile.name ?? rawFile.Name ?? 'file'),
@@ -249,10 +276,10 @@ export class GoContactClient {
     }
 
     /** Server-side dedup: a message marked as read is not returned again. */
-    async markAsRead(token: GoToken, accessKey: string, messageUuid: string): Promise<boolean> {
-        const data = await this.request(`poll/new-webchat-service/plugin/${accessKey}/mark-as-read`, {
+    async markAsRead(accessKey: string, messageUuid: string): Promise<boolean> {
+        const data = await this.authedRequest(`poll/new-webchat-service/plugin/${accessKey}/mark-as-read`, {
             method: 'POST',
-            headers: { ...this.bearer(token), 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ dialogUuid: messageUuid }),
         }, 'mark-as-read');
         return data.error !== true;
@@ -267,22 +294,29 @@ export class GoContactClient {
      *   2. POST upload with chat_uuid=dialogGroupUuid, dialog_uuid=EPISODE uuid
      */
     async uploadFile(
-        token: GoToken, handles: { dialogGroupUuid: string; episodeUuid: string; domainUuid: string },
+        handles: { dialogGroupUuid: string; episodeUuid: string; domainUuid: string },
         bytes: Uint8Array, filename: string, mimetype: string,
     ): Promise<void> {
-        const form = new FormData();
-        form.append('file', new Blob([bytes], { type: mimetype }), filename);
-        form.append('chat_uuid', handles.dialogGroupUuid);
-        form.append('dialog_uuid', handles.episodeUuid);
-        form.append('domain', handles.domainUuid);
-
-        const res = await fetch(this.url('poll/new-webchat-service/upload'), {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token.token}`, 'Accept': 'application/json' },
-            body: form,
-            signal: AbortSignal.timeout(120_000),
-            tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' },
-        } as RequestInit);
+        const send = async (tok: GoToken): Promise<Response> => {
+            const form = new FormData();
+            form.append('file', new Blob([bytes], { type: mimetype }), filename);
+            form.append('chat_uuid', handles.dialogGroupUuid);
+            form.append('dialog_uuid', handles.episodeUuid);
+            form.append('domain', handles.domainUuid);
+            return fetch(this.url('poll/new-webchat-service/upload'), {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${tok.token}`, 'Accept': 'application/json' },
+                body: form,
+                signal: AbortSignal.timeout(120_000),
+                tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' },
+            } as RequestInit);
+        };
+        let token = await this.getToken();
+        let res = await send(token);
+        if (res.status === 401) {
+            token = await refreshIfCurrent(this.tokenKey, token, () => this.fetchTokenFromServer());
+            res = await send(token);
+        }
         const text = await res.text().catch(() => '');
         if (res.status !== 200 && res.status !== 201) {
             throw new GoContactError('upload', `HTTP ${res.status} ${text.slice(0, 300)}`);
