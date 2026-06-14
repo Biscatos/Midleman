@@ -16,7 +16,7 @@
  */
 
 import type { GoContactConnector, NormalizedInboundMessage, ConnectorWebhookTarget } from '../core/connector-types';
-import { GoContactClient, stripHtml, type GoAgentMessage, type GoFile } from '../gocontact/client';
+import { GoContactClient, GoContactError, stripHtml, type GoAgentMessage, type GoFile } from '../gocontact/client';
 import {
     getSession, upsertSession, touchSession, deleteSession,
     updateSessionLastInbound, markSessionAutoReplied, listActiveSessions, purgeExpiredSessions, type ConnectorSession,
@@ -539,6 +539,25 @@ function sessionKeyFor(msg: NormalizedInboundMessage): string {
     return msg.phoneNumberId ? `${msg.phoneNumberId}:${msg.chatId}` : msg.chatId;
 }
 
+// Per-(connector, session) mutex. Serializes inbound handling for one customer
+// so two concurrent messages can never both create a dialog group (no
+// duplicate sessions) — and, as a bonus, preserves message order per customer.
+const sessionLocks = new Map<string, Promise<unknown>>();
+function withSessionLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = (sessionLocks.get(key) ?? Promise.resolve()).catch(() => {});
+    const result = prev.then(fn);
+    const tail = result.catch(() => {});
+    sessionLocks.set(key, tail);
+    // Drop the map entry once idle (this is still the tail and it has settled).
+    tail.then(() => { if (sessionLocks.get(key) === tail) sessionLocks.delete(key); });
+    return result;
+}
+
+/** True when an error is GoContact saying the dialog no longer exists (404). */
+function isDialogGone(err: unknown): boolean {
+    return err instanceof GoContactError && err.status === 404;
+}
+
 /** Get a live session or bootstrap a new one (token → … → dialog group + JOIN). */
 async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage): Promise<ConnectorSession> {
     const c = cs.connector;
@@ -582,11 +601,10 @@ async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage)
     return session;
 }
 
-/** Inject one normalized inbound message into GoContact (text and/or file). */
-async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage): Promise<void> {
+/** Push one message's payload (file and/or text) into a GoContact dialog.
+ *  Throws GoContactError(status 404) if the dialog no longer exists. */
+async function injectInbound(cs: ConnectorServer, session: ConnectorSession, msg: NormalizedInboundMessage): Promise<void> {
     const c = cs.connector;
-    const session = await ensureSession(cs, msg);
-
     if (msg.file) {
         // Prefer a direct (signed) URL when the gateway provides one — no Meta
         // token needed. Fall back to the Graph API media-id exchange.
@@ -628,24 +646,49 @@ async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage
     if (msg.text) {
         await cs.client.sendClientMessage(session.accessKey, session.dialogGroupUuid, session.displayName, 'MSG', msg.text);
     }
-    // Remember the customer's message id so the agent's reply can trigger a
-    // read receipt on the channel (WhatsApp blue ticks).
-    if (msg.messageId) updateSessionLastInbound(c.name, session.chatId, msg.messageId);
-    touchSession(c.name, session.chatId);
-    // Customer just wrote — an agent/queue reply is most likely now.
-    markSessionHot(c, session.chatId);
-    cs.stats.inboundMessages++;
-    cs.stats.lastInboundAt = Date.now();
+}
 
-    // Auto-reply: once per session, on the first customer message. An expiry
-    // date (when set) silently disables it — a forgotten holiday/campaign
-    // notice stops by itself.
-    const autoReplyExpired = !!c.autoReply?.expiresAt && Date.now() > Date.parse(c.autoReply.expiresAt);
-    if (c.autoReply?.enabled && !autoReplyExpired && c.autoReply.text?.trim() && !session.autoReplied) {
-        session.autoReplied = true;
-        markSessionAutoReplied(c.name, session.chatId);
-        void sendAutoReply(cs, session, c.autoReply.text.trim());
-    }
+/**
+ * Inject one inbound message into GoContact, serialized per customer so two
+ * concurrent messages never create duplicate dialogs. If GoContact has expired
+ * or closed the dialog (404), drop the stale local session, open a fresh one
+ * and retry once.
+ */
+async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage): Promise<void> {
+    const c = cs.connector;
+    const lockKey = `${c.name}:${sessionKeyFor(msg)}`;
+    await withSessionLock(lockKey, async () => {
+        let session = await ensureSession(cs, msg);
+        try {
+            await injectInbound(cs, session, msg);
+        } catch (err) {
+            if (!isDialogGone(err)) throw err;
+            // GoContact dropped the dialog — recreate and retry once. Safe from
+            // duplicates because we hold the per-customer lock here.
+            console.warn(`♻️ [connector:${c.name}] Dialog gone (404) for ${msg.chatId} — recreating session and retrying`);
+            deleteSession(c.name, session.chatId);
+            dropSessionPollState(c.name, session.chatId);
+            session = await ensureSession(cs, msg);
+            await injectInbound(cs, session, msg);
+        }
+
+        // Post-delivery bookkeeping (only after a successful inject).
+        if (msg.messageId) updateSessionLastInbound(c.name, session.chatId, msg.messageId);
+        touchSession(c.name, session.chatId);
+        markSessionHot(c, session.chatId); // customer just wrote — agent reply likely soon
+        cs.stats.inboundMessages++;
+        cs.stats.lastInboundAt = Date.now();
+
+        // Auto-reply: once per session, on the first customer message. An expiry
+        // date (when set) silently disables it — a forgotten campaign notice
+        // stops by itself.
+        const autoReplyExpired = !!c.autoReply?.expiresAt && Date.now() > Date.parse(c.autoReply.expiresAt);
+        if (c.autoReply?.enabled && !autoReplyExpired && c.autoReply.text?.trim() && !session.autoReplied) {
+            session.autoReplied = true;
+            markSessionAutoReplied(c.name, session.chatId);
+            void sendAutoReply(cs, session, c.autoReply.text.trim());
+        }
+    });
 }
 
 /** Deliver the connector's auto-reply: to the customer through the regular

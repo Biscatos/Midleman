@@ -54,10 +54,13 @@ export interface GoSessionHandles {
     dialogGroupId: string;
 }
 
-class GoContactError extends Error {
-    constructor(step: string, detail: string) {
+export class GoContactError extends Error {
+    /** Upstream HTTP status, when the failure came from a response. */
+    readonly status?: number;
+    constructor(step: string, detail: string, status?: number) {
         super(`GoContact ${step} failed: ${detail}`);
         this.name = 'GoContactError';
+        this.status = status;
     }
 }
 
@@ -138,7 +141,7 @@ export class GoContactClient {
         }
         const text = await res.text().catch(() => '');
         if (res.status < 200 || res.status >= 300) {
-            throw new GoContactError(step, `HTTP ${res.status} ${text.slice(0, 300)}`);
+            throw new GoContactError(step, `HTTP ${res.status} ${text.slice(0, 300)}`, res.status);
         }
         try { return text ? JSON.parse(text) : {}; }
         catch { throw new GoContactError(step, `invalid JSON response: ${text.slice(0, 300)}`); }
