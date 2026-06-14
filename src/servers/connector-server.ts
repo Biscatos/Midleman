@@ -26,6 +26,7 @@ import { enqueueFailedFanout } from './webhook-server';
 import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { assertResolvedHostAllowed, type SsrfPolicyOverride } from '../core/ssrf-guard';
 import { timingSafeEqualStr } from '../auth/auth';
+import { createHmac } from 'crypto';
 
 // ─── Types & State ───────────────────────────────────────────────────────────
 
@@ -137,6 +138,11 @@ function dropSessionPollState(connector: string, chatId: string): void {
 
 function ssrfPolicy(c: GoContactConnector): SsrfPolicyOverride {
     return { allowPrivate: c.allowPrivateTargets, allowedCidrs: c.targetAllowedCidrs };
+}
+
+/** Direct-reply flag, honouring the legacy `replyToMeta` alias. */
+function directReplyEnabled(c: GoContactConnector): boolean {
+    return c.directReply === true || c.replyToMeta === true;
 }
 
 function jsonResponse(status: number, body: Record<string, unknown>): Response {
@@ -267,6 +273,104 @@ function parseGenericPayload(payload: any): NormalizedInboundMessage[] {
         if (norm.text || norm.file) out.push(norm);
     }
     return out;
+}
+
+// ─── Smooch / Sunshine Conversations adapter ─────────────────────────────────
+
+function smoochBase(c: GoContactConnector): string {
+    const b = (c.smooch?.baseUrl || 'https://api.smooch.io').replace(/\/$/, '');
+    return b;
+}
+
+function smoochAuthHeader(c: GoContactConnector): string {
+    const s = c.smooch!;
+    if (s.bearerToken) return `Bearer ${s.bearerToken}`;
+    return 'Basic ' + Buffer.from(`${s.keyId}:${s.keySecret}`).toString('base64');
+}
+
+/**
+ * Parse a Sunshine Conversations webhook. CRITICAL: the conversation:message
+ * trigger fires for EVERY author — including the `business` messages this
+ * connector itself sends. We accept only `author.type === "user"`, otherwise
+ * each agent reply we push to Smooch would loop straight back in.
+ */
+function parseSmoochPayload(payload: any): NormalizedInboundMessage[] {
+    const out: NormalizedInboundMessage[] = [];
+    const events = Array.isArray(payload?.events) ? payload.events
+        : Array.isArray(payload?.messages) ? payload.messages.map((m: any) => ({ type: 'conversation:message', payload: m }))
+        : [];
+    for (const ev of events) {
+        if (ev?.type && ev.type !== 'conversation:message') continue;
+        const p = ev?.payload ?? ev;
+        const conversationId = String(p?.conversation?.id ?? p?.conversation?._id ?? '');
+        const message = p?.message ?? p;
+        const author = message?.author ?? {};
+        // Anti-echo: only the end customer's messages enter GoContact.
+        if (String(author.type || '').toLowerCase() !== 'user') continue;
+        if (!conversationId) continue;
+
+        const displayName = String(author.displayName || author.userId || conversationId);
+        const norm: NormalizedInboundMessage = {
+            chatId: conversationId,
+            displayName,
+            messageId: message?.id ? String(message.id) : undefined,
+        };
+        const content = message?.content ?? {};
+        const type = String(content.type || '').toLowerCase();
+        if (type === 'text') {
+            norm.text = String(content.text ?? '');
+        } else if (type === 'image' || type === 'file') {
+            const mediaUrl = content.mediaUrl ? String(content.mediaUrl) : undefined;
+            if (mediaUrl) {
+                norm.file = {
+                    url: mediaUrl,
+                    mimetype: content.mediaType ? String(content.mediaType) : undefined,
+                    filename: content.altText ? String(content.altText) : undefined,
+                    size: typeof content.mediaSize === 'number' ? content.mediaSize : undefined,
+                };
+            }
+            if (content.text) norm.text = String(content.text);
+        } else {
+            continue; // carousel/form/location/etc. — not handled
+        }
+        if (norm.text || norm.file) out.push(norm);
+    }
+    return out;
+}
+
+/** Send an agent reply to the customer through Sunshine Conversations. */
+async function sendToSmooch(c: GoContactConnector, conversationId: string, text: string | null, file: { url: string; mimetype: string; filename?: string } | null): Promise<void> {
+    const s = c.smooch;
+    if (!s?.appId || (!s.bearerToken && !(s.keyId && s.keySecret))) throw new Error('Smooch credentials not configured');
+    let content: Record<string, unknown>;
+    if (file) {
+        content = {
+            type: file.mimetype.startsWith('image/') ? 'image' : 'file',
+            mediaUrl: file.url,
+            ...(file.filename ? { altText: file.filename } : {}),
+            ...(text ? { text } : {}),
+        };
+    } else {
+        content = { type: 'text', text: text ?? '' };
+    }
+    const url = `${smoochBase(c)}/v2/apps/${encodeURIComponent(s.appId)}/conversations/${encodeURIComponent(conversationId)}/messages`;
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Authorization': smoochAuthHeader(c), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ author: { type: 'business' }, content }),
+        signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Smooch send failed: HTTP ${res.status} ${errText.slice(0, 300)}`);
+    }
+}
+
+/** Verify the X-Smooch-Signature header (HMAC-SHA256 of the raw body, base64). */
+function verifySmoochSignature(secret: string, rawBody: string, signature: string | null): boolean {
+    if (!signature) return false;
+    const expected = createHmac('sha256', secret).update(rawBody).digest('base64');
+    return timingSafeEqualStr(expected, signature.trim());
 }
 
 /** Resolve a Meta media id to a downloadable URL + bytes (Graph API, two hops). */
@@ -594,8 +698,13 @@ async function fanoutAgentEvent(cs: ConnectorServer, session: ConnectorSession |
     const c = cs.connector;
     const jobs: Promise<void>[] = [];
 
-    if (c.replyToMeta && event.event === 'agent_message' && event.message) {
-        jobs.push(sendToMeta(c, event.chatId, event.message.text, event.message.file, session?.phoneNumberId));
+    // Direct reply to the customer through this connector's channel provider.
+    if (directReplyEnabled(c) && event.event === 'agent_message' && event.message) {
+        if (c.channel === 'meta-whatsapp') {
+            jobs.push(sendToMeta(c, event.chatId, event.message.text, event.message.file, session?.phoneNumberId));
+        } else if (c.channel === 'smooch') {
+            jobs.push(sendToSmooch(c, event.chatId, event.message.text, event.message.file));
+        }
     }
     for (const target of (c.webhooksEnabled !== false ? c.webhookTargets || [] : [])) {
         // agent_message: single shot per tick — the poll loop + per-message
@@ -773,8 +882,8 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
     touchSession(c.name, session.chatId);
 
     // Agent replied → mark the customer's last message as read on WhatsApp
-    // (blue ticks). Only when Midleman owns the Meta side (replyToMeta).
-    if (c.replyToMeta && session.lastInboundMsgId && session.phoneNumberId) {
+    // (blue ticks). Meta-specific, only when Midleman owns the Meta side.
+    if (c.channel === 'meta-whatsapp' && directReplyEnabled(c) && session.lastInboundMsgId && session.phoneNumberId) {
         sendMetaReadReceipt(c, session.phoneNumberId, session.lastInboundMsgId)
             .then(() => { session.lastInboundMsgId = ''; updateSessionLastInbound(c.name, session.chatId, ''); })
             .catch(err => console.warn(`⚠️ [connector:${c.name}] read receipt failed:`, err instanceof Error ? err.message : err));
@@ -871,18 +980,6 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
         return jsonResponse(401, { error: 'Unauthorized', message: 'Your IP address is not allowed.' });
     }
 
-    // Inbound auth: when a verify token is configured it is ALWAYS required on
-    // POSTs (X-Forward-Token header or ?token= query). When pointing Meta's
-    // webhook directly here, register the callback URL with the token baked
-    // in (https://host/path?token=xxx) — Meta preserves the query string.
-    if (c.verifyToken) {
-        const provided = req.headers.get('X-Forward-Token') || url.searchParams.get('token');
-        if (!timingSafeEqualStr(provided, c.verifyToken)) {
-            console.warn(`❌ [connector:${c.name}] Unauthorized POST from ${clientIp}: missing/invalid token`);
-            return jsonResponse(401, { error: 'Unauthorized', message: 'Valid X-Forward-Token header or ?token= is required' });
-        }
-    }
-
     let payload: any;
     let rawBody = '';
     try {
@@ -892,7 +989,26 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
         return jsonResponse(400, { error: 'Bad Request', message: 'Body must be valid JSON' });
     }
 
-    let messages = c.channel === 'meta-whatsapp' ? parseMetaPayload(payload) : parseGenericPayload(payload);
+    // Inbound auth. Two independent mechanisms, either sufficient:
+    //  • verifyToken — X-Forward-Token header or ?token= query (all channels).
+    //    For a direct Meta webhook, bake ?token= into the callback URL.
+    //  • Smooch X-Smooch-Signature — HMAC-SHA256 of the raw body with the
+    //    webhook shared secret (smooch channel only).
+    const smoochSecret = c.channel === 'smooch' ? c.smooch?.webhookSecret : undefined;
+    if (c.verifyToken || smoochSecret) {
+        const tokenOk = !!c.verifyToken &&
+            timingSafeEqualStr(req.headers.get('X-Forward-Token') || url.searchParams.get('token'), c.verifyToken);
+        const sigOk = !!smoochSecret &&
+            verifySmoochSignature(smoochSecret, rawBody, req.headers.get('X-Smooch-Signature'));
+        if (!tokenOk && !sigOk) {
+            console.warn(`❌ [connector:${c.name}] Unauthorized POST from ${clientIp}: missing/invalid token or signature`);
+            return jsonResponse(401, { error: 'Unauthorized', message: 'Valid token or webhook signature is required' });
+        }
+    }
+
+    let messages = c.channel === 'meta-whatsapp' ? parseMetaPayload(payload)
+        : c.channel === 'smooch' ? parseSmoochPayload(payload)
+        : parseGenericPayload(payload);
 
     // Brand routing: when a filter is set, this connector only handles its own
     // business number(s) — other connectors sharing the same feed pick theirs.
@@ -945,6 +1061,8 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
     if (messages.length === 0) {
         resJson.hint = c.channel === 'meta-whatsapp'
             ? 'No messages extracted — send the Meta webhook envelope ({"entry":[{"changes":[{"value":{…}}]}]}) or a bare value object ({"messaging_product":"whatsapp","contacts":[…],"messages":[…]})'
+            : c.channel === 'smooch'
+            ? 'No user messages extracted — expects a Sunshine Conversations conversation:message event with author.type "user" (business/echo messages are ignored by design)'
             : 'No messages extracted — expected {"chatId":"…","name":"…","text":"…"} or {"messages":[…]}';
     }
     const resPayload = JSON.stringify(resJson);
@@ -1048,7 +1166,7 @@ export function getConnectorServers(): Map<string, ConnectorServer> {
 
 export function getConnectorStatus(): Array<{
     name: string; channel: string; port: number | null; running: boolean; enabled: boolean;
-    pollIntervalMs: number; replyToMeta: boolean; webhookTargets: number;
+    pollIntervalMs: number; directReply: boolean; webhookTargets: number;
     stats: ConnectorServer['stats'];
 }> {
     return Array.from(servers.values()).map(cs => ({
@@ -1058,7 +1176,7 @@ export function getConnectorStatus(): Array<{
         running: !!cs.server && !cs.isShuttingDown,
         enabled: cs.connector.enabled !== false,
         pollIntervalMs: Math.max(1000, cs.connector.pollIntervalMs ?? 4000),
-        replyToMeta: !!cs.connector.replyToMeta,
+        directReply: directReplyEnabled(cs.connector),
         webhookTargets: cs.connector.webhookTargets?.length ?? 0,
         stats: cs.stats,
     }));

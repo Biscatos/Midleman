@@ -13,8 +13,10 @@
 
 import { assertSafeOutboundUrl, SsrfBlockedError } from './ssrf-guard';
 
-/** Inbound channel adapters. Telegram/Instagram reserved for future use. */
-export type ConnectorChannel = 'meta-whatsapp' | 'generic' | 'telegram' | 'instagram';
+/** Inbound channel adapters. Each is just a parser+sender pair over the same
+ *  normalized event; adding a provider (Infobip, etc.) is another entry here.
+ *  Telegram/Instagram reserved for future use. */
+export type ConnectorChannel = 'meta-whatsapp' | 'smooch' | 'generic' | 'telegram' | 'instagram';
 
 /** GoContact instance credentials + webchat channel addressing. */
 export interface GoContactSettings {
@@ -47,6 +49,24 @@ export interface MetaSettings {
   graphVersion?: string;
 }
 
+/** Smooch / Zendesk Sunshine Conversations credentials. Sunshine is itself an
+ *  omnichannel aggregator (WhatsApp, Messenger, Instagram, web), so this single
+ *  adapter covers every channel a brand routes through it. */
+export interface SmoochSettings {
+  /** Sunshine Conversations app id (v2). */
+  appId: string;
+  /** API base. Default "https://api.smooch.io"; for Zendesk-hosted accounts use
+   *  "https://{subdomain}.zendesk.com/sc". The "/v2/apps/..." path is appended. */
+  baseUrl?: string;
+  /** Basic auth (preferred — non-expiring): API key id + secret, scope "app". */
+  keyId?: string;
+  keySecret?: string;
+  /** Alternative: a pre-generated JWT bearer token (used as-is). */
+  bearerToken?: string;
+  /** Shared secret for X-Smooch-Signature HMAC-SHA256 webhook verification. */
+  webhookSecret?: string;
+}
+
 /** A generic webhook destination for agent replies (e.g. your bot). */
 export interface ConnectorWebhookTarget {
   url: string;
@@ -67,15 +87,21 @@ export interface GoContactConnector {
   verifyToken?: string;
   allowedIps?: string[];
 
-  /** Required when channel = meta-whatsapp or when replyToMeta is true. */
+  /** Required when channel = meta-whatsapp or when replying directly via Meta. */
   meta?: MetaSettings;
+  /** Required when channel = smooch or when replying directly via Smooch. */
+  smooch?: SmoochSettings;
   /** Only process inbound messages whose metadata.phone_number_id is in this
    *  list (empty/unset = accept all). Lets several connectors — one per brand,
    *  each with its own GoContact channel — share the same inbound feed: each
    *  picks only its own business number. */
   phoneNumberFilter?: string[];
-  /** When true, agent replies are sent directly to the customer via the
-   *  Meta Graph API (text and media). */
+  /** When true, agent replies are sent directly back to the customer through
+   *  this connector's channel provider (Meta Graph API, Smooch, …). The actual
+   *  sender is chosen by `channel`. */
+  directReply?: boolean;
+  /** @deprecated Back-compat alias for `directReply` (Meta-only era). The store
+   *  loader maps a legacy `replyToMeta:true` onto `directReply`. */
   replyToMeta?: boolean;
 
   /** Agent replies (and chat-closed events) are also POSTed to each of these. */
@@ -108,7 +134,7 @@ export interface GoContactConnector {
 
 /** Normalized message flowing through the connector core (channel-agnostic). */
 export interface NormalizedInboundMessage {
-  chatId: string;          // stable per-customer id (e.g. wa_id)
+  chatId: string;          // stable per-conversation id (Meta wa_id, Smooch conversation id)
   displayName: string;     // shown to the agent
   /** Business number that received the message (Meta metadata.phone_number_id).
    *  Captured per session so replies go out via the same number — the
@@ -142,9 +168,13 @@ export function validateConnectorInput(input: unknown): string | null {
     if (typeof c.port !== 'number' || c.port < 1 || c.port > 65535) return '"port" must be 1–65535 (or 0/omitted for auto-assign)';
   }
 
-  const channels: ConnectorChannel[] = ['meta-whatsapp', 'generic', 'telegram', 'instagram'];
+  const channels: ConnectorChannel[] = ['meta-whatsapp', 'smooch', 'generic', 'telegram', 'instagram'];
   if (!channels.includes(c.channel as ConnectorChannel)) return `"channel" must be one of: ${channels.join(', ')}`;
   if (c.channel === 'telegram' || c.channel === 'instagram') return `Channel "${c.channel}" is not implemented yet`;
+
+  // Generic "reply directly via the channel provider" flag; `replyToMeta` is the
+  // legacy Meta-only alias still accepted on input.
+  const directReply = c.directReply === true || c.replyToMeta === true;
 
   if (!c.gocontact || typeof c.gocontact !== 'object') return '"gocontact" settings are required';
   const g = c.gocontact as Record<string, unknown>;
@@ -175,16 +205,41 @@ export function validateConnectorInput(input: unknown): string | null {
     const m = c.meta as Record<string, unknown>;
     if (m.accessToken !== undefined && typeof m.accessToken !== 'string') return '"meta.accessToken" must be a string';
     if (m.phoneNumberId !== undefined && typeof m.phoneNumberId !== 'string') return '"meta.phoneNumberId" must be a string';
-    // phoneNumberId is optional for the meta-whatsapp channel: it is captured
-    // per-session from the inbound payload (metadata.phone_number_id). It is
-    // only required to reply via Meta on channels that don't carry it.
-    if (c.replyToMeta === true && c.channel !== 'meta-whatsapp' && !m.phoneNumberId) {
-      return '"meta.phoneNumberId" is required to reply via Meta on this channel';
-    }
-  } else if (c.replyToMeta === true) {
-    return '"replyToMeta" requires "meta" credentials';
   }
 
+  // Smooch / Sunshine Conversations credentials.
+  if (c.smooch !== undefined) {
+    if (typeof c.smooch !== 'object' || c.smooch === null) return '"smooch" must be an object';
+    const sm = c.smooch as Record<string, unknown>;
+    for (const k of ['appId', 'baseUrl', 'keyId', 'keySecret', 'bearerToken', 'webhookSecret']) {
+      if (sm[k] !== undefined && typeof sm[k] !== 'string') return `"smooch.${k}" must be a string`;
+    }
+    if (sm.baseUrl) { try { new URL(sm.baseUrl as string); } catch { return '"smooch.baseUrl" must be a valid URL'; } }
+  }
+
+  // Channel-specific credential requirements.
+  if (c.channel === 'smooch') {
+    const sm = (c.smooch || {}) as Record<string, unknown>;
+    if (!sm.appId) return '"smooch.appId" is required for the smooch channel';
+    if (!sm.bearerToken && !(sm.keyId && sm.keySecret)) {
+      return 'Smooch auth requires either "smooch.bearerToken" or both "smooch.keyId" and "smooch.keySecret"';
+    }
+  }
+
+  // Direct reply needs the channel's sender to be usable.
+  if (directReply) {
+    if (c.channel === 'meta-whatsapp') {
+      const m = (c.meta || {}) as Record<string, unknown>;
+      if (!m.accessToken) return 'Replying directly requires "meta.accessToken"';
+    } else if (c.channel === 'smooch') {
+      const sm = (c.smooch || {}) as Record<string, unknown>;
+      if (!sm.appId || (!sm.bearerToken && !(sm.keyId && sm.keySecret))) return 'Replying directly requires Smooch credentials';
+    } else {
+      return `Direct reply is not supported on the "${c.channel}" channel — use webhook targets instead`;
+    }
+  }
+
+  if (c.directReply !== undefined && typeof c.directReply !== 'boolean') return '"directReply" must be a boolean';
   if (c.replyToMeta !== undefined && typeof c.replyToMeta !== 'boolean') return '"replyToMeta" must be a boolean';
   if (c.phoneNumberFilter !== undefined && (!Array.isArray(c.phoneNumberFilter) || (c.phoneNumberFilter as unknown[]).some(x => typeof x !== 'string'))) {
     return '"phoneNumberFilter" must be an array of phone_number_id strings';
@@ -220,8 +275,8 @@ export function validateConnectorInput(input: unknown): string | null {
   if (c.webhooksEnabled !== undefined && typeof c.webhooksEnabled !== 'boolean') return '"webhooksEnabled" must be a boolean';
 
   const webhooksActive = c.webhooksEnabled !== false && Array.isArray(c.webhookTargets) && c.webhookTargets.length > 0;
-  if (c.replyToMeta !== true && !webhooksActive) {
-    return 'Agent replies need at least one active destination: enable "replyToMeta" or add (and enable) a webhook target';
+  if (!directReply && !webhooksActive) {
+    return 'Agent replies need at least one active destination: enable direct reply or add (and enable) a webhook target';
   }
 
   if (c.pollIntervalMs !== undefined && (typeof c.pollIntervalMs !== 'number' || c.pollIntervalMs < 1000 || c.pollIntervalMs > 300_000)) {

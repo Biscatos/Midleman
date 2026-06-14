@@ -2104,7 +2104,7 @@ function renderConnectors(connectors) {
         ? '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>'
         : '<span style="background:var(--surface2);color:var(--text3);padding:2px 8px;border-radius:4px;font-size:11px">Disabled</span>');
     const replies = [
-      cn.replyToMeta ? 'Meta' : null,
+      cn.directReply ? (cn.channel === 'smooch' ? 'Smooch' : cn.channel === 'meta-whatsapp' ? 'Meta' : 'Direct') : null,
       (cn.webhookTargets && cn.webhookTargets.length)
         ? (cn.webhooksEnabled === false
             ? '<span style="color:var(--text3);text-decoration:line-through" title="Webhook delivery paused">' + cn.webhookTargets.length + ' webhook(s)</span>'
@@ -2134,18 +2134,17 @@ function renderConnectors(connectors) {
 let _editingConnector = null;
 
 function connectorChannelChanged() {
-  const isMeta = document.getElementById('cnChannel').value === 'meta-whatsapp';
-  const hint = document.getElementById('cnMetaMediaHint');
-  if (hint) hint.style.display = isMeta ? 'block' : 'none';
-  connectorReplyToMetaChanged();
-}
-
-function connectorReplyToMetaChanged() {
-  // Meta credentials are needed to reply via Graph API AND to download inbound
-  // WhatsApp media — show the section for either case.
-  const replyOn = document.getElementById('cnReplyToMeta').checked;
-  const isMeta = document.getElementById('cnChannel').value === 'meta-whatsapp';
-  document.getElementById('cnMetaSection').style.display = (replyOn || isMeta) ? 'block' : 'none';
+  const channel = document.getElementById('cnChannel').value;
+  const isMeta = channel === 'meta-whatsapp';
+  const isSmooch = channel === 'smooch';
+  const hasProvider = isMeta || isSmooch;
+  document.getElementById('cnProviderHeader').style.display = hasProvider ? 'block' : 'none';
+  document.getElementById('cnMetaSection').style.display = isMeta ? 'block' : 'none';
+  document.getElementById('cnSmoochSection').style.display = isSmooch ? 'block' : 'none';
+  // Direct reply only makes sense for channels that have a sender.
+  const row = document.getElementById('cnDirectReplyRow');
+  row.style.display = hasProvider ? 'flex' : 'none';
+  if (!hasProvider) document.getElementById('cnDirectReply').checked = false;
 }
 
 function connectorAutoReplyChanged() {
@@ -2203,13 +2202,22 @@ function openConnectorModal(connector = null) {
   expiredBadge.style.display = (arExpires && Date.parse(arExpires) < Date.now() && connector?.autoReply?.enabled) ? 'inline-block' : 'none';
   connectorAutoReplyChanged();
   document.getElementById('cnMetaToken').placeholder = connector?.meta?.hasAccessToken ? '(kept — type to replace)' : '';
-  document.getElementById('cnReplyToMeta').checked = connector ? !!connector.replyToMeta : false;
+  // Smooch credentials
+  document.getElementById('cnSmoochAppId').value = connector?.smooch?.appId || '';
+  document.getElementById('cnSmoochBaseUrl').value = (connector?.smooch?.baseUrl && connector.smooch.baseUrl !== 'https://api.smooch.io') ? connector.smooch.baseUrl : '';
+  document.getElementById('cnSmoochKeyId').value = connector?.smooch?.keyId || '';
+  document.getElementById('cnSmoochKeySecret').value = '';
+  document.getElementById('cnSmoochKeySecret').placeholder = connector?.smooch?.hasKeySecret ? '(kept — type to replace)' : '';
+  document.getElementById('cnSmoochBearer').value = '';
+  document.getElementById('cnSmoochBearer').placeholder = connector?.smooch?.hasBearerToken ? '(kept — type to replace)' : '';
+  document.getElementById('cnSmoochWebhookSecret').value = '';
+  document.getElementById('cnSmoochWebhookSecret').placeholder = connector?.smooch?.hasWebhookSecret ? '(kept — type to replace)' : '';
+  document.getElementById('cnDirectReply').checked = connector ? !!connector.directReply : false;
   document.getElementById('cnWebhookTargets').value = (connector?.webhookTargets || []).map(t => t.url).join('\n');
   document.getElementById('cnWebhooksEnabled').checked = connector ? connector.webhooksEnabled !== false : true;
   connectorWebhooksEnabledChanged();
   document.getElementById('cnAllowedIps').value = (connector?.allowedIps || []).join(', ');
   document.getElementById('cnEnabled').checked = connector ? connector.enabled !== false : true;
-  connectorReplyToMetaChanged();
   connectorChannelChanged();
   document.getElementById('connectorModal').style.display = 'block';
 }
@@ -2231,7 +2239,7 @@ async function saveConnector() {
       hashKey: document.getElementById('cnGoHashKey').value.trim(),
       domainUuid: document.getElementById('cnGoDomainUuid').value.trim() || undefined,
     },
-    replyToMeta: document.getElementById('cnReplyToMeta').checked,
+    directReply: document.getElementById('cnDirectReply').checked,
   };
   const password = document.getElementById('cnGoPassword').value;
   if (password) body.gocontact.password = password;
@@ -2241,6 +2249,17 @@ async function saveConnector() {
   // Always send meta when editing so the server can merge the stored token;
   // blank token = keep current. phoneNumberId is auto-captured per session.
   if (metaToken || _editingConnector) body.meta = { accessToken: metaToken || undefined };
+  // Smooch creds — always send on edit so the server merges kept secrets.
+  if (body.channel === 'smooch' || _editingConnector) {
+    body.smooch = {
+      appId: document.getElementById('cnSmoochAppId').value.trim(),
+      baseUrl: document.getElementById('cnSmoochBaseUrl').value.trim() || undefined,
+      keyId: document.getElementById('cnSmoochKeyId').value.trim() || undefined,
+      keySecret: document.getElementById('cnSmoochKeySecret').value.trim() || undefined,
+      bearerToken: document.getElementById('cnSmoochBearer').value.trim() || undefined,
+      webhookSecret: document.getElementById('cnSmoochWebhookSecret').value.trim() || undefined,
+    };
+  }
   const phoneFilter = document.getElementById('cnPhoneFilter').value.split(',').map(s => s.trim()).filter(Boolean);
   body.phoneNumberFilter = phoneFilter;
   body.autoReply = {

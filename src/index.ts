@@ -1693,7 +1693,15 @@ const server = Bun.serve({
                             graphVersion: c.meta.graphVersion || 'v21.0',
                             hasAccessToken: !!c.meta.accessToken,
                         } : null,
-                        replyToMeta: !!c.replyToMeta,
+                        smooch: c.smooch ? {
+                            appId: c.smooch.appId,
+                            baseUrl: c.smooch.baseUrl || 'https://api.smooch.io',
+                            keyId: c.smooch.keyId || '',
+                            hasKeySecret: !!c.smooch.keySecret,
+                            hasBearerToken: !!c.smooch.bearerToken,
+                            hasWebhookSecret: !!c.smooch.webhookSecret,
+                        } : null,
+                        directReply: c.directReply === true || c.replyToMeta === true,
                         phoneNumberFilter: c.phoneNumberFilter || [],
                         autoReply: c.autoReply || { enabled: false, text: '' },
                         webhookTargets: c.webhookTargets || [],
@@ -1776,14 +1784,19 @@ const server = Bun.serve({
                             if (!input.meta.accessToken && prev.meta?.accessToken) input.meta.accessToken = prev.meta.accessToken;
                             if (!input.meta.phoneNumberId && prev.meta?.phoneNumberId) input.meta.phoneNumberId = prev.meta.phoneNumberId;
                         }
+                        // Same secret-preservation for Smooch credentials.
+                        if (!input.smooch && prev.smooch) {
+                            input.smooch = { ...prev.smooch };
+                        } else if (input.smooch && typeof input.smooch === 'object' && prev.smooch) {
+                            if (!input.smooch.keySecret && prev.smooch.keySecret) input.smooch.keySecret = prev.smooch.keySecret;
+                            if (!input.smooch.bearerToken && prev.smooch.bearerToken) input.smooch.bearerToken = prev.smooch.bearerToken;
+                            if (!input.smooch.webhookSecret && prev.smooch.webhookSecret) input.smooch.webhookSecret = prev.smooch.webhookSecret;
+                        }
                     }
 
                     const error = validateConnectorInput(input);
                     if (error) return jsonRes(400, { error });
                     if (!input.gocontact.password) return jsonRes(400, { error: '"gocontact.password" is required' });
-                    if (input.replyToMeta === true && !input.meta?.accessToken) {
-                        return jsonRes(400, { error: '"meta.accessToken" is required to reply via Meta' });
-                    }
 
                     const connector: GoContactConnector = {
                         name: String(input.name).toLowerCase(),
@@ -1800,7 +1813,7 @@ const server = Bun.serve({
                             timestampOffsetHours: typeof input.gocontact.timestampOffsetHours === 'number' ? input.gocontact.timestampOffsetHours : undefined,
                             storageBucket: input.gocontact.storageBucket ? String(input.gocontact.storageBucket) : undefined,
                         },
-                        replyToMeta: input.replyToMeta === true,
+                        directReply: input.directReply === true || input.replyToMeta === true,
                     };
                     if (input.verifyToken) connector.verifyToken = String(input.verifyToken);
                     if (Array.isArray(input.allowedIps) && input.allowedIps.length) connector.allowedIps = input.allowedIps.map((s: unknown) => String(s).trim()).filter(Boolean);
@@ -1809,6 +1822,16 @@ const server = Bun.serve({
                             accessToken: String(input.meta.accessToken || ''),
                             phoneNumberId: String(input.meta.phoneNumberId || ''),
                             graphVersion: input.meta.graphVersion ? String(input.meta.graphVersion) : undefined,
+                        };
+                    }
+                    if (input.smooch && (input.smooch.appId || input.smooch.bearerToken || input.smooch.keyId)) {
+                        connector.smooch = {
+                            appId: String(input.smooch.appId || ''),
+                            baseUrl: input.smooch.baseUrl ? String(input.smooch.baseUrl).trim() : undefined,
+                            keyId: input.smooch.keyId ? String(input.smooch.keyId) : undefined,
+                            keySecret: input.smooch.keySecret ? String(input.smooch.keySecret) : undefined,
+                            bearerToken: input.smooch.bearerToken ? String(input.smooch.bearerToken) : undefined,
+                            webhookSecret: input.smooch.webhookSecret ? String(input.smooch.webhookSecret) : undefined,
                         };
                     }
                     if (Array.isArray(input.webhookTargets) && input.webhookTargets.length) connector.webhookTargets = input.webhookTargets;
