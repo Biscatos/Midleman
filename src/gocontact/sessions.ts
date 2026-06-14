@@ -13,7 +13,6 @@
 import { Database } from 'bun:sqlite';
 import { resolve } from 'path';
 import { mkdirSync } from 'fs';
-import type { GoToken } from './client';
 
 export interface ConnectorSession {
     connector: string;
@@ -24,7 +23,9 @@ export interface ConnectorSession {
     /** The customer's own id (e.g. WhatsApp wa_id) — what replies are sent to. */
     customerId: string;
     displayName: string;
-    token: GoToken;
+    // NOTE: no per-session token — the bearer token is shared per login user
+    // (see token-manager.ts). GoContact invalidates a user's previous token on
+    // each auth, so a per-session token would self-destruct under concurrency.
     domainUuid: string;
     accessKey: string;
     dialogGroupUuid: string;
@@ -90,7 +91,6 @@ function rowToSession(r: any): ConnectorSession {
         chatId: r.chat_id,
         customerId: r.customer_id || r.chat_id,
         displayName: r.display_name,
-        token: { token: r.token, expireTimestamp: r.token_expires_at },
         domainUuid: r.domain_uuid,
         accessKey: r.access_key,
         dialogGroupUuid: r.dialog_group_uuid,
@@ -112,19 +112,20 @@ export function getSession(connector: string, chatId: string): ConnectorSession 
 
 export function upsertSession(s: ConnectorSession): void {
     if (!db) return;
+    // The legacy token/token_expires_at columns are NOT NULL; write placeholders
+    // (the token is no longer persisted per session — see token-manager.ts).
     db.query(`
         INSERT INTO sessions (connector, chat_id, display_name, token, token_expires_at, domain_uuid,
                               access_key, dialog_group_uuid, dialog_group_id, phone_number_id, customer_id, last_inbound_msg_id, created_at, last_activity_at)
-        VALUES ($connector, $chatId, $displayName, $token, $tokenExp, $domainUuid,
+        VALUES ($connector, $chatId, $displayName, '', 0, $domainUuid,
                 $accessKey, $dgUuid, $dgId, $phoneId, $customerId, $lastInbound, $createdAt, $lastActivity)
         ON CONFLICT(connector, chat_id) DO UPDATE SET
-            display_name = $displayName, token = $token, token_expires_at = $tokenExp,
+            display_name = $displayName,
             domain_uuid = $domainUuid, access_key = $accessKey,
             dialog_group_uuid = $dgUuid, dialog_group_id = $dgId,
             phone_number_id = $phoneId, customer_id = $customerId, last_inbound_msg_id = $lastInbound, last_activity_at = $lastActivity
     `).run({
         $connector: s.connector, $chatId: s.chatId, $customerId: s.customerId, $displayName: s.displayName,
-        $token: s.token.token, $tokenExp: s.token.expireTimestamp,
         $domainUuid: s.domainUuid, $accessKey: s.accessKey,
         $dgUuid: s.dialogGroupUuid, $dgId: s.dialogGroupId, $phoneId: s.phoneNumberId,
         $lastInbound: s.lastInboundMsgId,
@@ -148,12 +149,6 @@ export function updateSessionLastInbound(connector: string, chatId: string, mess
     if (!db) return;
     db.query('UPDATE sessions SET last_inbound_msg_id = $m WHERE connector = $c AND chat_id = $id')
         .run({ $m: messageId, $c: connector, $id: chatId });
-}
-
-export function updateSessionToken(connector: string, chatId: string, token: GoToken): void {
-    if (!db) return;
-    db.query('UPDATE sessions SET token = $t, token_expires_at = $e WHERE connector = $c AND chat_id = $id')
-        .run({ $t: token.token, $e: token.expireTimestamp, $c: connector, $id: chatId });
 }
 
 export function deleteSession(connector: string, chatId: string): void {

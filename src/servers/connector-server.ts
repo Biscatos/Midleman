@@ -18,7 +18,7 @@
 import type { GoContactConnector, NormalizedInboundMessage, ConnectorWebhookTarget } from '../core/connector-types';
 import { GoContactClient, stripHtml, type GoAgentMessage, type GoFile } from '../gocontact/client';
 import {
-    getSession, upsertSession, touchSession, deleteSession, updateSessionToken,
+    getSession, upsertSession, touchSession, deleteSession,
     updateSessionLastInbound, markSessionAutoReplied, listActiveSessions, purgeExpiredSessions, type ConnectorSession,
 } from '../gocontact/sessions';
 import { logRequest, headersToRecord } from '../telemetry/request-log';
@@ -477,13 +477,9 @@ async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage)
     const key = sessionKeyFor(msg);
     const existing = getSession(c.name, key);
 
+    // The bearer token is shared per user by the token manager, so a live
+    // session needs no token upkeep — just reuse it.
     if (existing && Date.now() - existing.lastActivityAt < ttl * 60_000) {
-        // Refresh the bearer token in place when it is close to expiry.
-        if (!cs.client.tokenIsFresh(existing.token)) {
-            const token = await cs.client.requestToken();
-            existing.token = token;
-            updateSessionToken(c.name, key, token);
-        }
         return existing;
     }
 
@@ -495,7 +491,6 @@ async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage)
         chatId: key,
         customerId: msg.chatId,
         displayName: msg.displayName,
-        token: handles.token,
         domainUuid: handles.domainUuid,
         accessKey: handles.accessKey,
         dialogGroupUuid: handles.dialogGroupUuid,
@@ -510,7 +505,7 @@ async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage)
 
     // Announce the customer in the chat (mirrors the original JOIN episode).
     try {
-        await cs.client.sendClientMessage(session.token, session.accessKey, session.dialogGroupUuid, session.displayName, 'JOIN', '');
+        await cs.client.sendClientMessage(session.accessKey, session.dialogGroupUuid, session.displayName, 'JOIN', '');
     } catch (err) {
         console.warn(`⚠️ [connector:${c.name}] JOIN failed for ${msg.chatId}:`, err instanceof Error ? err.message : err);
     }
@@ -553,17 +548,16 @@ async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage
             filestatus: '',
         };
         const { episodeUuid } = await cs.client.sendClientMessage(
-            session.token, session.accessKey, session.dialogGroupUuid, session.displayName, 'FILESEND', '', goFile);
+            session.accessKey, session.dialogGroupUuid, session.displayName, 'FILESEND', '', goFile);
         if (!episodeUuid) throw new Error('FILESEND episode created but no episode uuid returned — cannot attach file');
         // 2. Attach the binary to that episode.
         await cs.client.uploadFile(
-            session.token,
             { dialogGroupUuid: session.dialogGroupUuid, episodeUuid, domainUuid: session.domainUuid },
             bytes, filename, effectiveMime,
         );
     }
     if (msg.text) {
-        await cs.client.sendClientMessage(session.token, session.accessKey, session.dialogGroupUuid, session.displayName, 'MSG', msg.text);
+        await cs.client.sendClientMessage(session.accessKey, session.dialogGroupUuid, session.displayName, 'MSG', msg.text);
     }
     // Remember the customer's message id so the agent's reply can trigger a
     // read receipt on the channel (WhatsApp blue ticks).
@@ -615,7 +609,7 @@ async function sendAutoReply(cs: ConnectorServer, session: ConnectorSession, tex
     // Mirror it into the GoContact chat (visible to the agent on pickup).
     try {
         await cs.client.sendClientMessage(
-            session.token, session.accessKey, session.dialogGroupUuid,
+            session.accessKey, session.dialogGroupUuid,
             '🤖 Auto-Reply', 'MSG', text);
     } catch (err) {
         console.warn(`⚠️ [connector:${c.name}] Auto-reply mirror to GoContact failed:`, err instanceof Error ? err.message : err);
@@ -749,13 +743,7 @@ async function fanoutAgentEvent(cs: ConnectorServer, session: ConnectorSession |
 async function pollSession(cs: ConnectorServer, session: ConnectorSession): Promise<number> {
     const c = cs.connector;
 
-    if (!cs.client.tokenIsFresh(session.token)) {
-        const token = await cs.client.requestToken();
-        session.token = token;
-        updateSessionToken(c.name, session.chatId, token);
-    }
-
-    const messages = await cs.client.fetchNewMessages(session.token, session.accessKey);
+    const messages = await cs.client.fetchNewMessages(session.accessKey);
     if (messages.length === 0) return 0;
 
     for (const m of messages) {
@@ -788,7 +776,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
 
     // Agent closed the chat.
     if (m.msgtype === 'LEAVE') {
-        try { await cs.client.markAsRead(session.token, session.accessKey, m.uuid); } catch { /* session dies anyway */ }
+        try { await cs.client.markAsRead(session.accessKey, m.uuid); } catch { /* session dies anyway */ }
         deleteSession(c.name, session.chatId);
         dropSessionPollState(c.name, session.chatId);
         console.log(`👋 [connector:${c.name}] Agent closed chat ${session.chatId}`);
@@ -806,7 +794,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
 
     // Agent joined the conversation — notify the webhooks (fire-and-forget).
     if (m.msgtype === 'JOIN') {
-        try { if (m.uuid) await cs.client.markAsRead(session.token, session.accessKey, m.uuid); } catch { /* non-critical */ }
+        try { if (m.uuid) await cs.client.markAsRead(session.accessKey, m.uuid); } catch { /* non-critical */ }
         console.log(`🙋 [connector:${c.name}] Agent "${m.displayname}" joined chat ${session.chatId}`);
         const event: AgentEvent = {
             connector: c.name, channel: c.channel, event: 'agent_joined',
@@ -833,7 +821,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
             }
             pendingFileFirstSeen.delete(key);
             console.log(`🚮 [connector:${c.name}] Dropping FILESEND ${m.uuid} on chat ${session.chatId} — no url after ${PENDING_FILE_GRACE_MS / 1000}s (upload failed/rejected)`);
-            await cs.client.markAsRead(session.token, session.accessKey, m.uuid);
+            await cs.client.markAsRead(session.accessKey, m.uuid);
             clearDeliveryFailure(c.name, m.uuid);
         }
         return;
@@ -844,12 +832,12 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
         // Unknown episode type — surface it so we learn what GoContact emits
         // (typing? read receipts?). Mark as read so it doesn't repeat forever.
         console.log(`❓ [connector:${c.name}] Unhandled agent msgtype "${m.msgtype}" (usertype=${m.usertype}) on chat ${session.chatId} — ignored`);
-        try { if (m.uuid) await cs.client.markAsRead(session.token, session.accessKey, m.uuid); } catch { /* non-critical */ }
+        try { if (m.uuid) await cs.client.markAsRead(session.accessKey, m.uuid); } catch { /* non-critical */ }
         return;
     }
     if (!m.uuid || wasDelivered(c.name, m.uuid)) {
         // Already fanned out but mark-as-read failed last time — just retry the mark.
-        if (m.uuid) await cs.client.markAsRead(session.token, session.accessKey, m.uuid);
+        if (m.uuid) await cs.client.markAsRead(session.accessKey, m.uuid);
         return;
     }
 
@@ -890,7 +878,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
     }
 
     // Only after successful delivery — mark-as-read is the dedup/ack.
-    await cs.client.markAsRead(session.token, session.accessKey, m.uuid);
+    await cs.client.markAsRead(session.accessKey, m.uuid);
 }
 
 async function pollTick(cs: ConnectorServer): Promise<void> {
@@ -1189,7 +1177,7 @@ export async function closeConnectorSession(connectorName: string, chatId: strin
     const session = getSession(connectorName, chatId);
     if (!session) return { ok: false, error: 'Session not found' };
     try {
-        await cs.client.sendClientMessage(session.token, session.accessKey, session.dialogGroupUuid, session.displayName, 'LEAVE', '');
+        await cs.client.sendClientMessage(session.accessKey, session.dialogGroupUuid, session.displayName, 'LEAVE', '');
     } catch (err) {
         console.warn(`⚠️ [connector:${connectorName}] LEAVE for ${chatId} failed:`, err instanceof Error ? err.message : err);
     }
