@@ -145,6 +145,11 @@ function directReplyEnabled(c: GoContactConnector): boolean {
     return c.directReply === true || c.replyToMeta === true;
 }
 
+/** True for a usable http(s) media URL (guards against null/empty/relative). */
+function isHttpUrl(u: string | null | undefined): boolean {
+    return typeof u === 'string' && /^https?:\/\//i.test(u);
+}
+
 function jsonResponse(status: number, body: Record<string, unknown>): Response {
     return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
@@ -379,7 +384,7 @@ async function sendToSmooch(c: GoContactConnector, conversationId: string, text:
     const s = c.smooch;
     if (!s?.appId || (!s.bearerToken && !(s.keyId && s.keySecret))) throw new Error('Smooch credentials not configured');
     let content: Record<string, unknown>;
-    if (file) {
+    if (file && isHttpUrl(file.url)) {
         content = {
             type: file.mimetype.startsWith('image/') ? 'image' : 'file',
             mediaUrl: file.url,
@@ -387,7 +392,11 @@ async function sendToSmooch(c: GoContactConnector, conversationId: string, text:
             ...(text ? { text } : {}),
         };
     } else {
-        content = { type: 'text', text: text ?? '' };
+        // No usable media URL → degrade to a text note instead of sending an
+        // invalid mediaUrl (which Smooch rejects with a 400 uri-format error).
+        const body = text || (file?.filename ? `📎 ${file.filename}` : '');
+        if (!body) throw new Error('Nothing to send (no text and no usable media URL)');
+        content = { type: 'text', text: body };
     }
     const url = `${smoochBase(c)}/v2/apps/${encodeURIComponent(s.appId)}/conversations/${encodeURIComponent(conversationId)}/messages`;
     const res = await fetch(url, {
@@ -457,6 +466,11 @@ async function downloadDirectUrl(c: GoContactConnector, url: string): Promise<{ 
 async function sendToMeta(c: GoContactConnector, chatId: string, text: string | null, file: { url: string; mimetype: string; filename?: string } | null, sessionPhoneNumberId?: string): Promise<void> {
     const phoneNumberId = sessionPhoneNumberId || c.meta?.phoneNumberId;
     if (!c.meta?.accessToken || !phoneNumberId) throw new Error('Meta credentials not configured (accessToken + phone_number_id)');
+    // Degrade to text if there's no usable media URL (Meta rejects an empty link).
+    if (file && !isHttpUrl(file.url)) {
+        text = text || (file.filename ? `📎 ${file.filename}` : text);
+        file = null;
+    }
     let body: Record<string, unknown>;
     if (file) {
         const kind = file.mimetype.startsWith('image/') ? 'image'
