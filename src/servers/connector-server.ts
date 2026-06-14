@@ -23,6 +23,7 @@ import {
 } from '../gocontact/sessions';
 import { logRequest, headersToRecord } from '../telemetry/request-log';
 import { enqueueFailedFanout } from './webhook-server';
+import { emitNotificationEvent, hasAnyRuleMatching } from '../core/notifications';
 import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { assertResolvedHostAllowed, type SsrfPolicyOverride } from '../core/ssrf-guard';
 import { timingSafeEqualStr } from '../auth/auth';
@@ -148,6 +149,53 @@ function directReplyEnabled(c: GoContactConnector): boolean {
 /** True for a usable http(s) media URL (guards against null/empty/relative). */
 function isHttpUrl(u: string | null | undefined): boolean {
     return typeof u === 'string' && /^https?:\/\//i.test(u);
+}
+
+// ─── Connector error notifications ────────────────────────────────────────────
+// Connector errors fire in hot loops (poll every few seconds, every failed
+// delivery). Route them through Midleman's notification pipeline, but throttle
+// per (connector, category) so a persistently broken connector can't spam
+// email/SMS — at most one notification per category per cooldown window.
+
+const NOTIFY_COOLDOWN_MS = (() => {
+    const n = parseInt(process.env.CONNECTOR_NOTIFY_COOLDOWN_MS || '', 10);
+    return Number.isFinite(n) && n > 0 ? n : 10 * 60_000; // 10 min default
+})();
+const lastNotifiedAt = new Map<string, number>();
+
+/**
+ * Report a connector error through the notification pipeline (category
+ * "connector.*", severity warning). Cheap no-op when no rule matches; throttled
+ * per (connector, category). Fire-and-forget — never blocks the hot path.
+ */
+function notifyConnectorError(
+    cs: ConnectorServer, category: string, subject: string, detail: string,
+    extra: Record<string, unknown> = {},
+): void {
+    const severity = 'warning' as const;
+    if (!hasAnyRuleMatching(category, severity)) return;
+    const key = `${cs.connector.name}:${category}`;
+    const now = Date.now();
+    if (now - (lastNotifiedAt.get(key) ?? 0) < NOTIFY_COOLDOWN_MS) return;
+    lastNotifiedAt.set(key, now);
+
+    const body = [
+        `Connector "${cs.connector.name}" (${cs.connector.channel}) reported an error.`,
+        ``,
+        subject,
+        ``,
+        detail,
+        ``,
+        `Further "${category}" alerts for this connector are muted for ${Math.round(NOTIFY_COOLDOWN_MS / 60_000)} min.`,
+        `Open the dashboard to inspect: /admin#connectors`,
+    ].join('\n');
+
+    emitNotificationEvent({
+        category, severity,
+        subject: `Connector ${cs.connector.name}: ${subject}`,
+        body,
+        payload: { connector: cs.connector.name, channel: cs.connector.channel, ...extra },
+    }).catch(e => console.warn(`📧 [connector:${cs.connector.name}] notification pipeline error:`, e));
 }
 
 function jsonResponse(status: number, body: Record<string, unknown>): Response {
@@ -875,6 +923,13 @@ async function pollSession(cs: ConnectorServer, session: ConnectorSession): Prom
                 if (attempts === 1) {
                     console.error(`   raw episode: ${JSON.stringify(m).slice(0, 500)}`);
                 }
+                // Notify once the failure persists (not on a single transient blip).
+                if (attempts >= 3) {
+                    notifyConnectorError(cs, 'connector.delivery_failed',
+                        `agent reply delivery failing (${attempts} attempts)`,
+                        `Chat ${session.chatId}\nMessage ${m.uuid}\nLast error: ${errMsg}`,
+                        { chatId: session.chatId, messageUuid: m.uuid, attempts, lastError: errMsg });
+                }
             } else {
                 console.error(`❌ [connector:${c.name}] Agent message for ${session.chatId} not delivered:`, errMsg);
             }
@@ -1041,6 +1096,10 @@ async function pollTick(cs: ConnectorServer): Promise<void> {
     } catch (err) {
         cs.stats.lastError = err instanceof Error ? err.message : String(err);
         console.error(`❌ [connector:${cs.connector.name}] poll tick error:`, cs.stats.lastError);
+        // A poll-tick failure usually means the whole connector is down (bad
+        // credentials, GoContact unreachable) — worth a notification.
+        notifyConnectorError(cs, 'connector.poll_error', 'polling agent replies failed',
+            `Last error: ${cs.stats.lastError}`, { lastError: cs.stats.lastError });
     } finally {
         cs.polling = false;
     }
@@ -1142,6 +1201,8 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
                     const errMsg = err instanceof Error ? err.message : String(err);
                     cs.stats.lastError = errMsg;
                     console.error(`❌ [connector:${c.name}] Failed to inject message from ${msg.chatId} into GoContact:`, errMsg);
+                    notifyConnectorError(cs, 'connector.inbound_failed', 'failed to inject a customer message into GoContact',
+                        `Chat ${msg.chatId}\nLast error: ${errMsg}`, { chatId: msg.chatId, lastError: errMsg });
                     logRequest({
                         requestId, type: 'connector', targetName: c.name,
                         method: 'POST', path: url.pathname, targetUrl: c.gocontact.baseUrl, clientIp,
