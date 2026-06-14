@@ -399,15 +399,24 @@ async function sendToSmooch(c: GoContactConnector, conversationId: string, text:
         content = { type: 'text', text: body };
     }
     const url = `${smoochBase(c)}/v2/apps/${encodeURIComponent(s.appId)}/conversations/${encodeURIComponent(conversationId)}/messages`;
+    const reqBody = JSON.stringify({ author: { type: 'business' }, content });
+    const started = performance.now();
     const res = await fetch(url, {
         method: 'POST',
         headers: { 'Authorization': smoochAuthHeader(c), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ author: { type: 'business' }, content }),
+        body: reqBody,
         signal: AbortSignal.timeout(30_000),
     });
+    const resText = await res.text().catch(() => '');
+    logRequest({
+        requestId: crypto.randomUUID(), type: 'connector-fanout', targetName: c.name,
+        method: 'POST', path: '/smooch/reply', targetUrl: url,
+        reqHeaders: { 'Content-Type': 'application/json' }, reqBody, reqBodySize: reqBody.length,
+        resStatus: res.status, resStatusText: res.statusText,
+        resBody: resText.slice(0, 2000), durationMs: performance.now() - started,
+    });
     if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        throw new Error(`Smooch send failed: HTTP ${res.status} ${errText.slice(0, 300)}`);
+        throw new Error(`Smooch send failed: HTTP ${res.status} ${resText.slice(0, 300)}`);
     }
 }
 
@@ -484,15 +493,25 @@ async function sendToMeta(c: GoContactConnector, chatId: string, text: string | 
     } else {
         body = { messaging_product: 'whatsapp', recipient_type: 'individual', to: chatId, type: 'text', text: { body: text ?? '' } };
     }
-    const res = await fetch(`${graphBase(c)}/${phoneNumberId}/messages`, {
+    const metaUrl = `${graphBase(c)}/${phoneNumberId}/messages`;
+    const reqBody = JSON.stringify(body);
+    const started = performance.now();
+    const res = await fetch(metaUrl, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${c.meta.accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: reqBody,
         signal: AbortSignal.timeout(30_000),
     });
+    const resText = await res.text().catch(() => '');
+    logRequest({
+        requestId: crypto.randomUUID(), type: 'connector-fanout', targetName: c.name,
+        method: 'POST', path: '/meta/reply', targetUrl: metaUrl,
+        reqHeaders: { 'Content-Type': 'application/json' }, reqBody, reqBodySize: reqBody.length,
+        resStatus: res.status, resStatusText: res.statusText,
+        resBody: resText.slice(0, 2000), durationMs: performance.now() - started,
+    });
     if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        throw new Error(`Meta send failed: HTTP ${res.status} ${errText.slice(0, 300)}`);
+        throw new Error(`Meta send failed: HTTP ${res.status} ${resText.slice(0, 300)}`);
     }
 }
 
