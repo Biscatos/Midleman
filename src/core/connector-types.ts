@@ -231,9 +231,14 @@ export function validateConnectorInput(input: unknown): string | null {
   const g = c.gocontact as Record<string, unknown>;
   const goMode = g.mode === 'webchat-api' ? 'webchat-api' : 'poll';
   if (g.mode !== undefined && g.mode !== 'poll' && g.mode !== 'webchat-api') return '"gocontact.mode" must be "poll" or "webchat-api"';
-  // baseUrl is shared across modes (instance for poll, API host for webchat-api).
-  if (!g.baseUrl || typeof g.baseUrl !== 'string') return '"gocontact.baseUrl" is required';
-  try { new URL(g.baseUrl); } catch { return '"gocontact.baseUrl" must be a valid URL'; }
+  // Poll needs baseUrl (the plugin API runs on the instance). webchat-api does
+  // everything via apiBaseUrl — baseUrl there only serves agent attachments, so
+  // it's optional (validated only if provided).
+  if (goMode === 'poll' && (!g.baseUrl || typeof g.baseUrl !== 'string')) return '"gocontact.baseUrl" is required';
+  if (g.baseUrl !== undefined && g.baseUrl !== '') {
+    if (typeof g.baseUrl !== 'string') return '"gocontact.baseUrl" must be a string';
+    try { new URL(g.baseUrl); } catch { return '"gocontact.baseUrl" must be a valid URL'; }
+  }
   if (!g.username || typeof g.username !== 'string') return '"gocontact.username" is required';
   // Poll mode derives the webchat domain from the e-mail's domain part; the
   // Webchat API takes username verbatim, so the "@" rule applies to poll only.
