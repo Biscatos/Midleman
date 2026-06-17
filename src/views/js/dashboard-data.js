@@ -2152,6 +2152,36 @@ function connectorAutoReplyChanged() {
   document.getElementById('cnAutoReplySection').style.display = on ? 'block' : 'none';
 }
 
+function connectorBusinessHoursChanged() {
+  const on = document.getElementById('cnBusinessHoursEnabled').checked;
+  document.getElementById('cnBusinessHoursSection').style.display = on ? 'block' : 'none';
+}
+
+// Structured ranges → "08:00-12:00, 13:00-17:00" for the per-day inputs.
+function bhRangesToText(ranges) {
+  return (ranges || []).map(r => `${r.start}-${r.end}`).join(', ');
+}
+
+// Parse a day input ("08:00-12:00, 13:00-17:00") → [{start,end}]. Throws an
+// Error with a human message on the first malformed range so saveConnector can
+// surface it before posting (the server validates the same shape again).
+function bhParseDayText(text, dayLabel) {
+  const out = [];
+  for (const part of String(text || '').split(',').map(s => s.trim()).filter(Boolean)) {
+    const m = /^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/.exec(part);
+    if (!m) throw new Error(`${dayLabel}: "${part}" is not a valid HH:MM-HH:MM range`);
+    const sH = +m[1], sM = +m[2], eH = +m[3], eM = +m[4];
+    if (sH > 23 || eH > 23 || sM > 59 || eM > 59) throw new Error(`${dayLabel}: "${part}" has an invalid time`);
+    const start = `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}`;
+    const end = `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`;
+    if (sH * 60 + sM >= eH * 60 + eM) throw new Error(`${dayLabel}: "${part}" — start must be before end (overnight ranges not supported)`);
+    out.push({ start, end });
+  }
+  return out;
+}
+
+const BH_DAY_LABELS = { 0: 'Sun', 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat' };
+
 function connectorWebhooksEnabledChanged() {
   const on = document.getElementById('cnWebhooksEnabled').checked;
   const ta = document.getElementById('cnWebhookTargets');
@@ -2201,6 +2231,16 @@ function openConnectorModal(connector = null) {
   const expiredBadge = document.getElementById('cnAutoReplyExpiredBadge');
   expiredBadge.style.display = (arExpires && Date.parse(arExpires) < Date.now() && connector?.autoReply?.enabled) ? 'inline-block' : 'none';
   connectorAutoReplyChanged();
+  // Business hours
+  const bh = connector?.businessHours || {};
+  document.getElementById('cnBusinessHoursEnabled').checked = !!bh.enabled;
+  document.getElementById('cnBusinessHoursMessage').value = bh.message || '';
+  document.getElementById('cnBusinessHoursForward').checked = !!bh.forwardToGoContact;
+  for (let d = 0; d <= 6; d++) {
+    const day = (bh.weekly || []).find(w => w.day === d);
+    document.getElementById('cnBhDay' + d).value = day ? bhRangesToText(day.ranges) : '';
+  }
+  connectorBusinessHoursChanged();
   document.getElementById('cnMetaToken').placeholder = connector?.meta?.hasAccessToken ? '(kept — type to replace)' : '';
   // Smooch credentials
   document.getElementById('cnSmoochAppId').value = connector?.smooch?.appId || '';
@@ -2268,6 +2308,28 @@ async function saveConnector() {
   };
   const arExpiresLocal = document.getElementById('cnAutoReplyExpires').value;
   if (arExpiresLocal) body.autoReply.expiresAt = new Date(arExpiresLocal).toISOString();
+  // Business hours — parse each day's ranges; surface a clean error before posting.
+  const bhEnabled = document.getElementById('cnBusinessHoursEnabled').checked;
+  const weekly = [];
+  try {
+    for (let d = 0; d <= 6; d++) {
+      const ranges = bhParseDayText(document.getElementById('cnBhDay' + d).value, BH_DAY_LABELS[d]);
+      if (ranges.length) weekly.push({ day: d, ranges });
+    }
+  } catch (e) { return toast(e.message, 'error'); }
+  if (bhEnabled && !document.getElementById('cnBusinessHoursMessage').value.trim()) {
+    return toast('Business hours: a message is required', 'error');
+  }
+  if (bhEnabled && weekly.length === 0) {
+    return toast('Business hours enabled but no open hours defined — add at least one range or disable it', 'error');
+  }
+  body.businessHours = {
+    enabled: bhEnabled,
+    message: document.getElementById('cnBusinessHoursMessage').value.trim(),
+    forwardToGoContact: document.getElementById('cnBusinessHoursForward').checked,
+    timezone: 'Africa/Luanda',
+    weekly,
+  };
   const targets = document.getElementById('cnWebhookTargets').value
     .split('\n').map(s => s.trim()).filter(Boolean).map(url => ({ url }));
   if (targets.length) body.webhookTargets = targets;

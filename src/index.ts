@@ -1704,6 +1704,7 @@ const server = Bun.serve({
                         directReply: c.directReply === true || c.replyToMeta === true,
                         phoneNumberFilter: c.phoneNumberFilter || [],
                         autoReply: c.autoReply || { enabled: false, text: '' },
+                        businessHours: c.businessHours || { enabled: false, message: '', forwardToGoContact: false, weekly: [] },
                         webhookTargets: c.webhookTargets || [],
                         webhooksEnabled: c.webhooksEnabled !== false,
                         pollIntervalMs: c.pollIntervalMs ?? 4000,
@@ -1848,6 +1849,24 @@ const server = Bun.serve({
                         if (input.autoReply.expiresAt && typeof input.autoReply.expiresAt === 'string') {
                             connector.autoReply.expiresAt = input.autoReply.expiresAt;
                         }
+                    }
+                    if (input.businessHours && typeof input.businessHours === 'object') {
+                        const bh = input.businessHours;
+                        const weekly = Array.isArray(bh.weekly)
+                            ? bh.weekly.map((d: any) => ({
+                                day: Number(d.day),
+                                ranges: Array.isArray(d.ranges)
+                                    ? d.ranges.map((r: any) => ({ start: String(r.start), end: String(r.end) }))
+                                    : [],
+                            }))
+                            : [];
+                        connector.businessHours = {
+                            enabled: bh.enabled === true,
+                            message: String(bh.message || ''),
+                            forwardToGoContact: bh.forwardToGoContact === true,
+                            timezone: bh.timezone ? String(bh.timezone) : undefined,
+                            weekly,
+                        };
                     }
                     if (typeof input.pollIntervalMs === 'number') connector.pollIntervalMs = input.pollIntervalMs;
                     if (typeof input.sessionTtlMinutes === 'number') connector.sessionTtlMinutes = input.sessionTtlMinutes;

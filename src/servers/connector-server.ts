@@ -21,7 +21,9 @@ import { GoContactClient, GoContactError, stripHtml, type GoAgentMessage, type G
 import {
     getSession, upsertSession, touchSession, deleteSession,
     updateSessionLastInbound, markSessionAutoReplied, listActiveSessions, purgeExpiredSessions, type ConnectorSession,
+    getOutOfHoursLastSent, markOutOfHoursSent,
 } from '../gocontact/sessions';
+import { isWithinBusinessHours } from '../core/business-hours';
 import { logRequest, headersToRecord } from '../telemetry/request-log';
 import { enqueueFailedFanout } from './webhook-server';
 import { emitNotificationEvent, hasAnyRuleMatching } from '../core/notifications';
@@ -707,8 +709,22 @@ async function injectInbound(cs: ConnectorServer, session: ConnectorSession, msg
  */
 async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage): Promise<void> {
     const c = cs.connector;
-    const lockKey = `${c.name}:${sessionKeyFor(msg)}`;
+    const sessionKey = sessionKeyFor(msg);
+    const lockKey = `${c.name}:${sessionKey}`;
     await withSessionLock(lockKey, async () => {
+        // Out-of-hours gate: when the connector declares business hours and the
+        // customer writes OUTSIDE them, send a single (throttled) notice. In
+        // reply-only mode we never create/touch a GoContact session.
+        const bh = c.businessHours;
+        const outsideHours = !!bh?.enabled && !!bh.message?.trim()
+            && !isWithinBusinessHours(bh.weekly, bh.timezone, new Date());
+        if (outsideHours && bh!.forwardToGoContact !== true) {
+            maybeSendOutOfHoursReply(cs, msg, sessionKey, bh!.message.trim(), null);
+            cs.stats.inboundMessages++;
+            cs.stats.lastInboundAt = Date.now();
+            return;
+        }
+
         let session = await ensureSession(cs, msg);
         try {
             await injectInbound(cs, session, msg);
@@ -730,14 +746,22 @@ async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage
         cs.stats.inboundMessages++;
         cs.stats.lastInboundAt = Date.now();
 
-        // Auto-reply: once per session, on the first customer message. An expiry
-        // date (when set) silently disables it — a forgotten campaign notice
-        // stops by itself.
-        const autoReplyExpired = !!c.autoReply?.expiresAt && Date.now() > Date.parse(c.autoReply.expiresAt);
-        if (c.autoReply?.enabled && !autoReplyExpired && c.autoReply.text?.trim() && !session.autoReplied) {
-            session.autoReplied = true;
-            markSessionAutoReplied(c.name, session.chatId);
-            void sendAutoReply(cs, session, c.autoReply.text.trim());
+        if (outsideHours) {
+            // Forward mode + outside hours: the message reached GoContact above;
+            // also notify the customer (throttled, mirrored into the chat). This
+            // suppresses the regular first-message auto-reply so the customer is
+            // never sent two automatic messages at once.
+            maybeSendOutOfHoursReply(cs, msg, sessionKey, bh!.message.trim(), session);
+        } else {
+            // Auto-reply: once per session, on the first customer message. An
+            // expiry date (when set) silently disables it — a forgotten campaign
+            // notice stops by itself.
+            const autoReplyExpired = !!c.autoReply?.expiresAt && Date.now() > Date.parse(c.autoReply.expiresAt);
+            if (c.autoReply?.enabled && !autoReplyExpired && c.autoReply.text?.trim() && !session.autoReplied) {
+                session.autoReplied = true;
+                markSessionAutoReplied(c.name, session.chatId);
+                void sendAutoReply(cs, session, c.autoReply.text.trim());
+            }
         }
     });
 }
@@ -776,6 +800,69 @@ async function sendAutoReply(cs: ConnectorServer, session: ConnectorSession, tex
             '🤖 Auto-Reply', 'MSG', text);
     } catch (err) {
         log.warn(`⚠️ [connector:${c.name}] Auto-reply mirror to GoContact failed:`, err instanceof Error ? err.message : err);
+    }
+}
+
+// ─── Out-of-hours reply ─────────────────────────────────────────────────────
+
+// Anti-spam throttle: a customer writing repeatedly outside hours is answered
+// at most once per this rolling window. NOTE: across a long continuous closure
+// (e.g. a weekend) a customer who writes on different days more than this window
+// apart can receive the notice more than once — an accepted v1 trade-off.
+const OUT_OF_HOURS_REPLY_WINDOW_MS = 8 * 60 * 60_000; // 8 hours
+
+/** Send the out-of-hours notice once per window for this customer. Throttle
+ *  check + mark happen under the per-customer session lock (caller holds it),
+ *  so two concurrent inbound messages can't both fire. */
+function maybeSendOutOfHoursReply(
+    cs: ConnectorServer, msg: NormalizedInboundMessage, sessionKey: string,
+    text: string, session: ConnectorSession | null,
+): void {
+    const c = cs.connector;
+    const last = getOutOfHoursLastSent(c.name, sessionKey);
+    if (Date.now() - last < OUT_OF_HOURS_REPLY_WINDOW_MS) return;
+    markOutOfHoursSent(c.name, sessionKey, Date.now());
+    void sendOutOfHoursReply(cs, msg, session, text);
+}
+
+/** Deliver the out-of-hours notice to the customer through the regular agent-
+ *  reply plumbing (Meta and/or webhooks). When a GoContact session exists
+ *  (forward mode), also mirror it into the chat like the auto-reply. */
+async function sendOutOfHoursReply(
+    cs: ConnectorServer, msg: NormalizedInboundMessage,
+    session: ConnectorSession | null, text: string,
+): Promise<void> {
+    const c = cs.connector;
+    const event: AgentEvent = {
+        connector: c.name,
+        channel: c.channel,
+        event: 'agent_message',
+        chatId: msg.chatId,
+        displayName: msg.displayName,
+        phoneNumberId: msg.phoneNumberId || undefined,
+        message: {
+            uuid: `outofhours-${sessionKeyFor(msg)}-${Date.now()}`,
+            text,
+            timestamp: Date.now(),
+            agentName: 'Out-of-Hours',
+            userType: 'AUTO',
+            file: null,
+        },
+    };
+    try {
+        await fanoutAgentEvent(cs, session, event);
+        log.info(`🌙 [connector:${c.name}] Out-of-hours reply sent to ${msg.chatId}`);
+    } catch (err) {
+        log.warn(`⚠️ [connector:${c.name}] Out-of-hours reply delivery failed:`, err instanceof Error ? err.message : err);
+    }
+    if (session) {
+        try {
+            await cs.client.sendClientMessage(
+                session.accessKey, session.dialogGroupUuid,
+                '🌙 Out-of-Hours', 'MSG', text);
+        } catch (err) {
+            log.warn(`⚠️ [connector:${c.name}] Out-of-hours mirror to GoContact failed:`, err instanceof Error ? err.message : err);
+        }
     }
 }
 
@@ -858,7 +945,7 @@ async function fanoutAgentEvent(cs: ConnectorServer, session: ConnectorSession |
     // Direct reply to the customer through this connector's channel provider.
     if (directReplyEnabled(c) && event.event === 'agent_message' && event.message) {
         if (c.channel === 'meta-whatsapp') {
-            jobs.push(sendToMeta(c, event.chatId, event.message.text, event.message.file, session?.phoneNumberId));
+            jobs.push(sendToMeta(c, event.chatId, event.message.text, event.message.file, session?.phoneNumberId || event.phoneNumberId));
         } else if (c.channel === 'smooch') {
             jobs.push(sendToSmooch(c, event.chatId, event.message.text, event.message.file));
         }

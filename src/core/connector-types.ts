@@ -12,6 +12,7 @@
  */
 
 import { assertSafeOutboundUrl, SsrfBlockedError } from './ssrf-guard';
+import { type DaySchedule, validateWeekly, isValidTimeZone } from './business-hours';
 
 /** Inbound channel adapters. Each is just a parser+sender pair over the same
  *  normalized event; adding a provider (Infobip, etc.) is another entry here.
@@ -120,6 +121,24 @@ export interface GoContactConnector {
      *  (e.g. a campaign/holiday notice you might forget to turn off).
      *  Unset = active forever while enabled. */
     expiresAt?: string;
+  };
+
+  /** Out-of-office-hours auto-reply. When the customer writes OUTSIDE the
+   *  weekly open hours, a single configured message is sent back (Meta and/or
+   *  webhooks, same plumbing as agent replies), at most once per anti-spam
+   *  window per customer. The schedule is evaluated in `timezone`
+   *  (default Africa/Luanda). See core/business-hours.ts. */
+  businessHours?: {
+    enabled: boolean;
+    message: string;
+    /** false (default): only the out-of-hours reply is sent, no GoContact
+     *  session is created. true: the reply is sent AND the message is still
+     *  forwarded into GoContact so agents see it when they return. */
+    forwardToGoContact?: boolean;
+    /** IANA timezone the schedule is evaluated in (default Africa/Luanda). */
+    timezone?: string;
+    /** Weekly recurring OPEN hours. A day with no entry/ranges is closed. */
+    weekly?: DaySchedule[];
   };
 
   /** Poller cadence in ms (default 4000, min 1000). */
@@ -255,6 +274,31 @@ export function validateConnectorInput(input: unknown): string | null {
     }
     if (ar.expiresAt !== undefined && ar.expiresAt !== '') {
       if (typeof ar.expiresAt !== 'string' || isNaN(Date.parse(ar.expiresAt))) return '"autoReply.expiresAt" must be a valid ISO datetime (or empty for no expiry)';
+    }
+  }
+
+  if (c.businessHours !== undefined) {
+    if (typeof c.businessHours !== 'object' || c.businessHours === null) return '"businessHours" must be an object';
+    const bh = c.businessHours as Record<string, unknown>;
+    if (typeof bh.enabled !== 'boolean') return '"businessHours.enabled" must be a boolean';
+    if (bh.forwardToGoContact !== undefined && typeof bh.forwardToGoContact !== 'boolean') return '"businessHours.forwardToGoContact" must be a boolean';
+    if (bh.timezone !== undefined && bh.timezone !== '' && !isValidTimeZone(bh.timezone)) {
+      return '"businessHours.timezone" must be a valid IANA timezone (e.g. Africa/Luanda)';
+    }
+    // Validate the schedule shape whenever present, so bad data can't be stored
+    // even while disabled.
+    const schedule = validateWeekly(bh.weekly);
+    if ('error' in schedule) return `"businessHours": ${schedule.error}`;
+    if (bh.enabled) {
+      if (!bh.message || typeof bh.message !== 'string' || !(bh.message as string).trim()) {
+        return '"businessHours.message" is required when business hours are enabled';
+      }
+      if ((bh.message as string).length > 2000) return '"businessHours.message" must be 2000 characters or fewer';
+      // Fail safe: enabling with no open hours would make the connector reply
+      // out-of-hours to EVERY message — a silent outage. Reject it.
+      if (schedule.open === 0) {
+        return '"businessHours" is enabled but no open hours are defined — add at least one time range, or disable it';
+      }
     }
   }
 

@@ -2667,6 +2667,35 @@
         <div style="margin-top:6px;font-size:11px;color:var(--text3)">Sent once per session — to the customer (via Meta/webhooks, like an agent reply with userType "AUTO") and mirrored into the GoContact chat so the agent sees it. After the expiry date it stops firing automatically.</div>
       </div>
 
+      <!-- ── Business hours (out-of-office reply) ── -->
+      <div style="margin-top:18px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Business Hours</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--text);cursor:pointer">
+        <input id="cnBusinessHoursEnabled" type="checkbox" onchange="connectorBusinessHoursChanged()"> Reply with a notice when customers write outside opening hours
+      </label>
+      <div id="cnBusinessHoursSection" style="display:none;margin-top:8px">
+        <textarea id="cnBusinessHoursMessage" rows="2" maxlength="2000" placeholder="Estamos fora do horário de atendimento. Responderemos assim que voltarmos." style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></textarea>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--text);cursor:pointer">
+          <input id="cnBusinessHoursForward" type="checkbox"> Also forward the message into GoContact (agents see it when they return)
+        </label>
+        <div style="margin-top:10px;display:grid;grid-template-columns:70px 1fr;gap:6px 10px;align-items:center">
+          <span style="font-size:12px;color:var(--text2)">Mon</span>
+          <input id="cnBhDay1" type="text" placeholder="08:00-17:00   (empty = closed)" style="width:100%;padding:6px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          <span style="font-size:12px;color:var(--text2)">Tue</span>
+          <input id="cnBhDay2" type="text" placeholder="08:00-17:00" style="width:100%;padding:6px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          <span style="font-size:12px;color:var(--text2)">Wed</span>
+          <input id="cnBhDay3" type="text" placeholder="08:00-17:00" style="width:100%;padding:6px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          <span style="font-size:12px;color:var(--text2)">Thu</span>
+          <input id="cnBhDay4" type="text" placeholder="08:00-17:00" style="width:100%;padding:6px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          <span style="font-size:12px;color:var(--text2)">Fri</span>
+          <input id="cnBhDay5" type="text" placeholder="08:00-17:00" style="width:100%;padding:6px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          <span style="font-size:12px;color:var(--text2)">Sat</span>
+          <input id="cnBhDay6" type="text" placeholder="(empty = closed)" style="width:100%;padding:6px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          <span style="font-size:12px;color:var(--text2)">Sun</span>
+          <input id="cnBhDay0" type="text" placeholder="(empty = closed)" style="width:100%;padding:6px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text3)">Times are in <strong>Africa/Luanda (UTC+1)</strong>. Use 24h <code>HH:MM-HH:MM</code> ranges; comma-separate to add a midday break — e.g. <code>08:00-12:00, 13:00-17:00</code>. Leave a day empty to mark it closed. The notice is sent at most once every 8h per customer. Overnight ranges (e.g. 20:00-04:00) are not supported.</div>
+      </div>
+
       <!-- ── Channel provider credentials ── -->
       <div id="cnProviderHeader" style="display:none;margin-top:18px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Channel Provider</div>
       <!-- Meta -->
