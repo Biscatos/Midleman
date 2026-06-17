@@ -26,6 +26,8 @@ services:
       # Log verbosity: error | warn | info | debug (default info). Set to "warn"
       # or "error" to keep the container quiet (only problems).
       - LOG_LEVEL=${LOG_LEVEL:-info}
+
+      - TZ=Africa/Luanda
       # ─── NPM integration (optional addon) ───────────────────────────────
       # Uncomment to bootstrap settings from env. Credentials are still managed
       # in the dashboard (encrypted at rest). The cert volume below is also opt-in.
