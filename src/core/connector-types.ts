@@ -21,9 +21,11 @@ export type ConnectorChannel = 'meta-whatsapp' | 'smooch' | 'generic' | 'telegra
 
 /** GoContact instance credentials + webchat channel addressing. */
 export interface GoContactSettings {
-  /** Base URL. In poll mode the GoContact instance, e.g.
-   *  "https://gotaag.ucall.co.ao/"; in webchat-api mode the Webchat API host,
-   *  e.g. "https://eu.ds.gocontact.com". username/password are shared. */
+  /** GoContact INSTANCE base URL, e.g. "https://gotaag.ucall.co.ao/". Used by
+   *  the plugin API in poll mode, and — in BOTH modes — to build agent
+   *  attachment URLs ({baseUrl}/{storageBucket}/webchat-attachments/…). In
+   *  webchat-api mode the API calls go to `apiBaseUrl` instead; username/password
+   *  are shared across modes. */
   baseUrl: string;
   /** Login e-mail. The webchat domain name is the part after "@". */
   username: string;
@@ -51,6 +53,10 @@ export interface GoContactSettings {
    *     Midleman through an outbound webhook callback (no poller).
    *  Default 'poll' keeps every existing connector unchanged. */
   mode?: 'poll' | 'webchat-api';
+  /** Webchat API endpoint for SENDING (auth, create conversation, send message),
+   *  e.g. "https://eu.ds.gocontact.com". Distinct from baseUrl (the instance,
+   *  which serves attachments). Defaults to https://eu.ds.gocontact.com. (webchat-api) */
+  apiBaseUrl?: string;
   /** `audience` sent to POST /v1/authentication/token. (webchat-api) */
   audience?: string;
   /** Webchat channel UUID — the {channelUuid} path param when creating a
@@ -244,6 +250,10 @@ export function validateConnectorInput(input: unknown): string | null {
     return '"gocontact.timestampOffsetHours" must be between -12 and 14';
   }
   if (goMode === 'webchat-api') {
+    if (g.apiBaseUrl !== undefined && g.apiBaseUrl !== '') {
+      if (typeof g.apiBaseUrl !== 'string') return '"gocontact.apiBaseUrl" must be a string';
+      try { new URL(g.apiBaseUrl); } catch { return '"gocontact.apiBaseUrl" must be a valid URL'; }
+    }
     if (!g.audience || typeof g.audience !== 'string') return '"gocontact.audience" is required for webchat-api mode';
     if (!g.channelUuid || typeof g.channelUuid !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(g.channelUuid)) {
       return '"gocontact.channelUuid" must be a UUID (webchat-api mode)';

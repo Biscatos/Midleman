@@ -2220,6 +2220,7 @@ function openConnectorModal(connector = null) {
   // GoContact mode + Webchat API fields
   const go = connector?.gocontact || {};
   document.getElementById('cnGoMode').value = go.mode === 'webchat-api' ? 'webchat-api' : 'poll';
+  document.getElementById('cnGoApiBaseUrl').value = go.apiBaseUrl || '';
   document.getElementById('cnGoAudience').value = go.audience || '';
   document.getElementById('cnGoChannelUuid').value = go.channelUuid || '';
   document.getElementById('cnGoCallbackToken').value = '';
@@ -2294,6 +2295,7 @@ async function saveConnector() {
       hashKey: document.getElementById('cnGoHashKey').value.trim(),
       domainUuid: document.getElementById('cnGoDomainUuid').value.trim() || undefined,
       mode: document.getElementById('cnGoMode').value,
+      apiBaseUrl: document.getElementById('cnGoApiBaseUrl').value.trim() || undefined,
       audience: document.getElementById('cnGoAudience').value.trim() || undefined,
       channelUuid: document.getElementById('cnGoChannelUuid').value.trim() || undefined,
     },

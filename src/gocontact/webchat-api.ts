@@ -23,6 +23,12 @@ import { GoContactError, type GoToken } from './client';
 
 const FETCH_TIMEOUT_MS = 30_000;
 
+/** Default Webchat API endpoint (EU datacenter). Overridable per connector via
+ *  gocontact.apiBaseUrl. This host serves the whole Webchat API (auth,
+ *  conversations, messages, channel config, close, …) — the ONLY thing it does
+ *  NOT serve is agent attachments, which live on the instance (gocontact.baseUrl). */
+export const DEFAULT_WEBCHAT_API_BASE = 'https://eu.ds.gocontact.com';
+
 export interface ChannelLoginField {
     label: string;
     field: string;
@@ -85,7 +91,7 @@ export class WebchatApiClient {
     private readonly base: string;
     private readonly tokenKey: string;
     constructor(private readonly cfg: GoContactSettings) {
-        const raw = cfg.baseUrl || '';
+        const raw = cfg.apiBaseUrl || DEFAULT_WEBCHAT_API_BASE;
         // Normalise to ".../api/webchat" (accept the host with or without it).
         const trimmed = raw.replace(/\/+$/, '');
         this.base = /\/api\/webchat$/i.test(trimmed) ? trimmed : trimmed + '/api/webchat';
@@ -203,33 +209,10 @@ export class WebchatApiClient {
         if (res.status < 200 || res.status >= 300) throw new GoContactError('client upload', `HTTP ${res.status} ${text.slice(0, 300)}`, res.status);
     }
 
-    /** Download an agent attachment. The outbound webhook gives a relative url
-     *  ("/webchat-attachments/..."); resolve it against the API host and try the
-     *  bearer token first, falling back to an unauthenticated GET. */
-    async downloadAttachment(relativeOrAbsUrl: string): Promise<{ bytes: Uint8Array; mimetype: string }> {
-        const abs = /^https?:\/\//i.test(relativeOrAbsUrl)
-            ? relativeOrAbsUrl
-            : this.base.replace(/\/api\/webchat$/i, '') + (relativeOrAbsUrl.startsWith('/') ? relativeOrAbsUrl : '/' + relativeOrAbsUrl);
-        const attempt = async (withAuth: boolean): Promise<Response> => {
-            const headers: Record<string, string> = {};
-            if (withAuth) headers['Authorization'] = `Bearer ${(await this.getToken()).token}`;
-            return fetch(abs, { headers, signal: AbortSignal.timeout(120_000), tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' } } as RequestInit);
-        };
-        let res = await attempt(true);
-        if (res.status === 401 || res.status === 403) res = await attempt(false);
-        if (!res.ok) throw new GoContactError('attachment download', `HTTP ${res.status}`, res.status);
-        const bytes = new Uint8Array(await res.arrayBuffer());
-        return { bytes, mimetype: res.headers.get('content-type') || 'application/octet-stream' };
-    }
+    // NOTE: agent attachments are NOT served from the API host — they live on
+    // the GoContact instance (gocontact.baseUrl) under the storage bucket. The
+    // callback builds their URL via the poll client's agentFileUrl().
 
-    /** Absolute URL of an attachment from the outbound webhook's relative path
-     *  ("/webchat-attachments/...") — what we hand to the fan-out (Meta/webhooks). */
-    attachmentUrl(relativeOrAbsUrl: string): string {
-        if (!relativeOrAbsUrl) return '';
-        if (/^https?:\/\//i.test(relativeOrAbsUrl)) return relativeOrAbsUrl;
-        return this.base.replace(/\/api\/webchat$/i, '') + (relativeOrAbsUrl.startsWith('/') ? relativeOrAbsUrl : '/' + relativeOrAbsUrl);
-    }
-
-    /** The resolved absolute base (".../api/webchat") — for logging/diagnostics. */
+    /** The resolved absolute API base (".../api/webchat") — for diagnostics. */
     get apiBase(): string { return this.base; }
 }
