@@ -21,7 +21,9 @@ export type ConnectorChannel = 'meta-whatsapp' | 'smooch' | 'generic' | 'telegra
 
 /** GoContact instance credentials + webchat channel addressing. */
 export interface GoContactSettings {
-  /** Instance base URL, e.g. "https://gotaag.ucall.co.ao/" */
+  /** Base URL. In poll mode the GoContact instance, e.g.
+   *  "https://gotaag.ucall.co.ao/"; in webchat-api mode the Webchat API host,
+   *  e.g. "https://eu.ds.gocontact.com". username/password are shared. */
   baseUrl: string;
   /** Login e-mail. The webchat domain name is the part after "@". */
   username: string;
@@ -39,6 +41,30 @@ export interface GoContactSettings {
   timestampOffsetHours?: number;
   /** Path under baseUrl where agent file attachments live (default "storage"). */
   storageBucket?: string;
+
+  // ── Webchat API mode ──────────────────────────────────────────────────────
+  /** GoContact integration mode:
+   *   • 'poll' (default): the traditional webchat plugin API + a poller that
+   *     pulls agent replies (everything above — baseUrl/username/hashKey).
+   *   • 'webchat-api': the official Webchat API (eu.ds.gocontact.com). The
+   *     client side is sent via that API and agent replies are PUSHED back to
+   *     Midleman through an outbound webhook callback (no poller).
+   *  Default 'poll' keeps every existing connector unchanged. */
+  mode?: 'poll' | 'webchat-api';
+  /** `audience` sent to POST /v1/authentication/token. (webchat-api) */
+  audience?: string;
+  /** Webchat channel UUID — the {channelUuid} path param when creating a
+   *  conversation and reading the login-field config. (webchat-api) */
+  channelUuid?: string;
+  /** Optional override of how inbound customer data fills the channel's
+   *  loginFields: { goContactFieldName: source }, where source is one of
+   *  "name" | "phone" | "phoneNumberId", or a literal value prefixed with "=".
+   *  Fields not listed here are auto-mapped by a name/phone heuristic over the
+   *  field/label returned by GET /channels/{uuid}/config. (webchat-api) */
+  loginFieldMap?: Record<string, string>;
+  /** Shared secret the GoContact outbound webhook must present (as ?token= or
+   *  X-Callback-Token header) for Midleman to accept a callback. (webchat-api) */
+  callbackToken?: string;
 }
 
 /** Meta WhatsApp Cloud API credentials — used to download inbound media and to
@@ -197,18 +223,38 @@ export function validateConnectorInput(input: unknown): string | null {
 
   if (!c.gocontact || typeof c.gocontact !== 'object') return '"gocontact" settings are required';
   const g = c.gocontact as Record<string, unknown>;
+  const goMode = g.mode === 'webchat-api' ? 'webchat-api' : 'poll';
+  if (g.mode !== undefined && g.mode !== 'poll' && g.mode !== 'webchat-api') return '"gocontact.mode" must be "poll" or "webchat-api"';
+  // baseUrl is shared across modes (instance for poll, API host for webchat-api).
   if (!g.baseUrl || typeof g.baseUrl !== 'string') return '"gocontact.baseUrl" is required';
   try { new URL(g.baseUrl); } catch { return '"gocontact.baseUrl" must be a valid URL'; }
-  if (!g.username || typeof g.username !== 'string' || !g.username.includes('@')) {
+  if (!g.username || typeof g.username !== 'string') return '"gocontact.username" is required';
+  // Poll mode derives the webchat domain from the e-mail's domain part; the
+  // Webchat API takes username verbatim, so the "@" rule applies to poll only.
+  if (goMode === 'poll' && !g.username.includes('@')) {
     return '"gocontact.username" must be an e-mail (domain name is taken from the part after "@")';
   }
   if (g.password !== undefined && typeof g.password !== 'string') return '"gocontact.password" must be a string';
-  if (!g.hashKey || typeof g.hashKey !== 'string') return '"gocontact.hashKey" is required';
+  // hashKey is the traditional plugin channel key — required for poll mode only.
+  if (goMode === 'poll' && (!g.hashKey || typeof g.hashKey !== 'string')) return '"gocontact.hashKey" is required';
   if (g.domainUuid !== undefined && g.domainUuid !== '' && (typeof g.domainUuid !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(g.domainUuid))) {
     return '"gocontact.domainUuid" must be a UUID (the _domain value from the embed script)';
   }
   if (g.timestampOffsetHours !== undefined && (typeof g.timestampOffsetHours !== 'number' || g.timestampOffsetHours < -12 || g.timestampOffsetHours > 14)) {
     return '"gocontact.timestampOffsetHours" must be between -12 and 14';
+  }
+  if (goMode === 'webchat-api') {
+    if (!g.audience || typeof g.audience !== 'string') return '"gocontact.audience" is required for webchat-api mode';
+    if (!g.channelUuid || typeof g.channelUuid !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(g.channelUuid)) {
+      return '"gocontact.channelUuid" must be a UUID (webchat-api mode)';
+    }
+    if (g.loginFieldMap !== undefined) {
+      if (typeof g.loginFieldMap !== 'object' || g.loginFieldMap === null || Array.isArray(g.loginFieldMap)
+          || Object.values(g.loginFieldMap as Record<string, unknown>).some(v => typeof v !== 'string')) {
+        return '"gocontact.loginFieldMap" must be an object mapping field names to source strings';
+      }
+    }
+    if (g.callbackToken !== undefined && typeof g.callbackToken !== 'string') return '"gocontact.callbackToken" must be a string';
   }
 
   const ssrfOverride = {

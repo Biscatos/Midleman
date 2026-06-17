@@ -17,11 +17,12 @@
 
 import { log } from '../core/logger';
 import type { GoContactConnector, NormalizedInboundMessage, ConnectorWebhookTarget } from '../core/connector-types';
-import { GoContactClient, GoContactError, stripHtml, type GoAgentMessage, type GoFile } from '../gocontact/client';
+import { GoContactClient, GoContactError, stripHtml, type GoAgentMessage, type GoFile, type GoSessionHandles } from '../gocontact/client';
+import { WebchatApiClient, resolveLoginFields, type ChannelLoginField } from '../gocontact/webchat-api';
 import {
     getSession, upsertSession, touchSession, deleteSession,
     updateSessionLastInbound, markSessionAutoReplied, listActiveSessions, purgeExpiredSessions, type ConnectorSession,
-    getOutOfHoursLastSent, markOutOfHoursSent,
+    getOutOfHoursLastSent, markOutOfHoursSent, getSessionByConversation,
 } from '../gocontact/sessions';
 import { isWithinBusinessHours } from '../core/business-hours';
 import { logRequest, headersToRecord } from '../telemetry/request-log';
@@ -37,6 +38,11 @@ import { createHmac } from 'crypto';
 export interface ConnectorServer {
     connector: GoContactConnector;
     client: GoContactClient;
+    /** Set only when gocontact.mode === 'webchat-api'. The poller is disabled in
+     *  that mode; agent replies arrive via the /gocontact/callback webhook. */
+    webchatClient: WebchatApiClient | null;
+    /** Cached GET /channels/{uuid}/config (webchat-api) — fetched once lazily. */
+    webchatLoginFields: ChannelLoginField[] | null;
     server: ReturnType<typeof Bun.serve> | null;
     pollTimer: ReturnType<typeof setInterval> | null;
     polling: boolean;             // reentrancy guard for the poll tick
@@ -234,22 +240,28 @@ function graphBase(c: GoContactConnector): string {
     return `https://graph.facebook.com/${c.meta?.graphVersion || DEFAULT_GRAPH_VERSION}`;
 }
 
-/** Extract messages from a Meta webhook payload. Accepts both the full
- *  envelope (entry[].changes[].value) and a bare `value` object — the shape
- *  many middlewares/BSPs forward (messaging_product/metadata/contacts/messages
- *  at the top level). */
+/** Extract messages from a Meta webhook payload. Accepts every shape we see in
+ *  the wild: the full envelope (entry[].changes[].value), a bare `value` object
+ *  (messaging_product/metadata/contacts/messages at the top level), a lone
+ *  `change` object ({value:{…}}), AND a top-level ARRAY of any of those (some
+ *  middlewares/BSPs forward `[ {value} ]`). */
 function parseMetaPayload(payload: any): NormalizedInboundMessage[] {
     const out: NormalizedInboundMessage[] = [];
     const values: any[] = [];
-    if (Array.isArray(payload?.entry)) {
-        for (const entry of payload.entry) {
-            const changes = Array.isArray(entry?.changes) ? entry.changes : [];
-            for (const change of changes) {
-                if (change?.value) values.push(change.value);
+    const items: any[] = Array.isArray(payload) ? payload : [payload];
+    for (const item of items) {
+        if (Array.isArray(item?.entry)) {
+            for (const entry of item.entry) {
+                const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+                for (const change of changes) {
+                    if (change?.value) values.push(change.value);
+                }
             }
+        } else if (Array.isArray(item?.messages)) {
+            values.push(item); // bare `value` object
+        } else if (item?.value && Array.isArray(item.value.messages)) {
+            values.push(item.value); // lone `change` object
         }
-    } else if (Array.isArray(payload?.messages)) {
-        values.push(payload); // bare `value` object
     }
     {
         for (const value of values) {
@@ -626,7 +638,12 @@ async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage)
 
     if (existing) deleteSession(c.name, key);
 
-    const handles = await cs.client.openSession(msg.displayName, msg.chatId);
+    // Webchat API mode creates a conversation via the official API; poll mode
+    // uses the traditional plugin bootstrap. Both yield the same handle shape
+    // (for webchat-api, dialogGroupUuid carries the conversationUuid).
+    const handles = cs.webchatClient
+        ? await openWebchatConversation(cs, msg)
+        : await cs.client.openSession(msg.displayName, msg.chatId);
     const session: ConnectorSession = {
         connector: c.name,
         chatId: key,
@@ -645,19 +662,42 @@ async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage)
     upsertSession(session);
 
     // Announce the customer in the chat (mirrors the original JOIN episode).
-    try {
-        await cs.client.sendClientMessage(session.accessKey, session.dialogGroupUuid, session.displayName, 'JOIN', '');
-    } catch (err) {
-        log.warn(`⚠️ [connector:${c.name}] JOIN failed for ${msg.chatId}:`, err instanceof Error ? err.message : err);
+    // Webchat API mode has no separate JOIN — creating the conversation is it.
+    if (!cs.webchatClient) {
+        try {
+            await cs.client.sendClientMessage(session.accessKey, session.dialogGroupUuid, session.displayName, 'JOIN', '');
+        } catch (err) {
+            log.warn(`⚠️ [connector:${c.name}] JOIN failed for ${msg.chatId}:`, err instanceof Error ? err.message : err);
+        }
     }
     log.info(`💬 [connector:${c.name}] New webchat session for ${key} (${session.dialogGroupUuid})`);
     return session;
+}
+
+/** Create a conversation via the GoContact Webchat API and adapt it to the
+ *  common session-handle shape (conversationUuid → dialogGroupUuid). */
+async function openWebchatConversation(cs: ConnectorServer, msg: NormalizedInboundMessage): Promise<GoSessionHandles> {
+    const wc = cs.webchatClient!;
+    const c = cs.connector;
+    if (!cs.webchatLoginFields) cs.webchatLoginFields = await wc.getChannelConfig();
+    const { fields, missingRequired } = resolveLoginFields(
+        cs.webchatLoginFields,
+        { name: msg.displayName, phone: msg.chatId, phoneNumberId: msg.phoneNumberId },
+        c.gocontact.loginFieldMap,
+    );
+    if (missingRequired.length) {
+        throw new GoContactError('create conversation',
+            `required loginFields could not be filled: ${missingRequired.join(', ')} — configure gocontact.loginFieldMap`);
+    }
+    const { conversationUuid, contactId } = await wc.createConversation(fields);
+    return { domainUuid: c.gocontact.channelUuid || '', accessKey: '', dialogGroupUuid: conversationUuid, dialogGroupId: contactId };
 }
 
 /** Push one message's payload (file and/or text) into a GoContact dialog.
  *  Throws GoContactError(status 404) if the dialog no longer exists. */
 async function injectInbound(cs: ConnectorServer, session: ConnectorSession, msg: NormalizedInboundMessage): Promise<void> {
     const c = cs.connector;
+    if (cs.webchatClient) { await injectInboundWebchat(cs, session, msg); return; }
     if (msg.file) {
         // Prefer a direct (signed) URL when the gateway provides one — no Meta
         // token needed. Fall back to the Graph API media-id exchange.
@@ -698,6 +738,41 @@ async function injectInbound(cs: ConnectorServer, session: ConnectorSession, msg
     }
     if (msg.text) {
         await cs.client.sendClientMessage(session.accessKey, session.dialogGroupUuid, session.displayName, 'MSG', msg.text);
+    }
+}
+
+/** Webchat API variant of injectInbound: send the customer's text/file straight
+ *  through the official API. dialogGroupUuid carries the conversationUuid. The
+ *  API only accepts jpg/png/pdf uploads — other types degrade to a text note. */
+async function injectInboundWebchat(cs: ConnectorServer, session: ConnectorSession, msg: NormalizedInboundMessage): Promise<void> {
+    const wc = cs.webchatClient!;
+    const c = cs.connector;
+    const conversationUuid = session.dialogGroupUuid;
+    if (msg.file) {
+        let downloaded: { bytes: Uint8Array; mimetype: string } | null = null;
+        if (msg.file.url) {
+            try { downloaded = await downloadDirectUrl(c, msg.file.url); }
+            catch (err) {
+                if (!msg.file.metaMediaId) throw err;
+                log.warn(`⚠️ [connector:${c.name}] Direct media URL failed (${err instanceof Error ? err.message : err}) — falling back to Graph API media id`);
+            }
+        }
+        if (!downloaded) {
+            if (!msg.file.metaMediaId) throw new Error('Media message has neither a usable URL nor a media id');
+            downloaded = await downloadMetaMedia(c, msg.file.metaMediaId);
+        }
+        const effectiveMime = msg.file.mimetype || downloaded.mimetype;
+        const filename = msg.file.filename || `file-${Date.now()}${extensionForMime(effectiveMime)}`;
+        if (/^(image\/jpe?g|image\/png|application\/pdf)$/i.test(effectiveMime)) {
+            await wc.uploadClientFile(conversationUuid, downloaded.bytes, filename, effectiveMime);
+        } else {
+            // The Webchat API rejects other types — surface a note so the agent
+            // at least knows a file arrived (and its name/type).
+            await wc.sendClientMessage(conversationUuid, `📎 ${filename} (${effectiveMime}) — anexo não suportado pela Webchat API`);
+        }
+    }
+    if (msg.text) {
+        await wc.sendClientMessage(conversationUuid, msg.text);
     }
 }
 
@@ -1197,6 +1272,129 @@ async function pollTick(cs: ConnectorServer): Promise<void> {
 
 // ─── Inbound HTTP handling ───────────────────────────────────────────────────
 
+/**
+ * GoContact Webchat API outbound webhook → fan-out. Maps data.conversation.uuid
+ * back to the customer session and relays the agent's message/file/join/leave to
+ * Meta/Smooch/webhooks via the same fanoutAgentEvent the poller uses.
+ *
+ * Auth: a callbackToken (query ?token= or X-Callback-Token header) when set;
+ * otherwise an IP allowlist is required so the endpoint is never fully open.
+ */
+async function handleWebchatCallback(req: Request, cs: ConnectorServer, clientIp: string): Promise<Response> {
+    const c = cs.connector;
+    const url = new URL(req.url);
+
+    const cbToken = c.gocontact.callbackToken;
+    const provided = url.searchParams.get('token') || req.headers.get('x-callback-token');
+    if (cbToken) {
+        if (!timingSafeEqualStr(provided, cbToken)) {
+            log.warn(`🚫 [connector:${c.name}] webchat callback rejected: bad token (ip ${clientIp})`);
+            return jsonResponse(401, { error: 'Unauthorized' });
+        }
+    } else if (!c.allowedIps || c.allowedIps.length === 0) {
+        log.warn(`🚫 [connector:${c.name}] webchat callback rejected: no callbackToken and no IP allowlist configured`);
+        return jsonResponse(401, { error: 'Unauthorized', message: 'Configure gocontact.callbackToken or allowedIps for the callback' });
+    }
+
+    let body: any;
+    try { body = JSON.parse(await req.text()); }
+    catch { return jsonResponse(400, { error: 'Bad Request', message: 'Body must be valid JSON' }); }
+
+    const action = String(body?.action || '');
+    const m = body?.data?.message || {};
+    const conversationUuid = String(body?.data?.conversation?.uuid || '');
+    const participantType = String(m?.participantType || '');
+    const msgType = String(m?.msgType || '');
+    const uuid = String(m?.uuid || '');
+
+    // Only agent-originated events drive fan-out — CLIENT echoes and
+    // DEFERRED_MESSAGE_PROCESSED acks would otherwise loop the customer's own
+    // message back to them.
+    if (participantType !== 'AGENT') return jsonResponse(200, { status: 'ignored', reason: 'non-agent' });
+    if (!conversationUuid) return jsonResponse(200, { status: 'ignored', reason: 'no-conversation' });
+
+    const session = getSessionByConversation(c.name, conversationUuid);
+    if (!session) {
+        log.warn(`⚠️ [connector:${c.name}] webchat callback for unknown conversation ${conversationUuid} — ignoring`);
+        return jsonResponse(200, { status: 'ignored', reason: 'unknown-conversation' });
+    }
+
+    const base = {
+        connector: c.name, channel: c.channel,
+        chatId: session.customerId, displayName: session.displayName,
+        phoneNumberId: session.phoneNumberId || undefined,
+    };
+    const deliver = async (event: AgentEvent): Promise<boolean> => {
+        try { await fanoutAgentEvent(cs, session, event); return true; }
+        catch (err) {
+            cs.stats.lastError = err instanceof Error ? err.message : String(err);
+            log.warn(`⚠️ [connector:${c.name}] webchat callback fan-out failed:`, cs.stats.lastError);
+            return false;
+        }
+    };
+
+    // Agent left → close the conversation.
+    if (msgType === 'LEAVE') {
+        await deliver({ ...base, event: 'chat_closed', reason: 'agent', message: null });
+        deleteSession(c.name, session.chatId);
+        dropSessionPollState(c.name, session.chatId);
+        return jsonResponse(200, { status: 'ok', event: 'chat_closed' });
+    }
+
+    // Agent joined → informational event (best-effort).
+    if (msgType === 'JOIN') {
+        await deliver({ ...base, event: 'agent_joined', message: {
+            uuid: uuid || crypto.randomUUID(), text: null, timestamp: Number(m.timestamp) || Date.now(),
+            agentName: String(m.participantName || 'Agent'), userType: 'AGENT', file: null,
+        } });
+        touchSession(c.name, session.chatId);
+        return jsonResponse(200, { status: 'ok', event: 'agent_joined' });
+    }
+
+    // File: act ONLY on FILE_UPLOADED (the prior MESSAGE_SENT FILESEND carries
+    // url=null). Dedup by message uuid against webhook retries.
+    if (msgType === 'FILESEND') {
+        if (action !== 'FILE_UPLOADED') return jsonResponse(200, { status: 'ignored', reason: 'awaiting-upload' });
+        if (uuid && wasDelivered(c.name, uuid)) return jsonResponse(200, { status: 'duplicate' });
+        const f = m.file || {};
+        const event: AgentEvent = { ...base, event: 'agent_message', message: {
+            uuid: uuid || crypto.randomUUID(),
+            text: m.msg ? stripHtml(String(m.msg)) : null,
+            timestamp: Number(m.timestamp) || Date.now(),
+            agentName: String(m.participantName || 'Agent'), userType: 'AGENT',
+            file: {
+                url: cs.webchatClient!.attachmentUrl(String(f.url || '')),
+                filename: String(f.filename || 'file'),
+                mimetype: String(f.mimetype || 'application/octet-stream'),
+                size: f.size ?? 0,
+            },
+        } };
+        if (!await deliver(event)) return jsonResponse(502, { error: 'fan-out failed' });
+        if (uuid) rememberDelivered(c.name, uuid);
+        touchSession(c.name, session.chatId);
+        cs.stats.agentMessages++; cs.stats.lastAgentMessageAt = Date.now();
+        return jsonResponse(200, { status: 'ok', event: 'agent_message', kind: 'file' });
+    }
+
+    // Text message.
+    if (msgType === 'MSG') {
+        if (uuid && wasDelivered(c.name, uuid)) return jsonResponse(200, { status: 'duplicate' });
+        const event: AgentEvent = { ...base, event: 'agent_message', message: {
+            uuid: uuid || crypto.randomUUID(),
+            text: stripHtml(String(m.msg || '')),
+            timestamp: Number(m.timestamp) || Date.now(),
+            agentName: String(m.participantName || 'Agent'), userType: 'AGENT', file: null,
+        } };
+        if (!await deliver(event)) return jsonResponse(502, { error: 'fan-out failed' });
+        if (uuid) rememberDelivered(c.name, uuid);
+        touchSession(c.name, session.chatId);
+        cs.stats.agentMessages++; cs.stats.lastAgentMessageAt = Date.now();
+        return jsonResponse(200, { status: 'ok', event: 'agent_message' });
+    }
+
+    return jsonResponse(200, { status: 'ignored', reason: `unhandled msgType ${msgType}` });
+}
+
 async function handleInbound(req: Request, cs: ConnectorServer): Promise<Response> {
     const c = cs.connector;
     const url = new URL(req.url);
@@ -1227,6 +1425,13 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
     if (!isIpAllowed(clientIp, c.allowedIps)) {
         log.warn(`🚫 [connector:${c.name}] blocked IP ${clientIp}`);
         return jsonResponse(401, { error: 'Unauthorized', message: 'Your IP address is not allowed.' });
+    }
+
+    // GoContact Webchat API outbound webhook (agent → Midleman). Only when this
+    // connector runs in webchat-api mode; the path keeps it distinct from the
+    // customer-side inbound that shares this listener.
+    if (cs.webchatClient && url.pathname.endsWith('/gocontact/callback')) {
+        return await handleWebchatCallback(req, cs, clientIp);
     }
 
     let payload: any;
@@ -1334,9 +1539,12 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
 // ─── Server lifecycle ────────────────────────────────────────────────────────
 
 export function startConnectorServer(connector: GoContactConnector): ConnectorServer {
+    const isWebchat = connector.gocontact.mode === 'webchat-api';
     const cs: ConnectorServer = {
         connector,
         client: new GoContactClient(connector.gocontact),
+        webchatClient: isWebchat ? new WebchatApiClient(connector.gocontact) : null,
+        webchatLoginFields: null,
         server: null,
         pollTimer: null,
         polling: false,
@@ -1370,10 +1578,16 @@ export function startConnectorServer(connector: GoContactConnector): ConnectorSe
             },
         });
 
-        // The scheduler ticks every second; each session is only actually
-        // polled when due per its adaptive interval (fast..8×fast, max 60s).
-        cs.pollTimer = setInterval(() => { void pollTick(cs); }, 1000);
-        log.info(`💬 Connector "${connector.name}" (${connector.channel}) on :${cs.server.port} — adaptive polling ${fastIntervalMs(connector)}–${maxIntervalMs(connector)}ms`);
+        if (isWebchat) {
+            // Webchat API mode: agent replies are PUSHED to /gocontact/callback;
+            // there is no poller.
+            log.info(`💬 Connector "${connector.name}" (${connector.channel}) on :${cs.server.port} — GoContact Webchat API (push via callback)`);
+        } else {
+            // The scheduler ticks every second; each session is only actually
+            // polled when due per its adaptive interval (fast..8×fast, max 60s).
+            cs.pollTimer = setInterval(() => { void pollTick(cs); }, 1000);
+            log.info(`💬 Connector "${connector.name}" (${connector.channel}) on :${cs.server.port} — adaptive polling ${fastIntervalMs(connector)}–${maxIntervalMs(connector)}ms`);
+        }
     } else {
         log.info(`💬 Connector "${connector.name}" loaded (disabled)`);
     }

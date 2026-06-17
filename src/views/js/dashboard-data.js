@@ -2157,6 +2157,12 @@ function connectorBusinessHoursChanged() {
   document.getElementById('cnBusinessHoursSection').style.display = on ? 'block' : 'none';
 }
 
+function connectorGoModeChanged() {
+  const webchat = document.getElementById('cnGoMode').value === 'webchat-api';
+  document.getElementById('cnWebchatSection').style.display = webchat ? 'block' : 'none';
+  document.querySelectorAll('.cn-poll-field').forEach(el => { el.style.display = webchat ? 'none' : ''; });
+}
+
 // Structured ranges → "08:00-12:00, 13:00-17:00" for the per-day inputs.
 function bhRangesToText(ranges) {
   return (ranges || []).map(r => `${r.start}-${r.end}`).join(', ');
@@ -2211,6 +2217,15 @@ function openConnectorModal(connector = null) {
   document.getElementById('cnGoPassword').placeholder = connector?.gocontact?.hasPassword ? '(kept — type to replace)' : '';
   document.getElementById('cnGoHashKey').value = connector?.gocontact?.hashKey || '';
   document.getElementById('cnGoDomainUuid').value = connector?.gocontact?.domainUuid || '';
+  // GoContact mode + Webchat API fields
+  const go = connector?.gocontact || {};
+  document.getElementById('cnGoMode').value = go.mode === 'webchat-api' ? 'webchat-api' : 'poll';
+  document.getElementById('cnGoAudience').value = go.audience || '';
+  document.getElementById('cnGoChannelUuid').value = go.channelUuid || '';
+  document.getElementById('cnGoCallbackToken').value = '';
+  document.getElementById('cnGoCallbackToken').placeholder = go.hasCallbackToken ? '(kept — type to replace)' : '';
+  document.getElementById('cnGoLoginFieldMap').value = Object.entries(go.loginFieldMap || {}).map(([k, v]) => `${k}=${v}`).join('\n');
+  connectorGoModeChanged();
   document.getElementById('cnPollInterval').value = connector?.pollIntervalMs || '';
   document.getElementById('cnSessionTtl').value = connector?.sessionTtlMinutes || '';
   document.getElementById('cnMetaToken').value = '';
@@ -2278,11 +2293,22 @@ async function saveConnector() {
       username: document.getElementById('cnGoUsername').value.trim(),
       hashKey: document.getElementById('cnGoHashKey').value.trim(),
       domainUuid: document.getElementById('cnGoDomainUuid').value.trim() || undefined,
+      mode: document.getElementById('cnGoMode').value,
+      audience: document.getElementById('cnGoAudience').value.trim() || undefined,
+      channelUuid: document.getElementById('cnGoChannelUuid').value.trim() || undefined,
     },
     directReply: document.getElementById('cnDirectReply').checked,
   };
   const password = document.getElementById('cnGoPassword').value;
   if (password) body.gocontact.password = password;
+  const cbToken = document.getElementById('cnGoCallbackToken').value;
+  if (cbToken) body.gocontact.callbackToken = cbToken;
+  const lfMap = {};
+  document.getElementById('cnGoLoginFieldMap').value.split('\n').map(s => s.trim()).filter(Boolean).forEach(line => {
+    const i = line.indexOf('=');
+    if (i > 0) lfMap[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  });
+  if (Object.keys(lfMap).length) body.gocontact.loginFieldMap = lfMap;
   const verifyToken = document.getElementById('cnVerifyToken').value.trim();
   if (verifyToken) body.verifyToken = verifyToken;
   const metaToken = document.getElementById('cnMetaToken').value.trim();

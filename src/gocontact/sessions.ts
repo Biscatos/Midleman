@@ -122,6 +122,16 @@ export function getSession(connector: string, chatId: string): ConnectorSession 
     return row ? rowToSession(row) : null;
 }
 
+/** Look up a session by its GoContact dialog/conversation UUID. Used by the
+ *  Webchat API callback, whose payload carries data.conversation.uuid (stored
+ *  in dialog_group_uuid) rather than the channel session key. */
+export function getSessionByConversation(connector: string, conversationUuid: string): ConnectorSession | null {
+    if (!db) return null;
+    const row = db.query('SELECT * FROM sessions WHERE connector = $c AND dialog_group_uuid = $u')
+        .get({ $c: connector, $u: conversationUuid });
+    return row ? rowToSession(row) : null;
+}
+
 export function upsertSession(s: ConnectorSession): void {
     if (!db) return;
     // The legacy token/token_expires_at columns are NOT NULL; write placeholders

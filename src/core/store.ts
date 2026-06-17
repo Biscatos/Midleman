@@ -603,13 +603,19 @@ export function loadPersistedConnectors(): import('./connector-types').GoContact
         const raw = readFileSync(CONNECTORS_FILE, 'utf-8');
         const stored: import('./connector-types').GoContactConnector[] = JSON.parse(raw);
         return stored
-            .filter(c => c.name && c.gocontact?.baseUrl)
             .map(c => {
-                const conn = { ...c, name: c.name.toLowerCase() };
+                const conn = { ...c, name: String(c.name || '').toLowerCase() };
                 // Back-compat: legacy Meta-only connectors used replyToMeta.
                 if (conn.directReply === undefined && conn.replyToMeta === true) conn.directReply = true;
+                // Back-compat: webchat-api connectors persisted with the
+                // now-removed apiBaseUrl — fold it into the shared baseUrl.
+                const g = conn.gocontact as (typeof conn.gocontact & { apiBaseUrl?: string }) | undefined;
+                if (g && !g.baseUrl && g.apiBaseUrl) {
+                    conn.gocontact = { ...conn.gocontact, baseUrl: g.apiBaseUrl };
+                }
                 return conn;
-            });
+            })
+            .filter(c => c.name && c.gocontact?.baseUrl);
     } catch (err) {
         console.warn('⚠️  Could not load connectors.json:', err instanceof Error ? err.message : err);
         return [];

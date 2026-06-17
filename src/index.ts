@@ -1685,6 +1685,11 @@ const server = Bun.serve({
                             timestampOffsetHours: c.gocontact.timestampOffsetHours ?? 1,
                             storageBucket: c.gocontact.storageBucket || 'storage',
                             hasPassword: !!c.gocontact.password,
+                            mode: c.gocontact.mode || 'poll',
+                            audience: c.gocontact.audience || '',
+                            channelUuid: c.gocontact.channelUuid || '',
+                            loginFieldMap: c.gocontact.loginFieldMap || {},
+                            hasCallbackToken: !!c.gocontact.callbackToken,
                         },
                         hasVerifyToken: !!c.verifyToken,
                         allowedIps: c.allowedIps || [],
@@ -1775,6 +1780,10 @@ const server = Bun.serve({
                         if (input.gocontact && typeof input.gocontact === 'object' && !input.gocontact.password) {
                             input.gocontact.password = prev.gocontact.password;
                         }
+                        // Webchat API callback secret — carried over when the form leaves it blank.
+                        if (input.gocontact && typeof input.gocontact === 'object' && !input.gocontact.callbackToken && prev.gocontact.callbackToken) {
+                            input.gocontact.callbackToken = prev.gocontact.callbackToken;
+                        }
                         if (!input.verifyToken && prev.verifyToken) input.verifyToken = prev.verifyToken;
                         // The form omits `meta` entirely when its fields are blank —
                         // carry the stored credentials over so editing unrelated
@@ -1805,14 +1814,21 @@ const server = Bun.serve({
                         enabled: input.enabled !== false,
                         channel: input.channel,
                         gocontact: {
-                            baseUrl: String(input.gocontact.baseUrl),
+                            baseUrl: input.gocontact.baseUrl ? String(input.gocontact.baseUrl) : '',
                             username: String(input.gocontact.username),
                             password: String(input.gocontact.password),
-                            hashKey: String(input.gocontact.hashKey),
+                            hashKey: input.gocontact.hashKey ? String(input.gocontact.hashKey) : '',
                             domainUuid: input.gocontact.domainUuid ? String(input.gocontact.domainUuid).trim() : undefined,
                             language: input.gocontact.language ? String(input.gocontact.language) : undefined,
                             timestampOffsetHours: typeof input.gocontact.timestampOffsetHours === 'number' ? input.gocontact.timestampOffsetHours : undefined,
                             storageBucket: input.gocontact.storageBucket ? String(input.gocontact.storageBucket) : undefined,
+                            mode: input.gocontact.mode === 'webchat-api' ? 'webchat-api' : undefined,
+                            audience: input.gocontact.audience ? String(input.gocontact.audience) : undefined,
+                            channelUuid: input.gocontact.channelUuid ? String(input.gocontact.channelUuid).trim() : undefined,
+                            loginFieldMap: (input.gocontact.loginFieldMap && typeof input.gocontact.loginFieldMap === 'object' && Object.keys(input.gocontact.loginFieldMap).length)
+                                ? Object.fromEntries(Object.entries(input.gocontact.loginFieldMap as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
+                                : undefined,
+                            callbackToken: input.gocontact.callbackToken ? String(input.gocontact.callbackToken) : undefined,
                         },
                         directReply: input.directReply === true || input.replyToMeta === true,
                     };
