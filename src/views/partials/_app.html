@@ -2627,8 +2627,8 @@
           </select>
         </div>
         <div style="grid-column:1 / -1">
-          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Base URL <span style="color:var(--text3)">(instance for polling · API host for Webchat API)</span></label>
-          <input id="cnGoBaseUrl" type="text" placeholder="https://instancia.gocontact.com/  ·  https://eu.ds.gocontact.com" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Base URL <span style="color:var(--text3)">(GoContact instance — plugin API + serves attachments)</span></label>
+          <input id="cnGoBaseUrl" type="text" placeholder="https://gotaag.ucall.co.ao/" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
         </div>
         <div>
           <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Username (e-mail)</label>
@@ -2660,6 +2660,10 @@
       <div id="cnWebchatSection" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2)">
         <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Official GoContact Webchat API. Agent replies are <strong>pushed</strong> to Midleman — register this callback URL on the GoContact side: <code>https://&lt;midleman&gt;:&lt;porta-do-conector&gt;/gocontact/callback?token=&lt;callback&nbsp;token&gt;</code></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div style="grid-column:1 / -1">
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Webchat API endpoint <span style="color:var(--text3)">(sending — default https://eu.ds.gocontact.com)</span></label>
+            <input id="cnGoApiBaseUrl" type="text" placeholder="https://eu.ds.gocontact.com" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          </div>
           <div>
             <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Audience</label>
             <input id="cnGoAudience" type="text" placeholder="audience do token" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">

@@ -1363,7 +1363,9 @@ async function handleWebchatCallback(req: Request, cs: ConnectorServer, clientIp
             timestamp: Number(m.timestamp) || Date.now(),
             agentName: String(m.participantName || 'Agent'), userType: 'AGENT',
             file: {
-                url: cs.webchatClient!.attachmentUrl(String(f.url || '')),
+                // Attachments live on the instance (baseUrl)/storage, NOT the API
+                // host — same URL builder the poll client uses.
+                url: cs.client.agentFileUrl(String(f.url || '')),
                 filename: String(f.filename || 'file'),
                 mimetype: String(f.mimetype || 'application/octet-stream'),
                 size: f.size ?? 0,

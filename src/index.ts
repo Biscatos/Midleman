@@ -1686,6 +1686,7 @@ const server = Bun.serve({
                             storageBucket: c.gocontact.storageBucket || 'storage',
                             hasPassword: !!c.gocontact.password,
                             mode: c.gocontact.mode || 'poll',
+                            apiBaseUrl: c.gocontact.apiBaseUrl || '',
                             audience: c.gocontact.audience || '',
                             channelUuid: c.gocontact.channelUuid || '',
                             loginFieldMap: c.gocontact.loginFieldMap || {},
@@ -1823,6 +1824,7 @@ const server = Bun.serve({
                             timestampOffsetHours: typeof input.gocontact.timestampOffsetHours === 'number' ? input.gocontact.timestampOffsetHours : undefined,
                             storageBucket: input.gocontact.storageBucket ? String(input.gocontact.storageBucket) : undefined,
                             mode: input.gocontact.mode === 'webchat-api' ? 'webchat-api' : undefined,
+                            apiBaseUrl: input.gocontact.apiBaseUrl ? String(input.gocontact.apiBaseUrl).trim() : undefined,
                             audience: input.gocontact.audience ? String(input.gocontact.audience) : undefined,
                             channelUuid: input.gocontact.channelUuid ? String(input.gocontact.channelUuid).trim() : undefined,
                             loginFieldMap: (input.gocontact.loginFieldMap && typeof input.gocontact.loginFieldMap === 'object' && Object.keys(input.gocontact.loginFieldMap).length)
