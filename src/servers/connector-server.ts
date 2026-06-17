@@ -593,6 +593,19 @@ async function sendMetaReadReceipt(c: GoContactConnector, phoneNumberId: string,
     }
 }
 
+/** When the agent replies on a meta-whatsapp connector that owns the Meta side
+ *  (directReply), mark the customer's last inbound message as read (blue ticks).
+ *  Best-effort, fire-and-forget. Shared by the poller and the webchat-api
+ *  callback so a reply on either path acks the customer's message. */
+function markCustomerReadOnMeta(cs: ConnectorServer, session: ConnectorSession): void {
+    const c = cs.connector;
+    if (c.channel === 'meta-whatsapp' && directReplyEnabled(c) && session.lastInboundMsgId && session.phoneNumberId) {
+        sendMetaReadReceipt(c, session.phoneNumberId, session.lastInboundMsgId)
+            .then(() => { session.lastInboundMsgId = ''; updateSessionLastInbound(c.name, session.chatId, ''); })
+            .catch(err => log.warn(`⚠️ [connector:${c.name}] read receipt failed:`, err instanceof Error ? err.message : err));
+    }
+}
+
 // ─── Session management ──────────────────────────────────────────────────────
 
 /** Session key: one GoContact chat per (business number, customer) pair, so a
@@ -1203,11 +1216,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
 
     // Agent replied → mark the customer's last message as read on WhatsApp
     // (blue ticks). Meta-specific, only when Midleman owns the Meta side.
-    if (c.channel === 'meta-whatsapp' && directReplyEnabled(c) && session.lastInboundMsgId && session.phoneNumberId) {
-        sendMetaReadReceipt(c, session.phoneNumberId, session.lastInboundMsgId)
-            .then(() => { session.lastInboundMsgId = ''; updateSessionLastInbound(c.name, session.chatId, ''); })
-            .catch(err => log.warn(`⚠️ [connector:${c.name}] read receipt failed:`, err instanceof Error ? err.message : err));
-    }
+    markCustomerReadOnMeta(cs, session);
 
     // Only after successful delivery — mark-as-read is the dedup/ack.
     await cs.client.markAsRead(session.accessKey, m.uuid);
@@ -1374,6 +1383,7 @@ async function handleWebchatCallback(req: Request, cs: ConnectorServer, clientIp
         if (!await deliver(event)) return jsonResponse(502, { error: 'fan-out failed' });
         if (uuid) rememberDelivered(c.name, uuid);
         touchSession(c.name, session.chatId);
+        markCustomerReadOnMeta(cs, session);
         cs.stats.agentMessages++; cs.stats.lastAgentMessageAt = Date.now();
         return jsonResponse(200, { status: 'ok', event: 'agent_message', kind: 'file' });
     }
@@ -1390,6 +1400,7 @@ async function handleWebchatCallback(req: Request, cs: ConnectorServer, clientIp
         if (!await deliver(event)) return jsonResponse(502, { error: 'fan-out failed' });
         if (uuid) rememberDelivered(c.name, uuid);
         touchSession(c.name, session.chatId);
+        markCustomerReadOnMeta(cs, session);
         cs.stats.agentMessages++; cs.stats.lastAgentMessageAt = Date.now();
         return jsonResponse(200, { status: 'ok', event: 'agent_message' });
     }
