@@ -65,6 +65,17 @@ CREATE TABLE IF NOT EXISTS sessions (
     PRIMARY KEY (connector, chat_id)
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_activity ON sessions(connector, last_activity_at);
+
+-- Out-of-hours reply de-dup. Kept SEPARATE from sessions because the
+-- "reply-only" mode never creates a session, so there is no session row to
+-- carry the flag. One row per (connector, session-key) with the last time the
+-- out-of-hours message was sent, used to throttle to once per anti-spam window.
+CREATE TABLE IF NOT EXISTS out_of_hours_replies (
+    connector     TEXT NOT NULL,
+    chat_id       TEXT NOT NULL,
+    last_sent_at  INTEGER NOT NULL,
+    PRIMARY KEY (connector, chat_id)
+);
 `;
 
 export function initConnectorSessions(dataDir: string): void {
@@ -111,6 +122,16 @@ export function getSession(connector: string, chatId: string): ConnectorSession 
     return row ? rowToSession(row) : null;
 }
 
+/** Look up a session by its GoContact dialog/conversation UUID. Used by the
+ *  Webchat API callback, whose payload carries data.conversation.uuid (stored
+ *  in dialog_group_uuid) rather than the channel session key. */
+export function getSessionByConversation(connector: string, conversationUuid: string): ConnectorSession | null {
+    if (!db) return null;
+    const row = db.query('SELECT * FROM sessions WHERE connector = $c AND dialog_group_uuid = $u')
+        .get({ $c: connector, $u: conversationUuid });
+    return row ? rowToSession(row) : null;
+}
+
 export function upsertSession(s: ConnectorSession): void {
     if (!db) return;
     // The legacy token/token_expires_at columns are NOT NULL; write placeholders
@@ -150,6 +171,24 @@ export function updateSessionLastInbound(connector: string, chatId: string, mess
     if (!db) return;
     db.query('UPDATE sessions SET last_inbound_msg_id = $m WHERE connector = $c AND chat_id = $id')
         .run({ $m: messageId, $c: connector, $id: chatId });
+}
+
+/** Unix ms of the last out-of-hours reply sent to this (connector, chatId), or
+ *  0 if none. Used to throttle the out-of-hours auto-reply per customer. */
+export function getOutOfHoursLastSent(connector: string, chatId: string): number {
+    if (!db) return 0;
+    const row = db.query('SELECT last_sent_at FROM out_of_hours_replies WHERE connector = $c AND chat_id = $id')
+        .get({ $c: connector, $id: chatId }) as { last_sent_at: number } | null;
+    return row ? row.last_sent_at : 0;
+}
+
+/** Record that an out-of-hours reply was sent to (connector, chatId) at `ts`. */
+export function markOutOfHoursSent(connector: string, chatId: string, ts: number): void {
+    if (!db) return;
+    db.query(`INSERT INTO out_of_hours_replies (connector, chat_id, last_sent_at)
+              VALUES ($c, $id, $t)
+              ON CONFLICT(connector, chat_id) DO UPDATE SET last_sent_at = $t`)
+        .run({ $c: connector, $id: chatId, $t: ts });
 }
 
 export function deleteSession(connector: string, chatId: string): void {
@@ -194,5 +233,6 @@ export function purgeExpiredSessions(connector: string, ttlMinutes: number): Con
 export function deleteConnectorSessions(connector: string): number {
     if (!db) return 0;
     const res = db.query('DELETE FROM sessions WHERE connector = $c').run({ $c: connector });
+    db.query('DELETE FROM out_of_hours_replies WHERE connector = $c').run({ $c: connector });
     return res.changes;
 }

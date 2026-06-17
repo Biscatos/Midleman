@@ -2620,8 +2620,15 @@
       <div style="margin-top:18px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">GoContact</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
         <div style="grid-column:1 / -1">
-          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Base URL</label>
-          <input id="cnGoBaseUrl" type="text" placeholder="https://instancia.gocontact.com/" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Mode</label>
+          <select id="cnGoMode" onchange="connectorGoModeChanged()" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+            <option value="poll">Plugin / polling (traditional)</option>
+            <option value="webchat-api">Webchat API (push via callback)</option>
+          </select>
+        </div>
+        <div style="grid-column:1 / -1">
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Base URL <span style="color:var(--text3)">(instance for polling · API host for Webchat API)</span></label>
+          <input id="cnGoBaseUrl" type="text" placeholder="https://instancia.gocontact.com/  ·  https://eu.ds.gocontact.com" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
         </div>
         <div>
           <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Username (e-mail)</label>
@@ -2631,21 +2638,45 @@
           <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Password <span style="color:var(--text3)">(blank keeps current)</span></label>
           <input id="cnGoPassword" type="password" autocomplete="new-password" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
         </div>
-        <div>
+        <div id="cnGoHashKeyWrap" class="cn-poll-field">
           <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Webchat Hash Key <span style="color:var(--text3)">(embed script: _hashkey)</span></label>
           <input id="cnGoHashKey" type="text" placeholder="38cdbe9e9d0d..." style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
         </div>
-        <div>
+        <div id="cnGoDomainUuidWrap" class="cn-poll-field">
           <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Domain UUID <span style="color:var(--text3)">(embed script: _domain — optional)</span></label>
           <input id="cnGoDomainUuid" type="text" placeholder="e1b0c3d8-5d74-4719-9404-..." style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
         </div>
-        <div>
+        <div class="cn-poll-field">
           <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Fast poll interval (ms) <span style="color:var(--text3)" title="Active chats are polled at this rate; idle ones back off automatically up to 8× (max 60s) and snap back on activity.">ⓘ adaptive</span></label>
           <input id="cnPollInterval" type="number" placeholder="4000" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
         </div>
         <div>
           <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Session TTL (minutes)</label>
           <input id="cnSessionTtl" type="number" placeholder="120" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+        </div>
+      </div>
+
+      <!-- ── Webchat API (mode = webchat-api) ── -->
+      <div id="cnWebchatSection" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2)">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Official GoContact Webchat API. Agent replies are <strong>pushed</strong> to Midleman — register this callback URL on the GoContact side: <code>https://&lt;midleman&gt;:&lt;porta-do-conector&gt;/gocontact/callback?token=&lt;callback&nbsp;token&gt;</code></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Audience</label>
+            <input id="cnGoAudience" type="text" placeholder="audience do token" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Channel UUID</label>
+            <input id="cnGoChannelUuid" type="text" placeholder="e1b0c3d8-5d74-4719-..." style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          </div>
+          <div style="grid-column:1 / -1">
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Callback token <span style="color:var(--text3)">(blank keeps current — secures the inbound callback)</span></label>
+            <input id="cnGoCallbackToken" type="password" autocomplete="new-password" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          </div>
+          <div style="grid-column:1 / -1">
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Login field mapping <span style="color:var(--text3)">(optional override — one per line: <code>field=source</code>; source = name | phone | phoneNumberId | =literal)</span></label>
+            <textarea id="cnGoLoginFieldMap" rows="2" placeholder="contact=name&#10;first_phone=phone" style="width:100%;padding:7px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px;font-family:monospace"></textarea>
+            <div style="margin-top:4px;font-size:11px;color:var(--text3)">Unmapped fields are auto-detected by a name/phone heuristic over the channel's field/label.</div>
+          </div>
         </div>
       </div>
 
@@ -2665,6 +2696,35 @@
           <span id="cnAutoReplyExpiredBadge" style="display:none;background:var(--red-bg);color:var(--red);padding:3px 8px;border-radius:4px;font-size:11px;margin-bottom:4px">Expired — not firing</span>
         </div>
         <div style="margin-top:6px;font-size:11px;color:var(--text3)">Sent once per session — to the customer (via Meta/webhooks, like an agent reply with userType "AUTO") and mirrored into the GoContact chat so the agent sees it. After the expiry date it stops firing automatically.</div>
+      </div>
+
+      <!-- ── Business hours (out-of-office reply) ── -->
+      <div style="margin-top:18px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Business Hours</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--text);cursor:pointer">
+        <input id="cnBusinessHoursEnabled" type="checkbox" onchange="connectorBusinessHoursChanged()"> Reply with a notice when customers write outside opening hours
+      </label>
+      <div id="cnBusinessHoursSection" style="display:none;margin-top:8px">
+        <textarea id="cnBusinessHoursMessage" rows="2" maxlength="2000" placeholder="Estamos fora do horário de atendimento. Responderemos assim que voltarmos." style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></textarea>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--text);cursor:pointer">
+          <input id="cnBusinessHoursForward" type="checkbox"> Also forward the message into GoContact (agents see it when they return)
+        </label>
+        <div style="margin-top:10px;display:grid;grid-template-columns:70px 1fr;gap:6px 10px;align-items:center">
+          <span style="font-size:12px;color:var(--text2)">Mon</span>
+          <input id="cnBhDay1" type="text" placeholder="08:00-17:00   (empty = closed)" style="width:100%;padding:6px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          <span style="font-size:12px;color:var(--text2)">Tue</span>
+          <input id="cnBhDay2" type="text" placeholder="08:00-17:00" style="width:100%;padding:6px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          <span style="font-size:12px;color:var(--text2)">Wed</span>
+          <input id="cnBhDay3" type="text" placeholder="08:00-17:00" style="width:100%;padding:6px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          <span style="font-size:12px;color:var(--text2)">Thu</span>
+          <input id="cnBhDay4" type="text" placeholder="08:00-17:00" style="width:100%;padding:6px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          <span style="font-size:12px;color:var(--text2)">Fri</span>
+          <input id="cnBhDay5" type="text" placeholder="08:00-17:00" style="width:100%;padding:6px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          <span style="font-size:12px;color:var(--text2)">Sat</span>
+          <input id="cnBhDay6" type="text" placeholder="(empty = closed)" style="width:100%;padding:6px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          <span style="font-size:12px;color:var(--text2)">Sun</span>
+          <input id="cnBhDay0" type="text" placeholder="(empty = closed)" style="width:100%;padding:6px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text3)">Times are in <strong>Africa/Luanda (UTC+1)</strong>. Use 24h <code>HH:MM-HH:MM</code> ranges; comma-separate to add a midday break — e.g. <code>08:00-12:00, 13:00-17:00</code>. Leave a day empty to mark it closed. The notice is sent at most once every 8h per customer. Overnight ranges (e.g. 20:00-04:00) are not supported.</div>
       </div>
 
       <!-- ── Channel provider credentials ── -->
