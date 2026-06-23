@@ -175,6 +175,24 @@ export class WebchatApiClient {
         return { conversationUuid: String(uuid), contactId: String(data?.contactId ?? data?.data?.contactId ?? '') };
     }
 
+    /** POST /v1/conversations/{channelUuid}/messages/batch — create the
+     *  conversation seeded with a history of episodes (handover from a bot).
+     *  Each episode: { timestamp(ms,string), usertype (CLIENT|BOT|…), msgtype, msg }.
+     *  Max 100 episodes. Returns the conversationUuid like createConversation. */
+    async createConversationWithHistory(
+        loginFields: Array<{ field: string; value: string }>,
+        episodes: Array<{ timestamp: string; usertype: string; msgtype: string; msg: string }>,
+    ): Promise<{ conversationUuid: string; contactId: string }> {
+        const data = await this.authedRequest(`/v1/conversations/${this.cfg.channelUuid}/messages/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ loginFields, episodes }),
+        }, 'create conversation (batch)');
+        const uuid = data?.conversationUuid ?? data?.data?.conversationUuid;
+        if (!uuid) throw new GoContactError('create conversation (batch)', data?.message || 'no conversationUuid in response');
+        return { conversationUuid: String(uuid), contactId: String(data?.contactId ?? data?.data?.contactId ?? '') };
+    }
+
     /** POST /v1/conversations/{uuid}/message/client — send a text message. */
     async sendClientMessage(conversationUuid: string, message: string): Promise<void> {
         await this.authedRequest(`/v1/conversations/${conversationUuid}/message/client`, {

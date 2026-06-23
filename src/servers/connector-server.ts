@@ -1282,6 +1282,91 @@ async function pollTick(cs: ConnectorServer): Promise<void> {
 // ─── Inbound HTTP handling ───────────────────────────────────────────────────
 
 /**
+ * Bot → human handover (webchat-api only). Creates the GoContact conversation
+ * seeded with the prior bot/customer chat history via the batch endpoint, stores
+ * the session, and returns the conversationUuid. Subsequent customer messages
+ * reuse the session and agent replies fan out through the connector's channel
+ * (Meta/Smooch/webhooks) exactly as a normally-created conversation.
+ */
+async function handleHandover(req: Request, cs: ConnectorServer, clientIp: string): Promise<Response> {
+    const c = cs.connector;
+    const url = new URL(req.url);
+    const wc = cs.webchatClient;
+    if (!wc) return jsonResponse(400, { error: 'Handover requires gocontact.mode = "webchat-api"' });
+
+    // Same auth as inbound: verify token (X-Forward-Token header or ?token=).
+    if (c.verifyToken) {
+        const ok = timingSafeEqualStr(req.headers.get('X-Forward-Token') || url.searchParams.get('token'), c.verifyToken);
+        if (!ok) { log.warn(`🚫 [connector:${c.name}] handover rejected: bad token (ip ${clientIp})`); return jsonResponse(401, { error: 'Unauthorized' }); }
+    }
+
+    let body: any;
+    try { body = JSON.parse(await req.text()); }
+    catch { return jsonResponse(400, { error: 'Bad Request', message: 'Body must be valid JSON' }); }
+
+    const chatId = String(body?.chatId || body?.from || '');
+    if (!chatId) return jsonResponse(400, { error: '"chatId" is required' });
+    const name = String(body?.name || body?.displayName || chatId);
+    const phoneNumberId = body?.phoneNumberId ? String(body.phoneNumberId) : '';
+
+    // Map the bot/customer history → episodes. `from`: bot → usertype BOT,
+    // anything else → CLIENT (keeps the two sides distinct for the agent).
+    const historyIn = Array.isArray(body?.history) ? body.history : [];
+    let episodes = historyIn.map((h: any) => ({
+        timestamp: String(h?.timestamp ?? Date.now()),
+        usertype: String(h?.from ?? h?.usertype ?? '').toLowerCase() === 'bot' ? 'BOT' : 'CLIENT',
+        msgtype: 'MSG',
+        msg: String(h?.text ?? h?.msg ?? '').trim(),
+    })).filter((e: any) => e.msg);
+    if (episodes.length === 0) return jsonResponse(400, { error: '"history" must contain at least one message with text' });
+    if (episodes.length > 100) {
+        log.warn(`⚠️ [connector:${c.name}] handover history truncated to the last 100 (was ${episodes.length})`);
+        episodes = episodes.slice(-100);
+    }
+
+    // loginFields from the channel config (same dynamic resolution as a normal conversation).
+    try {
+        if (!cs.webchatLoginFields) cs.webchatLoginFields = await wc.getChannelConfig();
+    } catch (err) {
+        return jsonResponse(502, { error: `Could not read channel config: ${err instanceof Error ? err.message : err}` });
+    }
+    const { fields, missingRequired } = resolveLoginFields(
+        cs.webchatLoginFields,
+        { name, phone: chatId, phoneNumberId: phoneNumberId || undefined },
+        c.gocontact.loginFieldMap,
+    );
+    if (missingRequired.length) return jsonResponse(400, { error: `required loginFields could not be filled: ${missingRequired.join(', ')} — configure gocontact.loginFieldMap` });
+
+    const key = phoneNumberId ? `${phoneNumberId}:${chatId}` : chatId;
+    // A handover replaces any existing session for this customer.
+    if (getSession(c.name, key)) { deleteSession(c.name, key); dropSessionPollState(c.name, key); }
+
+    let conversationUuid: string;
+    let contactId: string;
+    try {
+        ({ conversationUuid, contactId } = await wc.createConversationWithHistory(fields, episodes));
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.warn(`⚠️ [connector:${c.name}] handover batch failed for ${key}: ${msg}`);
+        return jsonResponse(502, { error: `Handover failed: ${msg}` });
+    }
+
+    const session: ConnectorSession = {
+        connector: c.name, chatId: key, customerId: chatId, displayName: name,
+        domainUuid: c.gocontact.channelUuid || '', accessKey: '',
+        dialogGroupUuid: conversationUuid, dialogGroupId: contactId,
+        phoneNumberId, lastInboundMsgId: '',
+        autoReplied: true, // already engaged by the bot — skip the first-message auto-reply
+        createdAt: Date.now(), lastActivityAt: Date.now(),
+    };
+    upsertSession(session);
+    cs.stats.inboundMessages += episodes.length;
+    cs.stats.lastInboundAt = Date.now();
+    log.info(`🤝 [connector:${c.name}] Handover ${key} → conversation ${conversationUuid} (${episodes.length} history msgs)`);
+    return jsonResponse(200, { status: 'ok', conversationUuid, contactId, chatId, historyCount: episodes.length });
+}
+
+/**
  * GoContact Webchat API outbound webhook → fan-out. Maps data.conversation.uuid
  * back to the customer session and relays the agent's message/file/join/leave to
  * Meta/Smooch/webhooks via the same fanoutAgentEvent the poller uses.
@@ -1445,6 +1530,12 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
     // customer-side inbound that shares this listener.
     if (cs.webchatClient && url.pathname.endsWith('/gocontact/callback')) {
         return await handleWebchatCallback(req, cs, clientIp);
+    }
+
+    // Bot → human handover: create the GoContact conversation seeded with the
+    // bot/customer chat history (webchat-api batch endpoint). webchat-api only.
+    if (url.pathname.endsWith('/handover')) {
+        return await handleHandover(req, cs, clientIp);
     }
 
     let payload: any;
