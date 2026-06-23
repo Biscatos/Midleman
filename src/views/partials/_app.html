@@ -738,6 +738,98 @@
           </table>
         </div>
       </div>
+
+      <!-- ── Integration guide ── -->
+      <div class="card" style="margin-top:16px">
+        <div class="card-header"><h3 style="font-size:14px;font-weight:600">Guia de integração</h3></div>
+        <div class="card-body" style="font-size:12.5px;color:var(--text2);line-height:1.6">
+          <p style="margin-top:0">Um conector liga um canal digital (WhatsApp&nbsp;Meta, Smooch/Sunshine, ou JSON genérico) a uma sessão de webchat GoContact, e devolve as respostas do agente. <strong>Modo GoContact</strong>: <code>poll</code> (API tradicional do plugin + polling) ou <code>webchat-api</code> (Webchat API oficial; respostas empurradas para um callback). O <strong>canal</strong> (Meta/Smooch/generic) é independente do modo. A <strong>porta</strong> de cada conector está na tabela acima — substitui <code>&lt;host&gt;:&lt;porta&gt;</code> pela porta real (exposta via o teu proxy).</p>
+
+          <details style="border-top:1px solid var(--border);padding:8px 0">
+            <summary style="cursor:pointer;font-weight:600;color:var(--text)">Canal <code>generic</code> — entrada (o teu sistema → Midleman)</summary>
+            <p>POST para a porta do conector (qualquer path). Auth: se definiste um <em>Verify Token</em>, envia-o em <code>?token=</code> ou no header <code>X-Forward-Token</code>.</p>
+            <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">POST http://&lt;host&gt;:&lt;porta&gt;/?token=SEGREDO
+Content-Type: application/json
+
+{ "chatId": "cliente-244939609354", "name": "João", "text": "Olá" }
+
+# anexo (o Midleman descarrega o url e injeta na GoContact):
+{ "chatId": "c1", "name": "João",
+  "file": { "url": "https://.../foto.jpg", "filename": "foto.jpg", "mimetype": "image/jpeg" } }
+
+# várias de uma vez:
+{ "messages": [ { "chatId": "c1", "text": "oi" }, { "chatId": "c2", "text": "olá" } ] }
+
+# resposta:
+{ "status": "accepted", "messages": 1, "requestId": "..." }</pre>
+            <p style="margin-bottom:0;color:var(--text3)">Aliases aceites: <code>chatId</code>=<code>idChat</code>/<code>from</code> · <code>name</code>=<code>displayName</code> · <code>text</code>=<code>message</code>/<code>mensagem</code>. Cada mensagem precisa de <code>text</code> ou <code>file</code>.</p>
+          </details>
+
+          <details style="border-top:1px solid var(--border);padding:8px 0">
+            <summary style="cursor:pointer;font-weight:600;color:var(--text)">Respostas do agente (Midleman → o teu sistema / cliente)</summary>
+            <p>Para receberes as respostas do agente, ativa <strong>Direct reply</strong> (Meta/Smooch — entrega direta ao cliente) <em>e/ou</em> configura <strong>Webhook Targets</strong> (o Midleman faz POST do evento). No canal <code>generic</code> só há webhooks (sem direct reply).</p>
+            <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">POST &lt;o-teu-webhook&gt;
+X-Connector: nome-do-conector
+
+{
+  "connector": "nome-do-conector",
+  "channel": "generic",
+  "event": "agent_message",          // ou "agent_joined" | "chat_closed"
+  "chatId": "cliente-244939609354",
+  "displayName": "João",
+  "message": {
+    "uuid": "id-unico", "text": "Em que posso ajudar?",
+    "timestamp": 1781700000000, "agentName": "Maria",
+    "userType": "AGENT",
+    "file": null                      // ou { url, filename, mimetype, size }
+  }
+}
+# chat_closed → message:null + "reason": "agent"|"admin"|"expired"</pre>
+            <p style="margin-bottom:0;color:var(--text3)">Responde <code>2xx</code> para confirmar. <code>agent_message</code> é <em>at-least-once</em> (repete em falha) → <strong>deduplica por <code>message.uuid</code></strong>. <code>chat_closed</code>: 3 tentativas, depois DLQ.</p>
+          </details>
+
+          <details style="border-top:1px solid var(--border);padding:8px 0">
+            <summary style="cursor:pointer;font-weight:600;color:var(--text)">Meta WhatsApp / Smooch</summary>
+            <p>Aponta o webhook do provedor para a porta do conector. <strong>Meta</strong>: usa o <em>Verify Token</em> no handshake (<code>hub.challenge</code>) e aceita o envelope completo, o <code>value</code> "nu", ou um array deles. <strong>Smooch</strong>: valida por <code>X-Smooch-Signature</code> (webhook secret). Vários conectores podem partilhar o mesmo feed Meta — cada um filtra pelo seu <em>Phone Number Filter</em> (<code>phone_number_id</code>).</p>
+            <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55"># Callback URL a registar na Meta/Smooch:
+https://&lt;host&gt;:&lt;porta&gt;/?token=VERIFY_TOKEN</pre>
+          </details>
+
+          <details style="border-top:1px solid var(--border);padding:8px 0">
+            <summary style="cursor:pointer;font-weight:600;color:var(--text)">Modo <code>webchat-api</code> (push) — callback &amp; URLs</summary>
+            <p>A GoContact <strong>empurra</strong> as respostas do agente para o Midleman. Regista este URL no painel da GoContact (o <em>Callback token</em> protege o endpoint):</p>
+            <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55"># Callback (agente → Midleman):
+https://&lt;host&gt;:&lt;porta&gt;/gocontact/callback?token=CALLBACK_TOKEN</pre>
+            <p style="margin-bottom:0;color:var(--text3)"><strong>API Base URL</strong> (<code>eu.ds.gocontact.com</code>) faz toda a API (auth, conversas, mensagens). <strong>Base URL</strong> (a instância, ex. <code>gotaag.ucall.co.ao</code>) serve <em>só os anexos</em> em webchat-api — opcional, só preciso se houver ficheiros. Os <code>loginFields</code> (nome/telefone do cliente) são detetados automaticamente; podes forçar o mapeamento em <em>Login field mapping</em>.</p>
+          </details>
+
+          <details style="border-top:1px solid var(--border);padding:8px 0">
+            <summary style="cursor:pointer;font-weight:600;color:var(--text)">Handover bot → humano (transferir com histórico)</summary>
+            <p>Quando o teu chatbot quer passar o cliente a um agente humano, cria a conversa na GoContact <strong>já com o histórico</strong>. Só em modo <code>webchat-api</code>. Auth = igual ao inbound (verify token).</p>
+            <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">POST http://&lt;host&gt;:&lt;porta&gt;/handover?token=SEGREDO
+Content-Type: application/json
+
+{
+  "chatId": "cliente-244939609354",
+  "name": "João",
+  "phoneNumberId": "879847985208219",   // routing das respostas na Meta
+  "history": [
+    { "from": "client", "text": "Quero falar com um humano", "timestamp": 1781700000000 },
+    { "from": "bot",    "text": "Claro, vou transferir-te.",  "timestamp": 1781700001000 }
+  ]
+}
+
+# resposta:
+{ "status": "ok", "conversationUuid": "…", "contactId": "…", "historyCount": 2 }</pre>
+            <p style="margin-bottom:0;color:var(--text3)"><code>from: "bot"</code> → marcado como BOT; o resto → CLIENT (o agente vê os dois lados). Máx 100 mensagens (fica com as mais recentes), só texto. Depois disto, as mensagens do cliente reutilizam a sessão e as respostas saem pelo provedor configurado.</p>
+          </details>
+
+          <details style="border-top:1px solid var(--border);padding:8px 0">
+            <summary style="cursor:pointer;font-weight:600;color:var(--text)">Anexos (por modo)</summary>
+            <p style="margin-bottom:0"><strong>poll</strong>: qualquer tipo de ficheiro é enviado para o storage da instância GoContact. <strong>webchat-api</strong>: a API só aceita <code>jpg/png/pdf</code> no upload do cliente — outros tipos (áudio/vídeo) não são suportados pela API. Os anexos do agente (nos dois modos) são servidos pela instância: <code>&lt;Base&nbsp;URL&gt;/storage/webchat-attachments/…</code>.</p>
+          </details>
+        </div>
+      </div>
     </div>
 
     <!-- ═══ PROFILES (HTTP) ═══ -->
