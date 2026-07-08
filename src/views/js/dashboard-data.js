@@ -214,7 +214,7 @@ function showContextMenu(e, btn) {
 
 // ─── Data Fetch ──────────────────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchConnectors(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchConsentPages(), fetchLdapConfigs(), fetchLdapAdoptions()]);
+  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchConnectors(), fetchFive9Connectors(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchConsentPages(), fetchLdapConfigs(), fetchLdapAdoptions()]);
 }
 
 async function fetchHealth() {
@@ -2090,6 +2090,8 @@ async function fetchConnectors() {
     renderConnectors(_allConnectors);
     const badge = document.getElementById('navConnectorBadge');
     if (badge) badge.textContent = _allConnectors.length;
+    const tabCount = document.getElementById('tabGoContactCount');
+    if (tabCount) tabCount.textContent = _allConnectors.length;
   } catch { }
 }
 
@@ -2399,6 +2401,18 @@ async function restartConnectorAction(name) {
     const d = await res.json();
     if (res.ok) { toast('Restarted'); await fetchConnectors(); } else toast(d.error || 'Failed', 'error');
   } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+function switchConnectorsTab(tab) {
+  const isGC = tab === 'gocontact';
+  document.getElementById('tabPaneGoContact').style.display = isGC ? '' : 'none';
+  document.getElementById('tabPaneFive9').style.display = isGC ? 'none' : '';
+  document.getElementById('tabBtnGoContact').style.borderBottomColor = isGC ? 'var(--accent)' : 'transparent';
+  document.getElementById('tabBtnGoContact').style.color = isGC ? 'var(--text)' : 'var(--text3)';
+  document.getElementById('tabBtnFive9').style.borderBottomColor = isGC ? 'transparent' : 'var(--accent)';
+  document.getElementById('tabBtnFive9').style.color = isGC ? 'var(--text3)' : 'var(--text)';
+  document.getElementById('btnNewGoContact').style.display = isGC ? '' : 'none';
+  document.getElementById('btnNewFive9').style.display = isGC ? 'none' : '';
 }
 
 let _sessionsModalConnector = null;
@@ -8173,4 +8187,277 @@ async function deleteNotifRule(id) {
     toast('Rule deleted');
     await fetchNotifRules();
   } catch (e) { toast('Network error: ' + e.message, 'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  FIVE9 CONNECTORS
+// ═══════════════════════════════════════════════════════════════════════
+
+let _allFive9Connectors = [];
+let _editingFive9Connector = null;
+
+async function fetchFive9Connectors() {
+  try {
+    const res = await api('/admin/five9-connectors');
+    if (!res.ok) return;
+    const d = await res.json();
+    _allFive9Connectors = d.connectors || [];
+    renderFive9Connectors(_allFive9Connectors);
+    const tabCount = document.getElementById('tabFive9Count');
+    if (tabCount) tabCount.textContent = _allFive9Connectors.length;
+  } catch { }
+}
+
+function renderFive9Connectors(connectors) {
+  const c = document.getElementById('five9ListBody');
+  if (!c) return;
+  if (connectors.length === 0) {
+    c.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No Five9 connectors yet. Click "+ New Connector".</td></tr>';
+    return;
+  }
+  c.innerHTML = connectors.map(cn => {
+    const statusBadge = cn.running
+      ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px">Running</span>'
+      : (cn.enabled !== false
+        ? '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>'
+        : '<span style="background:var(--surface2);color:var(--text3);padding:2px 8px;border-radius:4px;font-size:11px">Disabled</span>');
+    const replies = [
+      cn.directReply ? (cn.channel === 'smooch' ? 'Smooch' : cn.channel === 'meta-whatsapp' ? 'Meta' : 'Direct') : null,
+      (cn.webhookTargets && cn.webhookTargets.length)
+        ? (cn.webhooksEnabled === false
+          ? '<span style="color:var(--text3);text-decoration:line-through">' + cn.webhookTargets.length + ' webhook(s)</span>'
+          : cn.webhookTargets.length + ' webhook(s)')
+        : null,
+    ].filter(Boolean).join(' + ') || '<span style="color:var(--text3)">none</span>';
+    const stats = cn.stats || {};
+    const activity = `↓${stats.inboundMessages || 0} ↑${stats.agentMessages || 0}` +
+      (stats.lastError ? ` <span style="color:var(--red)" title="${esc(stats.lastError)}">⚠</span>` : '');
+    return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
+  <td style="padding:8px 12px;font-weight:600">${esc(cn.name)}</td>
+  <td style="padding:8px">${statusBadge}</td>
+  <td style="padding:8px;color:var(--text2)">${esc(cn.channel)}</td>
+  <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${cn.port ?? '--'}</td>
+  <td style="padding:8px;color:var(--text2)">${replies}</td>
+  <td style="padding:8px;color:var(--text2);font-family:'SF Mono',Monaco,monospace;font-size:12px" title="received / agent replies">${activity}</td>
+  <td style="padding:8px 12px;text-align:right;white-space:nowrap">
+    <button class="btn btn-sm" onclick="openFive9SessionsModal('${esc(cn.name)}')">Sessions</button>
+    <button class="btn btn-sm" onclick="editFive9Connector('${esc(cn.name)}')">Edit</button>
+    <button class="btn btn-sm" onclick="restartFive9ConnectorAction('${esc(cn.name)}')">Restart</button>
+    <button class="btn btn-sm btn-danger" onclick="deleteFive9Connector('${esc(cn.name)}')">Delete</button>
+  </td>
+</tr>`;
+  }).join('');
+}
+
+function f9ChannelChanged() {
+  const channel = document.getElementById('f9Channel').value;
+  const isMeta = channel === 'meta-whatsapp';
+  const isSmooch = channel === 'smooch';
+  document.getElementById('f9MetaSection').style.display = isMeta ? 'block' : 'none';
+  document.getElementById('f9SmoochSection').style.display = isSmooch ? 'block' : 'none';
+  const row = document.getElementById('f9DirectReplyRow');
+  row.style.display = (isMeta || isSmooch) ? 'block' : 'none';
+  if (!isMeta && !isSmooch) document.getElementById('f9DirectReply').checked = false;
+}
+
+function f9AutoReplyChanged() {
+  const on = document.getElementById('f9AutoReplyEnabled').checked;
+  document.getElementById('f9AutoReplySection').style.display = on ? 'block' : 'none';
+}
+
+function f9WebhooksEnabledChanged() {
+  const on = document.getElementById('f9WebhooksEnabled').checked;
+  const ta = document.getElementById('f9WebhookTargets');
+  ta.disabled = !on;
+  ta.style.opacity = on ? '1' : '0.5';
+}
+
+function generateF9CallbackToken() {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  document.getElementById('f9CallbackToken').value = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function generateF9VerifyToken() {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  document.getElementById('f9VerifyToken').value = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function openFive9Modal(connector = null) {
+  _editingFive9Connector = connector ? connector.name : null;
+  document.getElementById('five9ModalTitle').textContent = connector ? 'Edit Five9 Connector — ' + connector.name : 'New Five9 Connector';
+  document.getElementById('f9Name').value = connector?.name || '';
+  document.getElementById('f9Name').disabled = !!connector;
+  document.getElementById('f9Channel').value = connector?.channel || 'meta-whatsapp';
+  document.getElementById('f9Port').value = connector?.port || '';
+  document.getElementById('f9Enabled').checked = connector ? connector.enabled !== false : true;
+  // Five9 settings
+  const f9 = connector?.five9 || {};
+  document.getElementById('f9AuthBaseUrl').value = f9.authBaseUrl || '';
+  document.getElementById('f9TenantName').value = f9.tenantName || '';
+  document.getElementById('f9CampaignName').value = f9.campaignName || '';
+  document.getElementById('f9CallbackUrl').value = f9.callbackUrl || '';
+  document.getElementById('f9CallbackToken').value = '';
+  document.getElementById('f9CallbackToken').placeholder = f9.hasCallbackToken ? '(kept — type to replace)' : 'shared secret';
+  // Security
+  document.getElementById('f9VerifyToken').value = '';
+  document.getElementById('f9VerifyToken').placeholder = connector?.hasVerifyToken ? '(kept — type to replace)' : 'shared secret';
+  document.getElementById('f9AllowedIps').value = (connector?.allowedIps || []).join(', ');
+  // Meta
+  document.getElementById('f9MetaToken').value = '';
+  document.getElementById('f9MetaToken').placeholder = connector?.meta?.hasAccessToken ? '(kept — type to replace)' : '';
+  // Smooch
+  document.getElementById('f9SmoochAppId').value = connector?.smooch?.appId || '';
+  document.getElementById('f9SmoochBaseUrl').value = (connector?.smooch?.baseUrl && connector.smooch.baseUrl !== 'https://api.smooch.io') ? connector.smooch.baseUrl : '';
+  document.getElementById('f9SmoochKeyId').value = connector?.smooch?.keyId || '';
+  document.getElementById('f9SmoochKeySecret').value = '';
+  document.getElementById('f9SmoochKeySecret').placeholder = connector?.smooch?.hasKeySecret ? '(kept — type to replace)' : '';
+  document.getElementById('f9SmoochBearer').value = '';
+  document.getElementById('f9SmoochBearer').placeholder = connector?.smooch?.hasBearerToken ? '(kept — type to replace)' : '';
+  document.getElementById('f9SmoochWebhookSecret').value = '';
+  document.getElementById('f9SmoochWebhookSecret').placeholder = connector?.smooch?.hasWebhookSecret ? '(kept — type to replace)' : '';
+  // Delivery
+  document.getElementById('f9DirectReply').checked = !!connector?.directReply;
+  document.getElementById('f9PhoneFilter').value = (connector?.phoneNumberFilter || []).join(', ');
+  document.getElementById('f9WebhookTargets').value = (connector?.webhookTargets || []).map(t => t.url).join('\n');
+  document.getElementById('f9WebhooksEnabled').checked = connector ? connector.webhooksEnabled !== false : true;
+  f9WebhooksEnabledChanged();
+  // Auto-reply
+  document.getElementById('f9AutoReplyEnabled').checked = !!connector?.autoReply?.enabled;
+  document.getElementById('f9AutoReplyText').value = connector?.autoReply?.text || '';
+  const arExpires = connector?.autoReply?.expiresAt || '';
+  let localValue = '';
+  if (arExpires) {
+    const d = new Date(arExpires);
+    if (!isNaN(d.getTime())) {
+      const pad = n => String(n).padStart(2, '0');
+      localValue = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+  }
+  document.getElementById('f9AutoReplyExpires').value = localValue;
+  f9AutoReplyChanged();
+  // Advanced
+  document.getElementById('f9SessionTtl').value = connector?.sessionTtlMinutes || '';
+  f9ChannelChanged();
+  document.getElementById('five9Modal').style.display = 'block';
+}
+
+function closeFive9Modal() {
+  document.getElementById('five9Modal').style.display = 'none';
+  _editingFive9Connector = null;
+}
+
+async function saveFive9Connector() {
+  const body = {
+    name: document.getElementById('f9Name').value.trim().toLowerCase(),
+    channel: document.getElementById('f9Channel').value,
+    port: parseInt(document.getElementById('f9Port').value, 10) || 0,
+    enabled: document.getElementById('f9Enabled').checked,
+    five9: {
+      authBaseUrl: document.getElementById('f9AuthBaseUrl').value.trim(),
+      tenantName: document.getElementById('f9TenantName').value.trim(),
+      campaignName: document.getElementById('f9CampaignName').value.trim(),
+      callbackUrl: document.getElementById('f9CallbackUrl').value.trim(),
+    },
+    directReply: document.getElementById('f9DirectReply').checked,
+  };
+  const cbToken = document.getElementById('f9CallbackToken').value.trim();
+  if (cbToken) body.five9.callbackToken = cbToken;
+  const verifyToken = document.getElementById('f9VerifyToken').value.trim();
+  if (verifyToken) body.verifyToken = verifyToken;
+  const metaToken = document.getElementById('f9MetaToken').value.trim();
+  if (metaToken || _editingFive9Connector) body.meta = { accessToken: metaToken || undefined };
+  if (body.channel === 'smooch' || _editingFive9Connector) {
+    body.smooch = {
+      appId: document.getElementById('f9SmoochAppId').value.trim(),
+      baseUrl: document.getElementById('f9SmoochBaseUrl').value.trim() || undefined,
+      keyId: document.getElementById('f9SmoochKeyId').value.trim() || undefined,
+      keySecret: document.getElementById('f9SmoochKeySecret').value.trim() || undefined,
+      bearerToken: document.getElementById('f9SmoochBearer').value.trim() || undefined,
+      webhookSecret: document.getElementById('f9SmoochWebhookSecret').value.trim() || undefined,
+    };
+  }
+  const phoneFilter = document.getElementById('f9PhoneFilter').value.split(',').map(s => s.trim()).filter(Boolean);
+  if (phoneFilter.length) body.phoneNumberFilter = phoneFilter;
+  const targets = document.getElementById('f9WebhookTargets').value
+    .split('\n').map(s => s.trim()).filter(Boolean).map(url => ({ url }));
+  if (targets.length) body.webhookTargets = targets;
+  body.webhooksEnabled = document.getElementById('f9WebhooksEnabled').checked;
+  body.autoReply = {
+    enabled: document.getElementById('f9AutoReplyEnabled').checked,
+    text: document.getElementById('f9AutoReplyText').value.trim(),
+  };
+  const arExpiresLocal = document.getElementById('f9AutoReplyExpires').value;
+  if (arExpiresLocal) body.autoReply.expiresAt = new Date(arExpiresLocal).toISOString();
+  const ttl = parseInt(document.getElementById('f9SessionTtl').value, 10);
+  if (ttl) body.sessionTtlMinutes = ttl;
+  const ips = document.getElementById('f9AllowedIps').value.split(',').map(s => s.trim()).filter(Boolean);
+  if (ips.length) body.allowedIps = ips;
+
+  try {
+    const res = await api('/admin/five9-connectors', { method: 'POST', body: JSON.stringify(body) });
+    const d = await res.json();
+    if (res.ok) { toast('Connector ' + (d.status || 'saved') + ' (port ' + d.port + ')'); closeFive9Modal(); await fetchFive9Connectors(); }
+    else toast(d.error || 'Failed', 'error');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function editFive9Connector(name) {
+  try {
+    const res = await api('/admin/five9-connectors/' + encodeURIComponent(name));
+    if (!res.ok) return toast('Not found', 'error');
+    openFive9Modal((await res.json()).connector);
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteFive9Connector(name) {
+  if (!(await showConfirm({ title: 'Apagar connector Five9', message: 'Apagar connector "' + name + '" e todas as sessões ativas?', confirmText: 'Apagar' }))) return;
+  try {
+    const res = await api('/admin/five9-connectors/' + encodeURIComponent(name), { method: 'DELETE' });
+    if (res.ok) { toast('Deleted'); await fetchFive9Connectors(); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function restartFive9ConnectorAction(name) {
+  try {
+    const res = await api('/admin/five9-connectors/' + encodeURIComponent(name) + '/restart', { method: 'POST' });
+    const d = await res.json();
+    if (res.ok) { toast('Restarted'); await fetchFive9Connectors(); } else toast(d.error || 'Failed', 'error');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function openFive9SessionsModal(name) {
+  document.getElementById('five9SessionsTitle').textContent = 'Active Sessions — ' + name;
+  document.getElementById('five9SessionsModal').style.display = 'block';
+  const list = document.getElementById('five9SessionsList');
+  list.innerHTML = '<div style="color:var(--text3);padding:8px 0">Loading...</div>';
+  try {
+    const res = await api('/admin/five9-connectors/sessions?connector=' + encodeURIComponent(name));
+    const d = await res.json();
+    const sessions = d.sessions || [];
+    if (sessions.length === 0) {
+      list.innerHTML = '<div style="color:var(--text3);padding:8px 0">No active sessions.</div>';
+      return;
+    }
+    list.innerHTML = sessions.map(s => `
+      <div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:8px;font-size:12.5px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <strong>${esc(s.displayName)}</strong>
+            <span style="color:var(--text3);margin-left:8px">${esc(s.customerId || s.chatId)}</span>
+          </div>
+          <span style="color:var(--text3);font-size:11px">${s.lastActivityAt ? new Date(s.lastActivityAt).toLocaleString() : ''}</span>
+        </div>
+        <div style="color:var(--text2);margin-top:4px;font-family:'SF Mono',Monaco,monospace;font-size:11px">
+          correlationId: ${esc(s.correlationId || '—')}
+        </div>
+      </div>`).join('');
+  } catch (e) {
+    list.innerHTML = '<div style="color:var(--red);padding:8px 0">Error: ' + esc(e.message) + '</div>';
+  }
+}
+
+function closeFive9SessionsModal() {
+  document.getElementById('five9SessionsModal').style.display = 'none';
 }

@@ -6,10 +6,14 @@ import {
     loadPersistedWebhooks, persistWebhooks, validateWebhookInput,
     loadPersistedTcpUdpProfiles, persistTcpUdpProfiles, validateTcpUdpProfileInput,
     loadPersistedConnectors, persistConnectors,
+    loadPersistedFive9Connectors, persistFive9Connectors,
 } from './core/store';
 import { validateConnectorInput, type GoContactConnector } from './core/connector-types';
 import { startConnectorServer, stopConnectorServer, stopAllConnectors, restartConnector, getConnectorStatus, closeConnectorSession } from './servers/connector-server';
 import { initConnectorSessions, shutdownConnectorSessions, listSessions as listConnectorSessions, deleteConnectorSessions } from './gocontact/sessions';
+import { validateFive9ConnectorInput, type Five9Connector } from './core/connector-types-five9';
+import { startFive9ConnectorServer, stopFive9ConnectorServer, stopAllFive9Connectors, restartFive9Connector, getFive9ConnectorStatus } from './servers/five9-connector-server';
+import { initFive9Sessions, shutdownFive9Sessions, listFive9Sessions, deleteFive9ConnectorSessions } from './five9/sessions';
 import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry/telemetry';
 import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart } from './telemetry/request-log';
 import { initSipLog, shutdownSipLog, querySipLogs, getSipLogDetail, getSipLogStats } from './telemetry/sip-log';
@@ -61,6 +65,8 @@ config.webhooks = loadPersistedWebhooks();
 
 // Load persisted GoContact connectors
 let connectors: GoContactConnector[] = loadPersistedConnectors();
+// Load persisted Five9 connectors
+let five9Connectors: Five9Connector[] = loadPersistedFive9Connectors();
 
 // Merge TCP/UDP profiles: env vars as base, persisted (UI-created) take precedence
 const persistedTcpUdpProfiles = loadPersistedTcpUdpProfiles();
@@ -85,6 +91,7 @@ initConnLog(config.requestLog);
 // Initialize GoContact connector session store (SQLite) — must precede
 // connector server startup so the poller can resume persisted sessions.
 initConnectorSessions(config.requestLog.dataDir);
+initFive9Sessions(config.requestLog.dataDir);
 
 // Initialize central certificate store (SQLite-backed). Must come BEFORE any
 // TCP/UDP server starts so the migration step can populate it from legacy
@@ -344,6 +351,19 @@ if (connectors.length > 0) {
             startConnectorServer({ ...connector, port: assignedPort });
         } catch (err) {
             console.error(`❌ Failed to start connector "${connector.name}":`, err instanceof Error ? err.message : err);
+        }
+    }
+}
+
+// Start Five9 connectors (inbound listener + Five9 push callback receiver)
+if (five9Connectors.length > 0) {
+    console.log(`🤝 Five9 Connectors: ${five9Connectors.map(c => c.name).join(', ')}`);
+    for (const connector of five9Connectors) {
+        const assignedPort = portAssignments.connectors[connector.name];
+        try {
+            startFive9ConnectorServer({ ...connector, port: assignedPort });
+        } catch (err) {
+            console.error(`❌ Failed to start Five9 connector "${connector.name}":`, err instanceof Error ? err.message : err);
         }
     }
 }
@@ -1926,6 +1946,190 @@ const server = Bun.serve({
                     releaseConnectorPort(name);
                     const removedSessions = deleteConnectorSessions(name);
                     console.log(`🗑️  Connector "${name}" deleted (${removedSessions} session(s) removed)`);
+                    return jsonRes(200, { status: 'deleted', connector: name });
+                }
+
+                // ── Five9 Connectors ──
+                const redactFive9Connector = (c: Five9Connector) => {
+                    const status = getFive9ConnectorStatus(c.name) as any;
+                    return {
+                        name: c.name,
+                        channel: c.channel,
+                        enabled: c.enabled !== false,
+                        port: status?.port ?? getConnectorPort(c.name) ?? c.port,
+                        running: status?.running ?? false,
+                        five9: {
+                            authBaseUrl: c.five9.authBaseUrl,
+                            tenantName: c.five9.tenantName,
+                            campaignName: c.five9.campaignName,
+                            callbackUrl: c.five9.callbackUrl,
+                            // callbackToken intentionally omitted (secret)
+                        },
+                        directReply: c.directReply === true,
+                        phoneNumberFilter: c.phoneNumberFilter || [],
+                        autoReply: c.autoReply || { enabled: false, text: '' },
+                        webhookTargets: c.webhookTargets || [],
+                        webhooksEnabled: c.webhooksEnabled !== false,
+                        sessionTtlMinutes: c.sessionTtlMinutes ?? 120,
+                        allowPrivateTargets: c.allowPrivateTargets !== false,
+                        targetAllowedCidrs: c.targetAllowedCidrs || [],
+                        stats: status?.stats ?? null,
+                    };
+                };
+
+                if (url.pathname === '/admin/five9-connectors' && req.method === 'GET') {
+                    return jsonRes(200, { connectors: five9Connectors.map(redactFive9Connector) });
+                }
+
+                if (url.pathname === '/admin/five9-connectors/sessions' && req.method === 'GET') {
+                    const filter = url.searchParams.get('connector') || undefined;
+                    const sessions = listFive9Sessions(filter).map(s => ({
+                        connector: s.connector,
+                        chatId: s.chatId,
+                        customerId: s.customerId,
+                        displayName: s.displayName,
+                        correlationId: s.correlationId,
+                        lastActivityAt: s.lastActivityAt,
+                    }));
+                    return jsonRes(200, { sessions, total: sessions.length });
+                }
+
+                if (url.pathname.match(/^\/admin\/five9-connectors\/[^/]+$/) && req.method === 'GET') {
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
+                    const connector = five9Connectors.find(c => c.name === name);
+                    if (!connector) return jsonRes(404, { error: `Five9 connector "${name}" not found` });
+                    return jsonRes(200, { connector: redactFive9Connector(connector) });
+                }
+
+                if (url.pathname.match(/^\/admin\/five9-connectors\/[^/]+\/restart$/) && req.method === 'POST') {
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
+                    const connector = five9Connectors.find(c => c.name === name);
+                    if (!connector) return jsonRes(404, { error: `Five9 connector "${name}" not found` });
+                    try {
+                        const cs = await restartFive9Connector(connector);
+                        return jsonRes(200, { status: 'restarted', connector: name, port: (cs.server as any)?.port ?? connector.port });
+                    } catch (err) {
+                        return jsonRes(500, { error: `Failed to restart: ${err instanceof Error ? err.message : err}` });
+                    }
+                }
+
+                if (url.pathname === '/admin/five9-connectors' && req.method === 'POST') {
+                    let body: unknown;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
+
+                    const input = body as Record<string, any>;
+                    const existingIdx = five9Connectors.findIndex(c => c.name === String(input.name || '').toLowerCase());
+                    const prev = existingIdx >= 0 ? five9Connectors[existingIdx] : null;
+
+                    // Preserve secrets not resubmitted by the form
+                    if (prev) {
+                        if (input.five9 && typeof input.five9 === 'object') {
+                            if (!input.five9.callbackToken && prev.five9.callbackToken) input.five9.callbackToken = prev.five9.callbackToken;
+                        }
+                        if (!input.verifyToken && prev.verifyToken) input.verifyToken = prev.verifyToken;
+                        if (!input.meta && prev.meta) {
+                            input.meta = { ...prev.meta };
+                        } else if (input.meta && typeof input.meta === 'object') {
+                            if (!input.meta.accessToken && prev.meta?.accessToken) input.meta.accessToken = prev.meta.accessToken;
+                            if (!input.meta.phoneNumberId && prev.meta?.phoneNumberId) input.meta.phoneNumberId = prev.meta.phoneNumberId;
+                        }
+                        if (!input.smooch && prev.smooch) {
+                            input.smooch = { ...prev.smooch };
+                        } else if (input.smooch && typeof input.smooch === 'object' && prev.smooch) {
+                            if (!input.smooch.keySecret && prev.smooch.keySecret) input.smooch.keySecret = prev.smooch.keySecret;
+                            if (!input.smooch.bearerToken && prev.smooch.bearerToken) input.smooch.bearerToken = prev.smooch.bearerToken;
+                        }
+                    }
+
+                    const error = validateFive9ConnectorInput(input);
+                    if (error) return jsonRes(400, { error });
+
+                    const connector: Five9Connector = {
+                        name: String(input.name).toLowerCase(),
+                        port: input.port ? parseInt(String(input.port), 10) : 0,
+                        enabled: input.enabled !== false,
+                        channel: input.channel,
+                        five9: {
+                            authBaseUrl: String(input.five9.authBaseUrl).trim(),
+                            tenantName: String(input.five9.tenantName).trim(),
+                            campaignName: String(input.five9.campaignName).trim(),
+                            callbackUrl: String(input.five9.callbackUrl).trim(),
+                            callbackToken: input.five9.callbackToken ? String(input.five9.callbackToken) : undefined,
+                        },
+                        directReply: input.directReply === true,
+                    };
+                    if (input.verifyToken) connector.verifyToken = String(input.verifyToken);
+                    if (Array.isArray(input.allowedIps) && input.allowedIps.length) connector.allowedIps = input.allowedIps.map((s: unknown) => String(s).trim()).filter(Boolean);
+                    if (input.meta && (input.meta.accessToken || input.meta.phoneNumberId)) {
+                        connector.meta = {
+                            accessToken: String(input.meta.accessToken || ''),
+                            phoneNumberId: String(input.meta.phoneNumberId || ''),
+                            graphVersion: input.meta.graphVersion ? String(input.meta.graphVersion) : undefined,
+                        };
+                    }
+                    if (input.smooch && (input.smooch.appId || input.smooch.bearerToken || input.smooch.keyId)) {
+                        connector.smooch = {
+                            appId: String(input.smooch.appId || ''),
+                            baseUrl: input.smooch.baseUrl ? String(input.smooch.baseUrl).trim() : undefined,
+                            keyId: input.smooch.keyId ? String(input.smooch.keyId) : undefined,
+                            keySecret: input.smooch.keySecret ? String(input.smooch.keySecret) : undefined,
+                            bearerToken: input.smooch.bearerToken ? String(input.smooch.bearerToken) : undefined,
+                        };
+                    }
+                    if (Array.isArray(input.webhookTargets) && input.webhookTargets.length) connector.webhookTargets = input.webhookTargets;
+                    if (typeof input.webhooksEnabled === 'boolean') connector.webhooksEnabled = input.webhooksEnabled;
+                    if (Array.isArray(input.phoneNumberFilter)) {
+                        const filter = (input.phoneNumberFilter as unknown[]).map(x => String(x).trim()).filter(Boolean);
+                        if (filter.length) connector.phoneNumberFilter = filter;
+                    }
+                    if (input.autoReply && typeof input.autoReply === 'object') {
+                        connector.autoReply = {
+                            enabled: input.autoReply.enabled === true,
+                            text: String(input.autoReply.text || ''),
+                        };
+                        if (input.autoReply.expiresAt && typeof input.autoReply.expiresAt === 'string') connector.autoReply.expiresAt = input.autoReply.expiresAt;
+                    }
+                    if (typeof input.sessionTtlMinutes === 'number') connector.sessionTtlMinutes = input.sessionTtlMinutes;
+                    if (typeof input.allowPrivateTargets === 'boolean') connector.allowPrivateTargets = input.allowPrivateTargets;
+                    if (Array.isArray(input.targetAllowedCidrs) && input.targetAllowedCidrs.length) connector.targetAllowedCidrs = (input.targetAllowedCidrs as string[]).map(s => String(s).trim()).filter(Boolean);
+
+                    let portToUse = connector.port;
+                    if (prev && portToUse === 0) {
+                        const existingPort = getConnectorPort(connector.name) || prev.port || 0;
+                        if (existingPort > 0) portToUse = existingPort;
+                    }
+                    const excludePorts = [
+                        ...getConnectorStatus().map(s => s.port || 0),
+                        ...five9Connectors.filter(c => c.name !== connector.name).map(c => getConnectorPort(c.name) || c.port || 0),
+                    ].filter((p): p is number => p > 0);
+                    const assignedPort = await assignConnectorPort(connector.name, portToUse, config.port, excludePorts);
+                    const connectorWithPort = { ...connector, port: assignedPort };
+
+                    if (existingIdx >= 0) five9Connectors[existingIdx] = connectorWithPort;
+                    else five9Connectors.push(connectorWithPort);
+                    persistFive9Connectors(five9Connectors);
+
+                    try {
+                        await restartFive9Connector(connectorWithPort);
+                    } catch (err) {
+                        console.error(`⚠️  Five9 connector "${connector.name}" saved but failed to start:`, err);
+                    }
+
+                    const action = existingIdx >= 0 ? 'updated' : 'created';
+                    console.log(`✅ Five9 connector "${connector.name}" ${action} (port ${assignedPort})`);
+                    return jsonRes(200, { status: action, connector: connector.name, port: assignedPort });
+                }
+
+                if (url.pathname.match(/^\/admin\/five9-connectors\/[^/]+$/) && req.method === 'DELETE') {
+                    const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
+                    const idx = five9Connectors.findIndex(c => c.name === name);
+                    if (idx === -1) return jsonRes(404, { error: `Five9 connector "${name}" not found` });
+                    five9Connectors.splice(idx, 1);
+                    persistFive9Connectors(five9Connectors);
+                    await stopFive9ConnectorServer(name);
+                    releaseConnectorPort(name);
+                    const removedSessions = deleteFive9ConnectorSessions(name);
+                    console.log(`🗑️  Five9 connector "${name}" deleted (${removedSessions} session(s) removed)`);
                     return jsonRes(200, { status: 'deleted', connector: name });
                 }
 
@@ -4314,6 +4518,7 @@ const shutdown = async (signal: string) => {
     stopSilenceAlertScheduler();
     await stopAllWebhooks();
     await stopAllConnectors();
+    await stopAllFive9Connectors();
 
     // Wait for main server requests
     const maxWait = 10_000;
@@ -4333,6 +4538,7 @@ const shutdown = async (signal: string) => {
     shutdownSipLog();
     shutdownConnLog();
     shutdownConnectorSessions();
+    shutdownFive9Sessions();
     shutdownAcme();
     shutdownCertStore();
     shutdownLdap();

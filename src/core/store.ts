@@ -629,6 +629,34 @@ export function persistConnectors(connectors: import('./connector-types').GoCont
     }
 }
 
+// ─── Five9 Connector Persistence ─────────────────────────────────────────────
+
+const FIVE9_CONNECTORS_FILE = resolve(DATA_DIR, 'five9-connectors.json');
+
+export function loadPersistedFive9Connectors(): import('./connector-types-five9').Five9Connector[] {
+    try {
+        if (!existsSync(FIVE9_CONNECTORS_FILE)) return [];
+        const raw = readFileSync(FIVE9_CONNECTORS_FILE, 'utf-8');
+        const stored: import('./connector-types-five9').Five9Connector[] = JSON.parse(raw);
+        return stored
+            .filter(c => c.name && c.five9?.tenantName && c.five9?.authBaseUrl)
+            .map(c => ({ ...c, name: c.name.toLowerCase() }));
+    } catch (err) {
+        console.warn('⚠️  Could not load five9-connectors.json:', err instanceof Error ? err.message : err);
+        return [];
+    }
+}
+
+export function persistFive9Connectors(connectors: import('./connector-types-five9').Five9Connector[]): void {
+    try {
+        ensureDataDir();
+        writeFileSync(FIVE9_CONNECTORS_FILE, JSON.stringify(connectors, null, 2), 'utf-8');
+    } catch (err) {
+        console.error('❌ Could not save five9-connectors.json:', err instanceof Error ? err.message : err);
+        throw err;
+    }
+}
+
 // ─── TCP/UDP Profile Persistence ─────────────────────────────────────────────
 
 export function loadPersistedTcpUdpProfiles(): TcpUdpProfile[] {

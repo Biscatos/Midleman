@@ -426,7 +426,7 @@ const PAGE_TITLES = {
   tcpudp: 'TCP/UDP',
   profiles: 'HTTP Proxies',
   webhooks: 'Webhooks',
-  connectors: 'GoContact Connectors',
+  connectors: 'Chat Connectors',
   proxyusers: 'Users',
   oauthclients: 'OAuth Clients',
   consentpages: 'Consent Pages',
@@ -456,7 +456,7 @@ function navigate(page) {
     if (pendingTcpTab) switchTcpUdpTab(pendingTcpTab);
     else fetchSipProxies();
   }
-  if (page === 'connectors') { fetchConnectors(); }
+  if (page === 'connectors') { fetchConnectors(); fetchFive9Connectors(); }
   if (page === 'proxyusers') { fetchProxyUsers(); fetchInvites(); }
   if (page === 'oauthclients') { fetchOauthClients(); }
   if (page === 'consentpages') { fetchConsentPages(); }
