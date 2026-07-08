@@ -644,11 +644,11 @@ async function injectFive9Inbound(cs: Five9ConnectorServer, session: Five9Sessio
     }
 }
 
-async function deliverFive9Inbound(cs: Five9ConnectorServer, msg: NormalizedInboundMessage): Promise<void> {
+async function deliverFive9Inbound(cs: Five9ConnectorServer, msg: NormalizedInboundMessage): Promise<Five9Session> {
     const c = cs.connector;
     const key = sessionKeyFor(msg);
 
-    await withSessionLock(`${c.name}:${key}`, async () => {
+    return withSessionLock(`${c.name}:${key}`, async () => {
         let session = await ensureFive9Session(cs, msg);
         const sessionKey = session.chatId;
 
@@ -691,6 +691,7 @@ async function deliverFive9Inbound(cs: Five9ConnectorServer, msg: NormalizedInbo
         touchFive9Session(c.name, sessionKey);
         cs.stats.inboundMessages++;
         cs.stats.lastInboundAt = Date.now();
+        return session;
     });
 }
 
@@ -941,31 +942,41 @@ async function handleFive9Request(req: Request, cs: Five9ConnectorServer): Promi
         }
     }
 
-    if (messages.length > 0) {
-        void (async () => {
-            for (const msg of messages) {
-                try {
-                    await deliverFive9Inbound(cs, msg);
-                } catch (err) {
-                    const errMsg = err instanceof Error ? err.message : String(err);
-                    cs.stats.lastError = errMsg;
-                    log.error(`❌ [five9:${c.name}] Failed to deliver message from ${msg.chatId}:`, errMsg);
-                    logRequest({
-                        requestId, type: 'connector', targetName: c.name,
-                        method: 'POST', path: url.pathname, targetUrl: c.five9.authBaseUrl, clientIp,
-                        reqHeaders: headersToRecord(req.headers),
-                        reqBody: rawBody.length <= 64 * 1024 ? rawBody : `[large body: ${rawBody.length} bytes]`,
-                        reqBodySize: rawBody.length,
-                        resStatus: 502, resStatusText: 'Bad Gateway',
-                        durationMs: performance.now() - startTime,
-                        error: errMsg,
-                    });
-                }
-            }
-        })();
+    const correlationIds: string[] = [];
+    const deliveryErrors: string[] = [];
+    for (const msg of messages) {
+        try {
+            const session = await deliverFive9Inbound(cs, msg);
+            correlationIds.push(session.correlationId);
+        } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            cs.stats.lastError = errMsg;
+            deliveryErrors.push(errMsg);
+            log.error(`❌ [five9:${c.name}] Failed to deliver message from ${msg.chatId}:`, errMsg);
+            logRequest({
+                requestId, type: 'connector', targetName: c.name,
+                method: 'POST', path: url.pathname, targetUrl: c.five9.authBaseUrl, clientIp,
+                reqHeaders: headersToRecord(req.headers),
+                reqBody: rawBody.length <= 64 * 1024 ? rawBody : `[large body: ${rawBody.length} bytes]`,
+                reqBodySize: rawBody.length,
+                resStatus: 502, resStatusText: 'Bad Gateway',
+                durationMs: performance.now() - startTime,
+                error: errMsg,
+            });
+        }
     }
 
-    const resJson: Record<string, unknown> = { status: 'accepted', messages: messages.length, requestId };
+    const resJson: Record<string, unknown> = {
+        status: deliveryErrors.length > 0 ? 'partial' : 'accepted',
+        messages: correlationIds.length,
+        requestId,
+    };
+    if (correlationIds.length === 1) {
+        resJson.conversationId = correlationIds[0];
+    } else if (correlationIds.length > 1) {
+        resJson.conversationIds = correlationIds;
+    }
+    if (deliveryErrors.length > 0) resJson.errors = deliveryErrors;
     if (messages.length === 0) {
         resJson.hint = c.channel === 'meta-whatsapp'
             ? 'No messages extracted — send the Meta webhook envelope or a bare value object'

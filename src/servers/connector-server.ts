@@ -795,11 +795,11 @@ async function injectInboundWebchat(cs: ConnectorServer, session: ConnectorSessi
  * or closed the dialog (404), drop the stale local session, open a fresh one
  * and retry once.
  */
-async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage): Promise<void> {
+async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage): Promise<ConnectorSession | null> {
     const c = cs.connector;
     const sessionKey = sessionKeyFor(msg);
     const lockKey = `${c.name}:${sessionKey}`;
-    await withSessionLock(lockKey, async () => {
+    return withSessionLock(lockKey, async () => {
         // Out-of-hours gate: when the connector declares business hours and the
         // customer writes OUTSIDE them, send a single (throttled) notice. In
         // reply-only mode we never create/touch a GoContact session.
@@ -810,7 +810,7 @@ async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage
             maybeSendOutOfHoursReply(cs, msg, sessionKey, bh!.message.trim(), null);
             cs.stats.inboundMessages++;
             cs.stats.lastInboundAt = Date.now();
-            return;
+            return null;
         }
 
         let session = await ensureSession(cs, msg);
@@ -851,6 +851,7 @@ async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage
                 void sendAutoReply(cs, session, c.autoReply.text.trim());
             }
         }
+        return session;
     });
 }
 
@@ -1590,34 +1591,43 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
         }
     }
 
-    // Always 200 fast (Meta retries aggressively on non-200) — inject async.
-    if (messages.length > 0) {
-        void (async () => {
-            for (const msg of messages) {
-                try {
-                    await deliverInbound(cs, msg);
-                } catch (err) {
-                    const errMsg = err instanceof Error ? err.message : String(err);
-                    cs.stats.lastError = errMsg;
-                    log.error(`❌ [connector:${c.name}] Failed to inject message from ${msg.chatId} into GoContact:`, errMsg);
-                    notifyConnectorError(cs, 'connector.inbound_failed', 'failed to inject a customer message into GoContact',
-                        `Chat ${msg.chatId}\nLast error: ${errMsg}`, { chatId: msg.chatId, lastError: errMsg });
-                    logRequest({
-                        requestId, type: 'connector', targetName: c.name,
-                        method: 'POST', path: url.pathname, targetUrl: c.gocontact.baseUrl, clientIp,
-                        reqHeaders: headersToRecord(req.headers),
-                        reqBody: rawBody.length <= 64 * 1024 ? rawBody : `[large body: ${rawBody.length} bytes]`,
-                        reqBodySize: rawBody.length,
-                        resStatus: 502, resStatusText: 'Bad Gateway',
-                        durationMs: performance.now() - startTime,
-                        error: errMsg,
-                    });
-                }
-            }
-        })();
+    const conversationIds: string[] = [];
+    const deliveryErrors: string[] = [];
+    for (const msg of messages) {
+        try {
+            const session = await deliverInbound(cs, msg);
+            if (session?.dialogGroupUuid) conversationIds.push(session.dialogGroupUuid);
+        } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            cs.stats.lastError = errMsg;
+            deliveryErrors.push(errMsg);
+            log.error(`❌ [connector:${c.name}] Failed to inject message from ${msg.chatId} into GoContact:`, errMsg);
+            notifyConnectorError(cs, 'connector.inbound_failed', 'failed to inject a customer message into GoContact',
+                `Chat ${msg.chatId}\nLast error: ${errMsg}`, { chatId: msg.chatId, lastError: errMsg });
+            logRequest({
+                requestId, type: 'connector', targetName: c.name,
+                method: 'POST', path: url.pathname, targetUrl: c.gocontact.baseUrl, clientIp,
+                reqHeaders: headersToRecord(req.headers),
+                reqBody: rawBody.length <= 64 * 1024 ? rawBody : `[large body: ${rawBody.length} bytes]`,
+                reqBodySize: rawBody.length,
+                resStatus: 502, resStatusText: 'Bad Gateway',
+                durationMs: performance.now() - startTime,
+                error: errMsg,
+            });
+        }
     }
 
-    const resJson: Record<string, unknown> = { status: 'accepted', messages: messages.length, requestId };
+    const resJson: Record<string, unknown> = {
+        status: deliveryErrors.length > 0 ? 'partial' : 'accepted',
+        messages: messages.length,
+        requestId,
+    };
+    if (conversationIds.length === 1) {
+        resJson.conversationId = conversationIds[0];
+    } else if (conversationIds.length > 1) {
+        resJson.conversationIds = conversationIds;
+    }
+    if (deliveryErrors.length > 0) resJson.errors = deliveryErrors;
     if (messages.length === 0) {
         resJson.hint = c.channel === 'meta-whatsapp'
             ? 'No messages extracted — send the Meta webhook envelope ({"entry":[{"changes":[{"value":{…}}]}]}) or a bare value object ({"messaging_product":"whatsapp","contacts":[…],"messages":[…]})'
