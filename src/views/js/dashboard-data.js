@@ -8569,6 +8569,7 @@ function openReportFeedModal(feed) {
   document.getElementById('rfUsername').value = feed ? (feed.username || '') : '';
   document.getElementById('rfPassword').value = '';
   document.getElementById('rfTemplateId').value = feed ? (feed.templateId || '') : '';
+  document.getElementById('rfDataType').value = feed ? (feed.dataType != null ? feed.dataType : 0) : 0;
   document.getElementById('rfOwnerType').value = feed ? (feed.ownerType || 'campaign') : 'campaign';
   document.getElementById('rfOwnerIds').value = feed ? (feed.ownerIds || []).join(', ') : '';
 
@@ -8650,6 +8651,7 @@ async function saveReportFeed() {
     baseUrl: document.getElementById('rfBaseUrl').value.trim(),
     username: document.getElementById('rfUsername').value.trim(),
     templateId: document.getElementById('rfTemplateId').value.trim(),
+    dataType: parseInt(document.getElementById('rfDataType').value) || 0,
     ownerType: document.getElementById('rfOwnerType').value,
     ownerIds: document.getElementById('rfOwnerIds').value.split(',').map(function(s) { return s.trim(); }).filter(Boolean),
     dateRange: dateRange,

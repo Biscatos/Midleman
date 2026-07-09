@@ -2498,17 +2498,32 @@ X-API-Key: &lt;your-api-key&gt;</pre>
           </div>
 
           <!-- Report params -->
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
             <div>
               <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Template ID *</label>
               <input id="rfTemplateId" type="text" placeholder="1092" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
             </div>
             <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Data Type <span style="color:var(--text3)">(int, default 0)</span></label>
+              <input id="rfDataType" type="number" min="0" value="0" placeholder="0" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+            </div>
+            <div>
               <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Owner Type *</label>
               <select id="rfOwnerType" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
-                <option value="campaign">Campaign</option>
-                <option value="queue">Queue</option>
-                <option value="user">User</option>
+                <option value="campaign">campaign — Outbound Voice</option>
+                <option value="queue">queue — Inbound Voice</option>
+                <option value="ticket">ticket — Ticket Queues</option>
+                <option value="ivr_campaigns">ivr_campaigns — IVR Campaigns</option>
+                <option value="assisted_transfer">assisted_transfer — Assisted Transfer</option>
+                <option value="callbacks">callbacks — Voice Callbacks</option>
+                <option value="agents">agents — Events Log</option>
+                <option value="webchat">webchat — Webchat</option>
+                <option value="webchat_sessions">webchat_sessions — Webchat Sessions</option>
+                <option value="ticket_agent_times">ticket_agent_times — Ticket Agent Times</option>
+                <option value="on_hook_attempt">on_hook_attempt — On-Hook Attempts</option>
+                <option value="quality">quality — Quality</option>
+                <option value="elearning">elearning — E-Learning</option>
+                <option value="scripts">scripts — Scripts</option>
               </select>
             </div>
           </div>

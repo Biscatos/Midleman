@@ -9,6 +9,26 @@
  * cookie-session proxy without buffering in Midleman.
  */
 
+/**
+ * All valid ownerType values accepted by GoContact's Report Designer API.
+ * Source: POST_buildReport documentation (same values used in generateReport).
+ */
+export type GoContactOwnerType =
+    | 'campaign'           // Outbound Voice
+    | 'queue'              // Inbound Voice
+    | 'ticket'             // Ticket Queues
+    | 'ivr_campaigns'      // IVR Campaigns
+    | 'assisted_transfer'  // Assisted Transfer
+    | 'callbacks'          // Voice Callbacks
+    | 'agents'             // Events Log
+    | 'webchat'            // Webchat
+    | 'webchat_sessions'   // Webchat Sessions
+    | 'ticket_agent_times' // Ticket Agent Times
+    | 'on_hook_attempt'    // On-Hook Attempts
+    | 'quality'            // Quality
+    | 'elearning'          // E-Learning
+    | 'scripts';           // Scripts
+
 /** Date range for the report job. */
 export type DateRangeConfig =
     | { type: 'relative'; days: number }
@@ -24,9 +44,9 @@ export interface ReportFeed {
 
     // ── Report job parameters ───────────────────────────────────────────────
     templateId: string;
-    ownerType: 'campaign' | 'queue' | 'user';
+    ownerType: GoContactOwnerType;
     ownerIds: string[];
-    dataType?: string;           // default "0"
+    dataType?: number;           // default 0 — report type, varies per ownerType
     language?: string;           // default "en"
     includeAllOwners?: boolean;  // default false
 

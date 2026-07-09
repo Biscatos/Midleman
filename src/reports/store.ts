@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { mkdirSync } from 'fs';
-import type { ReportFeed, DateRangeConfig } from './types';
+import type { ReportFeed, DateRangeConfig, GoContactOwnerType } from './types';
 
 const DATA_DIR = process.env.DATA_DIR || resolve(process.cwd(), 'data');
 const FEEDS_FILE = resolve(DATA_DIR, 'report-feeds.json');
@@ -49,8 +49,13 @@ export function validateReportFeedInput(input: unknown): string | null {
     if (!f.password || typeof f.password !== 'string') return '"password" is required (string)';
     if (!f.templateId || typeof f.templateId !== 'string') return '"templateId" is required (string)';
 
-    if (!f.ownerType || !['campaign', 'queue', 'user'].includes(f.ownerType as string))
-        return '"ownerType" must be "campaign", "queue" or "user"';
+    const validOwnerTypes: GoContactOwnerType[] = [
+        'campaign', 'queue', 'ticket', 'ivr_campaigns', 'assisted_transfer',
+        'callbacks', 'agents', 'webchat', 'webchat_sessions', 'ticket_agent_times',
+        'on_hook_attempt', 'quality', 'elearning', 'scripts',
+    ];
+    if (!f.ownerType || !validOwnerTypes.includes(f.ownerType as GoContactOwnerType))
+        return `"ownerType" must be one of: ${validOwnerTypes.join(', ')}`;
 
     if (!Array.isArray(f.ownerIds) || f.ownerIds.length === 0)
         return '"ownerIds" must be a non-empty array of strings';
