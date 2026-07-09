@@ -8494,3 +8494,218 @@ async function openFive9SessionsModal(name) {
 function closeFive9SessionsModal() {
   document.getElementById('five9SessionsModal').style.display = 'none';
 }
+
+// ─── Report Feeds ─────────────────────────────────────────────────────────────
+
+let _allReportFeeds = [];
+let _editingReportFeed = null;
+let _reportFeedStatuses = {};
+
+async function loadReportFeeds() {
+  try {
+    _allReportFeeds = await fetch('/admin/reports').then(r => r.json());
+    if (!Array.isArray(_allReportFeeds)) _allReportFeeds = [];
+    const statusResults = await Promise.all(
+      _allReportFeeds.map(f => fetch('/admin/reports/' + f.name + '/status').then(r => r.json()).catch(() => ({})))
+    );
+    _reportFeedStatuses = {};
+    _allReportFeeds.forEach((f, i) => { _reportFeedStatuses[f.name] = statusResults[i]; });
+    renderReportFeeds();
+    const badge = document.getElementById('navReportBadge');
+    if (badge) badge.textContent = _allReportFeeds.length;
+  } catch (e) {
+    const tbody = document.getElementById('reportFeedListBody');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--red)">Error: ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+function renderReportFeeds() {
+  const tbody = document.getElementById('reportFeedListBody');
+  if (!tbody) return;
+  if (!_allReportFeeds.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No feeds yet. Click &quot;+ New Feed&quot;.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _allReportFeeds.map(function(f) {
+    const st = _reportFeedStatuses[f.name] || {};
+    const dateStr = f.dateRange && f.dateRange.type === 'relative'
+      ? 'Last ' + f.dateRange.days + ' days'
+      : ((f.dateRange && f.dateRange.startDate) || '') + ' → ' + ((f.dateRange && f.dateRange.endDate) || '');
+    const cacheStr = st.cached
+      ? '<span style="color:var(--green)">' + (st.rowCount || 0) + ' rows</span>'
+      : '<span style="color:var(--text3)">empty</span>';
+    const fetchedStr = st.fetchedAt
+      ? new Date(st.fetchedAt).toLocaleString()
+      : '<span style="color:var(--text3)">never</span>';
+    const refreshBadge = st.refreshing
+      ? ' <span style="background:var(--surface2);color:var(--accent);font-size:10px;padding:1px 6px;border-radius:8px">refreshing…</span>'
+      : '';
+    const autoRefreshBadge = f.autoRefreshInterval
+      ? '<span style="color:var(--text3);font-size:11px"> / ' + f.autoRefreshInterval + 's</span>'
+      : '';
+    return '<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background=\'var(--surface2)\'" onmouseleave="this.style.background=\'\'">' +
+      '<td style="padding:8px 12px;font-weight:600">' + esc(f.name) + '</td>' +
+      '<td style="padding:8px;font-family:\'SF Mono\',Monaco,monospace;color:var(--text2)">' + esc(f.templateId) + '</td>' +
+      '<td style="padding:8px;color:var(--text2)">' + esc(f.ownerType) + ' <span style="color:var(--text3)">(' + (f.ownerIds || []).length + ')</span></td>' +
+      '<td style="padding:8px;color:var(--text2);font-size:12px">' + esc(dateStr) + '</td>' +
+      '<td style="padding:8px;font-size:12px">' + cacheStr + refreshBadge + '</td>' +
+      '<td style="padding:8px;color:var(--text2);font-size:12px">' + fetchedStr + '</td>' +
+      '<td style="padding:8px 12px;text-align:right;white-space:nowrap">' +
+        '<button class="btn btn-sm" onclick="refreshReportFeed(\'' + esc(f.name) + '\')">Refresh</button> ' +
+        '<button class="btn btn-sm" onclick="editReportFeed(\'' + esc(f.name) + '\')">Edit</button> ' +
+        '<button class="btn btn-sm btn-danger" onclick="deleteReportFeed(\'' + esc(f.name) + '\')">Delete</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function openReportFeedModal(feed) {
+  feed = feed || null;
+  _editingReportFeed = feed ? feed.name : null;
+  document.getElementById('reportFeedModalTitle').textContent = feed ? 'Edit Feed — ' + feed.name : 'New Report Feed';
+  document.getElementById('rfName').value = feed ? feed.name : '';
+  document.getElementById('rfName').disabled = !!feed;
+  document.getElementById('rfBaseUrl').value = feed ? (feed.baseUrl || '') : '';
+  document.getElementById('rfUsername').value = feed ? (feed.username || '') : '';
+  document.getElementById('rfPassword').value = '';
+  document.getElementById('rfTemplateId').value = feed ? (feed.templateId || '') : '';
+  document.getElementById('rfOwnerType').value = feed ? (feed.ownerType || 'campaign') : 'campaign';
+  document.getElementById('rfOwnerIds').value = feed ? (feed.ownerIds || []).join(', ') : '';
+
+  const isFixed = feed && feed.dateRange && feed.dateRange.type === 'fixed';
+  document.querySelector('input[name="rfDateType"][value="relative"]').checked = !isFixed;
+  document.querySelector('input[name="rfDateType"][value="fixed"]').checked = !!isFixed;
+  document.getElementById('rfDays').value = (feed && feed.dateRange && feed.dateRange.days) || 7;
+  document.getElementById('rfStartDate').value = (feed && feed.dateRange && feed.dateRange.startDate) || '';
+  document.getElementById('rfEndDate').value = (feed && feed.dateRange && feed.dateRange.endDate) || '';
+  rfToggleDateType();
+
+  document.getElementById('rfTtl').value = feed ? (feed.ttlSeconds != null ? feed.ttlSeconds : 300) : 300;
+  document.getElementById('rfAutoRefresh').value = feed ? (feed.autoRefreshInterval || 0) : 0;
+  document.getElementById('rfApiKeys').value = feed ? (feed.apiKeys || []).join('\n') : '';
+
+  let fmStr = '';
+  if (feed && feed.fieldMap && Object.keys(feed.fieldMap).length) {
+    try { fmStr = JSON.stringify(feed.fieldMap, null, 2); } catch (e) { fmStr = ''; }
+  }
+  document.getElementById('rfFieldMap').value = fmStr;
+  document.getElementById('rfIncludeUnmapped').checked = !!(feed && feed.includeUnmapped);
+
+  const audioEnabled = !!(feed && feed.audio && feed.audio.enabled);
+  document.getElementById('rfAudioEnabled').checked = audioEnabled;
+  document.getElementById('rfAudioField').value = (feed && feed.audio && feed.audio.addressField) || '';
+  rfToggleAudio();
+
+  document.getElementById('rfError').style.display = 'none';
+  document.getElementById('reportFeedModal').style.display = 'flex';
+}
+
+function closeReportFeedModal() {
+  document.getElementById('reportFeedModal').style.display = 'none';
+}
+
+function rfToggleDateType() {
+  const isFixed = document.querySelector('input[name="rfDateType"]:checked') &&
+    document.querySelector('input[name="rfDateType"]:checked').value === 'fixed';
+  document.getElementById('rfDateRelative').style.display = isFixed ? 'none' : 'block';
+  document.getElementById('rfDateFixed').style.display = isFixed ? 'grid' : 'none';
+}
+
+function rfToggleAudio() {
+  document.getElementById('rfAudioFields').style.display =
+    document.getElementById('rfAudioEnabled').checked ? 'block' : 'none';
+}
+
+function rfGenerateApiKey() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  var key = 'rk-';
+  for (var i = 0; i < 32; i++) key += chars[Math.floor(Math.random() * chars.length)];
+  const ta = document.getElementById('rfApiKeys');
+  ta.value = ta.value.trim() ? ta.value.trim() + '\n' + key : key;
+}
+
+async function saveReportFeed() {
+  const btn = document.getElementById('rfSaveBtn');
+  const errEl = document.getElementById('rfError');
+  errEl.style.display = 'none';
+
+  let fieldMap = undefined;
+  const fmRaw = document.getElementById('rfFieldMap').value.trim();
+  if (fmRaw) {
+    try { fieldMap = JSON.parse(fmRaw); }
+    catch (e) { errEl.textContent = 'Field Map is not valid JSON'; errEl.style.display = 'block'; return; }
+  }
+
+  const isFixed = document.querySelector('input[name="rfDateType"]:checked') &&
+    document.querySelector('input[name="rfDateType"]:checked').value === 'fixed';
+  const dateRange = isFixed
+    ? { type: 'fixed', startDate: document.getElementById('rfStartDate').value.trim(), endDate: document.getElementById('rfEndDate').value.trim() }
+    : { type: 'relative', days: parseInt(document.getElementById('rfDays').value) || 7 };
+
+  const apiKeys = document.getElementById('rfApiKeys').value.split('\n').map(function(k) { return k.trim(); }).filter(Boolean);
+  const pw = document.getElementById('rfPassword').value;
+
+  const body = {
+    name: document.getElementById('rfName').value.trim().toLowerCase(),
+    baseUrl: document.getElementById('rfBaseUrl').value.trim(),
+    username: document.getElementById('rfUsername').value.trim(),
+    templateId: document.getElementById('rfTemplateId').value.trim(),
+    ownerType: document.getElementById('rfOwnerType').value,
+    ownerIds: document.getElementById('rfOwnerIds').value.split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    dateRange: dateRange,
+    ttlSeconds: parseInt(document.getElementById('rfTtl').value) || 300,
+    autoRefreshInterval: parseInt(document.getElementById('rfAutoRefresh').value) || 0,
+    apiKeys: apiKeys,
+    includeUnmapped: document.getElementById('rfIncludeUnmapped').checked,
+  };
+
+  if (pw) body.password = pw;
+  else if (!_editingReportFeed) { errEl.textContent = 'Password is required'; errEl.style.display = 'block'; return; }
+  if (fieldMap !== undefined) body.fieldMap = fieldMap;
+
+  const audioEnabled = document.getElementById('rfAudioEnabled').checked;
+  if (audioEnabled) {
+    body.audio = { enabled: true, addressField: document.getElementById('rfAudioField').value.trim() };
+  }
+
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const url = _editingReportFeed ? '/admin/reports/' + _editingReportFeed : '/admin/reports';
+    const method = _editingReportFeed ? 'PUT' : 'POST';
+    const res = await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || 'Save failed'; errEl.style.display = 'block'; return; }
+    closeReportFeedModal();
+    await loadReportFeeds();
+    showToast(_editingReportFeed ? 'Feed updated' : 'Feed created');
+  } catch (e) {
+    errEl.textContent = e.message; errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save Feed';
+  }
+}
+
+function editReportFeed(name) {
+  const feed = _allReportFeeds.find(function(f) { return f.name === name; });
+  if (feed) openReportFeedModal(feed);
+}
+
+async function deleteReportFeed(name) {
+  if (!confirm('Delete report feed "' + name + '"?')) return;
+  try {
+    const res = await fetch('/admin/reports/' + name, { method: 'DELETE' });
+    if (!res.ok) { const d = await res.json(); showToast(d.error || 'Delete failed', true); return; }
+    await loadReportFeeds();
+    showToast('Feed deleted');
+  } catch (e) { showToast(e.message, true); }
+}
+
+async function refreshReportFeed(name) {
+  showToast('Requesting refresh for "' + name + '"...');
+  try {
+    const res = await fetch('/admin/reports/' + name + '/refresh', { method: 'POST' });
+    if (!res.ok) { const d = await res.json().catch(function(){return {};}); showToast(d.error || 'Refresh failed', true); }
+    else { showToast('Feed "' + name + '" refreshed successfully'); }
+    await loadReportFeeds();
+  } catch (e) { showToast(e.message, true); await loadReportFeeds(); }
+}

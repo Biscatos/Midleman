@@ -86,12 +86,23 @@ export async function handleReportRequest(
         return json({ error: 'Method not allowed' }, 405);
     }
 
-    const adminMatch = pathname.match(/^\/admin\/reports\/([^/]+)(\/status)?$/);
+    const adminMatch = pathname.match(/^\/admin\/reports\/([^/]+)(\/status|\/refresh)?$/);
     if (adminMatch) {
         if (!auth) return json({ error: 'Unauthorized' }, 401);
         const name = adminMatch[1].toLowerCase();
-        const isStatus = !!adminMatch[2];
-        if (isStatus) return getFeedStatus(name);
+        const suffix = adminMatch[2] ?? '';
+        if (suffix === '/status') return getFeedStatus(name);
+        if (suffix === '/refresh') {
+            if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+            const feed = feeds.find(f => f.name === name);
+            if (!feed) return json({ error: 'Feed not found' }, 404);
+            try {
+                const entry = await forceRefresh(feed);
+                return json({ rowCount: entry.rowCount, fetchedAt: entry.fetchedAt });
+            } catch (err) {
+                return json({ error: 'Refresh failed', detail: err instanceof Error ? err.message : String(err) }, 502);
+            }
+        }
         if (req.method === 'PUT') return updateFeed(req, name);
         if (req.method === 'DELETE') return deleteFeed(name);
         return json({ error: 'Method not allowed' }, 405);
