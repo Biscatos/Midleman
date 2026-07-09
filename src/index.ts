@@ -1275,6 +1275,13 @@ const server = Bun.serve({
                     return jsonRes(200, detail as unknown as Record<string, unknown>);
                 }
 
+                // ── TCP/UDP proxy feature — disabled (code kept for future re-enable) ──
+                if (url.pathname.startsWith('/admin/tcpudp') ||
+                    url.pathname.startsWith('/admin/sip-logs') ||
+                    url.pathname === '/admin/tcpudp-conns') {
+                    return jsonRes(410, { error: 'TCP/UDP proxy feature is currently disabled' });
+                }
+
                 // ── SIP message log endpoints ──
                 if (url.pathname === '/admin/sip-logs' && req.method === 'GET') {
                     const result = querySipLogs({

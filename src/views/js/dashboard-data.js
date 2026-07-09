@@ -2249,6 +2249,7 @@ function openConnectorModal(connector = null) {
   const expiredBadge = document.getElementById('cnAutoReplyExpiredBadge');
   expiredBadge.style.display = (arExpires && Date.parse(arExpires) < Date.now() && connector?.autoReply?.enabled) ? 'inline-block' : 'none';
   connectorAutoReplyChanged();
+  document.getElementById('cnAutoReplyDetails').open = !!connector?.autoReply?.enabled;
   // Business hours
   const bh = connector?.businessHours || {};
   document.getElementById('cnBusinessHoursEnabled').checked = !!bh.enabled;
@@ -2259,6 +2260,7 @@ function openConnectorModal(connector = null) {
     document.getElementById('cnBhDay' + d).value = day ? bhRangesToText(day.ranges) : '';
   }
   connectorBusinessHoursChanged();
+  document.getElementById('cnBusinessHoursDetails').open = !!bh.enabled;
   document.getElementById('cnMetaToken').placeholder = connector?.meta?.hasAccessToken ? '(kept — type to replace)' : '';
   // Smooch credentials
   document.getElementById('cnSmoochAppId').value = connector?.smooch?.appId || '';
@@ -2277,7 +2279,7 @@ function openConnectorModal(connector = null) {
   document.getElementById('cnAllowedIps').value = (connector?.allowedIps || []).join(', ');
   document.getElementById('cnEnabled').checked = connector ? connector.enabled !== false : true;
   connectorChannelChanged();
-  document.getElementById('connectorModal').style.display = 'block';
+  document.getElementById('connectorModal').style.display = 'flex';
 }
 
 function closeConnectorModal() {
@@ -4742,6 +4744,7 @@ async function fetchSmtpConfig() {
       clearBtn.style.display = 'none';
       setSmtpStatus('smtpStatus', 'No SMTP configuration active.', 'info');
     }
+    _updateSmtpTabStatus(cfg);
   } catch (e) {
     setSmtpStatus('smtpStatus', 'Failed to load: ' + e.message, 'err');
   }
@@ -7341,6 +7344,29 @@ function updateSmsRoutingVisibility() {
   _renderSmsProviderBadges();
 }
 
+function _setTabDot(id, kind) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const colors = { ok: '#22c55e', warn: '#ca8a04', mute: 'var(--text3)' };
+  el.style.background = colors[kind] || colors.mute;
+}
+
+function _updateSmtpTabStatus(cfg) {
+  const configured = cfg && cfg.host;
+  _setTabDot('smtpTabDot', configured ? 'ok' : 'warn');
+  const banner = document.getElementById('smtpSetupBanner');
+  if (banner) banner.style.display = configured ? 'none' : '';
+}
+
+function _updateSmsTabStatus(cfg) {
+  const haveWe = cfg && cfg.wesender && cfg.wesender.hasApiKey;
+  const haveTw = cfg && cfg.twilio && cfg.twilio.hasAuthToken && cfg.twilio.accountSid;
+  const active  = cfg && cfg.enabled && (haveWe || haveTw);
+  _setTabDot('smsTabDot', active ? 'ok' : (cfg ? 'warn' : 'warn'));
+  const banner = document.getElementById('smsSetupBanner');
+  if (banner) banner.style.display = cfg ? 'none' : '';
+}
+
 function _setStatusPill(el, label, kind) {
   if (!el) return;
   if (!label) { el.style.display = 'none'; return; }
@@ -7528,6 +7554,7 @@ async function fetchSmsConfig() {
     updateSmsRoutingVisibility();
     renderSmsPrefixRules();
     _updateSmsStatusPill(cfg);
+    _updateSmsTabStatus(cfg);
     _renderSmsProviderBadges();
     _bindSmsLiveBadges();
   } catch (e) {
@@ -7663,6 +7690,11 @@ function switchNotifTab(tab) {
   document.querySelectorAll('.notif-tabpane').forEach(p => {
     p.style.display = p.getAttribute('data-tab') === tab ? '' : 'none';
   });
+  const isGroupRuleTab = tab === 'groups' || tab === 'rules';
+  const addGroupBtn = document.getElementById('notifAddGroupBtn');
+  const addRuleBtn = document.getElementById('notifAddRuleBtn');
+  if (addGroupBtn) addGroupBtn.style.display = isGroupRuleTab ? '' : 'none';
+  if (addRuleBtn) addRuleBtn.style.display = isGroupRuleTab ? '' : 'none';
 }
 
 function _setNotifStatus(elId, msg, kind) {
@@ -8337,10 +8369,11 @@ function openFive9Modal(connector = null) {
   }
   document.getElementById('f9AutoReplyExpires').value = localValue;
   f9AutoReplyChanged();
+  document.getElementById('f9AutoReplyDetails').open = !!connector?.autoReply?.enabled;
   // Advanced
   document.getElementById('f9SessionTtl').value = connector?.sessionTtlMinutes || '';
   f9ChannelChanged();
-  document.getElementById('five9Modal').style.display = 'block';
+  document.getElementById('five9Modal').style.display = 'flex';
 }
 
 function closeFive9Modal() {

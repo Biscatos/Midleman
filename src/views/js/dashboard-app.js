@@ -121,6 +121,10 @@ async function startApp(username) {
   
   await fetchHealth(); // Do this immediately to set 'Online' UI instantly
   
+  // Restore the page the user was on before the refresh (hash routing)
+  const initialPage = pageFromHash(location.hash) || 'overview';
+  navigate(initialPage, { pushHistory: false });
+
   // Trigger rest of initializations concurrently without blocking UI main thread
   refreshAll().catch(e => console.error('Dashboard refresh error:', e));
 
@@ -438,11 +442,31 @@ const PAGE_TITLES = {
   audit: 'Audit Log'
 };
 
-function navigate(page) {
+// Pages that can be reached via hash routing. Aliases (siplogs, certs) are
+// resolved inside navigate() and stored under their canonical name.
+const ROUTABLE_PAGES = new Set([
+  'overview','requests','proxyusers','profiles','connectors',
+  'oauthclients','consentpages','ldap','email','sms','notifications',
+  'npm','audit','webhooks','ldap',
+]);
+
+function navigate(page, { pushHistory = true } = {}) {
   let pendingTcpTab = null;
   if (page === 'siplogs') { page = 'tcpudp'; pendingTcpTab = 'logs'; }
   if (page === 'certs')   { page = 'tcpudp'; pendingTcpTab = 'certs'; }
+  let pendingNotifTab = null;
+  if (page === 'email') { page = 'notifications'; pendingNotifTab = 'email'; }
+  if (page === 'sms')   { page = 'notifications'; pendingNotifTab = 'sms'; }
   currentPage = page;
+
+  // Update browser URL without triggering a reload
+  const hash = '#' + page;
+  if (pushHistory && location.hash !== hash) {
+    history.pushState({ page }, '', hash);
+  } else if (!pushHistory && location.hash !== hash) {
+    history.replaceState({ page }, '', hash);
+  }
+
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
   const pageEl = document.getElementById('page' + page.charAt(0).toUpperCase() + page.slice(1));
@@ -461,15 +485,28 @@ function navigate(page) {
   if (page === 'oauthclients') { fetchOauthClients(); }
   if (page === 'consentpages') { fetchConsentPages(); }
   if (page === 'ldap') { fetchLdapConfigs(); filterLdapAdoptions('pending'); }
-  if (page === 'email') { fetchSmtpConfig(); }
-  if (page === 'sms') { fetchSmsConfig(); }
-  if (page === 'notifications') { fetchNotifGroups(); fetchNotifRules(); }
+  if (page === 'notifications') { fetchNotifGroups(); fetchNotifRules(); fetchSmtpConfig(); fetchSmsConfig(); }
+  if (pendingNotifTab) switchNotifTab(pendingNotifTab);
   if (page === 'npm') { if (typeof switchNpmSubpage === 'function') switchNpmSubpage(_npmCurrentSubpage || 'proxy-hosts'); fetchNpmConfig(); }
   if (page === 'audit') { fetchAuditLogs(true); }
   const titleEl = document.getElementById('topbarPageTitle');
   if (titleEl) titleEl.textContent = PAGE_TITLES[page] || page;
   closeNavMobile();
   closeNavMore();
+}
+
+// Restore page from URL hash on back/forward navigation
+window.addEventListener('popstate', e => {
+  const page = (e.state && e.state.page) || pageFromHash(location.hash);
+  if (page) navigate(page, { pushHistory: false });
+});
+
+function pageFromHash(hash) {
+  const raw = (hash || '').replace(/^#/, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  // resolve aliases to canonical
+  if (raw === 'siplogs') return 'tcpudp';
+  if (raw === 'certs')   return 'tcpudp';
+  return ROUTABLE_PAGES.has(raw) ? raw : null;
 }
 
 function toggleNavMobile() {
