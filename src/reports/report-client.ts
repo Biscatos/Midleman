@@ -92,7 +92,7 @@ async function generateReportJob(feed: ReportFeed): Promise<string> {
         ownerId: feed.ownerIds,
         startDate,
         endDate,
-        dataType: feed.dataType != null ? parseInt(String(feed.dataType), 10) : 0,
+        dataType: feed.dataType ?? 0,
         templateId: feed.templateId,
         includeALLOwners: feed.includeAllOwners ?? false,
         language: feed.language ?? 'en',

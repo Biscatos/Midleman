@@ -8569,9 +8569,13 @@ function openReportFeedModal(feed) {
   document.getElementById('rfUsername').value = feed ? (feed.username || '') : '';
   document.getElementById('rfPassword').value = '';
   document.getElementById('rfTemplateId').value = feed ? (feed.templateId || '') : '';
-  document.getElementById('rfDataType').value = feed ? (feed.dataType != null ? feed.dataType : 0) : 0;
+  document.getElementById('rfDataType').value = feed ? (feed.dataType != null ? feed.dataType : '') : '';
   document.getElementById('rfOwnerType').value = feed ? (feed.ownerType || 'campaign') : 'campaign';
-  document.getElementById('rfOwnerIds').value = feed ? (feed.ownerIds || []).join(', ') : '';
+  const allOwners = feed && feed.includeAllOwners;
+  document.getElementById('rfAllOwners').checked = !!allOwners;
+  const ownerIdsVal = (feed && feed.ownerIds) ? feed.ownerIds.filter(function(id) { return id !== 'allOwners'; }).join(', ') : '';
+  document.getElementById('rfOwnerIds').value = ownerIdsVal;
+  rfToggleAllOwners();
 
   const isFixed = feed && feed.dateRange && feed.dateRange.type === 'fixed';
   document.querySelector('input[name="rfDateType"][value="relative"]').checked = !isFixed;
@@ -8603,6 +8607,15 @@ function openReportFeedModal(feed) {
 
 function closeReportFeedModal() {
   document.getElementById('reportFeedModal').style.display = 'none';
+}
+
+function rfToggleAllOwners() {
+  const allOwners = document.getElementById('rfAllOwners').checked;
+  const idsInput = document.getElementById('rfOwnerIds');
+  idsInput.disabled = allOwners;
+  idsInput.style.opacity = allOwners ? '0.4' : '1';
+  if (allOwners) idsInput.placeholder = 'disabled — all owners selected';
+  else idsInput.placeholder = '226, 452, 443, 432';
 }
 
 function rfToggleDateType() {
@@ -8651,15 +8664,20 @@ async function saveReportFeed() {
     baseUrl: document.getElementById('rfBaseUrl').value.trim(),
     username: document.getElementById('rfUsername').value.trim(),
     templateId: document.getElementById('rfTemplateId').value.trim(),
-    dataType: parseInt(document.getElementById('rfDataType').value) || 0,
     ownerType: document.getElementById('rfOwnerType').value,
-    ownerIds: document.getElementById('rfOwnerIds').value.split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    ownerIds: document.getElementById('rfAllOwners').checked
+      ? ['allOwners']
+      : document.getElementById('rfOwnerIds').value.split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    includeAllOwners: document.getElementById('rfAllOwners').checked,
     dateRange: dateRange,
     ttlSeconds: parseInt(document.getElementById('rfTtl').value) || 300,
     autoRefreshInterval: parseInt(document.getElementById('rfAutoRefresh').value) || 0,
     apiKeys: apiKeys,
     includeUnmapped: document.getElementById('rfIncludeUnmapped').checked,
   };
+
+  const dtRaw = document.getElementById('rfDataType').value.trim();
+  if (dtRaw !== '') body.dataType = isNaN(Number(dtRaw)) ? dtRaw : Number(dtRaw);
 
   if (pw) body.password = pw;
   else if (!_editingReportFeed) { errEl.textContent = 'Password is required'; errEl.style.display = 'block'; return; }

@@ -2465,7 +2465,7 @@ X-API-Key: &lt;your-api-key&gt;</pre>
     </div>
 
     <!-- ===== Report Feed Modal ===== -->
-    <div class="modal-overlay" id="reportFeedModal" onclick="if(event.target===this)closeReportFeedModal()" style="display:none">
+    <div class="modal-overlay" id="reportFeedModal" style="display:none">
       <div class="modal" style="max-width:600px;max-height:90vh;overflow-y:auto">
         <div class="modal-header">
           <h3 id="reportFeedModalTitle">New Report Feed</h3>
@@ -2504,8 +2504,8 @@ X-API-Key: &lt;your-api-key&gt;</pre>
               <input id="rfTemplateId" type="text" placeholder="1092" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
             </div>
             <div>
-              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Data Type <span style="color:var(--text3)">(int, default 0)</span></label>
-              <input id="rfDataType" type="number" min="0" value="0" placeholder="0" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Data Type <span style="color:var(--text3)">(0 para voz, "sessions" para webchat)</span></label>
+              <input id="rfDataType" type="text" placeholder='0 ou "sessions"' style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
             </div>
             <div>
               <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Owner Type *</label>
@@ -2528,7 +2528,12 @@ X-API-Key: &lt;your-api-key&gt;</pre>
             </div>
           </div>
           <div>
-            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Owner IDs * <span style="color:var(--text3)">(comma-separated)</span></label>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+              <label style="font-size:11px;color:var(--text2)">Owner IDs <span style="color:var(--text3)">(comma-separated)</span></label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" id="rfAllOwners" onchange="rfToggleAllOwners()"> All owners
+              </label>
+            </div>
             <input id="rfOwnerIds" type="text" placeholder="226, 452, 443, 432" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
           </div>
 

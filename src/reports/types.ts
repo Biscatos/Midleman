@@ -46,7 +46,7 @@ export interface ReportFeed {
     templateId: string;
     ownerType: GoContactOwnerType;
     ownerIds: string[];
-    dataType?: number;           // default 0 — report type, varies per ownerType
+    dataType?: number | string;  // int for voice (0), string for webchat ("sessions")
     language?: string;           // default "en"
     includeAllOwners?: boolean;  // default false
 
