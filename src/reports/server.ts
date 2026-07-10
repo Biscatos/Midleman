@@ -256,6 +256,15 @@ export async function handleReportRequest(
     return null;
 }
 
+/**
+ * Resolve a raw GoContact column name to its projected API name via a fieldMap.
+ * If idField is already an API name (no entry in fieldMap), returns it unchanged.
+ * This handles both feeds saved before and after the raw-column UI fix.
+ */
+function resolveIdField(idField: string, fieldMap?: Record<string, string>): string {
+    return fieldMap?.[idField] ?? idField;
+}
+
 /** Filter cached rows by the detail idField, optionally from a linked source feed. */
 async function getDetailRows(feed: ReportFeed, id: string): Promise<Response> {
     const detail = feed.detail!;
@@ -272,7 +281,10 @@ async function getDetailRows(feed: ReportFeed, id: string): Promise<Response> {
         const projected = srcFeed
             ? projectRows(rawRows!, srcFeed.fieldMap, srcFeed.includeUnmapped)
             : rawRows!;
-        const matched = projected.filter(row => row[detail.idField] === id);
+
+        // Resolve idField through source feed's fieldMap (raw col name → API name)
+        const srcIdField = resolveIdField(detail.idField, srcFeed?.fieldMap);
+        const matched = projected.filter(row => row[srcIdField] === id);
 
         // mergeParent: also include the matching row from this (parent) feed as `summary`
         let summary: Record<string, string> | null = null;
@@ -280,11 +292,12 @@ async function getDetailRows(feed: ReportFeed, id: string): Promise<Response> {
             const parentEntry = getReadonlyData(feed.name);
             if (parentEntry) {
                 const parentProjected = projectRows(parentEntry.rawRows, feed.fieldMap, feed.includeUnmapped);
-                summary = parentProjected.find(row => row[detail.idField] === id) ?? null;
+                const parentIdField = resolveIdField(detail.idField, feed.fieldMap);
+                summary = parentProjected.find(row => row[parentIdField] === id) ?? null;
             }
         }
 
-        const resp: Record<string, unknown> = { id, idField: detail.idField, rowCount: matched.length, rows: matched };
+        const resp: Record<string, unknown> = { id, idField: srcIdField, rowCount: matched.length, rows: matched };
         if (detail.mergeParent) resp.summary = summary;
         return json(resp);
     }
@@ -294,8 +307,9 @@ async function getDetailRows(feed: ReportFeed, id: string): Promise<Response> {
     if (!entry) return json({ error: 'Data is not yet available. Please try again later.' }, 503);
 
     const projected = projectRows(entry.rawRows, feed.fieldMap, feed.includeUnmapped);
-    const matched = projected.filter(row => row[detail.idField] === id);
-    return json({ id, idField: detail.idField, rowCount: matched.length, rows: matched });
+    const parentIdField = resolveIdField(detail.idField, feed.fieldMap);
+    const matched = projected.filter(row => row[parentIdField] === id);
+    return json({ id, idField: parentIdField, rowCount: matched.length, rows: matched });
 }
 
 /** Look up the audio path for a given row ID from cached data and stream it. */

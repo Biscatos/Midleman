@@ -9219,7 +9219,7 @@ async function rfFetchPreview() {
         status.style.color = 'var(--green,#4ade80)';
         rfRenderPreviewTable(cacheData.columns, cacheData.rows || []);
         rfBuildFieldMapVisual(cacheData.columns, cacheData.rows || []);
-        rfPopulateColumnSelects(cacheData.columns);
+        rfPopulateColumnSelects(rfGetVisualProjectedColumns());
         btn.disabled = false;
         btn.textContent = 'Fetch Columns Preview';
         return;
@@ -9258,7 +9258,7 @@ async function rfFetchPreview() {
 
     rfRenderPreviewTable(data.columns, data.sampleRows);
     rfBuildFieldMapVisual(data.columns, data.sampleRows || []);
-    rfPopulateColumnSelects(data.columns);
+    rfPopulateColumnSelects(rfGetVisualProjectedColumns());
   } catch(e) {
     status.textContent = 'Error: ' + e.message;
     status.style.color = 'var(--red)';
@@ -9415,6 +9415,17 @@ function rfFmToggleAll(checked) {
   document.querySelectorAll('#rfFieldMapRows input[type=checkbox]').forEach(function(cb) {
     cb.checked = checked;
   });
+}
+
+/** Read projected API names from the visual field-map builder (populated by rfBuildFieldMapVisual). */
+function rfGetVisualProjectedColumns() {
+  var result = [];
+  document.querySelectorAll('#rfFieldMapRows tr[data-col]').forEach(function(tr) {
+    var col = tr.dataset.col;
+    var inp = document.getElementById('rfFm_out_' + col);
+    result.push(inp ? (inp.value.trim() || toApiFieldName(col)) : toApiFieldName(col));
+  });
+  return result;
 }
 
 function rfPopulateColumnSelects(columns) {
