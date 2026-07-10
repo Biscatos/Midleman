@@ -490,7 +490,7 @@ function navigate(page, { pushHistory = true } = {}) {
   if (pendingNotifTab) switchNotifTab(pendingNotifTab);
   if (page === 'npm') { if (typeof switchNpmSubpage === 'function') switchNpmSubpage(_npmCurrentSubpage || 'proxy-hosts'); fetchNpmConfig(); }
   if (page === 'audit') { fetchAuditLogs(true); }
-  if (page === 'reports') { loadReportFeeds(); }
+  if (page === 'reports') { loadReportFeeds(); loadGcInstances(); rfStartSse(); rfViewerUpdateSelect(); }
   const titleEl = document.getElementById('topbarPageTitle');
   if (titleEl) titleEl.textContent = PAGE_TITLES[page] || page;
   closeNavMobile();

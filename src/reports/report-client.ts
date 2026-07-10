@@ -34,12 +34,12 @@ function base(url: string): string {
 }
 
 function tokenKey(feed: ReportFeed): string {
-    return `${base(feed.baseUrl)}|${feed.username}`;
+    return `${base(feed.baseUrl!)}|${feed.username!}`;
 }
 
 async function fetchToken(feed: ReportFeed): Promise<GoToken> {
-    const basic = Buffer.from(`${feed.username}:${feed.password}`).toString('base64');
-    const res = await fetch(`${base(feed.baseUrl)}/poll/auth/token`, {
+    const basic = Buffer.from(`${feed.username!}:${feed.password!}`).toString('base64');
+    const res = await fetch(`${base(feed.baseUrl!)}/poll/auth/token`, {
         method: 'POST',
         headers: { Authorization: `Basic ${basic}`, Connection: 'Keep-Alive' },
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -66,9 +66,9 @@ async function authedFetch(
     init: RequestInit,
 ): Promise<Response> {
     const send = async (tok: GoToken): Promise<Response> => {
-        const headers = new Headers(init.headers as HeadersInit | undefined);
+        const headers = new Headers(init.headers as ConstructorParameters<typeof Headers>[0]);
         headers.set('Authorization', `Bearer ${tok.token}`);
-        return fetch(`${base(feed.baseUrl)}${path}`, {
+        return fetch(`${base(feed.baseUrl!)}${path}`, {
             ...init, headers,
             signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
             tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' },
@@ -87,7 +87,7 @@ async function authedFetch(
 async function generateReportJob(feed: ReportFeed): Promise<string> {
     const { startDate, endDate } = resolveDateRange(feed.dateRange);
     const body = {
-        api_download: false,
+        api_download: true,
         ownerType: feed.ownerType,
         ownerId: feed.ownerIds,
         startDate,
@@ -110,8 +110,8 @@ async function generateReportJob(feed: ReportFeed): Promise<string> {
     let data: any;
     try { data = JSON.parse(text); } catch { throw new ReportClientError('generateReport', `non-JSON response: ${text.slice(0, 300)}`); }
 
-    // GoContact typically returns { job_id: "..." } or { id: "..." } or similar.
-    const jobId = data?.job_id ?? data?.id ?? data?.jobId ?? data?.reportJobId;
+    // GoContact returns { reportJobId: "..." } per documentation.
+    const jobId = data?.reportJobId ?? data?.job_id ?? data?.jobId ?? data?.id;
     if (!jobId) throw new ReportClientError('generateReport', `no job id in response: ${text.slice(0, 300)}`);
     return String(jobId);
 }
@@ -150,6 +150,11 @@ async function downloadReport(feed: ReportFeed, jobId: string, maxAttempts: numb
         if (res.status === 404) {
             // Job not found or still queued — wait and retry
             if (attempt < maxAttempts) { await sleep(POLL_INTERVAL_MS); continue; }
+        }
+
+        if (res.status === 410) {
+            // Job expired — no point retrying
+            throw new ReportClientError('download', 'report job expired (410) — consider increasing maxPollAttempts or report TTL', 410);
         }
 
         const text = await res.text().catch(() => '');

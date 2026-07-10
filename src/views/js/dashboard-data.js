@@ -8500,6 +8500,10 @@ function closeFive9SessionsModal() {
 let _allReportFeeds = [];
 let _editingReportFeed = null;
 let _reportFeedStatuses = {};
+let _rfSse = null;
+let _rfViewerPage = 1;
+let _rfViewerTotal = 0;
+let _rfViewerPages = 0;
 
 async function loadReportFeeds() {
   try {
@@ -8511,6 +8515,7 @@ async function loadReportFeeds() {
     _reportFeedStatuses = {};
     _allReportFeeds.forEach((f, i) => { _reportFeedStatuses[f.name] = statusResults[i]; });
     renderReportFeeds();
+    if (typeof rfViewerUpdateSelect === 'function') rfViewerUpdateSelect();
     const badge = document.getElementById('navReportBadge');
     if (badge) badge.textContent = _allReportFeeds.length;
   } catch (e) {
@@ -8531,28 +8536,32 @@ function renderReportFeeds() {
     const dateStr = f.dateRange && f.dateRange.type === 'relative'
       ? 'Last ' + f.dateRange.days + ' days'
       : ((f.dateRange && f.dateRange.startDate) || '') + ' → ' + ((f.dateRange && f.dateRange.endDate) || '');
-    const cacheStr = st.cached
-      ? '<span style="color:var(--green)">' + (st.rowCount || 0) + ' rows</span>'
-      : '<span style="color:var(--text3)">empty</span>';
-    const fetchedStr = st.fetchedAt
-      ? new Date(st.fetchedAt).toLocaleString()
-      : '<span style="color:var(--text3)">never</span>';
     const refreshBadge = st.refreshing
       ? ' <span style="background:var(--surface2);color:var(--accent);font-size:10px;padding:1px 6px;border-radius:8px">refreshing…</span>'
       : '';
-    const autoRefreshBadge = f.autoRefreshInterval
-      ? '<span style="color:var(--text3);font-size:11px"> / ' + f.autoRefreshInterval + 's</span>'
+    const groupBadge = (f.group && f.slug)
+      ? ' <span style="font-size:10px;font-weight:400;color:var(--accent);background:var(--surface2);padding:1px 5px;border-radius:4px;border:1px solid var(--border)">' + esc(f.group) + '/' + esc(f.slug) + '</span>'
       : '';
-    return '<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background=\'var(--surface2)\'" onmouseleave="this.style.background=\'\'">' +
-      '<td style="padding:8px 12px;font-weight:600">' + esc(f.name) + '</td>' +
+    // Docs URL: group-scoped if group is set, always points to report API port (8444)
+    var reportBase = window.location.protocol + '//' + window.location.hostname + ':' + (window.REPORT_PORT || 8444);
+    var docsUrl = '';
+    if (f.apiKeys && f.apiKeys.length) {
+      docsUrl = f.group
+        ? reportBase + '/reports/' + encodeURIComponent(f.group) + '/docs?apiKey=' + encodeURIComponent(f.apiKeys[0])
+        : reportBase + '/reports/docs?apiKey=' + encodeURIComponent(f.apiKeys[0]);
+    }
+    return '<tr data-feed-row="' + esc(f.name) + '" style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background=\'var(--surface2)\'" onmouseleave="this.style.background=\'\'">' +
+      '<td style="padding:8px 12px;font-weight:600">' + esc(f.name) + groupBadge + (f.instanceName ? ' <span style="font-size:10px;font-weight:400;color:var(--text3);background:var(--surface2);padding:1px 5px;border-radius:4px;border:1px solid var(--border)">' + esc(f.instanceName) + '</span>' : '') + '</td>' +
       '<td style="padding:8px;font-family:\'SF Mono\',Monaco,monospace;color:var(--text2)">' + esc(f.templateId) + '</td>' +
       '<td style="padding:8px;color:var(--text2)">' + esc(f.ownerType) + ' <span style="color:var(--text3)">(' + (f.ownerIds || []).length + ')</span></td>' +
       '<td style="padding:8px;color:var(--text2);font-size:12px">' + esc(dateStr) + '</td>' +
-      '<td style="padding:8px;font-size:12px">' + cacheStr + refreshBadge + '</td>' +
-      '<td style="padding:8px;color:var(--text2);font-size:12px">' + fetchedStr + '</td>' +
+      '<td style="padding:8px;font-size:12px"><span class="rf-cache-badge">' + (st.cached ? (st.rowCount || 0) + ' rows' : 'empty') + '</span>' + refreshBadge + '</td>' +
+      '<td style="padding:8px;color:var(--text2);font-size:12px">' + (st.fetchedAt ? new Date(st.fetchedAt).toLocaleString() : '<span style="color:var(--text3)">never</span>') + '</td>' +
       '<td style="padding:8px 12px;text-align:right;white-space:nowrap">' +
         '<button class="btn btn-sm" onclick="refreshReportFeed(\'' + esc(f.name) + '\')">Refresh</button> ' +
+        (docsUrl ? '<button class="btn btn-sm" title="Abrir documentação API" onclick="window.open(\'' + docsUrl + '\',\'_blank\')">Docs</button> ' : '') +
         '<button class="btn btn-sm" onclick="editReportFeed(\'' + esc(f.name) + '\')">Edit</button> ' +
+        (st.cached ? '<button class="btn btn-sm" title="Limpar dados em cache" onclick="clearReportFeedCache(\'' + esc(f.name) + '\')">Limpar</button> ' : '') +
         '<button class="btn btn-sm btn-danger" onclick="deleteReportFeed(\'' + esc(f.name) + '\')">Delete</button>' +
       '</td>' +
     '</tr>';
@@ -8585,24 +8594,80 @@ function openReportFeedModal(feed) {
   document.getElementById('rfEndDate').value = (feed && feed.dateRange && feed.dateRange.endDate) || '';
   rfToggleDateType();
 
-  document.getElementById('rfTtl').value = feed ? (feed.ttlSeconds != null ? feed.ttlSeconds : 300) : 300;
+  document.getElementById('rfTtl').value = 0; // ttlSeconds deprecated
   document.getElementById('rfAutoRefresh').value = feed ? (feed.autoRefreshInterval || 0) : 0;
+  document.getElementById('rfGroup').value = (feed && feed.group) || '';
+  document.getElementById('rfSlug').value = (feed && feed.slug) || '';
   document.getElementById('rfApiKeys').value = feed ? (feed.apiKeys || []).join('\n') : '';
 
-  let fmStr = '';
-  if (feed && feed.fieldMap && Object.keys(feed.fieldMap).length) {
-    try { fmStr = JSON.stringify(feed.fieldMap, null, 2); } catch (e) { fmStr = ''; }
-  }
-  document.getElementById('rfFieldMap').value = fmStr;
+  // Store existing fieldMap + fieldFilters in hidden inputs (fallback when no preview done)
+  var existingFm = (feed && feed.fieldMap && Object.keys(feed.fieldMap).length) ? feed.fieldMap : null;
+  document.getElementById('rfFieldMap').value = existingFm ? JSON.stringify(existingFm) : '';
+  var existingFf = (feed && feed.fieldFilters && Object.keys(feed.fieldFilters).length) ? feed.fieldFilters : null;
+  var ffHidden = document.getElementById('rfFieldFilters');
+  if (ffHidden) ffHidden.value = existingFf ? JSON.stringify(existingFf) : '';
   document.getElementById('rfIncludeUnmapped').checked = !!(feed && feed.includeUnmapped);
+
+  // Reset preview state
+  _rfPreviewColumns = [];
+  var visual = document.getElementById('rfFieldMapVisual');
+  var jsonDiv = document.getElementById('rfFieldMapJson');
+  if (visual) visual.style.display = 'none';
+  if (jsonDiv) jsonDiv.style.display = 'block';
+
+  // Show existing mapping summary in the empty state
+  var existingInfo = document.getElementById('rfFieldMapExistingInfo');
+  if (existingInfo) {
+    if (existingFm) {
+      var count = Object.keys(existingFm).length;
+      existingInfo.textContent = count + ' column(s) already mapped — run preview to view and edit.';
+      existingInfo.style.display = 'block';
+    } else {
+      existingInfo.style.display = 'none';
+    }
+  }
+  var previewArea = document.getElementById('rfPreviewArea');
+  if (previewArea) previewArea.style.display = 'none';
+  var previewStatus = document.getElementById('rfPreviewStatus');
+  if (previewStatus) { previewStatus.textContent = 'Fill in the instance and template above, then click to preview available columns.'; previewStatus.style.color = 'var(--text3)'; }
+  ['rfDetailIdFieldSelect','rfAudioFieldSelect','rfAudioIdFieldSelect'].forEach(function(id) { var el = document.getElementById(id); if (el) el.style.display = 'none'; });
+  ['rfDetailIdField','rfAudioField','rfAudioIdField'].forEach(function(id) { var el = document.getElementById(id); if (el) el.style.display = 'block'; });
+
+  const detailEnabled = !!(feed && feed.detail && feed.detail.idField);
+  document.getElementById('rfDetailEnabled').checked = detailEnabled;
+  document.getElementById('rfDetailIdField').value = (feed && feed.detail && feed.detail.idField) || '';
+  rfPopulateSourceFeedSelect(feed && feed.detail && feed.detail.sourceFeed);
+  document.getElementById('rfMergeParent').checked = !!(feed && feed.detail && feed.detail.mergeParent);
+  rfToggleDetail();
 
   const audioEnabled = !!(feed && feed.audio && feed.audio.enabled);
   document.getElementById('rfAudioEnabled').checked = audioEnabled;
   document.getElementById('rfAudioField').value = (feed && feed.audio && feed.audio.addressField) || '';
+  document.getElementById('rfAudioIdField').value = (feed && feed.audio && feed.audio.idField) || '';
   rfToggleAudio();
 
+  // Instance dropdown
+  rfPopulateInstanceDropdown();
+  var instSel = document.getElementById('rfInstanceName');
+  if (instSel) instSel.value = (feed && feed.instanceName) ? feed.instanceName : '';
+  rfInstanceChanged();
+
+  // Show legacy warning if feed has inline credentials but no instanceName
+  var legacyWarn = document.getElementById('rfLegacyCredWarning');
+  if (legacyWarn) {
+    var isLegacy = !!(feed && !feed.instanceName && (feed.baseUrl || feed.username));
+    legacyWarn.style.display = isLegacy ? 'block' : 'none';
+  }
+
   document.getElementById('rfError').style.display = 'none';
+  rfOwnerTypeChanged(); // toggle source feed visibility based on ownerType
+  rfCheckGroupApiKeys(); // warn if group has inconsistent API keys
   document.getElementById('reportFeedModal').style.display = 'flex';
+
+  // Auto-trigger preview if editing a feed that already has cached data (Point 3)
+  if (feed && _reportFeedStatuses[feed.name] && _reportFeedStatuses[feed.name].cached) {
+    setTimeout(rfFetchPreview, 80); // small delay so modal is visible
+  }
 }
 
 function closeReportFeedModal() {
@@ -8625,9 +8690,67 @@ function rfToggleDateType() {
   document.getElementById('rfDateFixed').style.display = isFixed ? 'grid' : 'none';
 }
 
+function rfToggleDetail() {
+  var enabled = document.getElementById('rfDetailEnabled').checked;
+  document.getElementById('rfDetailFields').style.display = enabled ? 'flex' : 'none';
+  rfToggleSourceFeed();
+}
+
+function rfToggleMergeParent() {
+  var sel = document.getElementById('rfDetailSourceFeed');
+  var sourceFeed = sel ? sel.value.trim() : '';
+  document.getElementById('rfMergeParentWrap').style.display = sourceFeed ? 'block' : 'none';
+}
+
+function rfOwnerTypeChanged() {
+  rfToggleSourceFeed();
+}
+
+function rfCheckGroupApiKeys() {
+  var groupVal = (document.getElementById('rfGroup') || {}).value.trim().toLowerCase();
+  var hint = document.getElementById('rfGroupApiKeyHint');
+  if (!hint) return;
+  if (!groupVal) { hint.style.display = 'none'; return; }
+
+  // Get the API keys being configured for this feed
+  var currentKeys = document.getElementById('rfApiKeys').value.split('\n').map(function(k) { return k.trim(); }).filter(Boolean);
+  if (!currentKeys.length) { hint.style.display = 'none'; return; }
+
+  // Check if other feeds in the same group have different API keys
+  var groupFeeds = (_allReportFeeds || []).filter(function(f) {
+    return f.group && f.group.toLowerCase() === groupVal && f.name !== _editingReportFeed;
+  });
+  var hasKeyMismatch = groupFeeds.some(function(f) {
+    return !(f.apiKeys || []).some(function(k) { return currentKeys.indexOf(k) !== -1; });
+  });
+  hint.style.display = hasKeyMismatch ? 'block' : 'none';
+}
+
+function rfToggleSourceFeed() {
+  var ownerType = (document.getElementById('rfOwnerType') || {}).value || '';
+  var detailEnabled = !!(document.getElementById('rfDetailEnabled') || {}).checked;
+  var wrap = document.getElementById('rfDetailSourceFeedWrap');
+  if (wrap) wrap.style.display = (ownerType === 'webchat' && detailEnabled) ? 'block' : 'none';
+  rfToggleMergeParent();
+}
+
+function rfPopulateSourceFeedSelect(currentValue) {
+  var sel = document.getElementById('rfDetailSourceFeed');
+  if (!sel) return;
+  var sessionFeeds = (_allReportFeeds || []).filter(function(f) { return f.ownerType === 'webchat_sessions'; });
+  sel.innerHTML = '<option value="">— nenhum —</option>';
+  sessionFeeds.forEach(function(f) {
+    var opt = document.createElement('option');
+    opt.value = f.name;
+    opt.textContent = f.name + (f.instanceName ? ' (' + f.instanceName + ')' : '');
+    if (f.name === currentValue) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
 function rfToggleAudio() {
   document.getElementById('rfAudioFields').style.display =
-    document.getElementById('rfAudioEnabled').checked ? 'block' : 'none';
+    document.getElementById('rfAudioEnabled').checked ? 'flex' : 'none';
 }
 
 function rfGenerateApiKey() {
@@ -8643,11 +8766,19 @@ async function saveReportFeed() {
   const errEl = document.getElementById('rfError');
   errEl.style.display = 'none';
 
+  // Field map: use visual builder if preview was done, else keep existing (hidden input)
   let fieldMap = undefined;
-  const fmRaw = document.getElementById('rfFieldMap').value.trim();
-  if (fmRaw) {
-    try { fieldMap = JSON.parse(fmRaw); }
-    catch (e) { errEl.textContent = 'Field Map is not valid JSON'; errEl.style.display = 'block'; return; }
+  let fieldFilters = undefined;
+  const visualResult = typeof rfReadFieldMapVisual === 'function' ? rfReadFieldMapVisual() : null;
+  if (visualResult !== null) {
+    fieldMap = (visualResult.fieldMap && Object.keys(visualResult.fieldMap).length > 0) ? visualResult.fieldMap : undefined;
+    if (visualResult.fieldFilters && Object.keys(visualResult.fieldFilters).length > 0)
+      fieldFilters = visualResult.fieldFilters;
+  } else {
+    const fmRaw = document.getElementById('rfFieldMap').value.trim();
+    if (fmRaw) {
+      try { fieldMap = JSON.parse(fmRaw); } catch(e) { /* malformed, ignore */ }
+    }
   }
 
   const isFixed = document.querySelector('input[name="rfDateType"]:checked') &&
@@ -8659,10 +8790,11 @@ async function saveReportFeed() {
   const apiKeys = document.getElementById('rfApiKeys').value.split('\n').map(function(k) { return k.trim(); }).filter(Boolean);
   const pw = document.getElementById('rfPassword').value;
 
+  const instSel = document.getElementById('rfInstanceName');
+  const selectedInstance = instSel ? instSel.value : '';
+
   const body = {
     name: document.getElementById('rfName').value.trim().toLowerCase(),
-    baseUrl: document.getElementById('rfBaseUrl').value.trim(),
-    username: document.getElementById('rfUsername').value.trim(),
     templateId: document.getElementById('rfTemplateId').value.trim(),
     ownerType: document.getElementById('rfOwnerType').value,
     ownerIds: document.getElementById('rfAllOwners').checked
@@ -8670,22 +8802,60 @@ async function saveReportFeed() {
       : document.getElementById('rfOwnerIds').value.split(',').map(function(s) { return s.trim(); }).filter(Boolean),
     includeAllOwners: document.getElementById('rfAllOwners').checked,
     dateRange: dateRange,
-    ttlSeconds: parseInt(document.getElementById('rfTtl').value) || 300,
+    ttlSeconds: 0,
     autoRefreshInterval: parseInt(document.getElementById('rfAutoRefresh').value) || 0,
     apiKeys: apiKeys,
     includeUnmapped: document.getElementById('rfIncludeUnmapped').checked,
   };
 
+  const groupVal = document.getElementById('rfGroup').value.trim().toLowerCase();
+  const slugVal  = document.getElementById('rfSlug').value.trim().toLowerCase();
+  if (groupVal) body.group = groupVal;
+  if (slugVal)  body.slug  = slugVal;
+
   const dtRaw = document.getElementById('rfDataType').value.trim();
   if (dtRaw !== '') body.dataType = isNaN(Number(dtRaw)) ? dtRaw : Number(dtRaw);
 
-  if (pw) body.password = pw;
-  else if (!_editingReportFeed) { errEl.textContent = 'Password is required'; errEl.style.display = 'block'; return; }
+  if (selectedInstance) {
+    // Using a named instance — clear any leftover inline credentials
+    body.instanceName = selectedInstance;
+    body.baseUrl = undefined;
+    body.username = undefined;
+  } else if (_editingReportFeed) {
+    // Editing a legacy feed — don't touch credentials (server keeps existing ones)
+  } else {
+    // New feed with no instance selected
+    errEl.textContent = 'Selecciona uma GoContact Instance para o feed.';
+    errEl.style.display = 'block';
+    return;
+  }
   if (fieldMap !== undefined) body.fieldMap = fieldMap;
+  if (fieldFilters !== undefined) body.fieldFilters = fieldFilters;
+
+  const detailEnabled = document.getElementById('rfDetailEnabled').checked;
+  if (detailEnabled) {
+    const idField = typeof rfReadSelect === 'function'
+      ? rfReadSelect('rfDetailIdFieldSelect', 'rfDetailIdField')
+      : document.getElementById('rfDetailIdField').value.trim();
+    const sourceFeed = document.getElementById('rfDetailSourceFeed').value.trim();
+    if (!idField) { errEl.textContent = 'Detail ID field is required when detail route is enabled'; errEl.style.display = 'block'; return; }
+    body.detail = { idField: idField };
+    if (sourceFeed) {
+      body.detail.sourceFeed = sourceFeed;
+      if (document.getElementById('rfMergeParent').checked) body.detail.mergeParent = true;
+    }
+  }
 
   const audioEnabled = document.getElementById('rfAudioEnabled').checked;
   if (audioEnabled) {
-    body.audio = { enabled: true, addressField: document.getElementById('rfAudioField').value.trim() };
+    const addressField = typeof rfReadSelect === 'function'
+      ? rfReadSelect('rfAudioFieldSelect', 'rfAudioField')
+      : document.getElementById('rfAudioField').value.trim();
+    const audioIdField = typeof rfReadSelect === 'function'
+      ? rfReadSelect('rfAudioIdFieldSelect', 'rfAudioIdField')
+      : document.getElementById('rfAudioIdField').value.trim();
+    body.audio = { enabled: true, addressField: addressField };
+    if (audioIdField) body.audio.idField = audioIdField;
   }
 
   btn.disabled = true; btn.textContent = 'Saving…';
@@ -8695,9 +8865,15 @@ async function saveReportFeed() {
     const res = await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const data = await res.json();
     if (!res.ok) { errEl.textContent = data.error || 'Save failed'; errEl.style.display = 'block'; return; }
+    const isNew = !_editingReportFeed;
+    const feedName = data.name || body.name;
     closeReportFeedModal();
     await loadReportFeeds();
-    showToast(_editingReportFeed ? 'Feed updated' : 'Feed created');
+    showToast(isNew ? 'Feed criado — a ir buscar dados…' : 'Feed updated');
+    if (isNew && feedName) {
+      // Trigger first fetch immediately in background; SSE will show progress
+      fetch('/admin/reports/' + encodeURIComponent(feedName) + '/refresh', { method: 'POST' }).catch(function() {});
+    }
   } catch (e) {
     errEl.textContent = e.message; errEl.style.display = 'block';
   } finally {
@@ -8721,11 +8897,727 @@ async function deleteReportFeed(name) {
 }
 
 async function refreshReportFeed(name) {
-  showToast('Requesting refresh for "' + name + '"...');
   try {
     const res = await fetch('/admin/reports/' + name + '/refresh', { method: 'POST' });
-    if (!res.ok) { const d = await res.json().catch(function(){return {};}); showToast(d.error || 'Refresh failed', true); }
-    else { showToast('Feed "' + name + '" refreshed successfully'); }
+    const d = await res.json().catch(function() { return {}; });
+    if (!res.ok) { showToast(d.error || 'Refresh failed', true); return; }
+    if (d.message === 'Already refreshing') { showToast('Feed "' + name + '" já está a ser actualizado…'); return; }
+    showToast('A ir buscar dados para "' + name + '"…');
+  } catch (e) { showToast(e.message, true); }
+}
+
+async function clearReportFeedCache(name) {
+  if (!confirm('Limpar todos os dados em cache do feed "' + name + '"?')) return;
+  try {
+    const res = await fetch('/admin/reports/' + name + '/clear-cache', { method: 'POST' });
+    if (!res.ok) { const d = await res.json().catch(function(){return {};}); showToast(d.error || 'Erro ao limpar cache', true); }
+    else { showToast('Cache do feed "' + name + '" limpo'); }
     await loadReportFeeds();
   } catch (e) { showToast(e.message, true); await loadReportFeeds(); }
+}
+
+// ─── Report Feeds — Activity Log (SSE) ───────────────────────────────────────
+
+function rfStartSse() {
+  if (_rfSse) { _rfSse.close(); _rfSse = null; }
+  const dot = document.getElementById('rfSseDot');
+  const log = document.getElementById('rfActivityLog');
+  if (!dot || !log) return;
+
+  try {
+    _rfSse = new EventSource('/admin/reports/stream');
+  } catch (e) {
+    rfLogAppend('error', 'Could not connect to SSE stream');
+    return;
+  }
+
+  _rfSse.onopen = function() {
+    dot.style.background = '#22c55e';
+    dot.title = 'SSE connected';
+  };
+
+  _rfSse.onerror = function() {
+    dot.style.background = '#ef4444';
+    dot.title = 'SSE disconnected — retrying…';
+  };
+
+  _rfSse.onmessage = function(e) {
+    var ev;
+    try { ev = JSON.parse(e.data); } catch { return; }
+
+    if (ev.type === 'snapshot') {
+      log.innerHTML = '';
+      rfLogAppend('info', 'Connected. ' + ev.feeds.length + ' feed(s) loaded.');
+      ev.feeds.forEach(function(f) {
+        if (f.cached) {
+          rfLogAppend('done', '[' + f.feed + '] cached — ' + (f.rowCount || 0) + ' rows, last fetch ' + rfFmtTime(f.fetchedAt));
+        } else {
+          rfLogAppend('info', '[' + f.feed + '] not yet fetched');
+        }
+      });
+      rfViewerUpdateSelect();
+      return;
+    }
+
+    if (ev.type === 'fetch_start') {
+      rfLogAppend('start', '[' + ev.feed + '] fetching report…');
+      // Mark feed as refreshing in the table
+      var row = document.querySelector('[data-feed-row="' + ev.feed + '"]');
+      if (row) {
+        var badge = row.querySelector('.rf-cache-badge');
+        if (badge) { badge.textContent = 'Fetching…'; badge.style.background = 'var(--warning-bg,#fef3c7)'; badge.style.color = 'var(--warning,#92400e)'; }
+      }
+      return;
+    }
+
+    if (ev.type === 'fetch_done') {
+      var dur = ev.durationMs >= 1000 ? (ev.durationMs / 1000).toFixed(1) + 's' : ev.durationMs + 'ms';
+      rfLogAppend('done', '[' + ev.feed + '] done — ' + ev.rowCount + ' rows in ' + dur);
+      // Auto-reload viewer if this feed is selected
+      var sel = document.getElementById('rfViewerFeedSelect');
+      if (sel && sel.value === ev.feed) rfViewerLoad(_rfViewerPage);
+      // Refresh feed table row status
+      loadReportFeeds();
+      return;
+    }
+
+    if (ev.type === 'fetch_error') {
+      rfLogAppend('error', '[' + ev.feed + '] error: ' + ev.error);
+      loadReportFeeds();
+      return;
+    }
+  };
+}
+
+function rfLogAppend(type, msg) {
+  var log = document.getElementById('rfActivityLog');
+  if (!log) return;
+  var colors = { start: '#60a5fa', done: '#4ade80', error: '#f87171', info: 'var(--text3)' };
+  var icons  = { start: '⟳', done: '✓', error: '✗', info: '·' };
+  var now = new Date().toLocaleTimeString('en-GB', { hour12: false });
+  var line = document.createElement('div');
+  line.style.cssText = 'color:' + (colors[type] || 'var(--text2)') + ';word-break:break-word';
+  line.textContent = now + '  ' + (icons[type] || ' ') + '  ' + msg;
+  log.appendChild(line);
+  // Keep max 200 lines
+  while (log.children.length > 200) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+}
+
+function rfLogClear() {
+  var log = document.getElementById('rfActivityLog');
+  if (log) log.innerHTML = '';
+}
+
+function rfFmtTime(ts) {
+  if (!ts) return '—';
+  return new Date(ts).toLocaleTimeString('pt-PT', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+// ─── Report Feeds — Data Viewer ───────────────────────────────────────────────
+
+function rfViewerUpdateSelect() {
+  var sel = document.getElementById('rfViewerFeedSelect');
+  if (!sel) return;
+  var current = sel.value;
+  sel.innerHTML = '<option value="">— select a feed —</option>';
+  _allReportFeeds.forEach(function(f) {
+    var opt = document.createElement('option');
+    opt.value = f.name;
+    opt.textContent = f.name;
+    if (f.name === current) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+async function rfViewerLoad(page) {
+  var sel = document.getElementById('rfViewerFeedSelect');
+  if (!sel || !sel.value) return;
+  var name = sel.value;
+  var q = (document.getElementById('rfViewerSearch') || {}).value || '';
+  var raw = (document.getElementById('rfViewerRaw') || {}).checked ? '&raw=1' : '';
+  var limitSel = document.getElementById('rfViewerLimit');
+  var limit = limitSel ? (parseInt(limitSel.value) || 50) : 50;
+  _rfViewerPage = page || 1;
+
+  var head = document.getElementById('rfViewerHead');
+  var body = document.getElementById('rfViewerBody');
+  var meta = document.getElementById('rfViewerMeta');
+  var pager = document.getElementById('rfViewerPager');
+  if (body) body.innerHTML = '<tr><td style="padding:30px;text-align:center;color:var(--text3)">Loading…</td></tr>';
+
+  try {
+    var url = '/admin/reports/' + encodeURIComponent(name) + '/data?page=' + _rfViewerPage + '&limit=' + limit + raw;
+    if (q) url += '&q=' + encodeURIComponent(q);
+    var res = await fetch(url);
+    var data = await res.json();
+    if (!res.ok) { if (body) body.innerHTML = '<tr><td style="padding:30px;text-align:center;color:var(--red)">' + (data.error || 'Error') + '</td></tr>'; return; }
+
+    _rfViewerTotal = data.total;
+    _rfViewerPages = data.pages;
+
+    // Meta line
+    var fetchedStr = data.fetchedAt ? ' · fetched ' + rfFmtTime(data.fetchedAt) : '';
+    if (meta) meta.textContent = data.total + ' rows total' + (q ? ' (filtered)' : '') + fetchedStr;
+
+    // Headers
+    if (head) {
+      head.innerHTML = '';
+      var tr = document.createElement('tr');
+      data.columns.forEach(function(col) {
+        var th = document.createElement('th');
+        th.style.cssText = 'padding:6px 8px;color:var(--text2);font-weight:600;font-size:10.5px;text-transform:uppercase;white-space:nowrap;border-right:1px solid var(--border);position:sticky;top:0;background:var(--surface2);z-index:1';
+        th.textContent = col;
+        tr.appendChild(th);
+      });
+      head.appendChild(tr);
+    }
+
+    // Rows
+    if (body) {
+      body.innerHTML = '';
+      if (!data.rows.length) {
+        body.innerHTML = '<tr><td colspan="' + data.columns.length + '" style="padding:30px;text-align:center;color:var(--text3)">No rows' + (q ? ' matching "' + q + '"' : '') + '</td></tr>';
+      } else {
+        data.rows.forEach(function(row) {
+          var tr = document.createElement('tr');
+          tr.style.borderBottom = '1px solid var(--border)';
+          data.columns.forEach(function(col) {
+            var td = document.createElement('td');
+            td.style.cssText = 'padding:5px 8px;font-size:11.5px;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis;border-right:1px solid var(--border);color:var(--text)';
+            td.title = row[col] || '';
+            td.textContent = row[col] != null ? row[col] : '';
+            tr.appendChild(td);
+          });
+          body.appendChild(tr);
+        });
+      }
+    }
+
+    // Pagination
+    if (pager) rfViewerRenderPager(pager, data.page, data.pages, data.total, limit);
+
+  } catch(e) {
+    if (body) body.innerHTML = '<tr><td style="padding:30px;text-align:center;color:var(--red)">' + e.message + '</td></tr>';
+  }
+}
+
+function rfViewerRenderPager(pager, page, pages, total, limit) {
+  pager.innerHTML = '';
+  if (pages <= 1) { pager.style.display = 'none'; return; }
+  pager.style.display = 'flex';
+
+  var offset = (page - 1) * limit;
+  var end = Math.min(offset + limit, total);
+  var info = document.createElement('span');
+  info.style.flex = '1';
+  info.textContent = (offset + 1) + '–' + end + ' of ' + total;
+  pager.appendChild(info);
+
+  var mkBtn = function(label, targetPage, disabled) {
+    var b = document.createElement('button');
+    b.className = 'btn btn-sm';
+    b.style.cssText = 'padding:3px 9px;font-size:12px';
+    b.textContent = label;
+    b.disabled = disabled;
+    if (!disabled) b.onclick = function() { rfViewerLoad(targetPage); };
+    return b;
+  };
+
+  pager.appendChild(mkBtn('«', 1, page === 1));
+  pager.appendChild(mkBtn('‹', page - 1, page === 1));
+  var pageLabel = document.createElement('span');
+  pageLabel.textContent = 'Page ' + page + ' / ' + pages;
+  pageLabel.style.cssText = 'padding:0 6px;font-size:12px';
+  pager.appendChild(pageLabel);
+  pager.appendChild(mkBtn('›', page + 1, page === pages));
+  pager.appendChild(mkBtn('»', pages, page === pages));
+}
+
+async function rfViewerRefresh() {
+  var sel = document.getElementById('rfViewerFeedSelect');
+  if (!sel || !sel.value) { showToast('Select a feed first', true); return; }
+  try {
+    var res = await fetch('/admin/reports/' + encodeURIComponent(sel.value) + '/refresh', { method: 'POST' });
+    var d = await res.json().catch(function() { return {}; });
+    if (!res.ok) { showToast(d.error || 'Refresh failed', true); return; }
+    showToast('A ir buscar dados para "' + sel.value + '"…');
+  } catch(e) { showToast(e.message, true); }
+}
+
+// ─── Report Feed — Preview & Visual Field Map ────────────────────────────────
+
+var _rfPreviewColumns = []; // columns from last preview
+
+async function rfFetchPreview() {
+  var btn = document.getElementById('rfPreviewBtn');
+  var status = document.getElementById('rfPreviewStatus');
+  var area = document.getElementById('rfPreviewArea');
+
+  var instSel = document.getElementById('rfInstanceName');
+  var selectedInstance = instSel ? instSel.value : '';
+
+  var baseUrl    = (document.getElementById('rfBaseUrl')    || {}).value || '';
+  var username   = (document.getElementById('rfUsername')   || {}).value || '';
+  var password   = (document.getElementById('rfPassword')   || {}).value || '';
+  var templateId = (document.getElementById('rfTemplateId') || {}).value || '';
+  var ownerType  = (document.getElementById('rfOwnerType')  || {}).value || '';
+  var dataTypeRaw = (document.getElementById('rfDataType')  || {}).value || '';
+  var allOwners  = !!(document.getElementById('rfAllOwners') || {}).checked;
+  var ownerIdsRaw = (document.getElementById('rfOwnerIds')  || {}).value || '';
+
+  if (!selectedInstance && !_editingReportFeed) {
+    status.textContent = 'Select a GoContact Instance before previewing.';
+    status.style.color = 'var(--red,#f87171)';
+    return;
+  }
+  if (!templateId || !ownerType) {
+    status.textContent = 'Missing field(s): ' + (!templateId ? 'Template ID' : '') + (!ownerType ? ' Owner Type' : '');
+    status.style.color = 'var(--red,#f87171)';
+    return;
+  }
+
+  var isFixed = document.querySelector('input[name="rfDateType"][value="fixed"]') &&
+                document.querySelector('input[name="rfDateType"][value="fixed"]').checked;
+  var dateRange;
+  if (isFixed) {
+    dateRange = {
+      type: 'fixed',
+      startDate: (document.getElementById('rfStartDate') || {}).value || '',
+      endDate:   (document.getElementById('rfEndDate') || {}).value || ''
+    };
+  } else {
+    dateRange = { type: 'relative', days: parseInt((document.getElementById('rfDays') || {}).value || '1', 10) || 1 };
+  }
+
+  var ownerIds = allOwners
+    ? ['allOwners']
+    : ownerIdsRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+  if (!ownerIds.length) ownerIds = ['allOwners'];
+
+  var dtRaw = dataTypeRaw.trim();
+  var dataType = dtRaw === '' ? undefined : (isNaN(Number(dtRaw)) ? dtRaw : Number(dtRaw));
+
+  btn.disabled = true;
+  if (area) area.style.display = 'none';
+
+  // Fast path: if editing a feed with cached data, load from DB (no GoContact call)
+  var hasCachedData = _editingReportFeed &&
+    _reportFeedStatuses[_editingReportFeed] &&
+    _reportFeedStatuses[_editingReportFeed].cached;
+
+  if (hasCachedData) {
+    btn.textContent = 'Loading…';
+    status.textContent = 'Loading columns from cache…';
+    status.style.color = 'var(--text3)';
+    try {
+      var cacheRes = await fetch('/admin/reports/' + encodeURIComponent(_editingReportFeed) + '/data?limit=5&raw=1');
+      var cacheData = await cacheRes.json();
+      if (cacheRes.ok && cacheData.columns && cacheData.columns.length > 0) {
+        _rfPreviewColumns = cacheData.columns;
+        status.textContent = _rfPreviewColumns.length + ' columns (from cache — ' + cacheData.total + ' total rows).';
+        status.style.color = 'var(--green,#4ade80)';
+        rfRenderPreviewTable(cacheData.columns, cacheData.rows || []);
+        rfBuildFieldMapVisual(cacheData.columns, cacheData.rows || []);
+        rfPopulateColumnSelects(cacheData.columns);
+        btn.disabled = false;
+        btn.textContent = 'Fetch Columns Preview';
+        return;
+      }
+    } catch(e) { /* fall through to GoContact */ }
+  }
+
+  btn.textContent = 'Fetching…';
+  status.textContent = 'Fetching report from GoContact…';
+  status.style.color = 'var(--text3)';
+
+  try {
+    var res = await fetch('/admin/reports/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        feedName: _editingReportFeed || undefined,
+        instanceName: selectedInstance || undefined,
+        baseUrl: selectedInstance ? undefined : baseUrl,
+        username: selectedInstance ? undefined : username,
+        password: selectedInstance ? undefined : (password || undefined),
+        templateId, ownerType,
+        ownerIds, dataType, includeAllOwners: allOwners, dateRange
+      })
+    });
+    var data = await res.json();
+    if (!res.ok) {
+      status.textContent = data.detail || data.error || 'Unknown error';
+      status.style.color = 'var(--red)';
+      return;
+    }
+
+    _rfPreviewColumns = data.columns || [];
+    status.textContent = _rfPreviewColumns.length + ' columns, ' + data.totalRows + ' rows in report.';
+    status.style.color = 'var(--green,#4ade80)';
+
+    rfRenderPreviewTable(data.columns, data.sampleRows);
+    rfBuildFieldMapVisual(data.columns, data.sampleRows || []);
+    rfPopulateColumnSelects(data.columns);
+  } catch(e) {
+    status.textContent = 'Error: ' + e.message;
+    status.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Fetch Columns Preview';
+  }
+}
+
+function rfRenderPreviewTable(columns, rows) {
+  var area = document.getElementById('rfPreviewArea');
+  var head = document.getElementById('rfPreviewHead');
+  var body = document.getElementById('rfPreviewBody');
+  if (!area || !head || !body) return;
+
+  var thRow = document.createElement('tr');
+  columns.forEach(function(col) {
+    var th = document.createElement('th');
+    th.style.cssText = 'padding:5px 8px;font-size:10.5px;font-weight:600;color:var(--text2);text-transform:uppercase;border-right:1px solid var(--border);white-space:nowrap';
+    th.textContent = col;
+    thRow.appendChild(th);
+  });
+  head.innerHTML = '';
+  head.appendChild(thRow);
+
+  body.innerHTML = '';
+  (rows || []).forEach(function(row) {
+    var tr = document.createElement('tr');
+    tr.style.borderBottom = '1px solid var(--border)';
+    columns.forEach(function(col) {
+      var td = document.createElement('td');
+      td.style.cssText = 'padding:4px 8px;font-size:11.5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-right:1px solid var(--border);color:var(--text)';
+      td.title = row[col] || '';
+      td.textContent = row[col] != null ? row[col] : '';
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+
+  area.style.display = 'block';
+}
+
+/** Convert a CSV column name to a JSON/programming-friendly camelCase key.
+ *  "Call UUID" → "callUuid", "agent_name" → "agentName", "ChatId" → "chatId" */
+function toApiFieldName(col) {
+  return col
+    .trim()
+    .replace(/[^a-zA-Z0-9]+([a-zA-Z0-9])/g, function(_, c) { return c.toUpperCase(); })
+    .replace(/^([A-Z])/, function(c) { return c.toLowerCase(); })
+    .replace(/[^a-zA-Z0-9]/g, ''); // strip any remaining non-alphanumeric
+}
+
+/** Detect field type from sample row values. */
+function rfDetectFieldType(col, sampleRows) {
+  for (var i = 0; i < (sampleRows || []).length; i++) {
+    var val = sampleRows[i][col];
+    if (!val || val === '') continue;
+    var lower = val.toLowerCase();
+    if (lower === 'true' || lower === 'false') return 'boolean';
+    if (/\d{4}[-/]\d{2}[-/]\d{2}/.test(val) || /T\d{2}:\d{2}/.test(val)) return 'date';
+    if (!isNaN(parseFloat(val)) && isFinite(val) && !/[-/T]/.test(val)) return 'number';
+  }
+  return 'string';
+}
+
+function rfBuildFieldMapVisual(columns, sampleRows) {
+  var visual = document.getElementById('rfFieldMapVisual');
+  var jsonDiv = document.getElementById('rfFieldMapJson');
+  var hint    = document.getElementById('rfFieldMapHint');
+  var tbody   = document.getElementById('rfFieldMapRows');
+  if (!visual || !tbody) return;
+
+  // Read existing fieldMap and fieldFilters to pre-fill
+  var existing = {};
+  var existingFilters = {};
+  try {
+    var fmRaw = (document.getElementById('rfFieldMap') || {}).value || '';
+    if (fmRaw.trim()) existing = JSON.parse(fmRaw);
+  } catch {}
+  // fieldFilters are stored in a hidden input when editing
+  try {
+    var ffRaw = (document.getElementById('rfFieldFilters') || {}).value || '';
+    if (ffRaw.trim()) existingFilters = JSON.parse(ffRaw);
+  } catch {}
+  var existingKeys = Object.keys(existing);
+
+  tbody.innerHTML = '';
+  columns.forEach(function(col) {
+    var isIncluded = existingKeys.length === 0 || existingKeys.indexOf(col) !== -1;
+    var storedName = existing[col];
+    // Only keep stored name if it was actually customized (differs from raw column name).
+    // If stored === raw column name, the user never touched it → re-normalize now.
+    var outputName = (storedName && storedName !== col) ? storedName : toApiFieldName(col);
+    var detectedType = rfDetectFieldType(col, sampleRows || []);
+    // Use stored type if available (editing), else use detected
+    var fieldType = (existingFilters[outputName] && existingFilters[outputName].type) || detectedType;
+
+    var tr = document.createElement('tr');
+    tr.style.borderBottom = '1px solid var(--border)';
+    tr.dataset.col = col;
+
+    var tdCheck = document.createElement('td');
+    tdCheck.style.cssText = 'padding:5px 10px;text-align:center';
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = isIncluded;
+    cb.dataset.col = col;
+    cb.id = 'rfFm_cb_' + col;
+    tdCheck.appendChild(cb);
+    tr.appendChild(tdCheck);
+
+    var tdSrc = document.createElement('td');
+    tdSrc.style.cssText = 'padding:5px 8px;font-size:12px;font-family:"SF Mono",Monaco,monospace;color:var(--text2)';
+    tdSrc.textContent = col;
+    tr.appendChild(tdSrc);
+
+    var tdOut = document.createElement('td');
+    tdOut.style.cssText = 'padding:4px 8px';
+    var inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = outputName;
+    inp.dataset.col = col;
+    inp.id = 'rfFm_out_' + col;
+    inp.style.cssText = 'width:100%;padding:4px 7px;background:var(--surface2);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:12px';
+    inp.placeholder = col;
+    tdOut.appendChild(inp);
+    tr.appendChild(tdOut);
+
+    var tdType = document.createElement('td');
+    tdType.style.cssText = 'padding:4px 8px';
+    var typeSelect = document.createElement('select');
+    typeSelect.id = 'rfFm_type_' + col;
+    typeSelect.dataset.col = col;
+    typeSelect.style.cssText = 'width:100%;padding:3px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:11.5px';
+    ['string','number','date','boolean'].forEach(function(t) {
+      var opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t;
+      if (t === fieldType) opt.selected = true;
+      typeSelect.appendChild(opt);
+    });
+    tdType.appendChild(typeSelect);
+    tr.appendChild(tdType);
+
+    tbody.appendChild(tr);
+  });
+
+  visual.style.display = 'block';
+  if (jsonDiv) jsonDiv.style.display = 'none';
+  if (hint) hint.textContent = '— select columns and define their API output names';
+}
+
+function rfFmToggleAll(checked) {
+  document.querySelectorAll('#rfFieldMapRows input[type=checkbox]').forEach(function(cb) {
+    cb.checked = checked;
+  });
+}
+
+function rfPopulateColumnSelects(columns) {
+  var selects = [
+    { sel: 'rfDetailIdFieldSelect', txt: 'rfDetailIdField' },
+    { sel: 'rfAudioFieldSelect',    txt: 'rfAudioField' },
+    { sel: 'rfAudioIdFieldSelect',  txt: 'rfAudioIdField' }
+  ];
+  selects.forEach(function(s) {
+    var sel = document.getElementById(s.sel);
+    var txt = document.getElementById(s.txt);
+    if (!sel) return;
+    var current = txt ? txt.value : '';
+    sel.innerHTML = '<option value="">— não seleccionado —</option>';
+    columns.forEach(function(col) {
+      var opt = document.createElement('option');
+      opt.value = col;
+      opt.textContent = col;
+      if (col === current) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.style.display = 'block';
+    if (txt) txt.style.display = 'none';
+  });
+}
+
+/** Read the visual field map. Returns { fieldMap, fieldFilters } or null if visual not shown. */
+function rfReadFieldMapVisual() {
+  var visual = document.getElementById('rfFieldMapVisual');
+  if (!visual || visual.style.display === 'none') return null;
+
+  var fieldMap = {};
+  var fieldFilters = {};
+  document.querySelectorAll('#rfFieldMapRows tr[data-col]').forEach(function(tr) {
+    var col = tr.dataset.col;
+    var cb = document.getElementById('rfFm_cb_' + col);
+    if (!cb || !cb.checked) return;
+    var inp = document.getElementById('rfFm_out_' + col);
+    var outName = (inp ? inp.value.trim() : '') || col;
+    fieldMap[col] = outName;
+    var typeEl = document.getElementById('rfFm_type_' + col);
+    if (typeEl) fieldFilters[outName] = { type: typeEl.value };
+  });
+  return { fieldMap: fieldMap, fieldFilters: fieldFilters };
+}
+
+/** Read detail/audio idField — from select if available, else from text input. */
+function rfReadSelect(selId, txtId) {
+  var sel = document.getElementById(selId);
+  var txt = document.getElementById(txtId);
+  if (sel && sel.style.display !== 'none') return sel.value || '';
+  return txt ? txt.value.trim() : '';
+}
+
+// ─── GoContact Instances ──────────────────────────────────────────────────────
+
+var _gcInstances = [];
+var _editingGcInstance = null;
+
+async function loadGcInstances() {
+  try {
+    var data = await fetch('/admin/gocontact/instances').then(function(r) { return r.json(); });
+    _gcInstances = Array.isArray(data) ? data : [];
+    renderGcInstances();
+  } catch(e) {
+    _gcInstances = [];
+  }
+}
+
+function openGcInstancesModal() {
+  document.getElementById('gcInstancesModal').style.display = 'flex';
+  loadGcInstances();
+}
+
+function closeGcInstancesModal() {
+  document.getElementById('gcInstancesModal').style.display = 'none';
+}
+
+function renderGcInstances() {
+  var tbody = document.getElementById('gcInstanceListBody');
+  if (!tbody) return;
+  if (!_gcInstances.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="padding:32px;text-align:center;color:var(--text3)">Sem instâncias. Clica em &quot;+ Add Instance&quot;.</td></tr>';
+    return;
+  }
+  var truncCell = 'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+  tbody.innerHTML = _gcInstances.map(function(inst) {
+    return '<tr style="border-bottom:1px solid var(--border);transition:background 0.12s" onmouseenter="this.style.background=\'var(--surface2)\'" onmouseleave="this.style.background=\'\'">' +
+      '<td style="padding:9px 16px;font-weight:600;font-family:\'SF Mono\',Monaco,monospace;font-size:12px;white-space:nowrap">' + esc(inst.name) + '</td>' +
+      '<td style="padding:9px 8px;color:var(--text2);' + truncCell + '" title="' + esc(inst.label || '') + '">' + esc(inst.label || '<span style="color:var(--text3)">—</span>') + '</td>' +
+      '<td style="padding:9px 8px;color:var(--text2);font-size:12px;' + truncCell + '" title="' + esc(inst.baseUrl || '') + '">' + esc(inst.baseUrl || '') + '</td>' +
+      '<td style="padding:9px 8px;color:var(--text2);font-size:12px;' + truncCell + '" title="' + esc(inst.username || '') + '">' + esc(inst.username || '') + '</td>' +
+      '<td style="padding:9px 16px;text-align:right;white-space:nowrap">' +
+        '<button class="btn btn-sm" onclick="editGcInstance(\'' + esc(inst.name) + '\')">Edit</button> ' +
+        '<button class="btn btn-sm btn-danger" onclick="deleteGcInstance(\'' + esc(inst.name) + '\')">Delete</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+
+function openGcInstanceModal(inst) {
+  inst = inst || null;
+  _editingGcInstance = inst ? inst.name : null;
+  document.getElementById('gcInstanceModalTitle').textContent = inst ? 'Edit Instance — ' + inst.name : 'New GoContact Instance';
+  document.getElementById('gcInstName').value = inst ? inst.name : '';
+  document.getElementById('gcInstName').disabled = !!inst;
+  document.getElementById('gcInstLabel').value = inst ? (inst.label || '') : '';
+  document.getElementById('gcInstBaseUrl').value = inst ? (inst.baseUrl || '') : '';
+  document.getElementById('gcInstUsername').value = inst ? (inst.username || '') : '';
+  document.getElementById('gcInstPassword').value = '';
+  var errEl = document.getElementById('gcInstError');
+  if (errEl) errEl.style.display = 'none';
+  // Hide the list modal while editing
+  document.getElementById('gcInstancesModal').style.display = 'none';
+  document.getElementById('gcInstanceModal').style.display = 'flex';
+}
+
+function closeGcInstanceModal() {
+  document.getElementById('gcInstanceModal').style.display = 'none';
+  // Return to the list modal
+  document.getElementById('gcInstancesModal').style.display = 'flex';
+}
+
+function editGcInstance(name) {
+  var inst = _gcInstances.find(function(i) { return i.name === name; });
+  if (inst) openGcInstanceModal(inst);
+}
+
+async function saveGcInstance() {
+  var errEl = document.getElementById('gcInstError');
+  if (errEl) errEl.style.display = 'none';
+
+  var body = {
+    name: document.getElementById('gcInstName').value.trim().toLowerCase(),
+    label: document.getElementById('gcInstLabel').value.trim() || undefined,
+    baseUrl: document.getElementById('gcInstBaseUrl').value.trim(),
+    username: document.getElementById('gcInstUsername').value.trim(),
+  };
+  var pw = document.getElementById('gcInstPassword').value;
+  if (pw) body.password = pw;
+  else if (!_editingGcInstance) {
+    if (errEl) { errEl.textContent = 'Password is required'; errEl.style.display = 'block'; }
+    return;
+  }
+
+  try {
+    var url = _editingGcInstance ? '/admin/gocontact/instances/' + _editingGcInstance : '/admin/gocontact/instances';
+    var method = _editingGcInstance ? 'PUT' : 'POST';
+    var res = await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    var data = await res.json();
+    if (!res.ok) {
+      if (errEl) { errEl.textContent = data.error || 'Save failed'; errEl.style.display = 'block'; }
+      return;
+    }
+    closeGcInstanceModal();
+    await loadGcInstances();
+    rfPopulateInstanceDropdown();
+    // Reopen the list modal so the user sees the updated table
+    document.getElementById('gcInstancesModal').style.display = 'flex';
+    showToast(_editingGcInstance ? 'Instance updated' : 'Instance created');
+  } catch(e) {
+    if (errEl) { errEl.textContent = e.message; errEl.style.display = 'block'; }
+  }
+}
+
+async function deleteGcInstance(name) {
+  if (!confirm('Apagar instância "' + name + '"?')) return;
+  try {
+    var res = await fetch('/admin/gocontact/instances/' + name, { method: 'DELETE' });
+    var data = await res.json();
+    if (!res.ok) { showToast(data.error || 'Delete failed', true); return; }
+    await loadGcInstances();
+    rfPopulateInstanceDropdown();
+    showToast('Instância apagada');
+  } catch(e) { showToast(e.message, true); }
+}
+
+/** Populate #rfInstanceName dropdown in the feed modal from _gcInstances. */
+function rfPopulateInstanceDropdown() {
+  var sel = document.getElementById('rfInstanceName');
+  if (!sel) return;
+  var current = sel.value;
+  sel.innerHTML = '<option value="">— inline credentials —</option>';
+  _gcInstances.forEach(function(inst) {
+    var opt = document.createElement('option');
+    opt.value = inst.name;
+    opt.textContent = (inst.label || inst.name) + ' (' + (inst.baseUrl || '') + ')';
+    if (inst.name === current) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+/** Called when #rfInstanceName changes — show/hide credential fields. */
+function rfInstanceChanged() {
+  var sel = document.getElementById('rfInstanceName');
+  if (!sel) return;
+  // Hide legacy warning when an instance is chosen
+  var legacyWarn = document.getElementById('rfLegacyCredWarning');
+  if (legacyWarn && sel.value) legacyWarn.style.display = 'none';
+}
+
+function rfClearInstance() {
+  var sel = document.getElementById('rfInstanceName');
+  if (sel) sel.value = '';
 }
