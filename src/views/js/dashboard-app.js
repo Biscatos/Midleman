@@ -439,7 +439,8 @@ const PAGE_TITLES = {
   sms: 'SMS',
   notifications: 'Notifications',
   npm: 'Nginx Proxy Manager',
-  audit: 'Audit Log'
+  audit: 'Audit Log',
+  reports: 'Report Feeds'
 };
 
 // Pages that can be reached via hash routing. Aliases (siplogs, certs) are
@@ -447,7 +448,7 @@ const PAGE_TITLES = {
 const ROUTABLE_PAGES = new Set([
   'overview','requests','proxyusers','profiles','connectors',
   'oauthclients','consentpages','ldap','email','sms','notifications',
-  'npm','audit','webhooks','ldap',
+  'npm','audit','webhooks','ldap','reports',
 ]);
 
 function navigate(page, { pushHistory = true } = {}) {
@@ -489,6 +490,7 @@ function navigate(page, { pushHistory = true } = {}) {
   if (pendingNotifTab) switchNotifTab(pendingNotifTab);
   if (page === 'npm') { if (typeof switchNpmSubpage === 'function') switchNpmSubpage(_npmCurrentSubpage || 'proxy-hosts'); fetchNpmConfig(); }
   if (page === 'audit') { fetchAuditLogs(true); }
+  if (page === 'reports') { loadReportFeeds(); loadGcInstances(); rfStartSse(); rfViewerUpdateSelect(); }
   const titleEl = document.getElementById('topbarPageTitle');
   if (titleEl) titleEl.textContent = PAGE_TITLES[page] || page;
   closeNavMobile();

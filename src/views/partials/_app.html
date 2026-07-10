@@ -78,7 +78,13 @@
         <span class="sidebar-link-label">Chat Connectors</span>
         <span class="sidebar-badge" id="navConnectorBadge">0</span>
       </button>
-
+      <button class="sidebar-link" data-page="reports" data-tooltip="Report Feeds" onclick="navigate('reports')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>
+        </svg>
+        <span class="sidebar-link-label">Report Feeds</span>
+        <span class="sidebar-badge" id="navReportBadge">0</span>
+      </button>
 
       <div class="sidebar-section-label sidebar-section-label--master">Settings</div>
       <div class="sidebar-section-label sidebar-section-label--sub">Integrations</div>
@@ -2407,6 +2413,508 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
 </div>
 
     <!-- ═══ AUDIT LOG ═══ -->
+    <!-- ===== Report Feeds ===== -->
+    <style>
+      /* ── Report Feeds responsive ── */
+      .rf-bottom-grid { display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:16px; margin-top:16px; align-items:start; }
+      .rf-viewer-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+      .rf-viewer-toolbar select { min-width:140px; max-width:220px; }
+      .rf-viewer-toolbar input[type=search] { width:140px; }
+      #reportFeedModal .modal { max-width:640px; }
+
+      /* ── GoContact Instances modals ── */
+      /* List modal: wide enough for URL + username columns */
+      #gcInstancesModal .modal {
+        width: 760px;
+        max-width: 96vw;
+        height: 480px;
+        max-height: 92vh;
+        display: flex;
+        flex-direction: column;
+      }
+      @media (max-width: 640px) {
+        #gcInstancesModal .modal { height: auto; }
+      }
+      #gcInstancesModal .gc-inst-table-wrap {
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: auto;        /* table scrolls horizontally on narrow screens */
+      }
+      #gcInstancesModal table { min-width: 520px; }   /* prevents column crush */
+
+      /* Create/edit modal */
+      #gcInstanceModal .modal { width: min(520px, 96vw); }
+
+      @media (max-width:900px) {
+        .rf-bottom-grid { grid-template-columns:1fr; }
+        #rfSseLog { max-height:240px; }
+        /* Hide Label column in the list on medium screens */
+        #gcInstancesModal table th:nth-child(2),
+        #gcInstancesModal table td:nth-child(2) { display:none; }
+      }
+      @media (max-width:640px) {
+        .rf-viewer-toolbar select,
+        .rf-viewer-toolbar input[type=search] { width:100%; max-width:none; }
+        .rf-viewer-toolbar { gap:6px; }
+        .rf-feeds-table th:nth-child(2),
+        .rf-feeds-table th:nth-child(3),
+        .rf-feeds-table td:nth-child(2),
+        .rf-feeds-table td:nth-child(3) { display:none; }
+        /* Modal form grids collapse to single column */
+        #reportFeedModal [style*="grid-template-columns:1fr 2fr"],
+        #reportFeedModal [style*="grid-template-columns:1fr 1fr"],
+        #reportFeedModal [style*="grid-template-columns:1fr 1fr 1fr"],
+        #gcInstanceModal [style*="grid-template-columns:1fr 1fr"] {
+          grid-template-columns: 1fr !important;
+        }
+      }
+    </style>
+    <div class="page" id="pageReports">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+        <div>
+          <h2>Report Feeds</h2>
+          <p>Fetch GoContact reports and expose them as a JSON API with configurable field mapping and API key auth.</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm" onclick="openGcInstancesModal()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text)">GoContact Instances</button>
+          <button class="btn btn-primary btn-sm" onclick="openReportFeedModal()">+ New Feed</button>
+        </div>
+      </div>
+
+      <!-- Feeds table -->
+      <div class="card">
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table class="rf-feeds-table" style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--surface2);text-align:left">
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Template</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Owner Type</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Date Range</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Cache</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Last Fetch</th>
+                <th style="padding:10px 12px"></th>
+              </tr>
+            </thead>
+            <tbody id="reportFeedListBody">
+              <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Bottom two-column layout: Data Viewer + Activity Log -->
+      <div class="rf-bottom-grid">
+
+        <!-- ── Data Viewer ── -->
+        <div class="card" style="min-width:0;overflow:hidden">
+          <div class="card-header">
+            <div class="rf-viewer-toolbar">
+              <h3 style="font-size:14px;font-weight:600;margin:0;flex:1;white-space:nowrap">Data Viewer</h3>
+              <select id="rfViewerFeedSelect" onchange="rfViewerLoad(1)" style="padding:5px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+                <option value="">— selecciona feed —</option>
+              </select>
+              <input id="rfViewerSearch" type="search" placeholder="Pesquisar…" oninput="rfViewerLoad(1)" style="padding:5px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+              <select id="rfViewerLimit" onchange="rfViewerLoad(1)" style="padding:5px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+                <option value="25">25 / pág</option>
+                <option value="50" selected>50 / pág</option>
+                <option value="100">100 / pág</option>
+                <option value="250">250 / pág</option>
+              </select>
+              <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text2);cursor:pointer;white-space:nowrap">
+                <input type="checkbox" id="rfViewerRaw" onchange="rfViewerLoad(1)"> Raw
+              </label>
+              <button class="btn btn-sm" onclick="rfViewerRefresh()" id="rfViewerRefreshBtn" style="padding:4px 10px;font-size:12px;white-space:nowrap">Refresh</button>
+            </div>
+          </div>
+          <div id="rfViewerMeta" style="padding:6px 16px;font-size:11.5px;color:var(--text3);border-bottom:1px solid var(--border);min-height:26px"></div>
+          <div style="overflow-x:auto;max-width:100%">
+            <table id="rfViewerTable" style="border-collapse:collapse;font-size:12px;white-space:nowrap">
+              <thead id="rfViewerHead" style="background:var(--surface2)"></thead>
+              <tbody id="rfViewerBody">
+                <tr><td style="padding:40px;text-align:center;color:var(--text3)">Select a feed to view data</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <!-- Pagination -->
+          <div id="rfViewerPager" style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--border);font-size:12.5px;color:var(--text2)"></div>
+        </div>
+
+        <!-- ── Activity Log ── -->
+        <div class="card" style="position:sticky;top:16px">
+          <div class="card-header" style="display:flex;align-items:center;gap:8px">
+            <h3 style="font-size:14px;font-weight:600;margin:0;flex:1">Activity Log</h3>
+            <span id="rfSseDot" style="width:8px;height:8px;border-radius:50%;background:var(--text3);flex-shrink:0" title="SSE disconnected"></span>
+            <button class="btn btn-sm" onclick="rfLogClear()" style="padding:3px 8px;font-size:11px;color:var(--text3)">Clear</button>
+          </div>
+          <div id="rfActivityLog" style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;line-height:1.7;padding:10px 14px;max-height:480px;overflow-y:auto;color:var(--text2)">
+            <div style="color:var(--text3)">Connecting…</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- API usage guide -->
+      <div class="card" style="margin-top:16px">
+        <div class="card-header"><h3 style="font-size:14px;font-weight:600">Consumer API</h3></div>
+        <div class="card-body" style="font-size:12.5px;color:var(--text2);line-height:1.6">
+          <p style="margin-top:0">Authenticate with an API Key via header <code>X-API-Key</code>, <code>Authorization: Bearer &lt;key&gt;</code> or query param <code>?apiKey=&lt;key&gt;</code>.</p>
+          <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55"># Flat route (feed sem grupo)
+GET /reports/:name
+X-API-Key: &lt;your-api-key&gt;
+
+# Grouped route (feed com group + slug)
+GET /reports/:group/:slug
+X-API-Key: &lt;your-api-key&gt;
+
+# Detail (requer detail.idField configurado)
+GET /reports/:group/:slug/:id
+GET /reports/:name/:id
+
+# Streaming áudio
+GET /reports/:group/:slug/:id/audio
+
+# Filtros — exact-match
+GET /reports/:group/:slug?agentName=João
+# Filtros — operadores tipados (?campo__op=valor)
+GET /reports/:group/:slug?startDate__gte=2026-01-01&amp;startDate__lte=2026-01-31
+GET /reports/:group/:slug?talkTime__gte=60&amp;direction__contains=inbound
+
+# Swagger/OpenAPI
+GET /reports/docs?apiKey=&lt;key&gt;          ← global
+GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Report Feed Modal ===== -->
+    <!-- GoContact Instances list modal -->
+    <div class="modal-overlay" id="gcInstancesModal" style="display:none">
+      <div class="modal">
+        <div class="modal-header">
+          <h3 style="font-size:15px;font-weight:600;margin:0">GoContact Instances</h3>
+          <button class="close-btn" onclick="closeGcInstancesModal()">&times;</button>
+        </div>
+        <div style="padding:12px 20px 10px;border-bottom:1px solid var(--border)">
+          <p style="font-size:12.5px;color:var(--text2);margin:0">Credenciais partilhadas entre feeds. Cria uma instância aqui e selecciona-a ao criar um feed.</p>
+        </div>
+        <div class="gc-inst-table-wrap">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--surface2);text-align:left;position:sticky;top:0;z-index:1">
+                <th style="padding:9px 16px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase;white-space:nowrap">Name</th>
+                <th style="padding:9px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase;white-space:nowrap">Label</th>
+                <th style="padding:9px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase;white-space:nowrap">Base URL</th>
+                <th style="padding:9px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase;white-space:nowrap">Username</th>
+                <th style="padding:9px 16px;width:1%"></th>
+              </tr>
+            </thead>
+            <tbody id="gcInstanceListBody">
+              <tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">Sem instâncias ainda.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" onclick="closeGcInstancesModal()">Fechar</button>
+          <button class="btn btn-primary" onclick="openGcInstanceModal()">+ Add Instance</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- GoContact Instance create/edit modal -->
+    <div class="modal-overlay" id="gcInstanceModal" style="display:none">
+      <div class="modal">
+        <div class="modal-header">
+          <h3 id="gcInstanceModalTitle">New GoContact Instance</h3>
+          <button class="close-btn" onclick="closeGcInstanceModal()">&times;</button>
+        </div>
+        <div class="modal-body" style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Name (slug) *</label>
+              <input id="gcInstName" type="text" placeholder="ucall-prod" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Label (display name)</label>
+              <input id="gcInstLabel" type="text" placeholder="uCall Produção" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+            </div>
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Base URL *</label>
+            <input id="gcInstBaseUrl" type="text" placeholder="https://go.ucall.co.ao" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Username *</label>
+              <input id="gcInstUsername" type="text" placeholder="api@domain.gocontact.com" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Password *</label>
+              <input id="gcInstPassword" type="password" placeholder="••••••••" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+            </div>
+          </div>
+          <p id="gcInstError" style="color:var(--red);font-size:12px;margin:0;display:none"></p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" onclick="closeGcInstanceModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveGcInstance()">Save Instance</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="reportFeedModal" style="display:none">
+      <div class="modal" style="width:min(640px,96vw);max-height:92vh;overflow-y:auto">
+        <div class="modal-header">
+          <h3 id="reportFeedModalTitle">New Report Feed</h3>
+          <button class="close-btn" onclick="closeReportFeedModal()">&times;</button>
+        </div>
+        <div class="modal-body" style="display:flex;flex-direction:column;gap:14px">
+
+          <!-- Name + GoContact Instance -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Feed Name *</label>
+              <input id="rfName" type="text" placeholder="gocontact-campanhas" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">GoContact Instance *</label>
+              <select id="rfInstanceName" onchange="rfInstanceChanged()" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+                <option value="">— select an instance —</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- API Group + Slug (optional namespace routing) -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">API Group <span style="color:var(--text3)">(optional — namespace, e.g. nossa-seguro)</span></label>
+              <input id="rfGroup" type="text" placeholder="nossa-seguro" oninput="rfCheckGroupApiKeys()" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+              <span style="font-size:11px;color:var(--text3)">Agrupa feeds em /reports/<em>group</em>/<em>slug</em></span>
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Endpoint Slug <span style="color:var(--text3)">(required when group is set)</span></label>
+              <input id="rfSlug" type="text" placeholder="voice" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+              <span style="font-size:11px;color:var(--text3)">ex: voice, webchat, ticket, callback</span>
+            </div>
+          </div>
+          <div id="rfGroupApiKeyHint" style="display:none;padding:8px 12px;background:var(--surface2);border:1px solid #f59e0b44;border-radius:6px;font-size:12px;color:var(--text2)">
+            <strong style="color:#f59e0b">⚠ Group has different API keys</strong> — for clients to use a single API key across all group routes, every feed in the group should share the same key.
+          </div>
+
+          <!-- Aviso para feeds legados com credenciais inline -->
+          <div id="rfLegacyCredWarning" style="display:none;padding:10px 12px;background:var(--surface2);border:1px solid #f59e0b44;border-radius:6px;font-size:12px;color:var(--text2)">
+            <strong style="color:#f59e0b">⚠ Feed with inline credentials (legacy)</strong> — this feed has credentials stored directly. Select an instance above to migrate, or leave blank to keep the existing credentials.
+          </div>
+
+          <!-- Campos ocultos mantidos para compatibilidade com feeds legados (não visíveis ao utilizador) -->
+          <input id="rfUsername" type="hidden">
+          <input id="rfBaseUrl" type="hidden">
+          <input id="rfPassword" type="hidden">
+
+          <!-- Report params -->
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Template ID *</label>
+              <input id="rfTemplateId" type="text" placeholder="1092" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Data Type <span style="color:var(--text3)">(0 para voz, "sessions" para webchat)</span></label>
+              <input id="rfDataType" type="text" placeholder='0 ou "sessions"' style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Owner Type *</label>
+              <select id="rfOwnerType" onchange="rfOwnerTypeChanged()" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+                <option value="campaign">campaign — Outbound Voice</option>
+                <option value="queue">queue — Inbound Voice</option>
+                <option value="ticket">ticket — Ticket Queues</option>
+                <option value="ivr_campaigns">ivr_campaigns — IVR Campaigns</option>
+                <option value="assisted_transfer">assisted_transfer — Assisted Transfer</option>
+                <option value="callbacks">callbacks — Voice Callbacks</option>
+                <option value="agents">agents — Events Log</option>
+                <option value="webchat">webchat — Webchat</option>
+                <option value="webchat_sessions">webchat_sessions — Webchat Sessions</option>
+                <option value="ticket_agent_times">ticket_agent_times — Ticket Agent Times</option>
+                <option value="on_hook_attempt">on_hook_attempt — On-Hook Attempts</option>
+                <option value="quality">quality — Quality</option>
+                <option value="elearning">elearning — E-Learning</option>
+                <option value="scripts">scripts — Scripts</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+              <label style="font-size:11px;color:var(--text2)">Owner IDs <span style="color:var(--text3)">(comma-separated)</span></label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" id="rfAllOwners" onchange="rfToggleAllOwners()"> All owners
+              </label>
+            </div>
+            <input id="rfOwnerIds" type="text" placeholder="226, 452, 443, 432" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+          </div>
+
+          <!-- Date Range -->
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px">Date Range *</label>
+            <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+                <input type="radio" name="rfDateType" value="relative" checked onchange="rfToggleDateType()"> Last N days
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+                <input type="radio" name="rfDateType" value="fixed" onchange="rfToggleDateType()"> Fixed dates
+              </label>
+            </div>
+            <div id="rfDateRelative">
+              <input id="rfDays" type="number" min="1" max="3650" value="7" placeholder="7" style="width:120px;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+              <span style="font-size:12px;color:var(--text2);margin-left:8px">days back from today</span>
+            </div>
+            <div id="rfDateFixed" style="display:none;display:none;grid-template-columns:1fr 1fr;gap:10px">
+              <div>
+                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Start Date</label>
+                <input id="rfStartDate" type="text" placeholder="2026-05-01 00:00:00" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+              </div>
+              <div>
+                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">End Date</label>
+                <input id="rfEndDate" type="text" placeholder="2026-05-07 24:00:00" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+              </div>
+            </div>
+          </div>
+
+          <!-- Auto-refresh -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Auto-refresh (segundos)</label>
+              <input id="rfAutoRefresh" type="number" min="0" max="86400" value="0" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+              <span style="font-size:11px;color:var(--text3)">0 = apenas manual</span>
+              <input type="hidden" id="rfTtl" value="0">
+            </div>
+          </div>
+
+          <!-- API Keys -->
+          <div>
+            <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px">API Keys * <span style="color:var(--text3)">(one per line — grant access to consumers)</span></label>
+            <textarea id="rfApiKeys" rows="3" placeholder="key-abc123&#10;key-xyz789" oninput="rfCheckGroupApiKeys()" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;font-family:'SF Mono',Monaco,monospace;resize:vertical"></textarea>
+            <button type="button" onclick="rfGenerateApiKey()" class="btn btn-sm" style="margin-top:4px">Generate key</button>
+          </div>
+
+          <!-- ── Fetch Preview ── -->
+          <div style="border-top:1px solid var(--border);padding-top:14px">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <button type="button" class="btn" id="rfPreviewBtn" onclick="rfFetchPreview()" style="font-size:12.5px">
+                Fetch Columns Preview
+              </button>
+              <span id="rfPreviewStatus" style="font-size:12px;color:var(--text3)">Preenche as credenciais e template acima, depois clica para ver as colunas disponíveis.</span>
+            </div>
+            <!-- Sample data table — shown after preview -->
+            <div id="rfPreviewArea" style="display:none;margin-top:12px;overflow-x:auto;border:1px solid var(--border);border-radius:6px">
+              <table id="rfPreviewTable" style="border-collapse:collapse;font-size:11.5px;white-space:nowrap;width:100%">
+                <thead id="rfPreviewHead" style="background:var(--surface2)"></thead>
+                <tbody id="rfPreviewBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- ── Field Map ── -->
+          <div style="border-top:1px solid var(--border);padding-top:12px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+              <label style="font-size:11px;color:var(--text2);font-weight:600;flex:1">Column Mapping</label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;white-space:nowrap">
+                <input type="checkbox" id="rfIncludeUnmapped"> Include unmapped columns
+              </label>
+            </div>
+
+            <!-- Empty state — shown before preview -->
+            <div id="rfFieldMapJson" style="padding:20px 16px;border:1px dashed var(--border);border-radius:8px;text-align:center">
+              <p style="margin:0 0 4px;font-size:13px;color:var(--text2)">Click <strong>Fetch Columns Preview</strong> to configure which columns to expose and their API names.</p>
+              <p style="margin:0;font-size:11.5px;color:var(--text3)">If not configured, all columns are included with their original names.</p>
+              <p id="rfFieldMapExistingInfo" style="display:none;margin:8px 0 0;font-size:11.5px;color:var(--accent)"></p>
+            </div>
+
+            <!-- Visual builder — shown after preview -->
+            <div id="rfFieldMapVisual" style="display:none;border:1px solid var(--border);border-radius:6px;overflow:hidden">
+              <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+                <thead>
+                  <tr style="background:var(--surface2)">
+                    <th style="padding:7px 10px;width:36px">
+                      <input type="checkbox" id="rfFmSelectAll" onchange="rfFmToggleAll(this.checked)" title="Seleccionar todas">
+                    </th>
+                    <th style="padding:7px 10px;text-align:left;font-weight:600;font-size:11px;color:var(--text2);text-transform:uppercase">Source column</th>
+                    <th style="padding:7px 10px;text-align:left;font-weight:600;font-size:11px;color:var(--text2);text-transform:uppercase">API name</th>
+                    <th style="padding:7px 10px;text-align:left;font-weight:600;font-size:11px;color:var(--text2);text-transform:uppercase;width:100px">Type</th>
+                  </tr>
+                </thead>
+                <tbody id="rfFieldMapRows"></tbody>
+              </table>
+            </div>
+
+            <!-- Hidden inputs keep save logic working when visual is not shown -->
+            <input type="hidden" id="rfFieldMap" value="">
+            <input type="hidden" id="rfFieldFilters" value="">
+          </div>
+
+          <!-- include unmapped is now inline above, placeholder div to not break JS references -->
+          <div style="display:none">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="rfIncludeUnmappedHidden">
+            </label>
+          </div>
+
+          <!-- Detail route -->
+          <div style="border-top:1px solid var(--border);padding-top:12px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-bottom:8px">
+              <input type="checkbox" id="rfDetailEnabled" onchange="rfToggleDetail()">
+              Enable detail route <span style="color:var(--text3);font-size:12px">(GET /reports/:name/:id)</span>
+            </label>
+            <div id="rfDetailFields" style="display:none;display:flex;flex-direction:column;gap:10px">
+              <div>
+                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">ID field <span style="color:var(--text3)">(CSV column used as unique identifier, e.g. ChatId, CallUUID)</span></label>
+                <!-- select shown after preview, text input as fallback -->
+                <select id="rfDetailIdFieldSelect" style="display:none;width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></select>
+                <input id="rfDetailIdField" type="text" placeholder="ChatId" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+              </div>
+              <div id="rfDetailSourceFeedWrap" style="display:none">
+                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Source feed <span style="color:var(--text3)">(webchat_sessions feed to use for detail lookup)</span></label>
+                <select id="rfDetailSourceFeed" onchange="rfToggleMergeParent()" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+                  <option value="">— nenhum —</option>
+                </select>
+              </div>
+              <div id="rfMergeParentWrap" style="display:none">
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+                  <input type="checkbox" id="rfMergeParent">
+                  Include session summary in response
+                  <span style="color:var(--text3);font-size:11px">(/:id returns <code>summary</code> + <code>rows</code> in one call)</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Audio -->
+          <div style="border-top:1px solid var(--border);padding-top:12px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-bottom:8px">
+              <input type="checkbox" id="rfAudioEnabled" onchange="rfToggleAudio()">
+              Enable audio streaming <span style="color:var(--text3);font-size:12px">(GET /reports/:name/:id/audio)</span>
+            </label>
+            <div id="rfAudioFields" style="display:none;display:flex;flex-direction:column;gap:10px">
+              <div>
+                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Audio address field <span style="color:var(--text3)">(column with the audio file path, e.g. CallRecordAddress)</span></label>
+                <select id="rfAudioFieldSelect" style="display:none;width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></select>
+                <input id="rfAudioField" type="text" placeholder="CallRecordAddress" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+              </div>
+              <div>
+                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Audio ID field <span style="color:var(--text3)">(optional — column for ID lookup; defaults to detail.idField)</span></label>
+                <select id="rfAudioIdFieldSelect" style="display:none;width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></select>
+                <input id="rfAudioIdField" type="text" placeholder="CallUUID" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+              </div>
+            </div>
+          </div>
+
+          <div id="rfError" style="display:none;background:var(--red-bg);color:var(--red);padding:8px 12px;border-radius:6px;font-size:13px"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" onclick="closeReportFeedModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveReportFeed()" id="rfSaveBtn">Save Feed</button>
+        </div>
+      </div>
+    </div>
+
     <div class="page" id="pageAudit">
       <div class="page-header">
         <h2>Audit Log</h2>

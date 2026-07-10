@@ -42,6 +42,7 @@ import { initNpmSettings, getNpmSettings, publicNpmSettings, validateNpmInput, s
 import { isNpmCertVolumePresent, startCertWatcher, onCertReloaded } from './certs/npm-cert-loader';
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleOauthSmsOtp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
 import { resolveClientIp, getTrustProxyConfig } from './core/ip-filter';
+import { initReportFeeds, handleReportRequest } from './reports/server';
 import { readFileSync } from 'fs';
 import QRCode from 'qrcode';
 import { resolve } from 'path';
@@ -92,6 +93,9 @@ initConnLog(config.requestLog);
 // connector server startup so the poller can resume persisted sessions.
 initConnectorSessions(config.requestLog.dataDir);
 initFive9Sessions(config.requestLog.dataDir);
+
+// Initialize GoContact report feeds (load from disk + start auto-refresh timers)
+initReportFeeds();
 
 // Initialize central certificate store (SQLite-backed). Must come BEFORE any
 // TCP/UDP server starts so the migration step can populate it from legacy
@@ -444,6 +448,27 @@ if (jwksServer) {
 } else {
     console.log('ℹ️  JWKS_PORT not set — OIDC discovery server disabled (Supabase third-party auth requires it).');
 }
+
+// ─── Report API server (dedicated port, consumer-only) ──────────────────────
+// Exposes ONLY /reports/* consumer endpoints — no admin, no dashboard.
+// Configure with REPORT_PORT env var (default 4001).
+
+const reportPortRaw = process.env.REPORT_PORT ?? '8444';
+const reportApiServer = Bun.serve({
+    port: parseInt(reportPortRaw, 10),
+    idleTimeout: 0,
+    maxRequestBodySize: 1 * 1024 * 1024, // 1MB — consumer API only
+    async fetch(req: Request): Promise<Response> {
+        const url = new URL(req.url);
+        if (!url.pathname.startsWith('/reports/')) {
+            return new Response('Not Found', { status: 404 });
+        }
+        const res = await handleReportRequest(req, url.pathname, false, undefined);
+        return res ?? new Response('Not Found', { status: 404 });
+    },
+});
+console.log(`📊 Report API server: http://localhost:${reportApiServer.port}/reports/<feed>`);
+console.log(`   Docs: http://localhost:${reportApiServer.port}/reports/docs?apiKey=<key>`);
 
 // ─── Main HTTP server ───────────────────────────────────────────────────────
 
@@ -1001,7 +1026,8 @@ const server = Bun.serve({
                     const appHtml = readFileSync(resolve(import.meta.dir, 'views/partials/_app.html'), 'utf-8');
                     html = html.replace('<!-- INJECT_SETUP -->', setupHtml)
                                .replace('<!-- INJECT_LOGIN -->', loginHtml)
-                               .replace('<!-- INJECT_APP -->', appHtml);
+                               .replace('<!-- INJECT_APP -->', appHtml)
+                               .replace('<!-- INJECT_CONFIG -->', `<script>window.REPORT_PORT=${reportPortRaw};</script>`);
                 } catch (err) {
                     console.error('Failed to load dashboard partials:', err);
                 }
@@ -1157,6 +1183,12 @@ const server = Bun.serve({
             if (isAdminPath) {
                 const authError = checkAdminAuth(req, url);
                 if (authError) return authError;
+
+                // ── Report Feeds + GoContact Instances admin routes ─────────
+                if (url.pathname.startsWith('/admin/reports') || url.pathname.startsWith('/admin/gocontact/')) {
+                    const reportRes = await handleReportRequest(req, url.pathname, true, config.authToken);
+                    if (reportRes) return reportRes;
+                }
 
                 // GET /admin — API Discovery & Status
                 if ((url.pathname === '/admin' || url.pathname === '/admin/') && req.method === 'GET') {
