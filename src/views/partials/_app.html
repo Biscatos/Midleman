@@ -2870,17 +2870,34 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
                 <select id="rfDetailIdFieldSelect" style="display:none;width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></select>
                 <input id="rfDetailIdField" type="text" placeholder="ChatId" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
               </div>
+              <div>
+                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Sort rows by <span style="color:var(--text3)">(optional)</span></label>
+                <div style="display:flex;gap:8px;align-items:center">
+                  <div style="flex:1">
+                    <select id="rfDetailSortFieldSelect" style="display:none;width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></select>
+                    <input id="rfDetailSortField" type="text" placeholder="e.g. startDate, callDuration" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+                  </div>
+                  <select id="rfDetailSortOrder" style="width:110px;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+                    <option value="asc">Ascending</option>
+                    <option value="desc">Descending</option>
+                  </select>
+                </div>
+              </div>
               <div id="rfDetailSourceFeedWrap" style="display:none">
-                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Source feed <span style="color:var(--text3)">(webchat_sessions feed to use for detail lookup)</span></label>
+                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Source feed <span style="color:var(--text3)">(feed to use for detail lookup)</span></label>
                 <select id="rfDetailSourceFeed" onchange="rfToggleMergeParent()" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
                   <option value="">— nenhum —</option>
                 </select>
               </div>
+              <div id="rfDetailSourceIdFieldWrap" style="display:none">
+                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Source feed ID field <span style="color:var(--text3)">(projected field in the source feed used to join — leave blank to use the ID field above)</span></label>
+                <input id="rfDetailSourceIdField" type="text" placeholder="e.g. chatId, sessionId" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+              </div>
               <div id="rfMergeParentWrap" style="display:none">
                 <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
                   <input type="checkbox" id="rfMergeParent">
-                  Include session summary in response
-                  <span style="color:var(--text3);font-size:11px">(/:id returns <code>summary</code> + <code>rows</code> in one call)</span>
+                  Include source feed row as <code>summary</code>
+                  <span style="color:var(--text3);font-size:11px">(/:id returns <code>rows</code> from this feed + <code>summary</code> from source feed)</span>
                 </label>
               </div>
             </div>

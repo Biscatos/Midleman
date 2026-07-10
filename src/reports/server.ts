@@ -256,35 +256,63 @@ export async function handleReportRequest(
     return null;
 }
 
+/**
+ * Resolve a raw GoContact column name to its projected API name via a fieldMap.
+ * If idField is already an API name (no entry in fieldMap), returns it unchanged.
+ * This handles both feeds saved before and after the raw-column UI fix.
+ */
+function resolveIdField(idField: string, fieldMap?: Record<string, string>): string {
+    return fieldMap?.[idField] ?? idField;
+}
+
+/** Sort rows in-place by detail.sort config. Numeric values are compared numerically. */
+function applySortToRows(rows: Record<string, string>[], sort?: { field: string; order: 'asc' | 'desc' }): void {
+    if (!sort?.field) return;
+    const { field, order } = sort;
+    rows.sort((a, b) => {
+        const av = a[field] ?? '';
+        const bv = b[field] ?? '';
+        const an = Number(av), bn = Number(bv);
+        const cmp = (!isNaN(an) && av !== '' && !isNaN(bn) && bv !== '')
+            ? an - bn
+            : av.localeCompare(bv);
+        return order === 'desc' ? -cmp : cmp;
+    });
+}
+
 /** Filter cached rows by the detail idField, optionally from a linked source feed. */
 async function getDetailRows(feed: ReportFeed, id: string): Promise<Response> {
     const detail = feed.detail!;
 
     if (detail.sourceFeed) {
-        const srcFeed = feeds.find(f => f.name === detail.sourceFeed);
-        let rawRows = getCachedRawRows(detail.sourceFeed);
-        if (rawRows === null) {
-            if (!srcFeed) return json({ error: 'Data is not yet available. Please try again later.' }, 503);
-            const srcEntry = getReadonlyData(srcFeed.name);
-            if (!srcEntry) return json({ error: 'Data is not yet available. Please try again later.' }, 503);
-            rawRows = srcEntry.rawRows;
-        }
-        const projected = srcFeed
-            ? projectRows(rawRows!, srcFeed.fieldMap, srcFeed.includeUnmapped)
-            : rawRows!;
-        const matched = projected.filter(row => row[detail.idField] === id);
+        // rows = ALL matching rows from THIS feed (e.g. all messages for this chatId)
+        const parentEntry = getReadonlyData(feed.name);
+        if (!parentEntry) return json({ error: 'Data is not yet available. Please try again later.' }, 503);
+        const parentProjected = projectRows(parentEntry.rawRows, feed.fieldMap, feed.includeUnmapped);
+        const parentIdField = resolveIdField(detail.idField, feed.fieldMap);
+        const rows = parentProjected.filter(row => row[parentIdField] === id);
+        applySortToRows(rows, detail.sort);
 
-        // mergeParent: also include the matching row from this (parent) feed as `summary`
+        // summary = SINGLE matching row from the source feed (e.g. session metadata)
         let summary: Record<string, string> | null = null;
         if (detail.mergeParent) {
-            const parentEntry = getReadonlyData(feed.name);
-            if (parentEntry) {
-                const parentProjected = projectRows(parentEntry.rawRows, feed.fieldMap, feed.includeUnmapped);
-                summary = parentProjected.find(row => row[detail.idField] === id) ?? null;
+            const srcFeed = feeds.find(f => f.name === detail.sourceFeed);
+            let srcRawRows = getCachedRawRows(detail.sourceFeed!);
+            if (srcRawRows === null && srcFeed) {
+                const srcEntry = getReadonlyData(srcFeed.name);
+                if (srcEntry) srcRawRows = srcEntry.rawRows;
+            }
+            if (srcRawRows) {
+                const srcProjected = srcFeed
+                    ? projectRows(srcRawRows, srcFeed.fieldMap, srcFeed.includeUnmapped)
+                    : srcRawRows;
+                const srcIdField = detail.sourceIdField
+                    ?? resolveIdField(detail.idField, srcFeed?.fieldMap);
+                summary = srcProjected.find(row => row[srcIdField] === id) ?? null;
             }
         }
 
-        const resp: Record<string, unknown> = { id, idField: detail.idField, rowCount: matched.length, rows: matched };
+        const resp: Record<string, unknown> = { id, idField: parentIdField, rowCount: rows.length, rows };
         if (detail.mergeParent) resp.summary = summary;
         return json(resp);
     }
@@ -294,8 +322,10 @@ async function getDetailRows(feed: ReportFeed, id: string): Promise<Response> {
     if (!entry) return json({ error: 'Data is not yet available. Please try again later.' }, 503);
 
     const projected = projectRows(entry.rawRows, feed.fieldMap, feed.includeUnmapped);
-    const matched = projected.filter(row => row[detail.idField] === id);
-    return json({ id, idField: detail.idField, rowCount: matched.length, rows: matched });
+    const parentIdField = resolveIdField(detail.idField, feed.fieldMap);
+    const rows = projected.filter(row => row[parentIdField] === id);
+    applySortToRows(rows, detail.sort);
+    return json({ id, idField: parentIdField, rowCount: rows.length, rows });
 }
 
 /** Look up the audio path for a given row ID from cached data and stream it. */

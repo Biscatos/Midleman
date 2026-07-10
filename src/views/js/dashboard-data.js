@@ -8637,6 +8637,9 @@ function openReportFeedModal(feed) {
   document.getElementById('rfDetailEnabled').checked = detailEnabled;
   document.getElementById('rfDetailIdField').value = (feed && feed.detail && feed.detail.idField) || '';
   rfPopulateSourceFeedSelect(feed && feed.detail && feed.detail.sourceFeed);
+  document.getElementById('rfDetailSourceIdField').value = (feed && feed.detail && feed.detail.sourceIdField) || '';
+  document.getElementById('rfDetailSortField').value = (feed && feed.detail && feed.detail.sort && feed.detail.sort.field) || '';
+  document.getElementById('rfDetailSortOrder').value = (feed && feed.detail && feed.detail.sort && feed.detail.sort.order) || 'asc';
   document.getElementById('rfMergeParent').checked = !!(feed && feed.detail && feed.detail.mergeParent);
   rfToggleDetail();
 
@@ -8699,7 +8702,9 @@ function rfToggleDetail() {
 function rfToggleMergeParent() {
   var sel = document.getElementById('rfDetailSourceFeed');
   var sourceFeed = sel ? sel.value.trim() : '';
-  document.getElementById('rfMergeParentWrap').style.display = sourceFeed ? 'block' : 'none';
+  var show = sourceFeed ? 'block' : 'none';
+  document.getElementById('rfMergeParentWrap').style.display = show;
+  document.getElementById('rfDetailSourceIdFieldWrap').style.display = show;
 }
 
 function rfOwnerTypeChanged() {
@@ -8840,8 +8845,16 @@ async function saveReportFeed() {
     const sourceFeed = document.getElementById('rfDetailSourceFeed').value.trim();
     if (!idField) { errEl.textContent = 'Detail ID field is required when detail route is enabled'; errEl.style.display = 'block'; return; }
     body.detail = { idField: idField };
+    var sortField = typeof rfReadSelect === 'function'
+      ? rfReadSelect('rfDetailSortFieldSelect', 'rfDetailSortField')
+      : document.getElementById('rfDetailSortField').value.trim();
+    if (sortField) {
+      body.detail.sort = { field: sortField, order: document.getElementById('rfDetailSortOrder').value || 'asc' };
+    }
     if (sourceFeed) {
       body.detail.sourceFeed = sourceFeed;
+      var sourceIdField = document.getElementById('rfDetailSourceIdField').value.trim();
+      if (sourceIdField) body.detail.sourceIdField = sourceIdField;
       if (document.getElementById('rfMergeParent').checked) body.detail.mergeParent = true;
     }
   }
@@ -9219,7 +9232,7 @@ async function rfFetchPreview() {
         status.style.color = 'var(--green,#4ade80)';
         rfRenderPreviewTable(cacheData.columns, cacheData.rows || []);
         rfBuildFieldMapVisual(cacheData.columns, cacheData.rows || []);
-        rfPopulateColumnSelects(cacheData.columns);
+        rfPopulateColumnSelects(rfGetVisualProjectedColumns());
         btn.disabled = false;
         btn.textContent = 'Fetch Columns Preview';
         return;
@@ -9258,7 +9271,7 @@ async function rfFetchPreview() {
 
     rfRenderPreviewTable(data.columns, data.sampleRows);
     rfBuildFieldMapVisual(data.columns, data.sampleRows || []);
-    rfPopulateColumnSelects(data.columns);
+    rfPopulateColumnSelects(rfGetVisualProjectedColumns());
   } catch(e) {
     status.textContent = 'Error: ' + e.message;
     status.style.color = 'var(--red)';
@@ -9417,11 +9430,23 @@ function rfFmToggleAll(checked) {
   });
 }
 
+/** Read projected API names from the visual field-map builder (populated by rfBuildFieldMapVisual). */
+function rfGetVisualProjectedColumns() {
+  var result = [];
+  document.querySelectorAll('#rfFieldMapRows tr[data-col]').forEach(function(tr) {
+    var col = tr.dataset.col;
+    var inp = document.getElementById('rfFm_out_' + col);
+    result.push(inp ? (inp.value.trim() || toApiFieldName(col)) : toApiFieldName(col));
+  });
+  return result;
+}
+
 function rfPopulateColumnSelects(columns) {
   var selects = [
-    { sel: 'rfDetailIdFieldSelect', txt: 'rfDetailIdField' },
-    { sel: 'rfAudioFieldSelect',    txt: 'rfAudioField' },
-    { sel: 'rfAudioIdFieldSelect',  txt: 'rfAudioIdField' }
+    { sel: 'rfDetailIdFieldSelect',   txt: 'rfDetailIdField' },
+    { sel: 'rfDetailSortFieldSelect', txt: 'rfDetailSortField' },
+    { sel: 'rfAudioFieldSelect',      txt: 'rfAudioField' },
+    { sel: 'rfAudioIdFieldSelect',    txt: 'rfAudioIdField' }
   ];
   selects.forEach(function(s) {
     var sel = document.getElementById(s.sel);
