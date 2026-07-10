@@ -129,6 +129,12 @@ export interface ReportFeed {
          */
         sourceFeed?: string;
         /**
+         * Projected field name in the sourceFeed to match against the :id param.
+         * Defaults to detail.idField (resolved through srcFeed.fieldMap) when omitted.
+         * Set this when the source feed uses a different field name for the same concept.
+         */
+        sourceIdField?: string;
+        /**
          * When true (and sourceFeed is set), the matching row from THIS feed is
          * also included in the response as `summary`. Use on the sessions feed so
          * a single /:chatId call returns both the session metadata and all messages.

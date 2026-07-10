@@ -8637,6 +8637,7 @@ function openReportFeedModal(feed) {
   document.getElementById('rfDetailEnabled').checked = detailEnabled;
   document.getElementById('rfDetailIdField').value = (feed && feed.detail && feed.detail.idField) || '';
   rfPopulateSourceFeedSelect(feed && feed.detail && feed.detail.sourceFeed);
+  document.getElementById('rfDetailSourceIdField').value = (feed && feed.detail && feed.detail.sourceIdField) || '';
   document.getElementById('rfMergeParent').checked = !!(feed && feed.detail && feed.detail.mergeParent);
   rfToggleDetail();
 
@@ -8699,7 +8700,9 @@ function rfToggleDetail() {
 function rfToggleMergeParent() {
   var sel = document.getElementById('rfDetailSourceFeed');
   var sourceFeed = sel ? sel.value.trim() : '';
-  document.getElementById('rfMergeParentWrap').style.display = sourceFeed ? 'block' : 'none';
+  var show = sourceFeed ? 'block' : 'none';
+  document.getElementById('rfMergeParentWrap').style.display = show;
+  document.getElementById('rfDetailSourceIdFieldWrap').style.display = show;
 }
 
 function rfOwnerTypeChanged() {
@@ -8842,6 +8845,8 @@ async function saveReportFeed() {
     body.detail = { idField: idField };
     if (sourceFeed) {
       body.detail.sourceFeed = sourceFeed;
+      var sourceIdField = document.getElementById('rfDetailSourceIdField').value.trim();
+      if (sourceIdField) body.detail.sourceIdField = sourceIdField;
       if (document.getElementById('rfMergeParent').checked) body.detail.mergeParent = true;
     }
   }

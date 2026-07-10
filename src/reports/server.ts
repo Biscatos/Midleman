@@ -282,8 +282,10 @@ async function getDetailRows(feed: ReportFeed, id: string): Promise<Response> {
             ? projectRows(rawRows!, srcFeed.fieldMap, srcFeed.includeUnmapped)
             : rawRows!;
 
-        // Resolve idField through source feed's fieldMap (raw col name → API name)
-        const srcIdField = resolveIdField(detail.idField, srcFeed?.fieldMap);
+        // sourceIdField (if set) is already a projected name for the source feed.
+        // Otherwise fall back to resolving detail.idField through srcFeed.fieldMap.
+        const srcIdField = detail.sourceIdField
+            ?? resolveIdField(detail.idField, srcFeed?.fieldMap);
         const matched = projected.filter(row => row[srcIdField] === id);
 
         // mergeParent: also include the matching row from this (parent) feed as `summary`
