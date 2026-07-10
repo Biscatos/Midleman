@@ -265,6 +265,21 @@ function resolveIdField(idField: string, fieldMap?: Record<string, string>): str
     return fieldMap?.[idField] ?? idField;
 }
 
+/** Sort rows in-place by detail.sort config. Numeric values are compared numerically. */
+function applySortToRows(rows: Record<string, string>[], sort?: { field: string; order: 'asc' | 'desc' }): void {
+    if (!sort?.field) return;
+    const { field, order } = sort;
+    rows.sort((a, b) => {
+        const av = a[field] ?? '';
+        const bv = b[field] ?? '';
+        const an = Number(av), bn = Number(bv);
+        const cmp = (!isNaN(an) && av !== '' && !isNaN(bn) && bv !== '')
+            ? an - bn
+            : av.localeCompare(bv);
+        return order === 'desc' ? -cmp : cmp;
+    });
+}
+
 /** Filter cached rows by the detail idField, optionally from a linked source feed. */
 async function getDetailRows(feed: ReportFeed, id: string): Promise<Response> {
     const detail = feed.detail!;
@@ -276,6 +291,7 @@ async function getDetailRows(feed: ReportFeed, id: string): Promise<Response> {
         const parentProjected = projectRows(parentEntry.rawRows, feed.fieldMap, feed.includeUnmapped);
         const parentIdField = resolveIdField(detail.idField, feed.fieldMap);
         const rows = parentProjected.filter(row => row[parentIdField] === id);
+        applySortToRows(rows, detail.sort);
 
         // summary = SINGLE matching row from the source feed (e.g. session metadata)
         let summary: Record<string, string> | null = null;
@@ -307,8 +323,9 @@ async function getDetailRows(feed: ReportFeed, id: string): Promise<Response> {
 
     const projected = projectRows(entry.rawRows, feed.fieldMap, feed.includeUnmapped);
     const parentIdField = resolveIdField(detail.idField, feed.fieldMap);
-    const matched = projected.filter(row => row[parentIdField] === id);
-    return json({ id, idField: parentIdField, rowCount: matched.length, rows: matched });
+    const rows = projected.filter(row => row[parentIdField] === id);
+    applySortToRows(rows, detail.sort);
+    return json({ id, idField: parentIdField, rowCount: rows.length, rows });
 }
 
 /** Look up the audio path for a given row ID from cached data and stream it. */

@@ -140,6 +140,8 @@ export interface ReportFeed {
          * a single /:chatId call returns both the session metadata and all messages.
          */
         mergeParent?: boolean;
+        /** Sort returned rows. field is the projected API name. */
+        sort?: { field: string; order: 'asc' | 'desc' };
     };
 
     // ── Audio streaming ─────────────────────────────────────────────────────

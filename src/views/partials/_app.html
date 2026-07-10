@@ -2870,6 +2870,19 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
                 <select id="rfDetailIdFieldSelect" style="display:none;width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></select>
                 <input id="rfDetailIdField" type="text" placeholder="ChatId" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
               </div>
+              <div>
+                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Sort rows by <span style="color:var(--text3)">(optional)</span></label>
+                <div style="display:flex;gap:8px;align-items:center">
+                  <div style="flex:1">
+                    <select id="rfDetailSortFieldSelect" style="display:none;width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></select>
+                    <input id="rfDetailSortField" type="text" placeholder="e.g. startDate, callDuration" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+                  </div>
+                  <select id="rfDetailSortOrder" style="width:110px;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+                    <option value="asc">Ascending</option>
+                    <option value="desc">Descending</option>
+                  </select>
+                </div>
+              </div>
               <div id="rfDetailSourceFeedWrap" style="display:none">
                 <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Source feed <span style="color:var(--text3)">(feed to use for detail lookup)</span></label>
                 <select id="rfDetailSourceFeed" onchange="rfToggleMergeParent()" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">

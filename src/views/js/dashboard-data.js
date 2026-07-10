@@ -8638,6 +8638,8 @@ function openReportFeedModal(feed) {
   document.getElementById('rfDetailIdField').value = (feed && feed.detail && feed.detail.idField) || '';
   rfPopulateSourceFeedSelect(feed && feed.detail && feed.detail.sourceFeed);
   document.getElementById('rfDetailSourceIdField').value = (feed && feed.detail && feed.detail.sourceIdField) || '';
+  document.getElementById('rfDetailSortField').value = (feed && feed.detail && feed.detail.sort && feed.detail.sort.field) || '';
+  document.getElementById('rfDetailSortOrder').value = (feed && feed.detail && feed.detail.sort && feed.detail.sort.order) || 'asc';
   document.getElementById('rfMergeParent').checked = !!(feed && feed.detail && feed.detail.mergeParent);
   rfToggleDetail();
 
@@ -8843,6 +8845,12 @@ async function saveReportFeed() {
     const sourceFeed = document.getElementById('rfDetailSourceFeed').value.trim();
     if (!idField) { errEl.textContent = 'Detail ID field is required when detail route is enabled'; errEl.style.display = 'block'; return; }
     body.detail = { idField: idField };
+    var sortField = typeof rfReadSelect === 'function'
+      ? rfReadSelect('rfDetailSortFieldSelect', 'rfDetailSortField')
+      : document.getElementById('rfDetailSortField').value.trim();
+    if (sortField) {
+      body.detail.sort = { field: sortField, order: document.getElementById('rfDetailSortOrder').value || 'asc' };
+    }
     if (sourceFeed) {
       body.detail.sourceFeed = sourceFeed;
       var sourceIdField = document.getElementById('rfDetailSourceIdField').value.trim();
@@ -9435,9 +9443,10 @@ function rfGetVisualProjectedColumns() {
 
 function rfPopulateColumnSelects(columns) {
   var selects = [
-    { sel: 'rfDetailIdFieldSelect', txt: 'rfDetailIdField' },
-    { sel: 'rfAudioFieldSelect',    txt: 'rfAudioField' },
-    { sel: 'rfAudioIdFieldSelect',  txt: 'rfAudioIdField' }
+    { sel: 'rfDetailIdFieldSelect',   txt: 'rfDetailIdField' },
+    { sel: 'rfDetailSortFieldSelect', txt: 'rfDetailSortField' },
+    { sel: 'rfAudioFieldSelect',      txt: 'rfAudioField' },
+    { sel: 'rfAudioIdFieldSelect',    txt: 'rfAudioIdField' }
   ];
   selects.forEach(function(s) {
     var sel = document.getElementById(s.sel);
