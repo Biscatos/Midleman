@@ -270,36 +270,33 @@ async function getDetailRows(feed: ReportFeed, id: string): Promise<Response> {
     const detail = feed.detail!;
 
     if (detail.sourceFeed) {
-        const srcFeed = feeds.find(f => f.name === detail.sourceFeed);
-        let rawRows = getCachedRawRows(detail.sourceFeed);
-        if (rawRows === null) {
-            if (!srcFeed) return json({ error: 'Data is not yet available. Please try again later.' }, 503);
-            const srcEntry = getReadonlyData(srcFeed.name);
-            if (!srcEntry) return json({ error: 'Data is not yet available. Please try again later.' }, 503);
-            rawRows = srcEntry.rawRows;
-        }
-        const projected = srcFeed
-            ? projectRows(rawRows!, srcFeed.fieldMap, srcFeed.includeUnmapped)
-            : rawRows!;
+        // rows = ALL matching rows from THIS feed (e.g. all messages for this chatId)
+        const parentEntry = getReadonlyData(feed.name);
+        if (!parentEntry) return json({ error: 'Data is not yet available. Please try again later.' }, 503);
+        const parentProjected = projectRows(parentEntry.rawRows, feed.fieldMap, feed.includeUnmapped);
+        const parentIdField = resolveIdField(detail.idField, feed.fieldMap);
+        const rows = parentProjected.filter(row => row[parentIdField] === id);
 
-        // sourceIdField (if set) is already a projected name for the source feed.
-        // Otherwise fall back to resolving detail.idField through srcFeed.fieldMap.
-        const srcIdField = detail.sourceIdField
-            ?? resolveIdField(detail.idField, srcFeed?.fieldMap);
-        const matched = projected.filter(row => row[srcIdField] === id);
-
-        // mergeParent: also include the matching row from this (parent) feed as `summary`
+        // summary = SINGLE matching row from the source feed (e.g. session metadata)
         let summary: Record<string, string> | null = null;
         if (detail.mergeParent) {
-            const parentEntry = getReadonlyData(feed.name);
-            if (parentEntry) {
-                const parentProjected = projectRows(parentEntry.rawRows, feed.fieldMap, feed.includeUnmapped);
-                const parentIdField = resolveIdField(detail.idField, feed.fieldMap);
-                summary = parentProjected.find(row => row[parentIdField] === id) ?? null;
+            const srcFeed = feeds.find(f => f.name === detail.sourceFeed);
+            let srcRawRows = getCachedRawRows(detail.sourceFeed!);
+            if (srcRawRows === null && srcFeed) {
+                const srcEntry = getReadonlyData(srcFeed.name);
+                if (srcEntry) srcRawRows = srcEntry.rawRows;
+            }
+            if (srcRawRows) {
+                const srcProjected = srcFeed
+                    ? projectRows(srcRawRows, srcFeed.fieldMap, srcFeed.includeUnmapped)
+                    : srcRawRows;
+                const srcIdField = detail.sourceIdField
+                    ?? resolveIdField(detail.idField, srcFeed?.fieldMap);
+                summary = srcProjected.find(row => row[srcIdField] === id) ?? null;
             }
         }
 
-        const resp: Record<string, unknown> = { id, idField: srcIdField, rowCount: matched.length, rows: matched };
+        const resp: Record<string, unknown> = { id, idField: parentIdField, rowCount: rows.length, rows };
         if (detail.mergeParent) resp.summary = summary;
         return json(resp);
     }
