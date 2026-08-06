@@ -787,10 +787,15 @@ async function handleWebhookFanout(
     forwardHeaders.delete('X-Forward-Token');
     forwardHeaders.set('X-Request-ID', requestId);
 
-    // Attempt to parse incoming JSON for interpolations
+    // Attempt to parse incoming JSON for interpolations. Prefer the
+    // content-type header, but fall back to sniffing the body itself —
+    // some senders (proxies, certain webhook providers) post valid JSON
+    // without a precise `application/json` content-type, which would
+    // otherwise silently leave templates/filters unable to see the payload.
     let payloadObj: any = null;
-    if (bodyStringPreview && (req.headers.get('content-type')?.includes('application/json'))) {
-        try { payloadObj = JSON.parse(bodyStringPreview); } catch {}
+    const looksLikeJson = !!bodyStringPreview && /^\s*[\[{]/.test(bodyStringPreview);
+    if (looksLikeJson) {
+        try { payloadObj = JSON.parse(bodyStringPreview!); } catch {}
     }
 
     const FILTER_BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -806,23 +811,33 @@ async function handleWebhookFanout(
         return val;
     }
 
-    function matchesFilter(target: WebhookDestination, data: any): boolean {
-        if (!target.filter || target.filter.length === 0) return true;
-        return target.filter.every(cond => {
+    function matchesFilter(target: WebhookDestination, data: any): { matched: boolean; reason?: string } {
+        if (!target.filter || target.filter.length === 0) return { matched: true };
+        if (data === null || data === undefined) {
+            return { matched: false, reason: `payload could not be parsed as JSON (condition "${target.filter[0].path}" needs it)` };
+        }
+        for (const cond of target.filter) {
             const actual = resolvePath(data, cond.path);
+            let ok: boolean;
             switch (cond.op) {
-                case 'exists': return actual !== undefined;
-                case 'notExists': return actual === undefined;
-                case 'eq': return String(actual) === String(cond.value);
-                case 'neq': return String(actual) !== String(cond.value);
+                case 'exists': ok = actual !== undefined; break;
+                case 'notExists': ok = actual === undefined; break;
+                case 'eq': ok = String(actual) === String(cond.value); break;
+                case 'neq': ok = String(actual) !== String(cond.value); break;
                 case 'contains':
-                    if (Array.isArray(actual)) return actual.some(v => String(v) === String(cond.value));
-                    return actual !== undefined && String(actual).includes(String(cond.value));
+                    ok = Array.isArray(actual) ? actual.some(v => String(v) === String(cond.value)) : (actual !== undefined && String(actual).includes(String(cond.value)));
+                    break;
                 case 'in':
-                    return Array.isArray(cond.value) && cond.value.some(v => String(v) === String(actual));
-                default: return true;
+                    ok = Array.isArray(cond.value) && cond.value.some(v => String(v) === String(actual));
+                    break;
+                default: ok = true;
             }
-        });
+            if (!ok) {
+                const actualDesc = actual === undefined ? 'not found in payload' : JSON.stringify(actual);
+                return { matched: false, reason: `"${cond.path}" ${cond.op} "${cond.value ?? ''}" — actual: ${actualDesc}` };
+            }
+        }
+        return { matched: true };
     }
 
     function renderTemplate(template: string, data: any): string {
@@ -878,9 +893,12 @@ async function handleWebhookFanout(
         let tBodySize = bodyBuffer?.byteLength || 0;
         let tBodyStringPreview = bodyStringPreview;
 
-        if (typeof target !== 'string' && !matchesFilter(target, payloadObj)) {
-            console.log(`⏭️  [webhook:${webhook.name}] Skipped ${target.url} (filter did not match)`);
-            return;
+        if (typeof target !== 'string' && target.filter && target.filter.length > 0) {
+            const filterResult = matchesFilter(target, payloadObj);
+            if (!filterResult.matched) {
+                console.log(`⏭️  [webhook:${webhook.name}] Skipped ${target.url} — filter did not match: ${filterResult.reason}`);
+                return;
+            }
         }
 
         if (typeof target === 'string') {

@@ -3439,6 +3439,7 @@ function removeWebhookTargetFilter(index, fIndex) {
 function updateWebhookTargetFilter(index, fIndex, field, value) {
   webhookTargetState[index].filter[fIndex][field] = value;
   if (field === 'op') renderDestinationEditor(index);
+  else updateAllPreviews();
 }
 
 function toggleTargetRetry(index) {
@@ -3581,7 +3582,7 @@ function renderDestinationEditorMarkup(i) {
           oninput="updateWebhookTargetFilter(${i}, ${fIndex}, 'path', this.value); renderFilterAutocomplete(this, ${i}, ${fIndex})"
           onfocus="renderFilterAutocomplete(this, ${i}, ${fIndex})"
           onblur="setTimeout(hideFilterAutocomplete, 150)"
-          autocomplete="off"
+          autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
           style="flex:2;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
         <select onchange="updateWebhookTargetFilter(${i}, ${fIndex}, 'op', this.value)" style="padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
           <option value="eq" ${c.op === 'eq' ? 'selected' : ''}>equals</option>
