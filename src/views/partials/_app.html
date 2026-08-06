@@ -3135,35 +3135,16 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
             placeholder="Auto-assign" min="0" max="65535"></div>
 
         <div class="form-group span-2">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <span style="font-weight:600;font-size:13px">Destinations</span>
-            <div style="display:flex;gap:6px">
-              <button class="btn btn-sm" onclick="toggleTestPayload()" style="padding:2px 8px;font-size:11px"
-                tabindex="-1">Toggle Test Payload</button>
-              <button class="btn btn-sm" onclick="addWebhookTarget(''); openDestinationEditor(webhookTargetState.length - 1)" style="padding:2px 8px;font-size:11px">+ Add
-                Action</button>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm)">
+            <div>
+              <span style="font-weight:600;font-size:13px">Destinos</span>
+              <div id="wDestinationsSummary" style="font-size:11.5px;color:var(--text3);margin-top:2px">Nenhum destino configurado</div>
             </div>
+            <button class="btn btn-sm btn-primary" onclick="openDestinationsPage()" style="padding:5px 12px;font-size:12px;display:flex;align-items:center;gap:6px">
+              Gerir destinos
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </button>
           </div>
-
-          <div id="wTestPayloadContainer"
-            style="display:none;margin-bottom:12px;padding:10px;background:var(--surface2);border:1px dashed var(--border);border-radius:4px">
-            <label style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-              <span style="font-size:12px">Test Payload (JSON)</span>
-              <span style="display:inline-flex;gap:6px">
-                <button class="btn btn-sm" onclick="fetchRecentWebhookPayload()" style="padding:2px 8px;font-size:10px"
-                  tabindex="-1">Fetch recent request</button>
-                <button class="btn btn-sm" onclick="fetchAndMergeWebhookPayloads()" style="padding:2px 8px;font-size:10px"
-                  tabindex="-1" title="Analisa os últimos 50 payloads e gera um schema unificado com todos os campos vistos">Fetch &amp; merge (50)</button>
-              </span>
-            </label>
-            <textarea id="wTestPayload" rows="3" placeholder='{"event":"order.created", "data": {"id": 123}}'
-              style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;color:var(--text);font-family:monospace;font-size:11px;resize:vertical"
-              oninput="mergedSchemaStats=null;updateAllPreviews()"></textarea>
-            <div style="font-size:10px;color:var(--text3);margin-top:4px">Evaluated template variables will be shown
-              inline inside your Custom Actions.</div>
-          </div>
-
-          <div id="wDestinationsContainer" style="display:flex;flex-direction:column;gap:8px"></div>
         </div>
         <div class="form-group span-2"><label
             style="display:flex;justify-content:space-between;align-items:baseline">Incoming Auth Token (optional)<a
@@ -3280,21 +3261,66 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
   </div>
 </div>
 
-<!-- Destination Editor (full-page overlay, drilled into from the Webhook Modal's destination list) -->
-<div id="destinationEditorOverlay"
-  style="display:none;position:fixed;inset:0;z-index:250;background:var(--surface);overflow-y:auto">
+<!-- Destinations Page (full page, NOT a modal — reached from the Webhook Modal's "Gerir destinos" button) -->
+<div id="destinationsPage"
+  style="display:none;position:fixed;inset:0;z-index:220;background:var(--surface);overflow-y:auto">
   <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1">
     <div style="display:flex;align-items:center;gap:10px">
-      <button onclick="closeDestinationEditor()" class="btn btn-sm" style="padding:4px 10px;display:flex;align-items:center;gap:4px">
+      <button onclick="closeDestinationsPage()" class="btn btn-sm" style="padding:4px 10px;display:flex;align-items:center;gap:4px">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-        Voltar
+        Voltar às definições
       </button>
-      <h3 id="destinationEditorTitle" style="font-size:15px;font-weight:600">Editar destino</h3>
+      <div>
+        <h3 style="font-size:15px;font-weight:600">Destinos</h3>
+        <div id="destinationsPageSubtitle" style="font-size:11.5px;color:var(--text3)"></div>
+      </div>
     </div>
-    <button class="btn btn-primary btn-sm" onclick="closeDestinationEditor()">Concluído</button>
+    <button class="btn btn-primary btn-sm" onclick="saveWebhook()">Guardar Webhook</button>
   </div>
-  <div id="destinationEditorContent" style="padding:20px;max-width:760px;margin:0 auto"></div>
+  <div style="padding:20px;max-width:820px;margin:0 auto;display:flex;flex-direction:column;gap:14px">
+    <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surface2)">
+        <span style="font-size:12px;font-weight:600">Payload de teste (opcional)</span>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm" onclick="toggleTestPayload()" style="padding:2px 8px;font-size:11px" tabindex="-1">Mostrar/Ocultar</button>
+          <button class="btn btn-sm" onclick="fetchRecentWebhookPayload()" style="padding:2px 8px;font-size:10px" tabindex="-1">Fetch recent request</button>
+          <button class="btn btn-sm" onclick="fetchAndMergeWebhookPayloads()" style="padding:2px 8px;font-size:10px" tabindex="-1" title="Analisa os últimos 50 payloads e gera um schema unificado com todos os campos vistos">Fetch &amp; merge (50)</button>
+        </div>
+      </div>
+      <div id="wTestPayloadContainer" style="display:none;padding:10px">
+        <textarea id="wTestPayload" rows="3" placeholder='{"event":"order.created", "data": {"id": 123}}'
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;color:var(--text);font-family:monospace;font-size:11px;resize:vertical"
+          oninput="mergedSchemaStats=null;updateAllPreviews()"></textarea>
+        <div style="font-size:10px;color:var(--text3);margin-top:4px">Usado para pré-visualizar templates, filtros e sugestões de campos (intellisense) ao editar cada destino.</div>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:12px;color:var(--text2)">Lista de destinos</span>
+      <button class="btn btn-sm" onclick="addWebhookTarget(''); openDestinationEditor(webhookTargetState.length - 1)" style="padding:3px 10px;font-size:11.5px">+ Adicionar destino</button>
+    </div>
+    <div id="wDestinationsContainer" style="display:flex;flex-direction:column;gap:8px"></div>
+  </div>
 </div>
+
+<!-- Destination Edit Modal (single destination — opened from the Destinations Page) -->
+<div id="destinationEditModal"
+  style="display:none;position:fixed;inset:0;z-index:280;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+  <div style="max-width:720px;width:100%;max-height:90vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border);flex-shrink:0">
+      <h3 id="destinationEditTitle" style="font-size:15px;font-weight:600">Editar destino</h3>
+      <button onclick="closeDestinationEditor()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
+    </div>
+    <div id="destinationEditContent" style="padding:18px 20px;overflow-y:auto;flex:1"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid var(--border);flex-shrink:0">
+      <button class="btn btn-primary btn-sm" onclick="closeDestinationEditor()">Concluído</button>
+    </div>
+  </div>
+</div>
+
+<!-- Field intellisense dropdown shared by all filter-condition path inputs -->
+<div id="filterPathAutocomplete"
+  style="display:none;position:fixed;z-index:400;max-height:220px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:6px;box-shadow:var(--shadow);font-size:11.5px"></div>
 
 <!-- Connector Modal -->
 <div id="connectorModal"
