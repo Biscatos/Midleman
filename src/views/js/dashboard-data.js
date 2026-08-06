@@ -174,6 +174,7 @@ function showContextMenu(e, btn) {
       { label: 'View Logs', fn: () => viewWebhookLogs(name) },
       { label: 'Restart', fn: () => restartWebhookAction(name) },
       { label: 'Edit', fn: () => editWebhook(name) },
+      { label: 'Destinos', fn: () => manageWebhookDestinations(name) },
       canLinkNpm ? { label: 'Link to NPM host…', fn: () => openLinkToNpmModalForWebhook(name) } : null,
       '---',
       { label: 'Delete', fn: () => deleteWebhook(name), danger: true },
@@ -2086,7 +2087,7 @@ function renderWebhooks(webhooks) {
   <td style="padding:8px 12px;font-weight:600">${esc(w.name)}</td>
   <td style="padding:8px">${statusBadge}${wNpmBadge}</td>
   <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${w.port}</td>
-  <td style="padding:8px;color:var(--text2)">${numTargets} destinations</td>
+  <td style="padding:8px"><a href="javascript:void(0)" onclick="manageWebhookDestinations('${esc(w.name)}')" style="color:var(--accent);text-decoration:none">${numTargets} destino${numTargets === 1 ? '' : 's'} →</a></td>
   <td style="padding:8px">${authBadge}${wIpBadge}</td>
   <td style="padding:8px;color:var(--accent2)">${w.active > 0 ? w.active : '<span style="color:var(--text3)">0</span>'}</td>
   <td style="padding:8px 12px;text-align:right">
@@ -3474,7 +3475,7 @@ function updateWebhookTargetHeader(index, hIndex, field, val) {
 function renderWebhookTargets() {
   const container = document.getElementById('wDestinationsContainer');
   if (webhookTargetState.length === 0) {
-    container.innerHTML = '<div style="color:var(--text3);font-size:12px;text-align:center;padding:12px">No actions added. Click "+ Add Action" above.</div>';
+    container.innerHTML = '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">Sem destinos. Clique em "+ Adicionar destino".</td></tr>';
     return;
   }
 
@@ -3482,23 +3483,26 @@ function renderWebhookTargets() {
 
   container.innerHTML = webhookTargetState.map((t, i) => {
     const activeFilters = (t.filter || []).filter(c => c.path.trim());
-    const badges = [
+    const typeBadges = [
       badge(t.type === 'custom' ? esc(t.method || 'POST') : 'Basic'),
-      t.customBody && t.bodyTemplate ? badge('Custom Body') : '',
-      activeFilters.length ? badge(`Filtro (${activeFilters.length})`, true) : '',
-      t.retryOpen ? badge('Retry override') : '',
-      t.persistentRetryOpen ? badge('Persistent retry') : '',
-    ].filter(Boolean).join('');
+      t.customBody && t.bodyTemplate ? badge('Body') : '',
+    ].filter(Boolean).join(' ');
+    const retryBadges = [
+      t.retryOpen ? badge('Override') : '',
+      t.persistentRetryOpen ? badge('Persistent', true) : '',
+    ].filter(Boolean).join(' ') || '<span style="color:var(--text3);font-size:11px">Default</span>';
 
     return `
-    <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm)">
-      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
-        <div style="font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.url)}">${t.url ? esc(t.url) : '<span style="color:var(--text3)">(sem URL)</span>'}</div>
-        <div style="display:flex;gap:4px;flex-wrap:wrap">${badges}</div>
-      </div>
-      <button class="btn btn-sm" onclick="openDestinationEditor(${i})" style="padding:3px 10px;font-size:11px;flex-shrink:0">Editar</button>
-      <button onclick="removeWebhookTarget(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;line-height:1;padding:0 4px;flex-shrink:0" title="Remove Target">&times;</button>
-    </div>`;
+    <tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
+      <td style="padding:8px 12px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'SF Mono',Monaco,monospace;color:var(--text2)" title="${esc(t.url)}">${t.url ? esc(t.url) : '<span style="color:var(--text3)">(sem URL)</span>'}</td>
+      <td style="padding:8px">${typeBadges}</td>
+      <td style="padding:8px">${activeFilters.length ? badge(`${activeFilters.length} condição${activeFilters.length === 1 ? '' : 'ões'}`, true) : '<span style="color:var(--text3);font-size:11px">—</span>'}</td>
+      <td style="padding:8px">${retryBadges}</td>
+      <td style="padding:8px 12px;text-align:right;white-space:nowrap">
+        <button class="btn btn-sm" onclick="openDestinationEditor(${i})" style="padding:3px 10px;font-size:11.5px">Editar</button>
+        <button onclick="removeWebhookTarget(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;line-height:1;padding:0 4px" title="Remover destino">&times;</button>
+      </td>
+    </tr>`;
   }).join('');
 }
 
@@ -3689,18 +3693,30 @@ function updateDestinationsSummary() {
   const label = n === 0 ? 'Nenhum destino configurado' : (n === 1 ? '1 destino configurado' : `${n} destinos configurados`);
   const summaryEl = document.getElementById('wDestinationsSummary');
   if (summaryEl) summaryEl.textContent = label;
-  const subtitleEl = document.getElementById('destinationsPageSubtitle');
-  if (subtitleEl) subtitleEl.textContent = (document.getElementById('wName').value || 'novo webhook') + ' — ' + label;
+  const wName = document.getElementById('wName').value;
+  const titleEl = document.getElementById('wdPageTitle');
+  if (titleEl) titleEl.textContent = wName ? `Destinos — ${wName}` : 'Destinos — novo webhook';
+  const subtitleEl = document.getElementById('wdPageSubtitle');
+  if (subtitleEl) subtitleEl.textContent = label + '. Alterações só ficam persistidas ao clicar em "Guardar Webhook".';
 }
 
+// Opens the dedicated Destinations page (a real page in the main layout, not
+// a modal) for the webhook currently loaded into webhookTargetState/editingWebhook.
 function openDestinationsPage() {
+  document.getElementById('webhookModal').style.display = 'none';
   updateDestinationsSummary();
   renderWebhookTargets();
-  document.getElementById('destinationsPage').style.display = 'block';
+  navigate('webhookDestinations');
 }
 
-function closeDestinationsPage() {
-  document.getElementById('destinationsPage').style.display = 'none';
+// Entry point from the Webhooks list (row link / context menu "Destinos" action).
+// Loads the webhook's full config into the (hidden) settings form so Save keeps
+// working from the Destinations page, then jumps straight to it.
+function manageWebhookDestinations(name) {
+  const w = _allWebhooks.find(x => x.name === name);
+  if (!w) return;
+  openWebhookModal(w);
+  openDestinationsPage();
 }
 
 function openDestinationEditor(i) {
@@ -3731,7 +3747,6 @@ function closeDestinationEditor() {
 function openWebhookModal(webhook = null) {
   editingWebhook = webhook;
   editingDestinationIndex = -1;
-  document.getElementById('destinationsPage').style.display = 'none';
   document.getElementById('destinationEditModal').style.display = 'none';
   document.getElementById('webhookModalTitle').textContent = webhook ? 'Edit Webhook Distributor' : 'New Webhook Distributor';
   document.getElementById('wName').value = webhook ? webhook.name : ''; document.getElementById('wName').disabled = !!webhook;
@@ -3824,8 +3839,8 @@ function toggleSilenceSection() {
 
 function closeWebhookModal() {
   document.getElementById('webhookModal').style.display = 'none';
-  document.getElementById('destinationsPage').style.display = 'none';
   document.getElementById('destinationEditModal').style.display = 'none';
+  if (document.getElementById('pageWebhookDestinations')?.classList.contains('active')) navigate('webhooks');
   editingDestinationIndex = -1;
   editingWebhook = null;
 }
