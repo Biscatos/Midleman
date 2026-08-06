@@ -2887,7 +2887,7 @@ let fullEditor = null;
 let currentFullEditorIndex = -1;
 
 function flattenPayloadPaths(obj, prefix = '', out = [], depth = 0) {
-    if (depth > 5) return out;
+    if (depth > 10) return out;
     if (obj === null || obj === undefined) return out;
     if (Array.isArray(obj)) {
         // Expose array itself + first few indices
