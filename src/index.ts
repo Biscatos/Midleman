@@ -2257,6 +2257,7 @@ const server = Bun.serve({
                         blockedExtensions: p.blockedExtensions ? Array.from(p.blockedExtensions) : [],
                         allowedIps: p.allowedIps || [],
                         allowedPaths: p.allowedPaths || [],
+                        rateLimit: p.rateLimit || null,
                         forwardPath: p.forwardPath !== false,
                         loginTitle: p.loginTitle || '',
                         loginLogo: p.loginLogo || '',
@@ -2319,6 +2320,12 @@ const server = Bun.serve({
                         );
                     }
                     if (Array.isArray(input.allowedIps) && input.allowedIps.length) profile.allowedIps = input.allowedIps as string[];
+                    if (input.rateLimit && typeof input.rateLimit === 'object') {
+                        const rl = input.rateLimit as Record<string, unknown>;
+                        if (typeof rl.requestsPerMinute === 'number' && rl.requestsPerMinute > 0) {
+                            profile.rateLimit = { requestsPerMinute: rl.requestsPerMinute, perIp: !!rl.perIp };
+                        }
+                    }
                     if (Array.isArray(input.allowedPaths) && input.allowedPaths.length) {
                         profile.allowedPaths = (input.allowedPaths as string[]).map(s => s.trim()).filter(Boolean);
                     }

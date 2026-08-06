@@ -831,6 +831,9 @@ function renderProfiles(profiles) {
     const ipBadge = (p.allowedIps && p.allowedIps.length)
       ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px" title="${esc(p.allowedIps.join(', '))}">IP restricted</span>`
       : '';
+    const rateLimitBadge = (p.rateLimit && p.rateLimit.requestsPerMinute)
+      ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px" title="${p.rateLimit.requestsPerMinute} req/min${p.rateLimit.perIp ? ' per IP' : ' shared'}">${p.rateLimit.requestsPerMinute}/min${p.rateLimit.perIp ? ' /IP' : ''}</span>`
+      : '';
     const blockedVal = p.blockedExtensions?.length
       ? `<span style="color:var(--red)">${esc(p.blockedExtensions.join(', '))}</span>`
       : '<span style="color:var(--text3)">None</span>';
@@ -840,7 +843,7 @@ function renderProfiles(profiles) {
   <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${p.port || '<span style="color:var(--text3)">N/A</span>'}</td>
   <td style="padding:8px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'SF Mono',Monaco,monospace;color:var(--text2)" title="${esc(p.targetUrl)}">${esc(p.targetUrl)}</td>
   <td style="padding:8px">${authVal}</td>
-  <td style="padding:8px">${accessBadge}${ipBadge}</td>
+  <td style="padding:8px">${accessBadge}${ipBadge}${rateLimitBadge}</td>
   <td style="padding:8px">${blockedVal}</td>
   <td style="padding:8px 12px;text-align:right">
     <button data-type="profile" data-name="${esc(p.name)}" onclick="showContextMenu(event,this)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:2px 10px;cursor:pointer;color:var(--text2);font-size:18px;line-height:1.2;letter-spacing:1px" title="Actions">&#8942;</button>
@@ -881,6 +884,10 @@ async function openProfileModal(profile = null) {
   document.getElementById('pBlocked').value = profile?.blockedExtensions ? profile.blockedExtensions.join(', ') : '';
   IpTagInput.setValue('pAllowedIps', profile?.allowedIps || []);
   document.getElementById('pAllowedPaths').value = profile?.allowedPaths ? profile.allowedPaths.join('\n') : '';
+  document.getElementById('pRateLimitEnabled').checked = !!(profile && profile.rateLimit && profile.rateLimit.requestsPerMinute);
+  document.getElementById('pRateLimitRpm').value = (profile && profile.rateLimit) ? profile.rateLimit.requestsPerMinute : '';
+  document.getElementById('pRateLimitPerIp').checked = !!(profile && profile.rateLimit && profile.rateLimit.perIp);
+  toggleRateLimitFields();
   // NPM fields (hidden inputs — populated by Adopt flow; managed via the Nginx PM page otherwise)
   document.getElementById('pPublicHostnames').value = profile?.publicHostnames ? profile.publicHostnames.join(', ') : '';
   document.getElementById('pTlsMode').value = profile?.tlsMode || 'none';
@@ -932,6 +939,10 @@ function toggleUpstreamAuthSection() {
 function toggleConsentFields() {
   const on = document.getElementById('pConsentEnabled').checked;
   document.getElementById('pConsentFields').style.display = on ? '' : 'none';
+}
+function toggleRateLimitFields() {
+  const on = document.getElementById('pRateLimitEnabled').checked;
+  document.getElementById('pRateLimitFields').style.display = on ? 'grid' : 'none';
 }
 function closeProfileModal() { document.getElementById('profileModal').classList.remove('active'); editingProfile = null; }
 
@@ -996,6 +1007,16 @@ async function saveProfile() {
   if (allowedPathsRaw) {
     const paths = allowedPathsRaw.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
     if (paths.length) body.allowedPaths = paths;
+  }
+  if (document.getElementById('pRateLimitEnabled').checked) {
+    const rpm = Number(v('pRateLimitRpm'));
+    if (!rpm || rpm < 1) {
+      toast('Enter a valid requests-per-minute value or disable the rate limit.', 'error');
+      return;
+    }
+    body.rateLimit = { requestsPerMinute: rpm, perIp: document.getElementById('pRateLimitPerIp').checked };
+  } else {
+    body.rateLimit = null;
   }
   // NPM fields (hidden — only meaningful for adopted profiles; preserved across saves)
   const hostnamesRaw = v('pPublicHostnames');
@@ -2755,6 +2776,7 @@ function viewWebhookLogs(name) {
 }
 
 let webhookTargetState = [];
+let editingDestinationIndex = -1;
 let showTestPayload = false;
 
 function toggleTestPayload() {
@@ -3269,7 +3291,7 @@ function toggleRetrySection() {
 
 function addWebhookTarget(target = "") {
   if (typeof target === 'string') {
-    webhookTargetState.push({ type: 'basic', url: target, method: 'POST', bodyTemplate: '', customBody: false, dropEmpty: false, customHeaders: [], forwardHeaders: false, retry: null, retryOpen: false, persistentRetry: null, persistentRetryOpen: false });
+    webhookTargetState.push({ type: 'basic', url: target, method: 'POST', bodyTemplate: '', customBody: false, dropEmpty: false, customHeaders: [], forwardHeaders: false, filter: [], retry: null, retryOpen: false, persistentRetry: null, persistentRetryOpen: false });
   } else {
     const headersArr = [];
     if (target.customHeaders) {
@@ -3277,6 +3299,11 @@ function addWebhookTarget(target = "") {
             headersArr.push({ key: k, value: v });
         }
     }
+    const filterArr = (target.filter || []).map(c => ({
+      path: c.path || '',
+      op: c.op || 'eq',
+      value: c.op === 'in' ? (Array.isArray(c.value) ? c.value.join(', ') : '') : (c.value !== undefined ? String(c.value) : ''),
+    }));
     // A destination is "basic" if it has no method override, no custom headers,
     // no body template, and no forwardHeaders — only retry/persistent fields.
     const isBasicShape = !target.method && headersArr.length === 0
@@ -3290,6 +3317,7 @@ function addWebhookTarget(target = "") {
       dropEmpty: target.dropEmpty === true,
       customHeaders: headersArr,
       forwardHeaders: target.forwardHeaders === true,
+      filter: filterArr,
       retry: target.retry || null,
       retryOpen: !!target.retry,
       persistentRetry: target.persistentRetry || null,
@@ -3297,6 +3325,21 @@ function addWebhookTarget(target = "") {
     });
   }
   renderWebhookTargets();
+}
+
+function addWebhookTargetFilter(index) {
+  webhookTargetState[index].filter.push({ path: '', op: 'eq', value: '' });
+  renderDestinationEditor(index);
+}
+
+function removeWebhookTargetFilter(index, fIndex) {
+  webhookTargetState[index].filter.splice(fIndex, 1);
+  renderDestinationEditor(index);
+}
+
+function updateWebhookTargetFilter(index, fIndex, field, value) {
+  webhookTargetState[index].filter[fIndex][field] = value;
+  if (field === 'op') renderDestinationEditor(index);
 }
 
 function toggleTargetRetry(index) {
@@ -3310,7 +3353,7 @@ function toggleTargetRetry(index) {
       if (t.persistentRetry) t.persistentRetry.enabled = false;
     }
   }
-  renderWebhookTargets();
+  renderDestinationEditor(index);
 }
 
 function updateTargetRetry(index, field, value) {
@@ -3331,7 +3374,7 @@ function toggleTargetPersistentRetry(index) {
   } else if (t.persistentRetry) {
     t.persistentRetry.enabled = false;
   }
-  renderWebhookTargets();
+  renderDestinationEditor(index);
 }
 
 function updateTargetPersistentRetry(index, field, value) {
@@ -3342,6 +3385,7 @@ function updateTargetPersistentRetry(index, field, value) {
 }
 
 function removeWebhookTarget(index) {
+  if (editingDestinationIndex === index) closeDestinationEditor();
   webhookTargetState.splice(index, 1);
   renderWebhookTargets();
 }
@@ -3349,7 +3393,7 @@ function removeWebhookTarget(index) {
 function toggleWebhookTargetType(index) {
   const t = webhookTargetState[index];
   t.type = t.type === 'basic' ? 'custom' : 'basic';
-  renderWebhookTargets();
+  renderDestinationEditor(index);
 }
 
 function updateWebhookTargetField(index, field, value) {
@@ -3359,12 +3403,12 @@ function updateWebhookTargetField(index, field, value) {
 
 function addWebhookTargetHeader(index) {
   webhookTargetState[index].customHeaders.push({ key: '', value: '' });
-  renderWebhookTargets();
+  renderDestinationEditor(index);
 }
 
 function removeWebhookTargetHeader(index, hIndex) {
   webhookTargetState[index].customHeaders.splice(hIndex, 1);
-  renderWebhookTargets();
+  renderDestinationEditor(index);
 }
 
 function updateWebhookTargetHeader(index, hIndex, field, val) {
@@ -3378,9 +3422,36 @@ function renderWebhookTargets() {
     container.innerHTML = '<div style="color:var(--text3);font-size:12px;text-align:center;padding:12px">No actions added. Click "+ Add Action" above.</div>';
     return;
   }
-  
+
+  const badge = (label, accent) => `<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:${accent ? 'rgba(0,120,212,0.12)' : 'var(--surface2)'};color:${accent ? 'var(--accent)' : 'var(--text3)'};border:1px solid ${accent ? 'rgba(0,120,212,0.3)' : 'var(--border)'};white-space:nowrap">${label}</span>`;
+
   container.innerHTML = webhookTargetState.map((t, i) => {
-    const headersHtml = (t.customHeaders || []).map((h, hIndex) => `
+    const activeFilters = (t.filter || []).filter(c => c.path.trim());
+    const badges = [
+      badge(t.type === 'custom' ? esc(t.method || 'POST') : 'Basic'),
+      t.customBody && t.bodyTemplate ? badge('Custom Body') : '',
+      activeFilters.length ? badge(`Filtro (${activeFilters.length})`, true) : '',
+      t.retryOpen ? badge('Retry override') : '',
+      t.persistentRetryOpen ? badge('Persistent retry') : '',
+    ].filter(Boolean).join('');
+
+    return `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm)">
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
+        <div style="font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.url)}">${t.url ? esc(t.url) : '<span style="color:var(--text3)">(sem URL)</span>'}</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">${badges}</div>
+      </div>
+      <button class="btn btn-sm" onclick="openDestinationEditor(${i})" style="padding:3px 10px;font-size:11px;flex-shrink:0">Editar</button>
+      <button onclick="removeWebhookTarget(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;line-height:1;padding:0 4px;flex-shrink:0" title="Remove Target">&times;</button>
+    </div>`;
+  }).join('');
+}
+
+function renderDestinationEditorMarkup(i) {
+  const t = webhookTargetState[i];
+  if (!t) return '';
+
+  const headersHtml = (t.customHeaders || []).map((h, hIndex) => `
       <div style="display:flex;flex-direction:column;gap:2px;margin-top:4px">
           <div style="display:flex;gap:4px">
             <input type="text" placeholder="Key" value="${esc(h.key)}" oninput="updateWebhookTargetHeader(${i}, ${hIndex}, 'key', this.value)" style="flex:1;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
@@ -3391,22 +3462,48 @@ function renderWebhookTargets() {
       </div>
     `).join('');
 
-    return `
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;position:relative;padding:10px;">
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+  const filterHtml = (t.filter || []).map((c, fIndex) => `
+      <div style="display:flex;gap:4px;align-items:center;margin-top:4px">
+        <input type="text" placeholder="path (ex: customer.tier)" value="${esc(c.path)}" oninput="updateWebhookTargetFilter(${i}, ${fIndex}, 'path', this.value)" style="flex:2;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
+        <select onchange="updateWebhookTargetFilter(${i}, ${fIndex}, 'op', this.value)" style="padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
+          <option value="eq" ${c.op === 'eq' ? 'selected' : ''}>igual a</option>
+          <option value="neq" ${c.op === 'neq' ? 'selected' : ''}>diferente de</option>
+          <option value="contains" ${c.op === 'contains' ? 'selected' : ''}>contém</option>
+          <option value="in" ${c.op === 'in' ? 'selected' : ''}>está em (lista)</option>
+          <option value="exists" ${c.op === 'exists' ? 'selected' : ''}>existe</option>
+          <option value="notExists" ${c.op === 'notExists' ? 'selected' : ''}>não existe</option>
+        </select>
+        ${(c.op !== 'exists' && c.op !== 'notExists') ? `<input type="text" placeholder="${c.op === 'in' ? 'valores separados por vírgula' : 'valor'}" value="${esc(c.value)}" oninput="updateWebhookTargetFilter(${i}, ${fIndex}, 'value', this.value)" style="flex:2;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">` : ''}
+        <button onclick="removeWebhookTargetFilter(${i}, ${fIndex})" tabindex="-1" style="background:none;border:none;color:var(--red);cursor:pointer;padding:0 4px" title="Remover condição">&times;</button>
+      </div>
+    `).join('');
+
+  return `
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;gap:8px;align-items:center">
         <select onchange="toggleWebhookTargetType(${i})" style="padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);font-size:12px;color:var(--text);outline:none">
           <option value="basic" ${t.type === 'basic' ? 'selected' : ''}>Basic Forward</option>
           <option value="custom" ${t.type === 'custom' ? 'selected' : ''}>Custom Action</option>
         </select>
-        <button onclick="removeWebhookTarget(${i})" style="margin-left:auto;background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;line-height:1" title="Remove Target">&times;</button>
+        <button onclick="removeWebhookTarget(${i})" style="margin-left:auto;background:none;border:none;color:var(--red);cursor:pointer;font-size:12px" title="Remove Target">Remover destino</button>
       </div>
-      
+
       <div style="display:flex;flex-direction:column;gap:6px">
         <div>
            <input type="text" placeholder="Target URL (e.g. https://api.com/user/{{user.id}})" value="${esc(t.url)}" oninput="updateWebhookTargetField(${i}, 'url', this.value)" style="width:100%;padding:6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
            <div id="previewUrl_${i}" style="display:none;font-size:10px;color:var(--accent);margin-top:2px;margin-left:4px"></div>
         </div>
-        
+
+        <!-- Conditional delivery: only fires when ALL conditions match the incoming payload -->
+        <div style="border:1px solid var(--border);border-radius:4px;padding:8px;background:var(--surface)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+            <span style="font-size:11px;color:var(--text2);font-weight:600">Entrega condicional</span>
+            <button onclick="addWebhookTargetFilter(${i})" class="btn" style="padding:2px 6px;font-size:10px">+ Adicionar condição</button>
+          </div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:2px">Sem condições = entrega sempre. Com condições, TODAS têm de corresponder ao payload recebido para este destino ser acionado.</div>
+          ${filterHtml}
+        </div>
+
         ${t.type === 'custom' ? `
           <div style="display:flex;flex-direction:column;gap:6px">
             <div style="display:flex;align-items:center;gap:6px">
@@ -3431,7 +3528,7 @@ function renderWebhookTargets() {
 
             <div style="display:flex;flex-direction:column;gap:4px">
               <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none">
-                <input type="checkbox" ${t.customBody ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'customBody', this.checked); renderWebhookTargets()" style="cursor:pointer;accent-color:var(--accent)">
+                <input type="checkbox" ${t.customBody ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'customBody', this.checked); renderDestinationEditor(${i})" style="cursor:pointer;accent-color:var(--accent)">
                 <span style="font-weight:600">Custom Body</span>
                 <span style="color:var(--text3);font-weight:400">— leave unchecked to forward the incoming body as-is</span>
               </label>
@@ -3482,7 +3579,7 @@ function renderWebhookTargets() {
               </div>
             </div>
             <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer">
-              <input type="checkbox" ${t.retry?.retryUntilSuccess ? 'checked' : ''} onchange="updateTargetRetry(${i},'retryUntilSuccess',this.checked);document.getElementById('tRetryOnRow_${i}').style.display=this.checked?'none':'flex';renderWebhookTargets()">
+              <input type="checkbox" ${t.retry?.retryUntilSuccess ? 'checked' : ''} onchange="updateTargetRetry(${i},'retryUntilSuccess',this.checked);document.getElementById('tRetryOnRow_${i}').style.display=this.checked?'none':'flex';renderDestinationEditor(${i})">
               <strong>Retry until success (2xx)</strong>
             </label>
             <div id="tRetryOnRow_${i}" style="display:${t.retry?.retryUntilSuccess ? 'none' : 'flex'};align-items:center;gap:6px">
@@ -3524,14 +3621,36 @@ function renderWebhookTargets() {
         </div>
       </div>
     </div>
-  `}).join('');
+  `;
+}
 
+function openDestinationEditor(i) {
+  editingDestinationIndex = i;
+  const t = webhookTargetState[i];
+  document.getElementById('destinationEditorTitle').textContent = (t && t.url) ? t.url : 'Novo destino';
+  renderDestinationEditor(i);
+  document.getElementById('destinationEditorOverlay').style.display = 'block';
+}
+
+function renderDestinationEditor(i) {
+  if (editingDestinationIndex !== i) return;
+  const content = document.getElementById('destinationEditorContent');
+  if (!content) return;
+  content.innerHTML = renderDestinationEditorMarkup(i);
   initAceEditors();
   updateAllPreviews();
 }
 
+function closeDestinationEditor() {
+  document.getElementById('destinationEditorOverlay').style.display = 'none';
+  editingDestinationIndex = -1;
+  renderWebhookTargets();
+}
+
 function openWebhookModal(webhook = null) {
   editingWebhook = webhook;
+  editingDestinationIndex = -1;
+  document.getElementById('destinationEditorOverlay').style.display = 'none';
   document.getElementById('webhookModalTitle').textContent = webhook ? 'Edit Webhook Distributor' : 'New Webhook Distributor';
   document.getElementById('wName').value = webhook ? webhook.name : ''; document.getElementById('wName').disabled = !!webhook;
   document.getElementById('wPort').value = webhook ? webhook.port : '';
@@ -3620,7 +3739,27 @@ function toggleSilenceSection() {
   document.getElementById('wSilenceSection').style.display = cb.checked ? 'flex' : 'none';
 }
 
-function closeWebhookModal() { document.getElementById('webhookModal').style.display = 'none'; editingWebhook = null; }
+function closeWebhookModal() {
+  document.getElementById('webhookModal').style.display = 'none';
+  document.getElementById('destinationEditorOverlay').style.display = 'none';
+  editingDestinationIndex = -1;
+  editingWebhook = null;
+}
+
+function buildWebhookTargetFilter(t) {
+  return (t.filter || [])
+    .filter(c => c.path.trim())
+    .map(c => {
+      const cond = { path: c.path.trim(), op: c.op };
+      if (c.op === 'in') {
+        cond.value = String(c.value || '').split(',').map(s => s.trim()).filter(Boolean);
+      } else if (c.op !== 'exists' && c.op !== 'notExists') {
+        cond.value = c.value;
+      }
+      return cond;
+    })
+    .filter(c => c.op === 'exists' || c.op === 'notExists' || (c.value !== undefined && c.value !== '' && !(Array.isArray(c.value) && c.value.length === 0)));
+}
 
 async function saveWebhook() {
   const targetsRaw = [];
@@ -3628,9 +3767,11 @@ async function saveWebhook() {
       if (!t.url.trim()) continue;
       const hasRetryOverride = t.retryOpen && t.retry;
       const hasPersistent = t.persistentRetryOpen && t.persistentRetry && t.persistentRetry.enabled;
+      const filterConditions = buildWebhookTargetFilter(t);
+      const hasFilter = filterConditions.length > 0;
 
       // Basic forward with no retry override stays as a plain URL string.
-      if (t.type === 'basic' && !hasRetryOverride && !hasPersistent) {
+      if (t.type === 'basic' && !hasRetryOverride && !hasPersistent && !hasFilter) {
           targetsRaw.push(t.url.trim());
           continue;
       }
@@ -3654,6 +3795,7 @@ async function saveWebhook() {
           dest.bodyTemplate = (t.customBody && t.bodyTemplate.trim()) ? t.bodyTemplate.trim() : undefined;
           dest.dropEmpty = (t.customBody && t.dropEmpty) ? true : undefined;
       }
+      if (hasFilter) dest.filter = filterConditions;
       if (hasRetryOverride) dest.retry = t.retry;
       if (hasPersistent) {
           dest.persistentRetry = {

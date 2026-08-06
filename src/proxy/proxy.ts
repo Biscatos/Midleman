@@ -159,6 +159,41 @@ function checkProxyLoginAuth(req: Request, profileName: string): { username: str
     return { username, token };
 }
 
+// ─── Per-Profile Rate Limiting ──────────────────────────────────────────────
+// Fixed 60s window per profile (or per profile+IP when perIp is set).
+
+interface RateBucket { count: number; resetAt: number; }
+const proxyRateBuckets = new Map<string, RateBucket>();
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const MAX_RATE_LIMIT_BUCKETS = 20_000; // prevent unbounded growth under a per-IP flood
+
+/** Returns true if the request is within budget (and consumes one unit of it). */
+function checkProxyRateLimit(profile: ProxyProfile, clientIp: string): boolean {
+    const rl = profile.rateLimit;
+    if (!rl || !rl.requestsPerMinute || rl.requestsPerMinute <= 0) return true;
+
+    const key = rl.perIp ? JSON.stringify([profile.name, clientIp]) : JSON.stringify([profile.name]);
+    const now = Date.now();
+    const bucket = proxyRateBuckets.get(key);
+    if (!bucket || bucket.resetAt < now) {
+        if (proxyRateBuckets.size >= MAX_RATE_LIMIT_BUCKETS) {
+            const oldest = proxyRateBuckets.keys().next().value;
+            if (oldest) proxyRateBuckets.delete(oldest);
+        }
+        proxyRateBuckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+        return true;
+    }
+    bucket.count++;
+    return bucket.count <= rl.requestsPerMinute;
+}
+
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, bucket] of proxyRateBuckets) {
+        if (bucket.resetAt < now) proxyRateBuckets.delete(key);
+    }
+}, 5 * 60 * 1000);
+
 /**
  * Handle proxy bypass requests.
  * Routes: /proxy/{profileName}/...path
@@ -260,6 +295,21 @@ export async function handleProxyRequest(
             error: 'Not Found',
             message: `Proxy profile "${profileName}" not found. Available: ${available}`,
         });
+    }
+
+    // ── Rate limit (checked before any auth/allowlist work) ──
+    if (profile.rateLimit?.requestsPerMinute) {
+        const rlClientIp = getClientIP(req);
+        if (!checkProxyRateLimit(profile, rlClientIp)) {
+            logAudit({
+                action: 'proxy.ratelimit.blocked',
+                actorUsername: '',
+                details: { profile: profileName, path: remainingPath },
+                ip: rlClientIp,
+                userAgent: req.headers.get('user-agent'),
+            });
+            return jsonResponse(429, { error: 'Too Many Requests', message: 'Rate limit exceeded for this proxy.' });
+        }
     }
 
     // Detect browser vs API client (used for cookie policy and error responses)
@@ -773,6 +823,21 @@ export async function handleDirectProxy(
     const computedAuthValue = profile.apiKey
         ? (profile.authPrefix ? `${profile.authPrefix} ${profile.apiKey}` : profile.apiKey)
         : '';
+
+    // ── Rate limit (checked before any auth/allowlist work) ──
+    if (profile.rateLimit?.requestsPerMinute) {
+        const rlClientIp = getClientIP(req);
+        if (!checkProxyRateLimit(profile, rlClientIp)) {
+            logAudit({
+                action: 'proxy.ratelimit.blocked',
+                actorUsername: '',
+                details: { profile: profileName, path: url.pathname },
+                ip: rlClientIp,
+                userAgent: req.headers.get('user-agent'),
+            });
+            return jsonResponse(429, { error: 'Too Many Requests', message: 'Rate limit exceeded for this proxy.' });
+        }
+    }
 
     // Detect browser vs API client (used for cookie policy and error responses)
     const accept = req.headers.get('accept') || '';

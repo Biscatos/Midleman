@@ -3140,7 +3140,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
             <div style="display:flex;gap:6px">
               <button class="btn btn-sm" onclick="toggleTestPayload()" style="padding:2px 8px;font-size:11px"
                 tabindex="-1">Toggle Test Payload</button>
-              <button class="btn btn-sm" onclick="addWebhookTarget()" style="padding:2px 8px;font-size:11px">+ Add
+              <button class="btn btn-sm" onclick="addWebhookTarget(''); openDestinationEditor(webhookTargetState.length - 1)" style="padding:2px 8px;font-size:11px">+ Add
                 Action</button>
             </div>
           </div>
@@ -3278,6 +3278,22 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       <button class="btn btn-primary btn-sm" onclick="saveWebhook()">Save Webhook</button>
     </div>
   </div>
+</div>
+
+<!-- Destination Editor (full-page overlay, drilled into from the Webhook Modal's destination list) -->
+<div id="destinationEditorOverlay"
+  style="display:none;position:fixed;inset:0;z-index:250;background:var(--surface);overflow-y:auto">
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1">
+    <div style="display:flex;align-items:center;gap:10px">
+      <button onclick="closeDestinationEditor()" class="btn btn-sm" style="padding:4px 10px;display:flex;align-items:center;gap:4px">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        Voltar
+      </button>
+      <h3 id="destinationEditorTitle" style="font-size:15px;font-weight:600">Editar destino</h3>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="closeDestinationEditor()">Concluído</button>
+  </div>
+  <div id="destinationEditorContent" style="padding:20px;max-width:760px;margin:0 auto"></div>
 </div>
 
 <!-- Connector Modal -->
@@ -4107,6 +4123,25 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         <div class="form-group span-2"><label>Allowed Paths <span
               style="color:var(--text3);font-weight:400;font-size:11px">— exact path (e.g. <code>/api/v1/status</code>) or prefix ending with <code>*</code> (e.g. <code>/api/v1/users*</code>). One per line. Leave empty to allow all paths.</span></label>
           <textarea id="pAllowedPaths" rows="3" placeholder="/api/v1/users&#10;/api/v1/users/*" style="width:100%;font-family:monospace;font-size:12px"></textarea>
+        </div>
+        <div class="form-group span-2">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="pRateLimitEnabled" onchange="toggleRateLimitFields()" style="cursor:pointer;accent-color:var(--accent)">
+            <span>Rate Limit</span>
+          </label>
+          <div id="pRateLimitFields" style="display:none;margin-top:10px;grid-template-columns:1fr 1fr;gap:10px;align-items:end">
+            <div>
+              <label style="font-size:11.5px;color:var(--text3);display:block;margin-bottom:4px">Requests per minute</label>
+              <input type="number" id="pRateLimitRpm" min="1" step="1" placeholder="e.g. 300" style="width:100%;height:38px;padding:0 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px">
+            </div>
+            <div>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;height:38px">
+                <input type="checkbox" id="pRateLimitPerIp" style="cursor:pointer;accent-color:var(--accent)">
+                <span>Apply per client IP</span>
+              </label>
+            </div>
+          </div>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Requests over the limit get a 429 response. Unchecked "per client IP" means the limit is a single shared budget for the whole proxy.</span>
         </div>
       </div>
       <div class="form-section">Options</div>
