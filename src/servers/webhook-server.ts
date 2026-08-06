@@ -796,7 +796,7 @@ async function handleWebhookFanout(
     const FILTER_BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
     function resolvePath(data: any, path: string): any {
         const parts = path.split('.');
-        if (parts.length > 5) return undefined;
+        if (parts.length > 10) return undefined;
         let val: any = data;
         for (const k of parts) {
             if (FILTER_BLOCKED_KEYS.has(k) || val === undefined || val === null) return undefined;
