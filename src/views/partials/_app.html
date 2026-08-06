@@ -693,32 +693,32 @@
         <div>
           <button class="btn btn-sm" onclick="navigate('webhooks')" style="margin-bottom:10px;padding:4px 10px;font-size:12px;display:flex;align-items:center;gap:4px">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-            Voltar a Webhooks
+            Back to Webhooks
           </button>
-          <h2 id="wdPageTitle">Destinos</h2>
-          <p id="wdPageSubtitle">Destinos de fan-out configurados para este webhook.</p>
+          <h2 id="wdPageTitle">Destinations</h2>
+          <p id="wdPageSubtitle">Fan-out destinations configured for this webhook.</p>
         </div>
         <div style="display:flex;gap:8px;flex-shrink:0">
-          <button class="btn btn-sm" onclick="document.getElementById('webhookModal').style.display='flex'">Definições do webhook</button>
-          <button class="btn btn-primary btn-sm" onclick="saveWebhook()">Guardar Webhook</button>
+          <button class="btn btn-sm" onclick="document.getElementById('webhookModal').style.display='flex'">Webhook settings</button>
+          <button class="btn btn-primary btn-sm" onclick="saveWebhook()">Save Webhook</button>
         </div>
       </div>
 
       <div class="card" style="margin-bottom:16px">
         <div class="card-body" style="padding:12px 16px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <span style="font-size:12.5px;font-weight:600">Payload de teste (opcional)</span>
+            <span style="font-size:12.5px;font-weight:600">Test Payload (optional)</span>
             <div style="display:flex;gap:6px">
-              <button class="btn btn-sm" onclick="toggleTestPayload()" style="padding:2px 8px;font-size:11px" tabindex="-1">Mostrar/Ocultar</button>
+              <button class="btn btn-sm" onclick="toggleTestPayload()" style="padding:2px 8px;font-size:11px" tabindex="-1">Show/Hide</button>
               <button class="btn btn-sm" onclick="fetchRecentWebhookPayload()" style="padding:2px 8px;font-size:10px" tabindex="-1">Fetch recent request</button>
-              <button class="btn btn-sm" onclick="fetchAndMergeWebhookPayloads()" style="padding:2px 8px;font-size:10px" tabindex="-1" title="Analisa os últimos 50 payloads e gera um schema unificado com todos os campos vistos">Fetch &amp; merge (50)</button>
+              <button class="btn btn-sm" onclick="fetchAndMergeWebhookPayloads()" style="padding:2px 8px;font-size:10px" tabindex="-1" title="Analyzes the last 50 payloads and builds a unified schema of every field seen">Fetch &amp; merge (50)</button>
             </div>
           </div>
           <div id="wTestPayloadContainer" style="display:none">
             <textarea id="wTestPayload" rows="3" placeholder='{"event":"order.created", "data": {"id": 123}}'
               style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;color:var(--text);font-family:monospace;font-size:11px;resize:vertical"
               oninput="mergedSchemaStats=null;updateAllPreviews()"></textarea>
-            <div style="font-size:10px;color:var(--text3);margin-top:4px">Usado para pré-visualizar templates, filtros e sugestões de campos (intellisense) ao editar cada destino.</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:4px">Used to preview templates, filters, and field suggestions (intellisense) while editing each destination.</div>
           </div>
         </div>
       </div>
@@ -726,8 +726,8 @@
       <div class="card">
         <div class="card-body" style="padding:12px 16px 0">
           <div style="display:flex;justify-content:space-between;align-items:center">
-            <span id="wDestinationsSummary" style="font-size:12.5px;color:var(--text2);font-weight:600">Nenhum destino configurado</span>
-            <button class="btn btn-sm" onclick="addWebhookTarget(''); openDestinationEditor(webhookTargetState.length - 1)" style="padding:4px 10px;font-size:12px">+ Adicionar destino</button>
+            <span id="wDestinationsSummary" style="font-size:12.5px;color:var(--text2);font-weight:600">No destinations configured</span>
+            <button class="btn btn-sm" onclick="addWebhookTarget(''); openDestinationEditor(webhookTargetState.length - 1)" style="padding:4px 10px;font-size:12px">+ Add destination</button>
           </div>
         </div>
         <div class="card-body" style="padding:0;overflow-x:auto">
@@ -735,14 +735,14 @@
             <thead>
               <tr style="background:var(--surface2);text-align:left">
                 <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">URL</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Tipo</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Filtro</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Type</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Filter</th>
                 <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Retry</th>
                 <th style="padding:10px 12px"></th>
               </tr>
             </thead>
             <tbody id="wDestinationsContainer">
-              <tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">Sem destinos.</td></tr>
+              <tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">No destinations.</td></tr>
             </tbody>
           </table>
         </div>
@@ -3199,11 +3199,11 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         <div class="form-group span-2">
           <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm)">
             <div>
-              <span style="font-weight:600;font-size:13px">Destinos</span>
-              <div id="wDestinationsSummary" style="font-size:11.5px;color:var(--text3);margin-top:2px">Nenhum destino configurado</div>
+              <span style="font-weight:600;font-size:13px">Destinations</span>
+              <div id="wDestinationsSummaryModal" style="font-size:11.5px;color:var(--text3);margin-top:2px">No destinations configured</div>
             </div>
             <button class="btn btn-sm btn-primary" onclick="openDestinationsPage()" style="padding:5px 12px;font-size:12px;display:flex;align-items:center;gap:6px">
-              Gerir destinos
+              Manage destinations
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
             </button>
           </div>
@@ -3328,7 +3328,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
   style="display:none;position:fixed;inset:0;z-index:280;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
   <div style="max-width:720px;width:100%;max-height:90vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border);flex-shrink:0">
-      <h3 id="destinationEditTitle" style="font-size:15px;font-weight:600">Editar destino</h3>
+      <h3 id="destinationEditTitle" style="font-size:15px;font-weight:600">Edit destination</h3>
       <button onclick="closeDestinationEditor()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
     </div>
     <div id="destinationEditContent" style="padding:18px 20px;overflow-y:auto;flex:1"></div>

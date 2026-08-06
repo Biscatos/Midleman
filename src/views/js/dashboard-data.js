@@ -174,7 +174,7 @@ function showContextMenu(e, btn) {
       { label: 'View Logs', fn: () => viewWebhookLogs(name) },
       { label: 'Restart', fn: () => restartWebhookAction(name) },
       { label: 'Edit', fn: () => editWebhook(name) },
-      { label: 'Destinos', fn: () => manageWebhookDestinations(name) },
+      { label: 'Destinations', fn: () => manageWebhookDestinations(name) },
       canLinkNpm ? { label: 'Link to NPM host…', fn: () => openLinkToNpmModalForWebhook(name) } : null,
       '---',
       { label: 'Delete', fn: () => deleteWebhook(name), danger: true },
@@ -2087,7 +2087,7 @@ function renderWebhooks(webhooks) {
   <td style="padding:8px 12px;font-weight:600">${esc(w.name)}</td>
   <td style="padding:8px">${statusBadge}${wNpmBadge}</td>
   <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${w.port}</td>
-  <td style="padding:8px"><a href="javascript:void(0)" onclick="manageWebhookDestinations('${esc(w.name)}')" style="color:var(--accent);text-decoration:none">${numTargets} destino${numTargets === 1 ? '' : 's'} →</a></td>
+  <td style="padding:8px"><a href="javascript:void(0)" onclick="manageWebhookDestinations('${esc(w.name)}')" style="color:var(--accent);text-decoration:none">${numTargets} destination${numTargets === 1 ? '' : 's'} →</a></td>
   <td style="padding:8px">${authBadge}${wIpBadge}</td>
   <td style="padding:8px;color:var(--accent2)">${w.active > 0 ? w.active : '<span style="color:var(--text3)">0</span>'}</td>
   <td style="padding:8px 12px;text-align:right">
@@ -3440,7 +3440,16 @@ function updateTargetPersistentRetry(index, field, value) {
   webhookTargetState[index].persistentRetry[field] = value;
 }
 
-function removeWebhookTarget(index) {
+async function removeWebhookTarget(index) {
+  const t = webhookTargetState[index];
+  const label = t && t.url ? t.url : 'this destination';
+  if (!(await showConfirm({
+    title: 'Remove destination',
+    message: `Remove ${label}?`,
+    detail: 'This only takes effect once you click "Save Webhook" — but the destination and any filter/retry overrides configured for it will be gone.',
+    confirmText: 'Remove',
+    danger: true,
+  }))) return;
   if (editingDestinationIndex === index) closeDestinationEditor();
   webhookTargetState.splice(index, 1);
   renderWebhookTargets();
@@ -3475,7 +3484,7 @@ function updateWebhookTargetHeader(index, hIndex, field, val) {
 function renderWebhookTargets() {
   const container = document.getElementById('wDestinationsContainer');
   if (webhookTargetState.length === 0) {
-    container.innerHTML = '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">Sem destinos. Clique em "+ Adicionar destino".</td></tr>';
+    container.innerHTML = '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">No destinations yet. Click "+ Add destination".</td></tr>';
     return;
   }
 
@@ -3494,13 +3503,15 @@ function renderWebhookTargets() {
 
     return `
     <tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
-      <td style="padding:8px 12px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'SF Mono',Monaco,monospace;color:var(--text2)" title="${esc(t.url)}">${t.url ? esc(t.url) : '<span style="color:var(--text3)">(sem URL)</span>'}</td>
+      <td style="padding:8px 12px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'SF Mono',Monaco,monospace;color:var(--text2)" title="${esc(t.url)}">${t.url ? esc(t.url) : '<span style="color:var(--text3)">(no URL)</span>'}</td>
       <td style="padding:8px">${typeBadges}</td>
-      <td style="padding:8px">${activeFilters.length ? badge(`${activeFilters.length} condição${activeFilters.length === 1 ? '' : 'ões'}`, true) : '<span style="color:var(--text3);font-size:11px">—</span>'}</td>
+      <td style="padding:8px">${activeFilters.length ? badge(`${activeFilters.length} condition${activeFilters.length === 1 ? '' : 's'}`, true) : '<span style="color:var(--text3);font-size:11px">—</span>'}</td>
       <td style="padding:8px">${retryBadges}</td>
       <td style="padding:8px 12px;text-align:right;white-space:nowrap">
-        <button class="btn btn-sm" onclick="openDestinationEditor(${i})" style="padding:3px 10px;font-size:11.5px">Editar</button>
-        <button onclick="removeWebhookTarget(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;line-height:1;padding:0 4px" title="Remover destino">&times;</button>
+        <button class="btn btn-sm" onclick="openDestinationEditor(${i})" style="padding:3px 10px;font-size:11.5px">Edit</button>
+        <button onclick="removeWebhookTarget(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;padding:4px;display:inline-flex;align-items:center;border-radius:4px" onmouseenter="this.style.background='rgba(220,38,38,0.1)'" onmouseleave="this.style.background='none'" title="Remove destination">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        </button>
       </td>
     </tr>`;
   }).join('');
@@ -3523,22 +3534,22 @@ function renderDestinationEditorMarkup(i) {
 
   const filterHtml = (t.filter || []).map((c, fIndex) => `
       <div style="display:flex;gap:4px;align-items:center;margin-top:4px">
-        <input type="text" placeholder="path (ex: customer.tier)" value="${esc(c.path)}"
+        <input type="text" placeholder="path (e.g. customer.tier)" value="${esc(c.path)}"
           oninput="updateWebhookTargetFilter(${i}, ${fIndex}, 'path', this.value); renderFilterAutocomplete(this, ${i}, ${fIndex})"
           onfocus="renderFilterAutocomplete(this, ${i}, ${fIndex})"
           onblur="setTimeout(hideFilterAutocomplete, 150)"
           autocomplete="off"
           style="flex:2;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
         <select onchange="updateWebhookTargetFilter(${i}, ${fIndex}, 'op', this.value)" style="padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
-          <option value="eq" ${c.op === 'eq' ? 'selected' : ''}>igual a</option>
-          <option value="neq" ${c.op === 'neq' ? 'selected' : ''}>diferente de</option>
-          <option value="contains" ${c.op === 'contains' ? 'selected' : ''}>contém</option>
-          <option value="in" ${c.op === 'in' ? 'selected' : ''}>está em (lista)</option>
-          <option value="exists" ${c.op === 'exists' ? 'selected' : ''}>existe</option>
-          <option value="notExists" ${c.op === 'notExists' ? 'selected' : ''}>não existe</option>
+          <option value="eq" ${c.op === 'eq' ? 'selected' : ''}>equals</option>
+          <option value="neq" ${c.op === 'neq' ? 'selected' : ''}>not equals</option>
+          <option value="contains" ${c.op === 'contains' ? 'selected' : ''}>contains</option>
+          <option value="in" ${c.op === 'in' ? 'selected' : ''}>is in (list)</option>
+          <option value="exists" ${c.op === 'exists' ? 'selected' : ''}>exists</option>
+          <option value="notExists" ${c.op === 'notExists' ? 'selected' : ''}>does not exist</option>
         </select>
-        ${(c.op !== 'exists' && c.op !== 'notExists') ? `<input type="text" placeholder="${c.op === 'in' ? 'valores separados por vírgula' : 'valor'}" value="${esc(c.value)}" oninput="updateWebhookTargetFilter(${i}, ${fIndex}, 'value', this.value)" style="flex:2;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">` : ''}
-        <button onclick="removeWebhookTargetFilter(${i}, ${fIndex})" tabindex="-1" style="background:none;border:none;color:var(--red);cursor:pointer;padding:0 4px" title="Remover condição">&times;</button>
+        ${(c.op !== 'exists' && c.op !== 'notExists') ? `<input type="text" placeholder="${c.op === 'in' ? 'comma-separated values' : 'value'}" value="${esc(c.value)}" oninput="updateWebhookTargetFilter(${i}, ${fIndex}, 'value', this.value)" style="flex:2;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">` : ''}
+        <button onclick="removeWebhookTargetFilter(${i}, ${fIndex})" tabindex="-1" style="background:none;border:none;color:var(--red);cursor:pointer;padding:0 4px" title="Remove condition">&times;</button>
       </div>
     `).join('');
 
@@ -3549,7 +3560,10 @@ function renderDestinationEditorMarkup(i) {
           <option value="basic" ${t.type === 'basic' ? 'selected' : ''}>Basic Forward</option>
           <option value="custom" ${t.type === 'custom' ? 'selected' : ''}>Custom Action</option>
         </select>
-        <button onclick="removeWebhookTarget(${i})" style="margin-left:auto;background:none;border:none;color:var(--red);cursor:pointer;font-size:12px" title="Remove Target">Remover destino</button>
+        <button onclick="removeWebhookTarget(${i})" style="margin-left:auto;background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;display:inline-flex;align-items:center;gap:5px;padding:3px 6px;border-radius:4px" onmouseenter="this.style.background='rgba(220,38,38,0.1)'" onmouseleave="this.style.background='none'" title="Remove destination">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+          Remove destination
+        </button>
       </div>
 
       <div style="display:flex;flex-direction:column;gap:6px">
@@ -3561,10 +3575,10 @@ function renderDestinationEditorMarkup(i) {
         <!-- Conditional delivery: only fires when ALL conditions match the incoming payload -->
         <div style="border:1px solid var(--border);border-radius:4px;padding:8px;background:var(--surface)">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
-            <span style="font-size:11px;color:var(--text2);font-weight:600">Entrega condicional</span>
-            <button onclick="addWebhookTargetFilter(${i})" class="btn" style="padding:2px 6px;font-size:10px">+ Adicionar condição</button>
+            <span style="font-size:11px;color:var(--text2);font-weight:600">Conditional delivery</span>
+            <button onclick="addWebhookTargetFilter(${i})" class="btn" style="padding:2px 6px;font-size:10px">+ Add condition</button>
           </div>
-          <div style="font-size:10px;color:var(--text3);margin-bottom:2px">Sem condições = entrega sempre. Com condições, TODAS têm de corresponder ao payload recebido para este destino ser acionado.</div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:2px">No conditions = always deliver. With conditions, ALL of them must match the incoming payload for this destination to fire.</div>
           ${filterHtml}
         </div>
 
@@ -3690,14 +3704,16 @@ function renderDestinationEditorMarkup(i) {
 
 function updateDestinationsSummary() {
   const n = webhookTargetState.length;
-  const label = n === 0 ? 'Nenhum destino configurado' : (n === 1 ? '1 destino configurado' : `${n} destinos configurados`);
+  const label = n === 0 ? 'No destinations configured' : (n === 1 ? '1 destination configured' : `${n} destinations configured`);
   const summaryEl = document.getElementById('wDestinationsSummary');
   if (summaryEl) summaryEl.textContent = label;
+  const summaryModalEl = document.getElementById('wDestinationsSummaryModal');
+  if (summaryModalEl) summaryModalEl.textContent = label;
   const wName = document.getElementById('wName').value;
   const titleEl = document.getElementById('wdPageTitle');
-  if (titleEl) titleEl.textContent = wName ? `Destinos — ${wName}` : 'Destinos — novo webhook';
+  if (titleEl) titleEl.textContent = wName ? `Destinations — ${wName}` : 'Destinations — new webhook';
   const subtitleEl = document.getElementById('wdPageSubtitle');
-  if (subtitleEl) subtitleEl.textContent = label + '. Alterações só ficam persistidas ao clicar em "Guardar Webhook".';
+  if (subtitleEl) subtitleEl.textContent = label + '. Changes are only persisted when you click "Save Webhook".';
 }
 
 // Opens the dedicated Destinations page (a real page in the main layout, not
@@ -3709,7 +3725,7 @@ function openDestinationsPage() {
   navigate('webhookDestinations');
 }
 
-// Entry point from the Webhooks list (row link / context menu "Destinos" action).
+// Entry point from the Webhooks list (row link / context menu "Destinations" action).
 // Loads the webhook's full config into the (hidden) settings form so Save keeps
 // working from the Destinations page, then jumps straight to it.
 function manageWebhookDestinations(name) {
@@ -3722,7 +3738,7 @@ function manageWebhookDestinations(name) {
 function openDestinationEditor(i) {
   editingDestinationIndex = i;
   const t = webhookTargetState[i];
-  document.getElementById('destinationEditTitle').textContent = (t && t.url) ? t.url : 'Novo destino';
+  document.getElementById('destinationEditTitle').textContent = (t && t.url) ? t.url : 'New destination';
   renderDestinationEditor(i);
   document.getElementById('destinationEditModal').style.display = 'flex';
 }

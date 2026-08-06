@@ -440,7 +440,8 @@ const PAGE_TITLES = {
   notifications: 'Notifications',
   npm: 'Nginx Proxy Manager',
   audit: 'Audit Log',
-  reports: 'Report Feeds'
+  reports: 'Report Feeds',
+  webhookDestinations: 'Webhooks · Destinations'
 };
 
 // Pages that can be reached via hash routing. Aliases (siplogs, certs) are
@@ -476,6 +477,12 @@ function navigate(page, { pushHistory = true } = {}) {
     if (n.dataset.page === page) n.classList.add('active');
     else n.classList.remove('active');
   });
+  // Sub-pages drilled into from another section keep that section's sidebar
+  // link highlighted, since there's no dedicated nav entry for the sub-page.
+  if (page === 'webhookDestinations') {
+    const parentLink = document.querySelector('[data-page="webhooks"]');
+    if (parentLink) parentLink.classList.add('active');
+  }
   if (page === 'requests') { rlPage = 1; fetchRequestLogs(); }
   if (page === 'tcpudp') {
     if (pendingTcpTab) switchTcpUdpTab(pendingTcpTab);
@@ -508,6 +515,7 @@ function pageFromHash(hash) {
   // resolve aliases to canonical
   if (raw === 'siplogs') return 'tcpudp';
   if (raw === 'certs')   return 'tcpudp';
+  if (raw === 'webhookdestinations') return 'webhookDestinations';
   return ROUTABLE_PAGES.has(raw) ? raw : null;
 }
 
