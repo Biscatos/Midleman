@@ -3169,6 +3169,38 @@ function saveBodyEditor() {
     closeBodyEditor();
 }
 
+function resolvePathJS(data, path) {
+  const parts = path.split('.');
+  if (parts.length > 10) return undefined;
+  let val = data;
+  for (const k of parts) {
+    if (val === undefined || val === null) return undefined;
+    if (!Object.prototype.hasOwnProperty.call(val, k)) return undefined;
+    val = val[k];
+  }
+  return val;
+}
+
+function evaluateFilterConditionJS(cond, payloadObj) {
+  const actual = resolvePathJS(payloadObj, cond.path.trim());
+  const found = actual !== undefined;
+  let matches;
+  switch (cond.op) {
+    case 'exists': matches = found; break;
+    case 'notExists': matches = !found; break;
+    case 'eq': matches = String(actual) === String(cond.value); break;
+    case 'neq': matches = String(actual) !== String(cond.value); break;
+    case 'contains':
+      matches = Array.isArray(actual) ? actual.some(v => String(v) === String(cond.value)) : (found && String(actual).includes(String(cond.value)));
+      break;
+    case 'in':
+      matches = String(cond.value || '').split(',').map(s => s.trim()).filter(Boolean).some(v => v === String(actual));
+      break;
+    default: matches = true;
+  }
+  return { actual, found, matches };
+}
+
 function updateAllPreviews() {
   if (document.getElementById('bodyEditorModal')?.style.display === 'block') {
     renderBodyEditorFieldsPanel();
@@ -3194,7 +3226,18 @@ function updateAllPreviews() {
             pUrl.style.display = 'none';
         }
     }
-    
+
+    (t.filter || []).forEach((c, fIndex) => {
+        const pf = document.getElementById(`previewFilter_${i}_${fIndex}`);
+        if (!pf) return;
+        if (!(showTestPayload && payloadObj && c.path.trim())) { pf.style.display = 'none'; return; }
+        const { actual, found, matches } = evaluateFilterConditionJS(c, payloadObj);
+        const sample = found ? (typeof actual === 'object' ? JSON.stringify(actual) : String(actual)) : '(path not found in test payload)';
+        pf.textContent = (matches ? '✓ matches — ' : '✗ no match — ') + `payload value: ${sample}`;
+        pf.style.color = matches ? 'var(--green, #4ade80)' : 'var(--red)';
+        pf.style.display = 'block';
+    });
+
     if (t.type === 'custom') {
       (t.customHeaders || []).forEach((h, hIndex) => {
           const ph = document.getElementById(`previewHeader_${i}_${hIndex}`);
@@ -3551,6 +3594,7 @@ function renderDestinationEditorMarkup(i) {
         ${(c.op !== 'exists' && c.op !== 'notExists') ? `<input type="text" placeholder="${c.op === 'in' ? 'comma-separated values' : 'value'}" value="${esc(c.value)}" oninput="updateWebhookTargetFilter(${i}, ${fIndex}, 'value', this.value)" style="flex:2;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">` : ''}
         <button onclick="removeWebhookTargetFilter(${i}, ${fIndex})" tabindex="-1" style="background:none;border:none;color:var(--red);cursor:pointer;padding:0 4px" title="Remove condition">&times;</button>
       </div>
+      <div id="previewFilter_${i}_${fIndex}" style="display:none;font-size:10px;margin-top:2px;margin-left:2px"></div>
     `).join('');
 
   return `
