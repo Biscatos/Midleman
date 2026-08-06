@@ -2974,6 +2974,61 @@ function renderBodyEditorFieldsPanel() {
     });
 }
 
+function filterFieldColorFor(kind) {
+    if (kind === 'string') return 'var(--green, #4ade80)';
+    if (kind === 'number') return 'var(--accent, #3b82f6)';
+    if (kind === 'boolean') return 'var(--orange, #fb923c)';
+    if (kind === 'object' || kind === 'array') return 'var(--text3)';
+    return 'var(--text2)';
+}
+
+function renderFilterAutocomplete(inputEl, index, fIndex) {
+    const dropdown = document.getElementById('filterPathAutocomplete');
+    if (!dropdown) return;
+    const payload = getCurrentTestPayloadObject();
+    if (!payload) {
+        dropdown.style.display = 'none';
+        return;
+    }
+    const query = inputEl.value.trim().toLowerCase();
+    const paths = flattenPayloadPaths(payload).filter(p => !query || p.path.toLowerCase().includes(query));
+    if (paths.length === 0) {
+        dropdown.style.display = 'none';
+        return;
+    }
+    dropdown.innerHTML = paths.slice(0, 30).map(p => `
+        <div class="fp-field" data-path="${esc(p.path)}"
+            style="padding:5px 10px;cursor:pointer;display:flex;justify-content:space-between;gap:10px;align-items:center;border-bottom:1px solid var(--border)">
+            <span style="color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">${esc(p.path)}</span>
+            <span style="color:${filterFieldColorFor(p.kind)};opacity:.75;flex-shrink:0;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(String(p.sample))}</span>
+        </div>
+    `).join('');
+
+    const rect = inputEl.getBoundingClientRect();
+    dropdown.style.left = rect.left + 'px';
+    dropdown.style.top = (rect.bottom + 3) + 'px';
+    dropdown.style.width = Math.max(rect.width, 240) + 'px';
+    dropdown.style.display = 'block';
+
+    dropdown.querySelectorAll('.fp-field').forEach(el => {
+        el.addEventListener('mouseenter', () => { el.style.background = 'var(--surface2)'; });
+        el.addEventListener('mouseleave', () => { el.style.background = ''; });
+        // mousedown (not click) so this fires before the input's blur hides the dropdown
+        el.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            const path = el.getAttribute('data-path');
+            inputEl.value = path;
+            updateWebhookTargetFilter(index, fIndex, 'path', path);
+            dropdown.style.display = 'none';
+        });
+    });
+}
+
+function hideFilterAutocomplete() {
+    const dropdown = document.getElementById('filterPathAutocomplete');
+    if (dropdown) dropdown.style.display = 'none';
+}
+
 function insertTemplateAtCursor(text) {
     if (!fullEditor) return;
     fullEditor.insert(text);
@@ -3464,7 +3519,12 @@ function renderDestinationEditorMarkup(i) {
 
   const filterHtml = (t.filter || []).map((c, fIndex) => `
       <div style="display:flex;gap:4px;align-items:center;margin-top:4px">
-        <input type="text" placeholder="path (ex: customer.tier)" value="${esc(c.path)}" oninput="updateWebhookTargetFilter(${i}, ${fIndex}, 'path', this.value)" style="flex:2;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
+        <input type="text" placeholder="path (ex: customer.tier)" value="${esc(c.path)}"
+          oninput="updateWebhookTargetFilter(${i}, ${fIndex}, 'path', this.value); renderFilterAutocomplete(this, ${i}, ${fIndex})"
+          onfocus="renderFilterAutocomplete(this, ${i}, ${fIndex})"
+          onblur="setTimeout(hideFilterAutocomplete, 150)"
+          autocomplete="off"
+          style="flex:2;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
         <select onchange="updateWebhookTargetFilter(${i}, ${fIndex}, 'op', this.value)" style="padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
           <option value="eq" ${c.op === 'eq' ? 'selected' : ''}>igual a</option>
           <option value="neq" ${c.op === 'neq' ? 'selected' : ''}>diferente de</option>
@@ -3624,17 +3684,36 @@ function renderDestinationEditorMarkup(i) {
   `;
 }
 
+function updateDestinationsSummary() {
+  const n = webhookTargetState.length;
+  const label = n === 0 ? 'Nenhum destino configurado' : (n === 1 ? '1 destino configurado' : `${n} destinos configurados`);
+  const summaryEl = document.getElementById('wDestinationsSummary');
+  if (summaryEl) summaryEl.textContent = label;
+  const subtitleEl = document.getElementById('destinationsPageSubtitle');
+  if (subtitleEl) subtitleEl.textContent = (document.getElementById('wName').value || 'novo webhook') + ' — ' + label;
+}
+
+function openDestinationsPage() {
+  updateDestinationsSummary();
+  renderWebhookTargets();
+  document.getElementById('destinationsPage').style.display = 'block';
+}
+
+function closeDestinationsPage() {
+  document.getElementById('destinationsPage').style.display = 'none';
+}
+
 function openDestinationEditor(i) {
   editingDestinationIndex = i;
   const t = webhookTargetState[i];
-  document.getElementById('destinationEditorTitle').textContent = (t && t.url) ? t.url : 'Novo destino';
+  document.getElementById('destinationEditTitle').textContent = (t && t.url) ? t.url : 'Novo destino';
   renderDestinationEditor(i);
-  document.getElementById('destinationEditorOverlay').style.display = 'block';
+  document.getElementById('destinationEditModal').style.display = 'flex';
 }
 
 function renderDestinationEditor(i) {
   if (editingDestinationIndex !== i) return;
-  const content = document.getElementById('destinationEditorContent');
+  const content = document.getElementById('destinationEditContent');
   if (!content) return;
   content.innerHTML = renderDestinationEditorMarkup(i);
   initAceEditors();
@@ -3642,15 +3721,18 @@ function renderDestinationEditor(i) {
 }
 
 function closeDestinationEditor() {
-  document.getElementById('destinationEditorOverlay').style.display = 'none';
+  document.getElementById('destinationEditModal').style.display = 'none';
+  hideFilterAutocomplete();
   editingDestinationIndex = -1;
   renderWebhookTargets();
+  updateDestinationsSummary();
 }
 
 function openWebhookModal(webhook = null) {
   editingWebhook = webhook;
   editingDestinationIndex = -1;
-  document.getElementById('destinationEditorOverlay').style.display = 'none';
+  document.getElementById('destinationsPage').style.display = 'none';
+  document.getElementById('destinationEditModal').style.display = 'none';
   document.getElementById('webhookModalTitle').textContent = webhook ? 'Edit Webhook Distributor' : 'New Webhook Distributor';
   document.getElementById('wName').value = webhook ? webhook.name : ''; document.getElementById('wName').disabled = !!webhook;
   document.getElementById('wPort').value = webhook ? webhook.port : '';
@@ -3661,7 +3743,8 @@ function openWebhookModal(webhook = null) {
   } else {
       addWebhookTarget(''); // one empty default
   }
-  
+  updateDestinationsSummary();
+
   // The auth token is never sent back to the client. Leave the field empty and
   // signal that one is already configured via the placeholder; submitting an
   // empty field preserves the existing token server-side.
@@ -3741,7 +3824,8 @@ function toggleSilenceSection() {
 
 function closeWebhookModal() {
   document.getElementById('webhookModal').style.display = 'none';
-  document.getElementById('destinationEditorOverlay').style.display = 'none';
+  document.getElementById('destinationsPage').style.display = 'none';
+  document.getElementById('destinationEditModal').style.display = 'none';
   editingDestinationIndex = -1;
   editingWebhook = null;
 }
