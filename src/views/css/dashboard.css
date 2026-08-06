@@ -127,9 +127,9 @@ body {
 .sidebar-header {
   display: flex;
   align-items: center;
-  border-bottom: 1px solid var(--border);
+  border-bottom: none;
   flex-shrink: 0;
-  background: linear-gradient(135deg, transparent 0%, rgba(0, 120, 212, 0.05) 100%);
+  background: var(--surface);
   overflow: hidden;
 }
 .sidebar-brand {

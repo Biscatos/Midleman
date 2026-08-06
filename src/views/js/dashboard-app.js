@@ -121,9 +121,22 @@ async function startApp(username) {
   
   await fetchHealth(); // Do this immediately to set 'Online' UI instantly
   
-  // Restore the page the user was on before the refresh (hash routing)
+  // Restore the page the user was on before the refresh (hash routing).
+  // The Destinations sub-page needs its webhook loaded from the API first —
+  // otherwise a refresh lands on an empty page — so fetch webhooks before
+  // restoring that one specifically.
   const initialPage = pageFromHash(location.hash) || 'overview';
-  navigate(initialPage, { pushHistory: false });
+  if (initialPage === 'webhookDestinations') {
+    const name = hashSuffixFromHash(location.hash);
+    await fetchWebhooks();
+    if (name && typeof manageWebhookDestinations === 'function' && _allWebhooks.some(w => w.name === name)) {
+      manageWebhookDestinations(name, false);
+    } else {
+      navigate('webhooks', { pushHistory: false });
+    }
+  } else {
+    navigate(initialPage, { pushHistory: false });
+  }
 
   // Trigger rest of initializations concurrently without blocking UI main thread
   refreshAll().catch(e => console.error('Dashboard refresh error:', e));
@@ -452,7 +465,26 @@ const ROUTABLE_PAGES = new Set([
   'npm','audit','webhooks','ldap','reports',
 ]);
 
-function navigate(page, { pushHistory = true } = {}) {
+function navigate(page, opts = {}) {
+  // Guard against silently losing unsaved destination edits: if we're
+  // leaving the Webhook Destinations page with pending changes, confirm first.
+  if (typeof currentPage !== 'undefined' && currentPage === 'webhookDestinations' && page !== 'webhookDestinations'
+      && typeof webhookFormDirty !== 'undefined' && webhookFormDirty) {
+    showConfirm({
+      title: 'Unsaved changes',
+      message: 'You have unsaved changes to this webhook\'s destinations.',
+      detail: 'Leaving now will discard them. Click "Save Webhook" first if you want to keep them.',
+      confirmText: 'Leave without saving',
+      cancelText: 'Stay',
+      danger: true,
+    }).then(ok => {
+      if (!ok) return;
+      webhookFormDirty = false;
+      navigate(page, opts);
+    });
+    return;
+  }
+  const { pushHistory = true, hashSuffix = null } = opts;
   let pendingTcpTab = null;
   if (page === 'siplogs') { page = 'tcpudp'; pendingTcpTab = 'logs'; }
   if (page === 'certs')   { page = 'tcpudp'; pendingTcpTab = 'certs'; }
@@ -461,12 +493,14 @@ function navigate(page, { pushHistory = true } = {}) {
   if (page === 'sms')   { page = 'notifications'; pendingNotifTab = 'sms'; }
   currentPage = page;
 
-  // Update browser URL without triggering a reload
-  const hash = '#' + page;
+  // Update browser URL without triggering a reload. Sub-pages that need
+  // context to restore correctly on refresh (e.g. which webhook) encode it
+  // as a second hash segment: #webhookDestinations/<name>.
+  const hash = '#' + page + (hashSuffix ? '/' + encodeURIComponent(hashSuffix) : '');
   if (pushHistory && location.hash !== hash) {
-    history.pushState({ page }, '', hash);
+    history.pushState({ page, hashSuffix }, '', hash);
   } else if (!pushHistory && location.hash !== hash) {
-    history.replaceState({ page }, '', hash);
+    history.replaceState({ page, hashSuffix }, '', hash);
   }
 
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -507,16 +541,43 @@ function navigate(page, { pushHistory = true } = {}) {
 // Restore page from URL hash on back/forward navigation
 window.addEventListener('popstate', e => {
   const page = (e.state && e.state.page) || pageFromHash(location.hash);
-  if (page) navigate(page, { pushHistory: false });
+  if (!page) return;
+  if (page === 'webhookDestinations') {
+    const name = (e.state && e.state.hashSuffix) || hashSuffixFromHash(location.hash);
+    if (name && typeof manageWebhookDestinations === 'function') manageWebhookDestinations(name, false);
+    else navigate('webhooks', { pushHistory: false });
+    return;
+  }
+  navigate(page, { pushHistory: false });
+});
+
+// Warn on tab close/refresh/URL navigation while destination edits are unsaved.
+// Browsers ignore custom text and show their own generic prompt — that's expected.
+window.addEventListener('beforeunload', e => {
+  if (typeof currentPage !== 'undefined' && currentPage === 'webhookDestinations'
+      && typeof webhookFormDirty !== 'undefined' && webhookFormDirty) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
 });
 
 function pageFromHash(hash) {
-  const raw = (hash || '').replace(/^#/, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  // Sub-pages may carry a second segment (e.g. #webhookDestinations/name) —
+  // only the first segment identifies the page itself.
+  const base = (hash || '').replace(/^#/, '').split('/')[0];
+  const raw = base.toLowerCase().replace(/[^a-z0-9]/g, '');
   // resolve aliases to canonical
   if (raw === 'siplogs') return 'tcpudp';
   if (raw === 'certs')   return 'tcpudp';
   if (raw === 'webhookdestinations') return 'webhookDestinations';
   return ROUTABLE_PAGES.has(raw) ? raw : null;
+}
+
+// Extracts the "/<name>" suffix from a hash like #webhookDestinations/my-webhook.
+function hashSuffixFromHash(hash) {
+  const parts = (hash || '').replace(/^#/, '').split('/');
+  if (parts.length < 2 || !parts[1]) return null;
+  try { return decodeURIComponent(parts.slice(1).join('/')); } catch { return parts.slice(1).join('/'); }
 }
 
 function toggleNavMobile() {
