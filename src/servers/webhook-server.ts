@@ -1,4 +1,4 @@
-import type { WebhookDistributor, WebhookRetryConfig, WebhookPersistentRetry } from '../core/types';
+import type { WebhookDistributor, WebhookRetryConfig, WebhookPersistentRetry, WebhookDestination } from '../core/types';
 import { logRequest, headersToRecord, getLastWebhookActivity } from '../telemetry/request-log';
 import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { assertResolvedHostAllowed, webhookSsrfPolicy, type SsrfPolicyOverride } from '../core/ssrf-guard';
@@ -793,20 +793,40 @@ async function handleWebhookFanout(
         try { payloadObj = JSON.parse(bodyStringPreview); } catch {}
     }
 
+    const FILTER_BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+    function resolvePath(data: any, path: string): any {
+        const parts = path.split('.');
+        if (parts.length > 5) return undefined;
+        let val: any = data;
+        for (const k of parts) {
+            if (FILTER_BLOCKED_KEYS.has(k) || val === undefined || val === null) return undefined;
+            if (!Object.prototype.hasOwnProperty.call(val, k)) return undefined;
+            val = val[k];
+        }
+        return val;
+    }
+
+    function matchesFilter(target: WebhookDestination, data: any): boolean {
+        if (!target.filter || target.filter.length === 0) return true;
+        return target.filter.every(cond => {
+            const actual = resolvePath(data, cond.path);
+            switch (cond.op) {
+                case 'exists': return actual !== undefined;
+                case 'notExists': return actual === undefined;
+                case 'eq': return String(actual) === String(cond.value);
+                case 'neq': return String(actual) !== String(cond.value);
+                case 'contains':
+                    if (Array.isArray(actual)) return actual.some(v => String(v) === String(cond.value));
+                    return actual !== undefined && String(actual).includes(String(cond.value));
+                case 'in':
+                    return Array.isArray(cond.value) && cond.value.some(v => String(v) === String(actual));
+                default: return true;
+            }
+        });
+    }
+
     function renderTemplate(template: string, data: any): string {
         if (!data) return template;
-        const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-        const resolvePath = (path: string): any => {
-            const parts = path.split('.');
-            if (parts.length > 5) return undefined;
-            let val: any = data;
-            for (const k of parts) {
-                if (BLOCKED_KEYS.has(k) || val === undefined || val === null) return undefined;
-                if (!Object.prototype.hasOwnProperty.call(val, k)) return undefined;
-                val = val[k];
-            }
-            return val;
-        };
         // Supports {{path}}, {{path || other.path}}, {{path || "literal"}} (chained).
         return template.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_, expr) => {
             const operands = String(expr).split(/\s*\|\|\s*/);
@@ -818,7 +838,7 @@ async function handleWebhookFanout(
                 if (litMatch) return litMatch[2].slice(0, 4096);
                 // Path lookup
                 if (!/^[a-zA-Z0-9_.-]+$/.test(op)) continue; // ignore malformed segments
-                const val = resolvePath(op);
+                const val = resolvePath(data, op);
                 if (val === undefined || val === null || val === '') continue;
                 if (typeof val === 'object') return JSON.stringify(val).slice(0, 4096);
                 return String(val).slice(0, 4096);
@@ -858,11 +878,16 @@ async function handleWebhookFanout(
         let tBodySize = bodyBuffer?.byteLength || 0;
         let tBodyStringPreview = bodyStringPreview;
 
+        if (typeof target !== 'string' && !matchesFilter(target, payloadObj)) {
+            console.log(`⏭️  [webhook:${webhook.name}] Skipped ${target.url} (filter did not match)`);
+            return;
+        }
+
         if (typeof target === 'string') {
             tUrl = target;
         } else {
             tUrl = renderTemplate(target.url, payloadObj);
-            
+
             if (!target.forwardHeaders) {
                 tHeaders = new Headers();
             }

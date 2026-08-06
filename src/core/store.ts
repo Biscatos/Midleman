@@ -21,6 +21,7 @@ interface StoredProfile {
     blockedExtensions?: string[];
     allowedIps?: string[];
     allowedPaths?: string[];
+    rateLimit?: { requestsPerMinute: number; perIp?: boolean };
     port?: number;
     forwardPath?: boolean;
     passthrough?: boolean;
@@ -90,7 +91,8 @@ function toRuntime(stored: StoredProfile): ProxyProfile {
     }
     if (stored.allowedIps && stored.allowedIps.length > 0) profile.allowedIps = stored.allowedIps;
     if (stored.allowedPaths && stored.allowedPaths.length > 0) profile.allowedPaths = stored.allowedPaths;
-    
+    if (stored.rateLimit && stored.rateLimit.requestsPerMinute > 0) profile.rateLimit = stored.rateLimit;
+
     if (stored.port !== undefined) profile.port = stored.port;
     if (stored.forwardPath !== undefined) profile.forwardPath = stored.forwardPath;
     if (stored.passthrough !== undefined) profile.passthrough = stored.passthrough;
@@ -140,7 +142,8 @@ function toStored(profile: ProxyProfile): StoredProfile {
     }
     if (profile.allowedIps && profile.allowedIps.length > 0) stored.allowedIps = profile.allowedIps;
     if (profile.allowedPaths && profile.allowedPaths.length > 0) stored.allowedPaths = profile.allowedPaths;
-    
+    if (profile.rateLimit && profile.rateLimit.requestsPerMinute > 0) stored.rateLimit = profile.rateLimit;
+
     if (profile.port !== undefined) stored.port = profile.port;
     if (profile.forwardPath !== undefined) stored.forwardPath = profile.forwardPath;
     if (profile.passthrough !== undefined) stored.passthrough = profile.passthrough;
@@ -305,6 +308,15 @@ export function validateProfileInput(input: unknown): string | null {
             if (l.advancedConfig !== undefined && typeof l.advancedConfig !== 'string') return '"npmLocations[].advancedConfig" must be a string';
             if (typeof l.advancedConfig === 'string' && (l.advancedConfig as string).length > 4096) return '"npmLocations[].advancedConfig" too long (max 4KB)';
         }
+    }
+
+    if (p.rateLimit !== undefined && p.rateLimit !== null) {
+        if (typeof p.rateLimit !== 'object' || Array.isArray(p.rateLimit)) return '"rateLimit" must be an object';
+        const rl = p.rateLimit as Record<string, unknown>;
+        if (typeof rl.requestsPerMinute !== 'number' || !Number.isFinite(rl.requestsPerMinute) || rl.requestsPerMinute < 1 || rl.requestsPerMinute > 1_000_000) {
+            return '"rateLimit.requestsPerMinute" must be a number between 1 and 1,000,000';
+        }
+        if (rl.perIp !== undefined && typeof rl.perIp !== 'boolean') return '"rateLimit.perIp" must be a boolean';
     }
 
     if (p.allowedPaths !== undefined) {
@@ -573,6 +585,18 @@ export function validateWebhookInput(input: unknown): string | null {
             if (dest.dropEmpty !== undefined && typeof dest.dropEmpty !== 'boolean') return '"dropEmpty" must be a boolean';
             if (dest.customHeaders && typeof dest.customHeaders !== 'object') return '"customHeaders" must be an object';
             if (dest.forwardHeaders !== undefined && typeof dest.forwardHeaders !== 'boolean') return '"forwardHeaders" must be a boolean';
+            if (dest.filter !== undefined) {
+                if (!Array.isArray(dest.filter)) return '"filter" must be an array of conditions';
+                const validOps = new Set(['eq', 'neq', 'exists', 'notExists', 'contains', 'in']);
+                for (const cond of dest.filter) {
+                    if (typeof cond !== 'object' || cond === null) return 'Each "filter" entry must be an object';
+                    const c = cond as Record<string, unknown>;
+                    if (typeof c.path !== 'string' || c.path.trim() === '') return 'Each filter condition requires a non-empty "path" string';
+                    if (typeof c.op !== 'string' || !validOps.has(c.op)) return `Filter condition "op" must be one of: ${[...validOps].join(', ')}`;
+                    if (c.op !== 'exists' && c.op !== 'notExists' && c.value === undefined) return `Filter condition with op "${c.op}" requires a "value"`;
+                    if (c.op === 'in' && !Array.isArray(c.value)) return 'Filter condition with op "in" requires "value" to be an array';
+                }
+            }
             if (dest.persistentRetry !== undefined) {
                 if (typeof dest.persistentRetry !== 'object' || dest.persistentRetry === null) return '"persistentRetry" must be an object';
                 const pr = dest.persistentRetry as Record<string, unknown>;
