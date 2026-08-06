@@ -2778,6 +2778,10 @@ function viewWebhookLogs(name) {
 
 let webhookTargetState = [];
 let editingDestinationIndex = -1;
+// Tracks unsaved edits to webhookTargetState (destinations) so leaving the
+// Destinations page — via nav, back button, or closing the tab — can warn
+// before work is lost. Reset on load and after a successful save.
+let webhookFormDirty = false;
 let showTestPayload = false;
 
 function toggleTestPayload() {
@@ -3423,21 +3427,25 @@ function addWebhookTarget(target = "") {
       persistentRetryOpen: !!(target.persistentRetry && target.persistentRetry.enabled),
     });
   }
+  webhookFormDirty = true;
   renderWebhookTargets();
 }
 
 function addWebhookTargetFilter(index) {
   webhookTargetState[index].filter.push({ path: '', op: 'eq', value: '' });
+  webhookFormDirty = true;
   renderDestinationEditor(index);
 }
 
 function removeWebhookTargetFilter(index, fIndex) {
   webhookTargetState[index].filter.splice(fIndex, 1);
+  webhookFormDirty = true;
   renderDestinationEditor(index);
 }
 
 function updateWebhookTargetFilter(index, fIndex, field, value) {
   webhookTargetState[index].filter[fIndex][field] = value;
+  webhookFormDirty = true;
   if (field === 'op') renderDestinationEditor(index);
   else updateAllPreviews();
 }
@@ -3453,12 +3461,14 @@ function toggleTargetRetry(index) {
       if (t.persistentRetry) t.persistentRetry.enabled = false;
     }
   }
+  webhookFormDirty = true;
   renderDestinationEditor(index);
 }
 
 function updateTargetRetry(index, field, value) {
   if (!webhookTargetState[index].retry) return;
   webhookTargetState[index].retry[field] = value;
+  webhookFormDirty = true;
 }
 
 function toggleTargetPersistentRetry(index) {
@@ -3474,6 +3484,7 @@ function toggleTargetPersistentRetry(index) {
   } else if (t.persistentRetry) {
     t.persistentRetry.enabled = false;
   }
+  webhookFormDirty = true;
   renderDestinationEditor(index);
 }
 
@@ -3482,6 +3493,7 @@ function updateTargetPersistentRetry(index, field, value) {
     webhookTargetState[index].persistentRetry = { enabled: true, maxAttemptsPerMinute: 10, notifyAfterAttempts: 10, notifyEmail: '' };
   }
   webhookTargetState[index].persistentRetry[field] = value;
+  webhookFormDirty = true;
 }
 
 async function removeWebhookTarget(index) {
@@ -3496,32 +3508,38 @@ async function removeWebhookTarget(index) {
   }))) return;
   if (editingDestinationIndex === index) closeDestinationEditor();
   webhookTargetState.splice(index, 1);
+  webhookFormDirty = true;
   renderWebhookTargets();
 }
 
 function toggleWebhookTargetType(index) {
   const t = webhookTargetState[index];
   t.type = t.type === 'basic' ? 'custom' : 'basic';
+  webhookFormDirty = true;
   renderDestinationEditor(index);
 }
 
 function updateWebhookTargetField(index, field, value) {
   webhookTargetState[index][field] = value;
+  webhookFormDirty = true;
   updateAllPreviews();
 }
 
 function addWebhookTargetHeader(index) {
   webhookTargetState[index].customHeaders.push({ key: '', value: '' });
+  webhookFormDirty = true;
   renderDestinationEditor(index);
 }
 
 function removeWebhookTargetHeader(index, hIndex) {
   webhookTargetState[index].customHeaders.splice(hIndex, 1);
+  webhookFormDirty = true;
   renderDestinationEditor(index);
 }
 
 function updateWebhookTargetHeader(index, hIndex, field, val) {
   webhookTargetState[index].customHeaders[hIndex][field] = val;
+  webhookFormDirty = true;
   updateAllPreviews();
 }
 
@@ -3763,21 +3781,29 @@ function updateDestinationsSummary() {
 
 // Opens the dedicated Destinations page (a real page in the main layout, not
 // a modal) for the webhook currently loaded into webhookTargetState/editingWebhook.
-function openDestinationsPage() {
+function openDestinationsPage(pushHistory = true) {
   document.getElementById('webhookModal').style.display = 'none';
   updateDestinationsSummary();
   renderWebhookTargets();
-  navigate('webhookDestinations');
+  // Encode which webhook this is in the URL (#webhookDestinations/<name>) so a
+  // refresh or shared link can restore this exact page instead of landing empty.
+  const name = editingWebhook && editingWebhook.name ? editingWebhook.name : null;
+  navigate('webhookDestinations', { pushHistory, hashSuffix: name || undefined });
 }
 
-// Entry point from the Webhooks list (row link / context menu "Destinations" action).
+// Entry point from the Webhooks list (row link / context menu "Destinations" action),
+// and from hash-based restoration (page refresh, back/forward, shared link).
 // Loads the webhook's full config into the (hidden) settings form so Save keeps
 // working from the Destinations page, then jumps straight to it.
-function manageWebhookDestinations(name) {
+function manageWebhookDestinations(name, pushHistory = true) {
   const w = _allWebhooks.find(x => x.name === name);
-  if (!w) return;
+  if (!w) {
+    toast('Webhook "' + name + '" not found', 'error');
+    navigate('webhooks', { pushHistory: false });
+    return;
+  }
   openWebhookModal(w);
-  openDestinationsPage();
+  openDestinationsPage(pushHistory);
 }
 
 function openDestinationEditor(i) {
@@ -3875,6 +3901,9 @@ function openWebhookModal(webhook = null) {
   }
 
   document.getElementById('webhookModal').style.display = 'flex';
+  // Loading existing targets above runs through the same mutators used for
+  // real edits, which mark the form dirty — reset now that the load is done.
+  webhookFormDirty = false;
 }
 
 async function releaseWebhookFromNpm() {
@@ -3901,6 +3930,10 @@ function toggleSilenceSection() {
 function closeWebhookModal() {
   document.getElementById('webhookModal').style.display = 'none';
   document.getElementById('destinationEditModal').style.display = 'none';
+  // Cancel/Save both discard the in-memory edit session intentionally —
+  // clear the dirty flag first so the subsequent navigate() (if any) doesn't
+  // re-prompt for a decision the user just made.
+  webhookFormDirty = false;
   if (document.getElementById('pageWebhookDestinations')?.classList.contains('active')) navigate('webhooks');
   editingDestinationIndex = -1;
   editingWebhook = null;
