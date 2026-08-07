@@ -8716,7 +8716,11 @@ function closeFive9Modal() {
   _editingFive9Connector = null;
 }
 
-async function saveFive9Connector() {
+async function saveFive9Connector(event) {
+  await withBusy(event, 'A guardar…', async () => { await doSaveFive9Connector(); });
+}
+async function doSaveFive9Connector() {
+  try {
   const body = {
     name: document.getElementById('f9Name').value.trim().toLowerCase(),
     channel: document.getElementById('f9Channel').value,
@@ -8763,11 +8767,10 @@ async function saveFive9Connector() {
   const ips = document.getElementById('f9AllowedIps').value.split(',').map(s => s.trim()).filter(Boolean);
   if (ips.length) body.allowedIps = ips;
 
-  try {
-    const res = await api('/admin/five9-connectors', { method: 'POST', body: JSON.stringify(body) });
-    const d = await res.json();
-    if (res.ok) { toast('Connector ' + (d.status || 'saved') + ' (port ' + d.port + ')'); closeFive9Modal(); await fetchFive9Connectors(); }
-    else toast(d.error || 'Failed', 'error');
+  const res = await api('/admin/five9-connectors', { method: 'POST', body: JSON.stringify(body) });
+  const d = await res.json();
+  if (res.ok) { toast('Connector ' + (d.status || 'saved') + ' (port ' + d.port + ')'); closeFive9Modal(); await fetchFive9Connectors(); }
+  else toast(d.error || 'Failed', 'error');
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 

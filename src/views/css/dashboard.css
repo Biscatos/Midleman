@@ -1677,7 +1677,7 @@ body.sidebar-collapsed .sidebar-link:hover[data-tooltip]::after { opacity: 1; }
   position: fixed;
   bottom: 24px;
   right: 24px;
-  z-index: 200;
+  z-index: 2000;
   padding: 12px 20px;
   border-radius: var(--radius-sm);
   font-size: 14px;
