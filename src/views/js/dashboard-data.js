@@ -225,7 +225,7 @@ async function fetchHealth() {
     document.getElementById('navStatus').textContent = 'Online';
     document.getElementById('navUptime').textContent = fmtUptime(d.uptime);
     const td = document.getElementById('topbarDot'); if (td) td.className = 'status-dot online';
-    const ts = document.getElementById('topbarStatus'); if (ts) ts.textContent = 'Online';
+    const ts = document.getElementById('topbarStatus'); if (ts) { ts.textContent = 'Online'; ts.parentElement.title = 'Online'; }
     document.getElementById('ovStatus').textContent = 'Online';
     document.getElementById('ovStatus').style.color = 'var(--green)';
     document.getElementById('ovUptime').textContent = 'Uptime: ' + fmtUptime(d.uptime);
@@ -237,7 +237,7 @@ async function fetchHealth() {
     document.getElementById('navStatus').textContent = 'Offline';
     document.getElementById('navUptime').textContent = '';
     const td = document.getElementById('topbarDot'); if (td) td.className = 'status-dot offline';
-    const ts = document.getElementById('topbarStatus'); if (ts) ts.textContent = 'Offline';
+    const ts = document.getElementById('topbarStatus'); if (ts) { ts.textContent = 'Offline'; ts.parentElement.title = 'Offline'; }
     document.getElementById('ovStatus').textContent = 'Offline';
     document.getElementById('ovStatus').style.color = 'var(--red)';
   }
