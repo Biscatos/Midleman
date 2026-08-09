@@ -103,7 +103,7 @@ async function startApp(username) {
   const avatar = document.getElementById('navUserAvatar');
   if (avatar) avatar.textContent = (loggedInUser || '?').charAt(0).toUpperCase();
   const topbarUser = document.getElementById('topbarUser');
-  if (topbarUser) topbarUser.textContent = loggedInUser;
+  if (topbarUser) { topbarUser.textContent = loggedInUser; topbarUser.closest('.topbar-user').title = loggedInUser; }
   const topbarAvatar = document.getElementById('topbarAvatar');
   if (topbarAvatar) topbarAvatar.textContent = (loggedInUser || '?').charAt(0).toUpperCase();
   document.querySelector('.app').style.display = 'grid';
