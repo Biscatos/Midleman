@@ -858,7 +858,7 @@ async function openProfileModal(profile = null) {
   // Pages may not be loaded yet on first open — make sure the dropdown has options.
   if (!_consentPages.length) await fetchConsentPages();
   editingProfile = profile;
-  document.getElementById('modalTitle').textContent = profile ? 'Edit Proxy' : 'New Proxy';
+  proxyWiz.open(!!profile, { title: profile ? 'Edit Proxy — ' + (profile.name || '') : 'New Proxy' });
   document.getElementById('pName').value = profile ? profile.name : ''; document.getElementById('pName').disabled = !!profile;
   document.getElementById('pTargetUrl').value = profile ? profile.targetUrl : '';
   document.getElementById('pApiKey').value = profile ? (profile.apiKey || '') : '';
@@ -926,6 +926,7 @@ function toggleProfileAuthMode() {
   document.getElementById('pLoginTitleGroup').style.display = mode === 'login' ? '' : 'none';
   document.getElementById('pLoginLogoGroup').style.display = mode === 'login' ? '' : 'none';
   document.getElementById('pConsentGroup').style.display = mode === 'login' ? '' : 'none';
+  proxyWiz.render(); // Access Key mode makes the key required
 }
 function toggleUpstreamAuthSection() {
   const on = document.getElementById('pUpstreamAuthToggle').checked;
@@ -936,6 +937,7 @@ function toggleUpstreamAuthSection() {
     document.getElementById('pAuthHeader').value = '';
     document.getElementById('pAuthPrefix').value = '';
   }
+  proxyWiz.render(); // turning it on makes the auth value required
 }
 function toggleConsentFields() {
   const on = document.getElementById('pConsentEnabled').checked;
@@ -945,7 +947,11 @@ function toggleRateLimitFields() {
   const on = document.getElementById('pRateLimitEnabled').checked;
   document.getElementById('pRateLimitFields').style.display = on ? 'grid' : 'none';
 }
-function closeProfileModal() { document.getElementById('profileModal').classList.remove('active'); editingProfile = null; }
+function closeProfileModal() {
+  document.getElementById('profileModal').classList.remove('active');
+  editingProfile = null;
+  proxyWiz.close();
+}
 
 function handleLogoUpload(input) {
   const file = input.files[0];
@@ -972,6 +978,9 @@ function clearLogo() {
   updateLogoPreview();
 }
 async function saveProfile() {
+  // Surface the offending step before the server rejects it — otherwise the
+  // error names a field sitting on a pane the user cannot see.
+  if (proxyWiz.focusProblem()) return;
   const body = { name: document.getElementById('pName').value.trim(), targetUrl: document.getElementById('pTargetUrl').value.trim() };
   const v = (id) => document.getElementById(id).value.trim();
   if (v('pApiKey')) body.apiKey = v('pApiKey');
@@ -2157,6 +2166,160 @@ function renderConnectors(connectors) {
 
 let _editingConnector = null;
 
+/**
+ * The reports code calls showToast(msg, isError) in 19 places, but only
+ * toast(msg, type) was ever defined — so every one of those calls threw after
+ * the action had already succeeded (the feed saved, then the success path blew
+ * up and surfaced "showToast is not defined" in the error banner).
+ */
+function showToast(msg, isError) { toast(msg, isError ? 'error' : 'success'); }
+
+// -- Connector wizards ------------------------------------------------------
+// Both connector modals are Wizard instances (see js/wizard.js). The panes live
+// in the HTML; the title bar, step nav and footer are built at mount time.
+
+const _wizHasProvider = id => ['meta-whatsapp', 'smooch'].includes(Wizard.val(id));
+/** Targets belong to whichever modal currently owns the shared row editor. */
+const _wizTargetCount = listId => (_cnListId === listId ? _cnTargets.length : 0);
+
+const cnWiz = Wizard.mount('connectorModal', {
+  title: 'Connector',
+  subtitle: 'GoContact webchat connector',
+  saveLabel: 'Save Connector',
+  onClose: () => closeConnectorModal(),
+  onSave: () => saveConnector(),
+  // The Channel step holds provider credentials, irrelevant to generic JSON.
+  hidden: id => id === 'channel' && !_wizHasProvider('cnChannel'),
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    if (!Wizard.val('cnName')) flag('basics', 'Name is required');
+    if (!Wizard.val('cnGoUsername')) flag('gocontact', 'GoContact username is required');
+    if ((Wizard.val('cnGoMode') || 'poll') === 'poll') {
+      if (!Wizard.val('cnGoBaseUrl')) flag('gocontact', 'Base URL is required in polling mode');
+      else if (!Wizard.val('cnGoHashKey')) flag('gocontact', 'Hash Key is required in polling mode');
+    } else {
+      if (!Wizard.val('cnGoAudience')) flag('gocontact', 'Audience is required in Webchat API mode');
+      else if (!Wizard.val('cnGoChannelUuid')) flag('gocontact', 'Channel UUID is required in Webchat API mode');
+    }
+    // A connector with nowhere to send agent replies is accepted by neither the
+    // API nor common sense.
+    if (!Wizard.checked('cnDirectReply') &&
+        !(Wizard.checked('cnWebhooksEnabled') && _wizTargetCount('cnWebhookTargetsList'))) {
+      flag('delivery', 'Add a webhook target or enable direct reply');
+    }
+    return p;
+  },
+});
+
+const rfWiz = Wizard.mount('reportFeedModal', {
+  title: 'Report Feed',
+  subtitle: 'GoContact report exposed as a consumer API',
+  saveLabel: 'Save Feed',
+  saveId: 'rfSaveBtn',
+  onClose: () => closeReportFeedModal(),
+  onSave: () => saveReportFeed(),
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    if (!Wizard.val('rfName')) flag('basics', 'Feed name is required');
+    else if (!Wizard.val('rfInstanceName')) flag('basics', 'Pick a GoContact instance');
+    if (!Wizard.val('rfApiKeys')) flag('routing', 'At least one API key is required');
+    if (!Wizard.val('rfTemplateId')) flag('report', 'Template ID is required');
+    else if (!Wizard.val('rfOwnerType')) flag('report', 'Owner type is required');
+    if (Wizard.checked('rfDetailEnabled') &&
+        !(Wizard.val('rfDetailIdFieldSelect') || Wizard.val('rfDetailIdField'))) {
+      flag('detail', 'Detail ID field is required when the detail route is on');
+    }
+    return p;
+  },
+});
+
+const proxyWiz = Wizard.mount('profileModal', {
+  title: 'Proxy',
+  subtitle: 'HTTP forwarder with its own auth and access rules',
+  saveLabel: 'Save Proxy',
+  onClose: () => closeProfileModal(),
+  onSave: () => saveProfile(),
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    if (!Wizard.val('pName')) flag('basics', 'Proxy name is required');
+    else if (!Wizard.val('pTargetUrl')) flag('basics', 'Target URL is required');
+    // Secrets only when creating: the admin API redacts them, so an existing
+    // profile loads with these blank, and the save path reads blank as "keep
+    // the stored value". Demanding them on edit would block every save.
+    const creating = !proxyWiz.freeNav;
+    if (creating && Wizard.checked('pUpstreamAuthToggle') && !Wizard.val('pApiKey')) {
+      flag('upstream', 'Auth value is required when upstream credentials are on');
+    }
+    if (creating && Wizard.val('pAuthMode') === 'accessKey' && !Wizard.val('pAccessKey')) {
+      flag('access', 'Access key is required in Access Key mode');
+    }
+    return p;
+  },
+});
+
+const sipWiz = Wizard.mount('sipModal', {
+  title: 'TCP/UDP Proxy',
+  subtitle: 'Generic stream relay — SIP aware when the upstream is UDP',
+  saveLabel: 'Save Proxy',
+  onClose: () => closeSipModal(),
+  onSave: () => saveSipProxy(),
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    if (!Wizard.val('sipName')) flag('basics', 'Profile name is required');
+    else if (!Wizard.val('sipUpstreamHost')) flag('basics', 'Upstream host is required');
+    else if (!Wizard.val('sipUpstreamPort')) flag('basics', 'Upstream port is required');
+    const anyListener = ['sipListenerUdp', 'sipListenerTcp', 'sipListenerTls'].some(Wizard.checked);
+    if (!anyListener) flag('listeners', 'Pick at least one inbound listener');
+    else if (Wizard.checked('sipListenerTls') && !Wizard.val('sipCertId')) {
+      flag('listeners', 'A TLS listener needs a certificate');
+    }
+    return p;
+  },
+});
+
+const ldapWiz = Wizard.mount('ldapModal', {
+  title: 'LDAP Directory',
+  subtitle: 'Authenticate dashboard and proxy users against Active Directory',
+  saveLabel: 'Create',
+  saveId: 'ldapSubmitBtn',
+  onClose: () => closeLdapModal(),
+  onSave: () => submitLdap(),
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    if (!Wizard.val('ldapName')) flag('connection', 'Connection name is required');
+    else if (!Wizard.val('ldapUrl')) flag('connection', 'Directory URL is required');
+    else if (!Wizard.val('ldapBaseDn')) flag('connection', 'Base DN is required');
+    const filter = Wizard.val('ldapUserFilter');
+    if (filter && !filter.includes('{login}')) flag('mapping', 'Search filter must contain {login}');
+    return p;
+  },
+});
+
+const f9Wiz = Wizard.mount('five9Modal', {
+  title: 'Five9 Connector',
+  subtitle: 'Five9 Digital Engagement connector',
+  saveLabel: 'Save Connector',
+  onClose: () => closeFive9Modal(),
+  onSave: ev => saveFive9Connector(ev),
+  hidden: id => id === 'channel' && !_wizHasProvider('f9Channel'),
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    if (!Wizard.val('f9Name')) flag('basics', 'Name is required');
+    if (!Wizard.checked('f9DirectReply') &&
+        !(Wizard.checked('f9WebhooksEnabled') && _wizTargetCount('f9WebhookTargetsList'))) {
+      flag('delivery', 'Add a webhook target or enable direct reply');
+    }
+    return p;
+  },
+});
+
+
 function connectorChannelChanged() {
   const channel = document.getElementById('cnChannel').value;
   const isMeta = channel === 'meta-whatsapp';
@@ -2169,6 +2332,7 @@ function connectorChannelChanged() {
   const row = document.getElementById('cnDirectReplyRow');
   row.style.display = hasProvider ? 'flex' : 'none';
   if (!hasProvider) document.getElementById('cnDirectReply').checked = false;
+  cnWiz.render(); // the Channel step drops out for the generic channel
 }
 
 function connectorAutoReplyChanged() {
@@ -2386,6 +2550,8 @@ function renderConnectorTargets() {
       </div>`;
   }).join('');
   connectorWebhooksEnabledChanged();
+  if (_cnListId === 'cnWebhookTargetsList') cnWiz.render();
+  if (_cnListId === 'f9WebhookTargetsList') f9Wiz.render();
 }
 
 function generateConnectorToken() {
@@ -2397,7 +2563,6 @@ function generateConnectorToken() {
 
 function openConnectorModal(connector = null) {
   _editingConnector = connector ? connector.name : null;
-  document.getElementById('connectorModalTitle').textContent = connector ? 'Edit Connector — ' + connector.name : 'New Connector';
   document.getElementById('cnName').value = connector?.name || '';
   document.getElementById('cnName').disabled = !!connector;
   document.getElementById('cnChannel').value = connector?.channel || 'meta-whatsapp';
@@ -2473,7 +2638,11 @@ function openConnectorModal(connector = null) {
   connectorWebhooksEnabledChanged();
   document.getElementById('cnAllowedIps').value = (connector?.allowedIps || []).join(', ');
   document.getElementById('cnEnabled').checked = connector ? connector.enabled !== false : true;
-  connectorChannelChanged();
+  cnWiz.open(!!connector, {
+    title: connector ? `Edit Connector — ${connector.name}` : 'New Connector',
+    subtitle: connector ? 'GoContact webchat connector' : 'GoContact webchat connector — walk the steps, or jump to one',
+  });
+  connectorChannelChanged(); // also re-renders the stepper
   document.getElementById('connectorModal').style.display = 'flex';
 }
 
@@ -2481,9 +2650,13 @@ function closeConnectorModal() {
   document.getElementById('connectorModal').style.display = 'none';
   _editingConnector = null;
   releaseConnectorTargetEditor();
+  cnWiz.close();
 }
 
 async function saveConnector() {
+  // Surface the offending step before the server rejects it — otherwise the
+  // toast names a field sitting on a pane the user cannot see.
+  if (cnWiz.focusProblem()) return;
   const body = {
     name: document.getElementById('cnName').value.trim().toLowerCase(),
     channel: document.getElementById('cnChannel').value,
@@ -4313,8 +4486,8 @@ function renderRequestLogs() {
   document.getElementById('rlPrev').disabled = page <= 1;
   document.getElementById('rlNext').disabled = page >= totalPages;
 }
-function reqLogPrevPage() { if (rlPage > 1) { rlPage--; fetchRequestLogs(); } }
-function reqLogNextPage() { if (rlData && rlPage < rlData.totalPages) { rlPage++; fetchRequestLogs(); } }
+function reqLogPrevPage() { if (rlPage > 1) { rlPage--; return fetchRequestLogs(); } }
+function reqLogNextPage() { if (rlData && rlPage < rlData.totalPages) { rlPage++; return fetchRequestLogs(); } }
 
 // ─── Request Detail ──────────────────────────────────────────────────────────
 async function openReqDetail(id) {
@@ -4620,7 +4793,7 @@ function renderTcpUdpProxies(list) {
 
 function openSipModal(proxy) {
   _editingSip = proxy || null;
-  document.getElementById('sipModalTitle').textContent = proxy ? 'Edit TCP/UDP Proxy' : 'New TCP/UDP Proxy';
+  sipWiz.open(!!proxy, { title: proxy ? 'Edit TCP/UDP Proxy — ' + (proxy.name || '') : 'New TCP/UDP Proxy' });
   document.getElementById('sipModalError').style.display = 'none';
   document.getElementById('sipName').value = proxy ? proxy.name : '';
   document.getElementById('sipName').disabled = !!proxy;
@@ -4680,6 +4853,7 @@ function toggleSipLogOptions() {
 function toggleSipTlsSection() {
   const tls = document.getElementById('sipListenerTls').checked;
   document.getElementById('sipTlsSection').style.display = tls ? '' : 'none';
+  sipWiz.render(); // listener choice drives what the Listeners step requires
 }
 
 function toggleSipUpstreamTls() {
@@ -4698,6 +4872,7 @@ function toggleSipAdvanced(btn) {
 function toggleSipRtpRelay() {
   const enabled = document.getElementById('sipRtpRelay').checked;
   document.getElementById('sipRtpRelayGroup').style.display = enabled ? 'block' : 'none';
+  sipWiz.render();
 }
 
 async function populateSipCertDropdown(selectedId) {
@@ -4719,9 +4894,11 @@ async function populateSipCertDropdown(selectedId) {
 function closeSipModal() {
   document.getElementById('sipModal').classList.remove('active');
   _editingSip = null;
+  sipWiz.close();
 }
 
 async function saveSipProxy() {
+  if (sipWiz.focusProblem()) return;
   const errEl = document.getElementById('sipModalError');
   errEl.style.display = 'none';
 
@@ -5542,6 +5719,16 @@ function renderLdapConfigs(configs) {
   ).join('');
 }
 
+/** Show the "test these credentials" bar only when editing.
+ *  The test endpoint is /admin/ldap/configs/{id}/test — it needs a saved
+ *  directory, so offering it on the create form was an action that could only
+ *  ever answer "save first". */
+function _ldapSyncTestRow() {
+  const editing = !!document.getElementById('ldapEditId').value;
+  const row = document.querySelector('#ldapModal .ldap-test-row');
+  if (row) row.style.display = editing ? '' : 'none';
+}
+
 function _ldapResetForm() {
   document.getElementById('ldapEditId').value = '';
   document.getElementById('ldapName').value = '';
@@ -5573,7 +5760,8 @@ function _ldapResetForm() {
 
 function openCreateLdapModal() {
   _ldapResetForm();
-  document.getElementById('ldapModalTitle').textContent = 'Novo directory LDAP';
+  _ldapSyncTestRow();
+  ldapWiz.open(false, { title: 'New LDAP Directory' });
   document.getElementById('ldapSubmitBtn').textContent = 'Create';
   document.getElementById('ldapModal').classList.add('active');
 }
@@ -5603,13 +5791,15 @@ function openEditLdapModal(id) {
   document.getElementById('ldapAdminGroups').value = (c.adminGroups || []).join('\n');
   document.getElementById('ldapDefaultProfile').value = c.defaultProfile || '';
   document.getElementById('ldapAutoAdoptLocal').checked = !!c.autoAdoptLocal;
-  document.getElementById('ldapModalTitle').textContent = 'Edit directory: ' + c.name;
+  _ldapSyncTestRow();
+  ldapWiz.open(true, { title: 'Edit Directory — ' + c.name });
   document.getElementById('ldapSubmitBtn').textContent = 'Save';
   document.getElementById('ldapModal').classList.add('active');
 }
 
 function closeLdapModal() {
   document.getElementById('ldapModal').classList.remove('active');
+  ldapWiz.close();
 }
 
 function _ldapCollectPayload(isEdit) {
@@ -5649,6 +5839,7 @@ function _ldapCollectPayload(isEdit) {
 }
 
 async function submitLdap() {
+  if (ldapWiz.focusProblem()) return;
   const editId = document.getElementById('ldapEditId').value;
   const isEdit = !!editId;
   const payload = _ldapCollectPayload(isEdit);
@@ -6156,10 +6347,10 @@ function truncStr(s, n) {
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
 }
 
-function sipLogPrevPage() { if (slPage > 1) { slPage--; fetchSipLogs(); } }
+function sipLogPrevPage() { if (slPage > 1) { slPage--; return fetchSipLogs(); } }
 function sipLogNextPage() {
   const maxPage = Math.max(1, Math.ceil(slTotal / slPageSize));
-  if (slPage < maxPage) { slPage++; fetchSipLogs(); }
+  if (slPage < maxPage) { slPage++; return fetchSipLogs(); }
 }
 
 // Auto-refresh: poll every 5s while on the SIP logs page with the checkbox on
@@ -6369,10 +6560,10 @@ function humanDuration(ms) {
   return Math.floor(ms / 60_000) + 'm ' + Math.floor((ms % 60_000) / 1000) + 's';
 }
 
-function connLogPrevPage() { if (clPage > 1) { clPage--; fetchConnLogs(); } }
+function connLogPrevPage() { if (clPage > 1) { clPage--; return fetchConnLogs(); } }
 function connLogNextPage() {
   const maxPage = Math.max(1, Math.ceil(clTotal / clPageSize));
-  if (clPage < maxPage) { clPage++; fetchConnLogs(); }
+  if (clPage < maxPage) { clPage++; return fetchConnLogs(); }
 }
 
 // ─── Certificates ──────────────────────────────────────────────────────────
@@ -8799,6 +8990,7 @@ function f9ChannelChanged() {
   const row = document.getElementById('f9DirectReplyRow');
   row.style.display = (isMeta || isSmooch) ? 'block' : 'none';
   if (!isMeta && !isSmooch) document.getElementById('f9DirectReply').checked = false;
+  f9Wiz.render(); // the Channel step drops out when there is no provider
 }
 
 function f9AutoReplyChanged() {
@@ -8824,7 +9016,6 @@ function generateF9VerifyToken() {
 
 function openFive9Modal(connector = null) {
   _editingFive9Connector = connector ? connector.name : null;
-  document.getElementById('five9ModalTitle').textContent = connector ? 'Edit Five9 Connector — ' + connector.name : 'New Five9 Connector';
   document.getElementById('f9Name').value = connector?.name || '';
   document.getElementById('f9Name').disabled = !!connector;
   document.getElementById('f9Channel').value = connector?.channel || 'meta-whatsapp';
@@ -8882,6 +9073,10 @@ function openFive9Modal(connector = null) {
   // Advanced
   document.getElementById('f9SessionTtl').value = connector?.sessionTtlMinutes || '';
   f9ChannelChanged();
+  f9Wiz.open(!!connector, {
+    title: connector ? `Edit Five9 Connector — ${connector.name}` : 'New Five9 Connector',
+    subtitle: 'Five9 Digital Engagement connector',
+  });
   document.getElementById('five9Modal').style.display = 'flex';
 }
 
@@ -8889,9 +9084,13 @@ function closeFive9Modal() {
   document.getElementById('five9Modal').style.display = 'none';
   _editingFive9Connector = null;
   releaseConnectorTargetEditor();
+  f9Wiz.close();
 }
 
 async function saveFive9Connector(event) {
+  // Surface the offending step before the server rejects it — otherwise the
+  // toast names a field sitting on a pane the user cannot see.
+  if (f9Wiz.focusProblem()) return;
   await withBusy(event, 'A guardar…', async () => { await doSaveFive9Connector(); });
 }
 async function doSaveFive9Connector() {
@@ -9084,7 +9283,10 @@ function renderReportFeeds() {
 function openReportFeedModal(feed) {
   feed = feed || null;
   _editingReportFeed = feed ? feed.name : null;
-  document.getElementById('reportFeedModalTitle').textContent = feed ? 'Edit Feed — ' + feed.name : 'New Report Feed';
+  rfWiz.open(!!feed, {
+    title: feed ? 'Edit Feed — ' + feed.name : 'New Report Feed',
+    subtitle: 'GoContact report exposed as a consumer API',
+  });
   document.getElementById('rfName').value = feed ? feed.name : '';
   document.getElementById('rfName').disabled = !!feed;
   document.getElementById('rfBaseUrl').value = feed ? (feed.baseUrl || '') : '';
@@ -9188,6 +9390,7 @@ function openReportFeedModal(feed) {
 
 function closeReportFeedModal() {
   document.getElementById('reportFeedModal').style.display = 'none';
+  rfWiz.close();
 }
 
 function rfToggleAllOwners() {
@@ -9210,6 +9413,7 @@ function rfToggleDetail() {
   var enabled = document.getElementById('rfDetailEnabled').checked;
   document.getElementById('rfDetailFields').style.display = enabled ? 'flex' : 'none';
   rfToggleSourceFeed();
+  rfWiz.render(); // enabling the route makes its ID field required
 }
 
 function rfToggleMergeParent() {
@@ -9280,6 +9484,9 @@ function rfGenerateApiKey() {
 }
 
 async function saveReportFeed() {
+  // Surface the offending step before the server rejects it — otherwise the
+  // error names a field sitting on a pane the user cannot see.
+  if (rfWiz.focusProblem()) return;
   const btn = document.getElementById('rfSaveBtn');
   const errEl = document.getElementById('rfError');
   errEl.style.display = 'none';
@@ -9791,6 +9998,9 @@ async function rfFetchPreview() {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Fetch Columns Preview';
+    // Hook 3: the preview builds the field-map rows and repopulates the detail
+    // selects, so the stepper's view of what is filled in has just changed.
+    rfWiz.render();
   }
 }
 
@@ -10160,7 +10370,7 @@ function rfClearInstance() {
   if (sel) sel.value = '';
 }
 
-// ─── System Errors (backend error feed) ──────────────────────────────────────
+// ─── System Alerts (backend error feed) ──────────────────────────────────────
 // Surfaces everything core/error-feed.ts captured: console.error/warn from any
 // module plus uncaught exceptions and unhandled rejections. Rows are grouped
 // server-side by fingerprint, so `count` is how many times that exact failure
@@ -10196,22 +10406,36 @@ async function fetchErrorStats() {
         _errLastToastedId = s.latestId;
       } else if (s.latestId > _errLastToastedId) {
         _errLastToastedId = s.latestId;
-        toast('Novo erro no backend — ver System Errors', 'error');
+        toast('Novo alerta do sistema — ver System Alerts', 'error');
       }
     }
   } catch (e) { /* badge is best-effort; never break the dashboard over it */ }
 }
 
 function renderErrorBadge(s) {
-  const badge = document.getElementById('navErrorBadge');
-  if (!badge) return;
   const n = s.openErrors || 0;
-  if (n > 0) {
-    badge.textContent = n > 99 ? '99+' : String(n);
-    badge.style.display = '';
-    badge.title = n + ' unacknowledged backend error' + (n === 1 ? '' : 's');
-  } else {
-    badge.style.display = 'none';
+  const label = n + ' unacknowledged system alert' + (n === 1 ? '' : 's');
+  const text = n > 99 ? '99+' : String(n);
+
+  // Two places show the same count: the sidebar entry, and the floating
+  // topbar button that stays visible on every page (and when the sidebar is
+  // collapsed on mobile).
+  const badge = document.getElementById('navErrorBadge');
+  if (badge) {
+    badge.textContent = text;
+    badge.style.display = n > 0 ? '' : 'none';
+    badge.title = label;
+  }
+
+  const topBadge = document.getElementById('topbarAlertBadge');
+  const topBtn = document.getElementById('alertsBtn');
+  if (topBadge) {
+    topBadge.textContent = text;
+    topBadge.style.display = n > 0 ? '' : 'none';
+  }
+  if (topBtn) {
+    topBtn.title = n > 0 ? label : 'System alerts';
+    topBtn.classList.toggle('has-alerts', n > 0);
   }
 }
 

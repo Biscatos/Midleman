@@ -1,6 +1,6 @@
 /**
  * Backend error feed — captures every error/warning raised anywhere in the
- * process and exposes it to the dashboard ("System Errors" page).
+ * process and exposes it to the dashboard ("System Alerts" page).
  *
  * Why a console monkey-patch instead of an opt-in logger:
  * `core/logger.ts` is opt-in (11 modules import it) while ~130 bare

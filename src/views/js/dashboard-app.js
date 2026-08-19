@@ -460,7 +460,7 @@ const PAGE_TITLES = {
   notifications: 'Notifications',
   npm: 'Nginx Proxy Manager',
   audit: 'Audit Log',
-  errors: 'System Errors',
+  errors: 'System Alerts',
   reports: 'Report Feeds',
   webhookDestinations: 'Webhooks · Destinations'
 };

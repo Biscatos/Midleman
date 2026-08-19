@@ -1328,7 +1328,7 @@ const server = Bun.serve({
                 }
 
                 // ── Backend error feed endpoints ──
-                // Feeds the "System Errors" dashboard page. Entries are
+                // Feeds the "System Alerts" dashboard page. Entries are
                 // deduplicated by fingerprint upstream in core/error-feed.
 
                 // GET /admin/errors/stats — badge counts + per-source rollup.
@@ -2459,6 +2459,14 @@ const server = Bun.serve({
                     if (idx >= 0) {
                         // Preserve NPM-managed ids across saves (the user can't edit these directly).
                         const existing = config.proxyProfiles[idx];
+                        // Secrets: GET /admin/profiles redacts apiKey and accessKey
+                        // (it reports hasApiKey / hasAccessKey instead), so the editor
+                        // loads those fields blank and posts them back empty. Without
+                        // carrying the stored values over, saving an unchanged profile
+                        // silently WIPED both credentials. Same rule the webhook and
+                        // connector routes already apply to their tokens.
+                        if (!profile.apiKey && existing.apiKey) profile.apiKey = existing.apiKey;
+                        if (!profile.accessKey && existing.accessKey) profile.accessKey = existing.accessKey;
                         if (existing.npmProxyHostId !== undefined && profile.npmProxyHostId === undefined) profile.npmProxyHostId = existing.npmProxyHostId;
                         if (existing.npmCertificateId !== undefined && profile.npmCertificateId === undefined) profile.npmCertificateId = existing.npmCertificateId;
                         if (existing.npmOriginalForwardHost && !profile.npmOriginalForwardHost) profile.npmOriginalForwardHost = existing.npmOriginalForwardHost;
