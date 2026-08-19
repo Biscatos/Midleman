@@ -83,11 +83,76 @@ Sem verify token configurado, o endpoint aceita sem auth. Podes ainda restringir
 ```
 
 ### Resposta
+
+O pedido é **síncrono**: o Midleman só responde depois de a conversa estar criada na
+GoContact e a mensagem entregue. Se o cliente ainda não tinha sessão, ela é aberta durante
+este pedido — não precisas de fazer polling à espera dela.
+
 ```json
-{ "status": "accepted", "messages": 1, "requestId": "2d141482-a4a3-416a-..." }
+{
+  "status": "accepted",
+  "messages": 1,
+  "requestId": "2d141482-a4a3-416a-...",
+  "conversationId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+  "session": {
+    "sessionId": "244900333444",
+    "conversationId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    "contactId": "contact-777",
+    "customerId": "244900333444",
+    "displayName": "Maria",
+    "connector": "mat-whatsapp",
+    "channel": "generic",
+    "mode": "webchat-api",
+    "phoneNumberId": null,
+    "isNew": true,
+    "agentJoined": false,
+    "agentJoinedAt": null,
+    "autoReplied": false,
+    "createdAt": 1787134589088,
+    "lastActivityAt": 1787134589099,
+    "expiresAt": 1787141789099
+  }
+}
 ```
-A entrega à GoContact é **assíncrona** — o `accepted` confirma só que o payload foi aceite
-e parseado (não que já chegou ao agente).
+
+#### Os três identificadores
+
+São diferentes de propósito — não os troques:
+
+| Campo | O que é | Para que serve |
+|---|---|---|
+| `sessionId` | Chave interna do Midleman: `chatId`, ou `{phone_number_id}:{chatId}` quando o canal traz número de negócio | Correlacionar do teu lado; é a chave usada no dashboard e no `DELETE /admin/connectors/{nome}/sessions/{id}` |
+| `conversationId` | O handle da conversa na GoContact (`dialogGroupUuid` em modo poll, `conversationUuid` em webchat-api) | Referir a conversa em suporte com a GoContact |
+| `contactId` | O contacto criado na GoContact | Cruzar com relatórios/CRM |
+
+#### Campos de estado
+
+- **`isNew`** — `true` quando esta mensagem abriu a sessão, `false` quando reutilizou uma já viva.
+- **`expiresAt`** — quando a sessão expira por inatividade (`lastActivityAt` + `sessionTtlMinutes`,
+  por omissão 120 min). Cada mensagem empurra a data para a frente.
+- **`agentJoined` / `agentJoinedAt`** — se algum agente humano já entrou nesta conversa.
+  ⚠️ **Não é um sinal em tempo real.** Em modo `poll` só fica a `true` depois de o poller ler
+  o episódio `JOIN`, o que pode demorar até um intervalo de polling. Para decidires *agora* se
+  o bot deve calar-se, usa o evento `agent_joined` que recebes no webhook (secção 2). Este
+  campo serve para recuperares o estado quando reinicias e não guardaste o evento.
+
+#### Quando não há sessão
+
+Nem toda a mensagem abre sessão. Nesses casos vem `session: null` com um `reason` legível
+por máquina — antes disto a resposta era indistinguível de um sucesso:
+
+| `reason` | Significado |
+|---|---|
+| `out_of_hours` | Fora do horário configurado, em modo "só responde" (`forwardToGoContact:false`). Foi enviada a mensagem de fora-de-horas; **não existe sessão GoContact**. |
+| `delivery_failed` | A GoContact recusou ou falhou. Vem com `status:"partial"` e `errors[]`. |
+| `no_messages` | O payload não produziu mensagens (ver `hint`). |
+| `filtered` | O `phone_number_id` não pertence a este conector (`status:"ignored"`). |
+
+Com várias mensagens no mesmo pedido vem **`sessions: []`** em vez de `session`, **alinhado
+por índice** com as mensagens extraídas (`null` nas posições sem sessão), mais
+`sessionReasons: []` com o motivo de cada `null`. O campo `conversationIds` continua a
+existir por retrocompatibilidade, mas **salta** as falhadas — por isso não dá para saber a
+que mensagem cada id pertence. Usa `sessions`.
 
 ### Exemplo `curl`
 ```bash
@@ -171,11 +236,52 @@ Exemplo de `chat_closed`:
 }
 ```
 
+### Tipos de Webhook Target
+
+Um target pode ser uma de duas coisas:
+
+**`kind: "url"`** — o Midleman faz `POST` diretamente ao teu endpoint. Podes configurar
+autenticação sem escrever headers à mão: **Bearer**, **Basic** ou um **header à escolha**
+(ex. `X-Api-Key`). O segredo é guardado redigido nos logs e nunca é devolvido pela API de
+administração — ao editares o conector aparece mascarado e, se não lhe tocares, é preservado.
+
+```json
+{ "kind": "url", "url": "https://o-meu-bot/eventos",
+  "auth": { "type": "bearer", "token": "..." } }
+```
+
+**`kind: "webhook"`** — o evento é entregue a um **Webhook Distributor deste Midleman**, que
+passa a ser o dono da entrega. Herda tudo o que esse subsistema já faz: política de retry,
+*persistent retry* com alerta por email, filtros por condição, `bodyTemplate`, DLQ com replay
+e log por tentativa.
+
+```json
+{ "kind": "webhook", "webhookName": "bot-feed" }
+```
+
+No dashboard escolhes o distributor de uma lista — cria-o primeiro na página **Webhooks**. A
+entrega é interna ao processo, por isso o `authToken` e a allowlist de IPs do distributor não
+se aplicam a ela — continuam a valer para quem lhe bata de fora.
+
+**Qual usar:** se perderes uma resposta do agente for inaceitável, usa `kind: "webhook"`.
+
 ### Semântica de entrega (importante)
 - **Responde `2xx`** para confirmar a receção.
-- `agent_message` é **at-least-once**: se o teu endpoint falhar (não-2xx ou timeout), o
-  Midleman **repete** mais tarde. **Deduplica sempre pelo `message.uuid`** do teu lado.
-- `chat_closed` tenta 3 vezes; se falhar, fica na **DLQ** (replay manual pelo dashboard).
+- `agent_message` é **at-least-once**: **deduplica sempre pelo `message.uuid`** do teu lado.
+- Quantas tentativas depende do modo do conector, porque o que serve de rede de segurança
+  é diferente:
+
+| Modo | `agent_message` | Porquê |
+|---|---|---|
+| `poll` | 1 tentativa | A mensagem não é marcada como lida enquanto não for entregue, por isso o poller volta a apanhá-la. O retry real é o ciclo de polling. |
+| `webchat-api` | 3 tentativas, depois **DLQ** | Não há poller — a GoContact empurra cada resposta **uma só vez**. Sem isto, um bot em baixo dois segundos perdia a mensagem em silêncio. |
+
+- `chat_closed` tenta sempre 3 vezes e vai para a DLQ; é *fire-once* (a sessão já não existe).
+- Um target `kind: "webhook"` faz 1 tentativa para *entregar ao distributor* — a partir daí a
+  durabilidade é dele.
+- No replay da DLQ a credencial do target é **re-derivada da configuração atual** do conector,
+  não lida da entrada em fila. É por isso que o segredo não está no `dlq.json`, e é também por
+  isso que rodar a credencial faz os replays pendentes passarem a usar a nova.
 
 ### Exemplo de recetor mínimo (Bun/Node)
 ```js
@@ -203,8 +309,9 @@ Bun.serve({
 |---|---|---|
 | Direção | `POST` para a porta do conector | `POST` para os teus Webhook Targets |
 | Formato | `{chatId, name?, text?, file?}` ou `{messages:[…]}` | `AgentEvent` (`event` + `message`) |
-| Auth | verify token (`?token=` / `X-Forward-Token`) + IP allowlist | os teus custom headers; `X-Connector` identifica o conector |
-| Ack | resposta `{status:"accepted"}` | responde `2xx`; deduplica por `message.uuid` |
+| Auth | verify token (`?token=` / `X-Forward-Token`) + IP allowlist | Bearer / Basic / header à escolha; `X-Connector` identifica o conector |
+| Ack | resposta síncrona `{status:"accepted", session:{…}}` | responde `2xx`; deduplica por `message.uuid` |
+| Sessão | criada durante o pedido; devolvida em `session` (ou `session:null` + `reason`) | `agent_joined` avisa quando um humano assume |
 
 **Configuração mínima do conector `generic`:** credenciais GoContact + **pelo menos um
 Webhook Target** (sem ele não há por onde devolver as respostas do agente).

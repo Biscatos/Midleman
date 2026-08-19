@@ -16,17 +16,18 @@
  */
 
 import { log } from '../core/logger';
-import type { GoContactConnector, NormalizedInboundMessage, ConnectorWebhookTarget } from '../core/connector-types';
+import type { GoContactConnector, NormalizedInboundMessage } from '../core/connector-types';
 import { GoContactClient, GoContactError, stripHtml, type GoAgentMessage, type GoFile, type GoSessionHandles } from '../gocontact/client';
 import { WebchatApiClient, resolveLoginFields, type ChannelLoginField } from '../gocontact/webchat-api';
+import { deliverConnectorEvent, attemptsFor, shouldParkInDlq, parkFailedDelivery } from '../core/connector-webhooks';
+import { registerDlqSsrfPolicy } from './webhook-server';
 import {
     getSession, upsertSession, touchSession, deleteSession,
-    updateSessionLastInbound, markSessionAutoReplied, listActiveSessions, purgeExpiredSessions, type ConnectorSession,
+    updateSessionLastInbound, markSessionAutoReplied, markSessionAgentJoined, listActiveSessions, purgeExpiredSessions, type ConnectorSession,
     getOutOfHoursLastSent, markOutOfHoursSent, getSessionByConversation,
 } from '../gocontact/sessions';
 import { isWithinBusinessHours } from '../core/business-hours';
 import { logRequest, headersToRecord } from '../telemetry/request-log';
-import { enqueueFailedFanout } from './webhook-server';
 import { emitNotificationEvent, hasAnyRuleMatching } from '../core/notifications';
 import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { assertResolvedHostAllowed, type SsrfPolicyOverride } from '../core/ssrf-guard';
@@ -615,6 +616,36 @@ function sessionKeyFor(msg: NormalizedInboundMessage): string {
     return msg.phoneNumberId ? `${msg.phoneNumberId}:${msg.chatId}` : msg.chatId;
 }
 
+/** The session as reported back to whoever posted the inbound message — enough
+ *  for a bot to drive the conversation without a second lookup.
+ *
+ *  Three ids, deliberately named apart: `sessionId` is Midleman's own key,
+ *  `conversationId` is the GoContact handle to quote in support, `contactId` is
+ *  the contact behind it. `agentJoined` is NOT a live "is a human here now"
+ *  flag — in poll mode it trails the real pickup by up to one poll interval;
+ *  the timely signal is the `agent_joined` webhook event. */
+function sessionInfo(cs: ConnectorServer, s: ConnectorSession, created: boolean): Record<string, unknown> {
+    const ttlMs = (cs.connector.sessionTtlMinutes ?? 120) * 60_000;
+    return {
+        sessionId: s.chatId,
+        conversationId: s.dialogGroupUuid,
+        contactId: s.dialogGroupId,
+        customerId: s.customerId,
+        displayName: s.displayName,
+        connector: s.connector,
+        channel: cs.connector.channel,
+        mode: cs.connector.gocontact.mode ?? 'poll',
+        phoneNumberId: s.phoneNumberId || null,
+        isNew: created,
+        agentJoined: s.agentJoinedAt > 0,
+        agentJoinedAt: s.agentJoinedAt || null,
+        autoReplied: s.autoReplied,
+        createdAt: s.createdAt,
+        lastActivityAt: s.lastActivityAt,
+        expiresAt: s.lastActivityAt + ttlMs,
+    };
+}
+
 // Per-(connector, session) mutex. Serializes inbound handling for one customer
 // so two concurrent messages can never both create a dialog group (no
 // duplicate sessions) — and, as a bonus, preserves message order per customer.
@@ -636,8 +667,10 @@ function isDialogGone(err: unknown): boolean {
     return err instanceof GoContactError && (err.status === 404 || err.dialogGone === true);
 }
 
-/** Get a live session or bootstrap a new one (token → … → dialog group + JOIN). */
-async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage): Promise<ConnectorSession> {
+/** Get a live session or bootstrap a new one (token → … → dialog group + JOIN).
+ *  `created` tells the caller whether a GoContact conversation was opened on
+ *  this call — surfaced to inbound callers as `session.isNew`. */
+async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage): Promise<{ session: ConnectorSession; created: boolean }> {
     const c = cs.connector;
     const ttl = c.sessionTtlMinutes ?? 120;
     const key = sessionKeyFor(msg);
@@ -646,7 +679,7 @@ async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage)
     // The bearer token is shared per user by the token manager, so a live
     // session needs no token upkeep — just reuse it.
     if (existing && Date.now() - existing.lastActivityAt < ttl * 60_000) {
-        return existing;
+        return { session: existing, created: false };
     }
 
     if (existing) deleteSession(c.name, key);
@@ -669,6 +702,7 @@ async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage)
         phoneNumberId: msg.phoneNumberId || '',
         lastInboundMsgId: '',
         autoReplied: false,
+        agentJoinedAt: 0,
         createdAt: Date.now(),
         lastActivityAt: Date.now(),
     };
@@ -684,7 +718,7 @@ async function ensureSession(cs: ConnectorServer, msg: NormalizedInboundMessage)
         }
     }
     log.info(`💬 [connector:${c.name}] New webchat session for ${key} (${session.dialogGroupUuid})`);
-    return session;
+    return { session, created: true };
 }
 
 /** Create a conversation via the GoContact Webchat API and adapt it to the
@@ -789,13 +823,20 @@ async function injectInboundWebchat(cs: ConnectorServer, session: ConnectorSessi
     }
 }
 
+/** Outcome of injecting one inbound message. A missing session is never just
+ *  `null`: every path that produces no GoContact conversation says why, so a
+ *  bot can tell "session opened" apart from "we're closed right now". */
+type InboundOutcome =
+    | { ok: true; session: ConnectorSession; created: boolean }
+    | { ok: false; reason: 'out_of_hours' };
+
 /**
  * Inject one inbound message into GoContact, serialized per customer so two
  * concurrent messages never create duplicate dialogs. If GoContact has expired
  * or closed the dialog (404), drop the stale local session, open a fresh one
  * and retry once.
  */
-async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage): Promise<ConnectorSession | null> {
+async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage): Promise<InboundOutcome> {
     const c = cs.connector;
     const sessionKey = sessionKeyFor(msg);
     const lockKey = `${c.name}:${sessionKey}`;
@@ -810,10 +851,10 @@ async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage
             maybeSendOutOfHoursReply(cs, msg, sessionKey, bh!.message.trim(), null);
             cs.stats.inboundMessages++;
             cs.stats.lastInboundAt = Date.now();
-            return null;
+            return { ok: false, reason: 'out_of_hours' };
         }
 
-        let session = await ensureSession(cs, msg);
+        let { session, created } = await ensureSession(cs, msg);
         try {
             await injectInbound(cs, session, msg);
         } catch (err) {
@@ -823,13 +864,17 @@ async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage
             log.warn(`♻️ [connector:${c.name}] Dialog gone (404) for ${msg.chatId} — recreating session and retrying`);
             deleteSession(c.name, session.chatId);
             dropSessionPollState(c.name, session.chatId);
-            session = await ensureSession(cs, msg);
+            ({ session } = await ensureSession(cs, msg));
+            created = true;
             await injectInbound(cs, session, msg);
         }
 
         // Post-delivery bookkeeping (only after a successful inject).
         if (msg.messageId) updateSessionLastInbound(c.name, session.chatId, msg.messageId);
         touchSession(c.name, session.chatId);
+        // Keep the in-memory copy in step with the row we just bumped, so the
+        // `expiresAt` reported back to the caller reflects this message.
+        session.lastActivityAt = Date.now();
         markSessionHot(c, session.chatId); // customer just wrote — agent reply likely soon
         cs.stats.inboundMessages++;
         cs.stats.lastInboundAt = Date.now();
@@ -851,7 +896,7 @@ async function deliverInbound(cs: ConnectorServer, msg: NormalizedInboundMessage
                 void sendAutoReply(cs, session, c.autoReply.text.trim());
             }
         }
-        return session;
+        return { ok: true, session, created };
     });
 }
 
@@ -981,52 +1026,11 @@ interface AgentEvent {
     } | null;
 }
 
-async function postWebhookTarget(c: GoContactConnector, target: ConnectorWebhookTarget, event: AgentEvent, maxAttempts = 3): Promise<void> {
-    await assertResolvedHostAllowed(target.url, ssrfPolicy(c));
-    const body = JSON.stringify(event);
-    let lastErr: unknown;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        if (attempt > 1) await Bun.sleep(1000 * Math.pow(2, attempt - 2));
-        const started = performance.now();
-        try {
-            const headers = new Headers({ 'Content-Type': 'application/json', 'X-Connector': c.name });
-            for (const [k, v] of Object.entries(target.customHeaders || {})) headers.set(k, v);
-            const res = await fetch(target.url, {
-                method: target.method || 'POST',
-                headers,
-                body,
-                signal: AbortSignal.timeout(30_000),
-                tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' },
-            } as RequestInit);
-            const resText = await res.text().catch(() => null);
-            logRequest({
-                requestId: event.message?.uuid || crypto.randomUUID(),
-                type: 'connector-fanout',
-                targetName: c.name,
-                method: target.method || 'POST',
-                path: `/${event.event}`,
-                targetUrl: target.url,
-                reqHeaders: headersToRecord(headers),
-                reqBody: body,
-                reqBodySize: body.length,
-                resStatus: res.status,
-                resStatusText: res.statusText,
-                resBody: resText && resText.length <= 4096 ? resText : null,
-                durationMs: performance.now() - started,
-            });
-            if (res.status >= 200 && res.status < 300) return;
-            lastErr = new Error(`HTTP ${res.status}`);
-        } catch (err) {
-            lastErr = err;
-        }
-    }
-    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
-}
-
 /** Deliver one agent message to every configured destination. Throws if any fails.
- *  chat_closed is fire-once (the session is already gone), so webhook-target
- *  failures for it are parked in the shared DLQ for manual replay instead of
- *  being lost — agent_message failures retry naturally on the next poll. */
+ *  How hard we try depends on the event and the mode — see attemptsFor(): in
+ *  poll mode an unacknowledged agent_message comes round again on the next
+ *  poll, but in webchat-api mode GoContact pushes it exactly once, so there it
+ *  gets real retries and a DLQ entry like chat_closed does. */
 async function fanoutAgentEvent(cs: ConnectorServer, session: ConnectorSession | null, event: AgentEvent): Promise<void> {
     const c = cs.connector;
     const jobs: Promise<void>[] = [];
@@ -1039,34 +1043,19 @@ async function fanoutAgentEvent(cs: ConnectorServer, session: ConnectorSession |
             jobs.push(sendToSmooch(c, event.chatId, event.message.text, event.message.file));
         }
     }
-    for (const target of (c.webhooksEnabled !== false ? c.webhookTargets || [] : [])) {
-        // agent_message: single shot per tick — the poll loop + per-message
-        // backoff is the retry mechanism. chat_closed: 3 attempts, then DLQ.
-        let job = postWebhookTarget(c, target, event, event.event === 'chat_closed' ? 3 : 1);
-        if (event.event === 'chat_closed') {
+    // Webchat API mode has no poller, so nothing re-reads a lost agent reply.
+    const pushMode = c.gocontact.mode === 'webchat-api';
+    const allTargets = c.webhooksEnabled !== false ? c.webhookTargets || [] : [];
+    allTargets.forEach((target, targetIndex) => {
+        const attempts = attemptsFor(event.event, pushMode);
+        let job = deliverConnectorEvent({ connectorName: c.name, target, event, ssrf: ssrfPolicy(c), maxAttempts: attempts });
+        if (shouldParkInDlq(event.event, pushMode)) {
             job = job.catch(err => {
-                const body = JSON.stringify(event);
-                const errMsg = err instanceof Error ? err.message : String(err);
-                enqueueFailedFanout({
-                    webhookName: `connector:${c.name}`,
-                    requestId: crypto.randomUUID(),
-                    targetUrl: target.url,
-                    method: target.method || 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Connector': c.name, ...(target.customHeaders || {}) },
-                    body,
-                    bodyPreview: body,
-                    bodySize: body.length,
-                    path: `/chat_closed`,
-                    clientIp: 'internal',
-                    retryConfig: undefined,
-                    lastError: errMsg,
-                    totalAttempts: 3,
-                });
-                log.warn(`📥 [connector:${c.name}] chat_closed → ${target.url} failed (${errMsg}) — parked in DLQ for replay`);
+                parkFailedDelivery({ connectorName: c.name, target, targetIndex, event, error: err, attempts });
             });
         }
         jobs.push(job);
-    }
+    });
 
     const results = await Promise.allSettled(jobs);
     const failures = results.filter(r => r.status === 'rejected') as PromiseRejectedResult[];
@@ -1142,6 +1131,7 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
     if (m.msgtype === 'JOIN') {
         try { if (m.uuid) await cs.client.markAsRead(session.accessKey, m.uuid); } catch { /* non-critical */ }
         log.info(`🙋 [connector:${c.name}] Agent "${m.displayname}" joined chat ${session.chatId}`);
+        markSessionAgentJoined(c.name, session.chatId, m.timestamp || Date.now());
         const event: AgentEvent = {
             connector: c.name, channel: c.channel, event: 'agent_joined',
             chatId: session.customerId, displayName: session.displayName,
@@ -1358,6 +1348,7 @@ async function handleHandover(req: Request, cs: ConnectorServer, clientIp: strin
         dialogGroupUuid: conversationUuid, dialogGroupId: contactId,
         phoneNumberId, lastInboundMsgId: '',
         autoReplied: true, // already engaged by the bot — skip the first-message auto-reply
+        agentJoinedAt: 0,
         createdAt: Date.now(), lastActivityAt: Date.now(),
     };
     upsertSession(session);
@@ -1438,6 +1429,7 @@ async function handleWebchatCallback(req: Request, cs: ConnectorServer, clientIp
 
     // Agent joined → informational event (best-effort).
     if (msgType === 'JOIN') {
+        markSessionAgentJoined(c.name, session.chatId, Number(m.timestamp) || Date.now());
         await deliver({ ...base, event: 'agent_joined', message: {
             uuid: uuid || crypto.randomUUID(), text: null, timestamp: Number(m.timestamp) || Date.now(),
             agentName: String(m.participantName || 'Agent'), userType: 'AGENT', file: null,
@@ -1575,7 +1567,10 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
         const before = messages.length;
         messages = messages.filter(m => m.phoneNumberId && c.phoneNumberFilter!.includes(m.phoneNumberId));
         if (before > 0 && messages.length === 0) {
-            return jsonResponse(200, { status: 'ignored', reason: 'phone_number_id not handled by this connector', requestId });
+            return jsonResponse(200, {
+                status: 'ignored', reason: 'filtered', session: null, requestId,
+                detail: 'phone_number_id not handled by this connector',
+            });
         }
     }
 
@@ -1593,11 +1588,27 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
 
     const conversationIds: string[] = [];
     const deliveryErrors: string[] = [];
+    // Index-aligned with `messages`: null wherever that message produced no
+    // session, so a caller can always tell which message a session belongs to.
+    // (`conversationIds` can't — it skips the failures — but it stays as-is for
+    // backwards compatibility.)
+    const sessionInfos: (Record<string, unknown> | null)[] = [];
+    // Why each null slot is null, in the same order.
+    const sessionReasons: (string | null)[] = [];
     for (const msg of messages) {
         try {
-            const session = await deliverInbound(cs, msg);
-            if (session?.dialogGroupUuid) conversationIds.push(session.dialogGroupUuid);
+            const outcome = await deliverInbound(cs, msg);
+            if (outcome.ok) {
+                conversationIds.push(outcome.session.dialogGroupUuid);
+                sessionInfos.push(sessionInfo(cs, outcome.session, outcome.created));
+                sessionReasons.push(null);
+            } else {
+                sessionInfos.push(null);
+                sessionReasons.push(outcome.reason);
+            }
         } catch (err) {
+            sessionInfos.push(null);
+            sessionReasons.push('delivery_failed');
             const errMsg = err instanceof Error ? err.message : String(err);
             cs.stats.lastError = errMsg;
             deliveryErrors.push(errMsg);
@@ -1627,6 +1638,20 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
     } else if (conversationIds.length > 1) {
         resJson.conversationIds = conversationIds;
     }
+    // Session view: a single `session` for the common one-message post, the
+    // index-aligned array when a payload carried several. When nothing opened a
+    // session, say so explicitly with the reason — an absent field used to be
+    // indistinguishable from a plain success.
+    if (messages.length === 1) {
+        resJson.session = sessionInfos[0];
+        if (!sessionInfos[0]) resJson.reason = sessionReasons[0];
+    } else if (messages.length > 1) {
+        resJson.sessions = sessionInfos;
+        if (sessionReasons.some(r => r !== null)) resJson.sessionReasons = sessionReasons;
+    } else {
+        resJson.session = null;
+        resJson.reason = 'no_messages';
+    }
     if (deliveryErrors.length > 0) resJson.errors = deliveryErrors;
     if (messages.length === 0) {
         resJson.hint = c.channel === 'meta-whatsapp'
@@ -1653,6 +1678,9 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
 // ─── Server lifecycle ────────────────────────────────────────────────────────
 
 export function startConnectorServer(connector: GoContactConnector): ConnectorServer {
+    // Keep DLQ replays on the same SSRF footing as live delivery — the shared
+    // queue only carries the producer name, not the connector's policy.
+    registerDlqSsrfPolicy(`connector:${connector.name}`, ssrfPolicy(connector));
     const isWebchat = connector.gocontact.mode === 'webchat-api';
     const cs: ConnectorServer = {
         connector,

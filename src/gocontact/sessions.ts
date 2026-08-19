@@ -39,6 +39,11 @@ export interface ConnectorSession {
     lastInboundMsgId: string;
     /** True once the connector's auto-reply fired for this session. */
     autoReplied: boolean;
+    /** Unix ms of the first agent JOIN on this conversation, 0 while nobody has
+     *  picked it up. In poll mode this lags the real pickup by up to one poll
+     *  interval — the timely signal is the `agent_joined` fan-out event; this
+     *  column is what lets a consumer recover the state after a restart. */
+    agentJoinedAt: number;
     createdAt: number;         // Unix ms
     lastActivityAt: number;    // Unix ms — bumped on every send/receive
 }
@@ -59,6 +64,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     phone_number_id   TEXT NOT NULL DEFAULT '',
     customer_id       TEXT NOT NULL DEFAULT '',
     auto_replied      INTEGER NOT NULL DEFAULT 0,
+    agent_joined_at   INTEGER NOT NULL DEFAULT 0,
     last_inbound_msg_id TEXT NOT NULL DEFAULT '',
     created_at        INTEGER NOT NULL,
     last_activity_at  INTEGER NOT NULL,
@@ -89,6 +95,7 @@ export function initConnectorSessions(dataDir: string): void {
     try { db.exec("ALTER TABLE sessions ADD COLUMN last_inbound_msg_id TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
     try { db.exec("ALTER TABLE sessions ADD COLUMN customer_id TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
     try { db.exec("ALTER TABLE sessions ADD COLUMN auto_replied INTEGER NOT NULL DEFAULT 0"); } catch { /* already present */ }
+    try { db.exec("ALTER TABLE sessions ADD COLUMN agent_joined_at INTEGER NOT NULL DEFAULT 0"); } catch { /* already present */ }
     log.info(`💬 GoContact session store: ${dbPath}`);
 }
 
@@ -110,6 +117,7 @@ function rowToSession(r: any): ConnectorSession {
         phoneNumberId: r.phone_number_id || '',
         lastInboundMsgId: r.last_inbound_msg_id || '',
         autoReplied: !!r.auto_replied,
+        agentJoinedAt: r.agent_joined_at || 0,
         createdAt: r.created_at,
         lastActivityAt: r.last_activity_at,
     };
@@ -165,6 +173,16 @@ export function markSessionAutoReplied(connector: string, chatId: string): void 
     if (!db) return;
     db.query('UPDATE sessions SET auto_replied = 1 WHERE connector = $c AND chat_id = $id')
         .run({ $c: connector, $id: chatId });
+}
+
+/** Stamp the first agent JOIN on this session. Later JOINs (an agent leaving and
+ *  another picking up) keep the original timestamp — the flag answers "has a
+ *  human ever been on this conversation", which is what a bot needs to decide
+ *  whether to keep auto-answering. */
+export function markSessionAgentJoined(connector: string, chatId: string, ts: number): void {
+    if (!db) return;
+    db.query('UPDATE sessions SET agent_joined_at = $t WHERE connector = $c AND chat_id = $id AND agent_joined_at = 0')
+        .run({ $t: ts, $c: connector, $id: chatId });
 }
 
 export function updateSessionLastInbound(connector: string, chatId: string, messageId: string): void {

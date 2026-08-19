@@ -3687,8 +3687,18 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer;margin-bottom:6px">
           <input id="cnWebhooksEnabled" type="checkbox" checked onchange="connectorWebhooksEnabledChanged()"> Deliver events to webhook targets
         </label>
-        <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Webhook Targets <span style="color:var(--text3)">(agent replies POSTed here — one URL per line)</span></label>
-        <textarea id="cnWebhookTargets" rows="3" placeholder="https://o-meu-bot.exemplo.com/gocontact-events" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px;font-family:'SF Mono',Monaco,monospace"></textarea>
+        <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Webhook Targets <span style="color:var(--text3)">(where agent replies, joins and closes are delivered)</span></label>
+        <div id="cnWebhookTargetsList"></div>
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <button type="button" class="btn btn-sm" onclick="addConnectorTarget('url')">+ URL</button>
+          <button type="button" class="btn btn-sm" onclick="addConnectorTarget('webhook')">+ Midleman Webhook</button>
+        </div>
+        <div style="font-size:10.5px;color:var(--text3);margin-top:6px;line-height:1.5">
+          A <strong>Midleman Webhook</strong> target hands the event to one of your Webhook distributors, which then owns
+          delivery — its retry policy, persistent retry, filters, templates and the DLQ all apply. Prefer it when the
+          delivery must not be lost; create the distributor on the Webhooks page first. A plain <strong>URL</strong>
+          target posts directly, with a bounded retry.
+        </div>
       </div>
     </div>
     <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border);flex-shrink:0;background:var(--surface);border-radius:0 0 var(--radius) var(--radius)">
@@ -3848,7 +3858,16 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer;margin-bottom:4px">
             <input id="f9WebhooksEnabled" type="checkbox" checked onchange="f9WebhooksEnabledChanged()"> Deliver events to webhook targets
           </label>
-          <textarea id="f9WebhookTargets" rows="3" placeholder="https://o-meu-bot.exemplo.com/five9-events" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px;font-family:'SF Mono',Monaco,monospace"></textarea>
+          <div id="f9WebhookTargetsList"></div>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <button type="button" class="btn btn-sm" onclick="addConnectorTarget('url')">+ URL</button>
+            <button type="button" class="btn btn-sm" onclick="addConnectorTarget('webhook')">+ Midleman Webhook</button>
+          </div>
+          <div style="font-size:10.5px;color:var(--text3);margin-top:6px;line-height:1.5">
+            Five9 pushes each agent reply once, so a target that is briefly down loses the message. A
+            <strong>Midleman Webhook</strong> target avoids that: the distributor takes over delivery with its own
+            retry policy and dead-letter queue.
+          </div>
         </div>
       </div>
 

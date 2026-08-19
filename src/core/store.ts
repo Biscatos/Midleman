@@ -449,6 +449,16 @@ export interface StoredFailedFanout {
     lastError: string;
     totalAttempts: number;
     failedAt: number;
+    /** Where to FETCH the target's credential from at replay time, instead of
+     *  storing it here. Two reasons: request-log redaction would have written
+     *  `[redacted]` into `headers` (a replay would then send that literal
+     *  string), and dlq.json is plain text on disk.
+     *
+     *  `targetUrl` is the real key — the index is only a hint. A target list
+     *  edited while an entry sits in the queue would otherwise shift, and the
+     *  index would resolve to a DIFFERENT target's credential, sending one
+     *  receiver's secret to another. */
+    authRef?: { kind: 'connector'; connector: string; targetIndex: number; targetUrl: string };
 }
 
 export function loadPersistedDlq(): StoredFailedFanout[] {

@@ -100,11 +100,58 @@ export interface SmoochSettings {
   webhookSecret?: string;
 }
 
-/** A generic webhook destination for agent replies (e.g. your bot). */
+/** How a target authenticates to the receiver. Kept as a discriminated field
+ *  rather than a raw header so the value can be redacted in logs and preserved
+ *  across UI edits (the dashboard never re-sends secrets). */
+export type ConnectorTargetAuth =
+  | { type: 'bearer'; token: string }
+  | { type: 'basic'; username: string; password: string }
+  | { type: 'header'; name: string; value: string };
+
+/**
+ * A destination for agent replies. Two shapes:
+ *
+ *   • kind 'url' (default) — POST straight to an external URL. Simple, and the
+ *     only option for endpoints outside this Midleman.
+ *   • kind 'webhook' — hand the event to a Webhook Distributor configured in
+ *     this same Midleman. The event then inherits everything that subsystem
+ *     already does: per-destination retry, persistent retry with e-mail alerts,
+ *     conditional filters, body templates, the DLQ with replay, and per-attempt
+ *     logging. Prefer this when delivery must not be lost.
+ */
 export interface ConnectorWebhookTarget {
-  url: string;
+  kind?: 'url' | 'webhook';              // default 'url' (legacy targets have no kind)
+  url?: string;                          // kind 'url'
+  webhookName?: string;                  // kind 'webhook'
   method?: string;                       // default POST
   customHeaders?: Record<string, string>;
+  /** Auth for kind 'url'. A 'webhook' target needs none — the distributor's own
+   *  destination config holds the credential, which also keeps the secret out
+   *  of DLQ entries. */
+  auth?: ConnectorTargetAuth;
+}
+
+/** The effective kind of a target, tolerating legacy entries with no `kind`. */
+export function targetKind(t: ConnectorWebhookTarget): 'url' | 'webhook' {
+  return t.kind === 'webhook' ? 'webhook' : 'url';
+}
+
+/** Human-readable destination, for logs and DLQ labels. */
+export function targetLabel(t: ConnectorWebhookTarget): string {
+  return targetKind(t) === 'webhook' ? `webhook:${t.webhookName}` : (t.url || '(no url)');
+}
+
+/** Target as sent to the dashboard: the auth secret is replaced by a presence
+ *  flag, matching how every other credential is exposed by the admin API. The
+ *  editor posts the secret back empty and the save path restores it. */
+export function redactTargetAuth(t: ConnectorWebhookTarget): Record<string, unknown> {
+  const { auth, ...rest } = t;
+  if (!auth) return { ...rest, kind: targetKind(t) };
+  const masked =
+    auth.type === 'bearer' ? { type: 'bearer', token: '', hasSecret: !!auth.token }
+    : auth.type === 'basic' ? { type: 'basic', username: auth.username, password: '', hasSecret: !!auth.password }
+    : { type: 'header', name: auth.name, value: '', hasSecret: !!auth.value };
+  return { ...rest, kind: targetKind(t), auth: masked };
 }
 
 export interface GoContactConnector {
@@ -363,19 +410,8 @@ export function validateConnectorInput(input: unknown): string | null {
     }
   }
 
-  if (c.webhookTargets !== undefined) {
-    if (!Array.isArray(c.webhookTargets)) return '"webhookTargets" must be an array';
-    if (c.webhookTargets.length > 16) return '"webhookTargets" cannot exceed 16 entries';
-    for (const t of c.webhookTargets as unknown[]) {
-      if (!t || typeof t !== 'object') return '"webhookTargets" entries must be objects';
-      const wt = t as Record<string, unknown>;
-      if (typeof wt.url !== 'string' || !wt.url.trim()) return '"webhookTargets[].url" is required';
-      try { assertSafeOutboundUrl(wt.url, ssrfOverride); }
-      catch (e) { return e instanceof SsrfBlockedError ? `"${wt.url}": ${e.message}` : `"${wt.url}" is not a valid URL`; }
-      if (wt.method !== undefined && typeof wt.method !== 'string') return '"webhookTargets[].method" must be a string';
-      if (wt.customHeaders !== undefined && (typeof wt.customHeaders !== 'object' || wt.customHeaders === null)) return '"webhookTargets[].customHeaders" must be an object';
-    }
-  }
+  const targetsError = validateWebhookTargets(c.webhookTargets, ssrfOverride);
+  if (targetsError) return targetsError;
 
   if (c.webhooksEnabled !== undefined && typeof c.webhooksEnabled !== 'boolean') return '"webhooksEnabled" must be a boolean';
 
@@ -393,6 +429,69 @@ export function validateConnectorInput(input: unknown): string | null {
   if (c.allowPrivateTargets !== undefined && typeof c.allowPrivateTargets !== 'boolean') return '"allowPrivateTargets" must be a boolean';
   if (c.targetAllowedCidrs !== undefined && (!Array.isArray(c.targetAllowedCidrs) || (c.targetAllowedCidrs as unknown[]).some(x => typeof x !== 'string'))) {
     return '"targetAllowedCidrs" must be an array of CIDR strings';
+  }
+
+  return null;
+}
+
+/**
+ * Validate a connector's `webhookTargets` array. Shared by the GoContact and
+ * Five9 validators so a target gains the same shape rules in both.
+ * Returns an error string, or null when valid (including when unset).
+ */
+export function validateWebhookTargets(
+  targets: unknown,
+  ssrfOverride: { allowPrivate?: boolean; allowedCidrs?: string[] },
+): string | null {
+  if (targets !== undefined) {
+    if (!Array.isArray(targets)) return '"webhookTargets" must be an array';
+    if (targets.length > 16) return '"webhookTargets" cannot exceed 16 entries';
+    for (const t of targets as unknown[]) {
+      if (!t || typeof t !== 'object') return '"webhookTargets" entries must be objects';
+      const wt = t as Record<string, unknown>;
+      if (wt.kind !== undefined && wt.kind !== 'url' && wt.kind !== 'webhook') {
+        return '"webhookTargets[].kind" must be "url" or "webhook"';
+      }
+      const kind = wt.kind === 'webhook' ? 'webhook' : 'url';
+      if (wt.url && wt.webhookName) return '"webhookTargets[]" takes either a url or a webhookName, not both';
+
+      if (kind === 'webhook') {
+        // Internal destination: the distributor is reached over loopback, so
+        // the outbound SSRF policy (which exists to stop us being aimed at
+        // internal networks) does not apply. Existence is checked by the caller
+        // that has the webhook list — here we only validate the shape.
+        if (typeof wt.webhookName !== 'string' || !wt.webhookName.trim()) {
+          return '"webhookTargets[].webhookName" is required when kind is "webhook"';
+        }
+        if (wt.auth !== undefined) {
+          return '"webhookTargets[].auth" does not apply to a "webhook" target — set the credential on the distributor destination instead';
+        }
+      } else {
+        if (typeof wt.url !== 'string' || !wt.url.trim()) return '"webhookTargets[].url" is required';
+        try { assertSafeOutboundUrl(wt.url, ssrfOverride); }
+        catch (e) { return e instanceof SsrfBlockedError ? `"${wt.url}": ${e.message}` : `"${wt.url}" is not a valid URL`; }
+      }
+
+      if (wt.method !== undefined && typeof wt.method !== 'string') return '"webhookTargets[].method" must be a string';
+      if (wt.customHeaders !== undefined && (typeof wt.customHeaders !== 'object' || wt.customHeaders === null)) return '"webhookTargets[].customHeaders" must be an object';
+
+      if (wt.auth !== undefined) {
+        if (typeof wt.auth !== 'object' || wt.auth === null) return '"webhookTargets[].auth" must be an object';
+        const a = wt.auth as Record<string, unknown>;
+        if (a.type === 'bearer') {
+          if (typeof a.token !== 'string' || !a.token.trim()) return '"webhookTargets[].auth.token" is required for bearer auth';
+        } else if (a.type === 'basic') {
+          if (typeof a.username !== 'string' || !a.username.trim()) return '"webhookTargets[].auth.username" is required for basic auth';
+          if (typeof a.password !== 'string') return '"webhookTargets[].auth.password" must be a string';
+        } else if (a.type === 'header') {
+          if (typeof a.name !== 'string' || !a.name.trim()) return '"webhookTargets[].auth.name" is required for header auth';
+          if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(a.name)) return `"webhookTargets[].auth.name" is not a valid header name: ${a.name}`;
+          if (typeof a.value !== 'string') return '"webhookTargets[].auth.value" must be a string';
+        } else {
+          return '"webhookTargets[].auth.type" must be "bearer", "basic" or "header"';
+        }
+      }
+    }
   }
 
   return null;

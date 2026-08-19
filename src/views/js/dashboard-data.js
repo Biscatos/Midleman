@@ -2213,10 +2213,179 @@ function bhParseDayText(text, dayLabel) {
 const BH_DAY_LABELS = { 0: 'Sun', 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat' };
 
 function connectorWebhooksEnabledChanged() {
-  const on = document.getElementById('cnWebhooksEnabled').checked;
-  const ta = document.getElementById('cnWebhookTargets');
-  ta.disabled = !on;
-  ta.style.opacity = on ? '1' : '0.5';
+  const toggle = _cnEnabledId && document.getElementById(_cnEnabledId);
+  const list = _cnListId && document.getElementById(_cnListId);
+  if (!toggle || !list) return; // no modal owns the editor right now
+  const on = toggle.checked;
+  list.querySelectorAll('input,select,button').forEach(el => { el.disabled = !on; });
+  list.style.opacity = on ? '1' : '0.5';
+}
+
+// ── Connector webhook target editor ────────────────────────────────────────
+// Working copy of the targets being edited. Kept as objects (not lines of text)
+// because a target now carries a kind, an auth block and custom headers.
+let _cnTargets = [];
+
+// Which modal the editor is currently driving. Only one connector modal can be
+// open at a time, so a single active-context pointer is enough to share the
+// whole editor between the GoContact and Five9 forms.
+let _cnListId = 'cnWebhookTargetsList';
+let _cnEnabledId = 'cnWebhooksEnabled';
+function useConnectorTargetEditor(listId, enabledId) { _cnListId = listId; _cnEnabledId = enabledId; }
+/** Drop the working copy when a modal closes. Without this a cancelled edit
+ *  would still be sitting in _cnTargets for whichever form saves next. */
+function releaseConnectorTargetEditor() { _cnListId = null; _cnEnabledId = null; _cnTargets = []; }
+
+// Attribute-safe escaping. The global esc() escapes &<> but leaves quotes
+// intact, which would let a URL or token containing " break out of a value="…"
+// attribute — so these values get their own helper.
+function _cnAttr(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/** Distributor names for the "Midleman Webhook" dropdown. Loaded when the
+ *  connector modal opens so a webhook created moments ago shows up. */
+let _cnWebhookNames = [];
+
+async function loadConnectorWebhookNames() {
+  try {
+    const res = await api('/admin/webhooks');
+    const d = await res.json();
+    _cnWebhookNames = (d.webhooks || []).map(w => w.name);
+  } catch { _cnWebhookNames = []; }
+}
+
+function addConnectorTarget(kind) {
+  _cnTargets.push(kind === 'webhook'
+    ? { kind: 'webhook', webhookName: _cnWebhookNames[0] || '' }
+    : { kind: 'url', url: '', method: 'POST', auth: null });
+  renderConnectorTargets();
+}
+
+function removeConnectorTarget(i) {
+  _cnTargets.splice(i, 1);
+  renderConnectorTargets();
+}
+
+function connectorTargetFieldChanged(i, field, value) {
+  const t = _cnTargets[i];
+  if (!t) return;
+  if (field === 'authType') {
+    // Switching scheme drops any half-typed credential rather than carrying a
+    // value from one shape into another.
+    t.auth = !value ? null
+      : value === 'bearer' ? { type: 'bearer', token: '' }
+      : value === 'basic' ? { type: 'basic', username: '', password: '' }
+      : { type: 'header', name: '', value: '' };
+    renderConnectorTargets();
+    return;
+  }
+  if (field.startsWith('auth.')) {
+    if (!t.auth) return;
+    t.auth[field.slice(5)] = value;
+    return;
+  }
+  t[field] = value;
+}
+
+/** Turn the editor state into the payload shape, or return null after showing
+ *  the user what is wrong. An auth block whose secret was left blank is sent
+ *  as-is: the server matches it to the stored target and carries the old value
+ *  over, which is how every other credential in this UI behaves. */
+function serializeConnectorTargets(expectedListId) {
+  if (expectedListId && _cnListId !== expectedListId) {
+    toast('Webhook target editor is out of sync — reopen the connector and try again', 'error');
+    return null;
+  }
+  const out = [];
+  for (const t of _cnTargets) {
+    if ((t.kind === 'webhook' ? 'webhook' : 'url') === 'webhook') {
+      if (!t.webhookName) { toast('Pick a webhook for every "Midleman Webhook" target, or remove it', 'error'); return null; }
+      out.push({ kind: 'webhook', webhookName: t.webhookName });
+      continue;
+    }
+    const url = (t.url || '').trim();
+    if (!url) { toast('Every URL target needs a URL, or remove it', 'error'); return null; }
+    const target = { kind: 'url', url };
+    if (t.method && t.method !== 'POST') target.method = t.method;
+    if (t.auth?.type === 'bearer') target.auth = { type: 'bearer', token: t.auth.token || '' };
+    else if (t.auth?.type === 'basic') target.auth = { type: 'basic', username: t.auth.username || '', password: t.auth.password || '' };
+    else if (t.auth?.type === 'header') {
+      if (!t.auth.name) { toast(`Header auth on ${url} needs a header name`, 'error'); return null; }
+      target.auth = { type: 'header', name: t.auth.name, value: t.auth.value || '' };
+    }
+    out.push(target);
+  }
+  return out;
+}
+
+
+function renderConnectorTargets() {
+  const list = document.getElementById(_cnListId);
+  if (!list) return;
+  if (!_cnTargets.length) {
+    list.innerHTML = '<div style="font-size:11.5px;color:var(--text3);padding:8px 0">No targets yet — agent replies will only go out via direct reply.</div>';
+    return;
+  }
+  // A "webhook" target can only point at a distributor that already exists;
+  // they are created on the Webhooks page, not from here.
+  const noWebhooks = !_cnWebhookNames.length;
+  const inputStyle = "padding:6px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px";
+  list.innerHTML = _cnTargets.map((t, i) => {
+    const kind = t.kind === 'webhook' ? 'webhook' : 'url';
+    let head;
+    if (kind === 'webhook') {
+      const known = _cnWebhookNames.includes(t.webhookName);
+      const opts = _cnWebhookNames.map(n => `<option value="${_cnAttr(n)}"${n === t.webhookName ? ' selected' : ''}>${_cnAttr(n)}</option>`).join('');
+      const missing = t.webhookName && !known
+        ? `<option value="${_cnAttr(t.webhookName)}" selected>${_cnAttr(t.webhookName)} (not running)</option>` : '';
+      head = `<select style="${inputStyle};flex:1" onchange="connectorTargetFieldChanged(${i},'webhookName',this.value)">
+                <option value="">— pick a webhook —</option>${missing}${opts}
+              </select>${noWebhooks ? '<span style="font-size:10.5px;color:var(--text3)">none yet — create one on the Webhooks page</span>' : ''}`;
+    } else {
+      head = `<input type="text" value="${_cnAttr(t.url || '')}" placeholder="https://o-meu-bot.exemplo.com/gocontact-events"
+                     style="${inputStyle};flex:1;font-family:'SF Mono',Monaco,monospace"
+                     oninput="connectorTargetFieldChanged(${i},'url',this.value)">`;
+    }
+
+    let authRow = '';
+    if (kind === 'url') {
+      const a = t.auth || null;
+      const sel = (v, label) => `<option value="${v}"${(a?.type || '') === v ? ' selected' : ''}>${label}</option>`;
+      let fields = '';
+      if (a?.type === 'bearer') {
+        fields = `<input type="password" value="${_cnAttr(a.token || '')}" placeholder="${a.hasSecret ? '(kept — type to replace)' : 'token'}"
+                         style="${inputStyle};flex:1" oninput="connectorTargetFieldChanged(${i},'auth.token',this.value)">`;
+      } else if (a?.type === 'basic') {
+        fields = `<input type="text" value="${_cnAttr(a.username || '')}" placeholder="username" style="${inputStyle};flex:1"
+                         oninput="connectorTargetFieldChanged(${i},'auth.username',this.value)">
+                  <input type="password" value="${_cnAttr(a.password || '')}" placeholder="${a.hasSecret ? '(kept — type to replace)' : 'password'}"
+                         style="${inputStyle};flex:1" oninput="connectorTargetFieldChanged(${i},'auth.password',this.value)">`;
+      } else if (a?.type === 'header') {
+        fields = `<input type="text" value="${_cnAttr(a.name || '')}" placeholder="X-Api-Key" style="${inputStyle};flex:1"
+                         oninput="connectorTargetFieldChanged(${i},'auth.name',this.value)">
+                  <input type="password" value="${_cnAttr(a.value || '')}" placeholder="${a.hasSecret ? '(kept — type to replace)' : 'value'}"
+                         style="${inputStyle};flex:1" oninput="connectorTargetFieldChanged(${i},'auth.value',this.value)">`;
+      }
+      authRow = `<div style="display:flex;gap:6px;margin-top:6px">
+          <select style="${inputStyle};width:120px" onchange="connectorTargetFieldChanged(${i},'authType',this.value)">
+            ${sel('', 'No auth')}${sel('bearer', 'Bearer')}${sel('basic', 'Basic')}${sel('header', 'Header')}
+          </select>${fields}
+        </div>`;
+    }
+
+    return `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;background:var(--surface2)">
+        <div style="display:flex;gap:6px;align-items:center">
+          <span style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);width:64px;flex-shrink:0">${kind === 'webhook' ? 'Webhook' : 'URL'}</span>
+          ${head}
+          <button type="button" class="btn btn-sm" onclick="removeConnectorTarget(${i})" title="Remove this target">✕</button>
+        </div>
+        ${authRow}
+      </div>`;
+  }).join('');
+  connectorWebhooksEnabledChanged();
 }
 
 function generateConnectorToken() {
@@ -2295,7 +2464,11 @@ function openConnectorModal(connector = null) {
   document.getElementById('cnSmoochWebhookSecret').value = '';
   document.getElementById('cnSmoochWebhookSecret').placeholder = connector?.smooch?.hasWebhookSecret ? '(kept — type to replace)' : '';
   document.getElementById('cnDirectReply').checked = connector ? !!connector.directReply : false;
-  document.getElementById('cnWebhookTargets').value = (connector?.webhookTargets || []).map(t => t.url).join('\n');
+  // Deep copy: edits must not mutate the cached connector list before saving.
+  useConnectorTargetEditor('cnWebhookTargetsList', 'cnWebhooksEnabled');
+  _cnTargets = JSON.parse(JSON.stringify(connector?.webhookTargets || []));
+  renderConnectorTargets();
+  loadConnectorWebhookNames().then(renderConnectorTargets);
   document.getElementById('cnWebhooksEnabled').checked = connector ? connector.webhooksEnabled !== false : true;
   connectorWebhooksEnabledChanged();
   document.getElementById('cnAllowedIps').value = (connector?.allowedIps || []).join(', ');
@@ -2307,6 +2480,7 @@ function openConnectorModal(connector = null) {
 function closeConnectorModal() {
   document.getElementById('connectorModal').style.display = 'none';
   _editingConnector = null;
+  releaseConnectorTargetEditor();
 }
 
 async function saveConnector() {
@@ -2384,8 +2558,8 @@ async function saveConnector() {
     timezone: 'Africa/Luanda',
     weekly,
   };
-  const targets = document.getElementById('cnWebhookTargets').value
-    .split('\n').map(s => s.trim()).filter(Boolean).map(url => ({ url }));
+  const targets = serializeConnectorTargets('cnWebhookTargetsList');
+  if (targets === null) return; // validation already reported
   if (targets.length) body.webhookTargets = targets;
   body.webhooksEnabled = document.getElementById('cnWebhooksEnabled').checked;
   const pollInterval = parseInt(document.getElementById('cnPollInterval').value, 10);
@@ -8633,10 +8807,7 @@ function f9AutoReplyChanged() {
 }
 
 function f9WebhooksEnabledChanged() {
-  const on = document.getElementById('f9WebhooksEnabled').checked;
-  const ta = document.getElementById('f9WebhookTargets');
-  ta.disabled = !on;
-  ta.style.opacity = on ? '1' : '0.5';
+  connectorWebhooksEnabledChanged();
 }
 
 function generateF9CallbackToken() {
@@ -8687,9 +8858,12 @@ function openFive9Modal(connector = null) {
   // Delivery
   document.getElementById('f9DirectReply').checked = !!connector?.directReply;
   document.getElementById('f9PhoneFilter').value = (connector?.phoneNumberFilter || []).join(', ');
-  document.getElementById('f9WebhookTargets').value = (connector?.webhookTargets || []).map(t => t.url).join('\n');
+  useConnectorTargetEditor('f9WebhookTargetsList', 'f9WebhooksEnabled');
+  _cnTargets = JSON.parse(JSON.stringify(connector?.webhookTargets || []));
+  renderConnectorTargets();
+  loadConnectorWebhookNames().then(renderConnectorTargets);
   document.getElementById('f9WebhooksEnabled').checked = connector ? connector.webhooksEnabled !== false : true;
-  f9WebhooksEnabledChanged();
+  connectorWebhooksEnabledChanged();
   // Auto-reply
   document.getElementById('f9AutoReplyEnabled').checked = !!connector?.autoReply?.enabled;
   document.getElementById('f9AutoReplyText').value = connector?.autoReply?.text || '';
@@ -8714,6 +8888,7 @@ function openFive9Modal(connector = null) {
 function closeFive9Modal() {
   document.getElementById('five9Modal').style.display = 'none';
   _editingFive9Connector = null;
+  releaseConnectorTargetEditor();
 }
 
 async function saveFive9Connector(event) {
@@ -8752,8 +8927,8 @@ async function doSaveFive9Connector() {
   }
   const phoneFilter = document.getElementById('f9PhoneFilter').value.split(',').map(s => s.trim()).filter(Boolean);
   if (phoneFilter.length) body.phoneNumberFilter = phoneFilter;
-  const targets = document.getElementById('f9WebhookTargets').value
-    .split('\n').map(s => s.trim()).filter(Boolean).map(url => ({ url }));
+  const targets = serializeConnectorTargets('f9WebhookTargetsList');
+  if (targets === null) return; // validation already reported
   if (targets.length) body.webhookTargets = targets;
   body.webhooksEnabled = document.getElementById('f9WebhooksEnabled').checked;
   body.autoReply = {
