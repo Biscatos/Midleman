@@ -215,7 +215,8 @@ function showContextMenu(e, btn) {
 
 // ─── Data Fetch ──────────────────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchConnectors(), fetchFive9Connectors(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchConsentPages(), fetchLdapConfigs(), fetchLdapAdoptions()]);
+  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchConnectors(), fetchFive9Connectors(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchConsentPages(), fetchLdapConfigs(), fetchLdapAdoptions(), fetchNotifGroups(), fetchNotifRules(), loadReportFeeds(), loadGcInstances(), fetchNpmConfig()]);
+  renderResourceIndicators();
 }
 
 async function fetchHealth() {
@@ -241,6 +242,54 @@ async function fetchHealth() {
     document.getElementById('ovStatus').textContent = 'Offline';
     document.getElementById('ovStatus').style.color = 'var(--red)';
   }
+}
+
+// ─── Resource indicators (Overview) ──────────────────────────────────────────
+// One clickable tile per resource type Midleman manages; counts come from the
+// collections refreshAll() just fetched, so no extra endpoint is needed.
+function renderResourceIndicators() {
+  const grid = document.getElementById('ovResourcesGrid');
+  if (!grid) return;
+  const svg = inner => '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
+  const items = [
+    { label: 'Users', page: 'proxyusers', count: _allProxyUsers.length,
+      sub: _allInvites.length ? _allInvites.length + ' pending invite' + (_allInvites.length > 1 ? 's' : '') : 'no pending invites',
+      icon: svg('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>') },
+    { label: 'HTTP Proxies', page: 'profiles', count: _allProfiles.length, sub: 'forward profiles',
+      icon: svg('<rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><line x1="7" y1="7" x2="7.01" y2="7"/><line x1="7" y1="17" x2="7.01" y2="17"/><line x1="11" y1="7" x2="17" y2="7"/><line x1="11" y1="17" x2="17" y2="17"/>') },
+    { label: 'NPM Hosts', page: 'npm', count: _npmHostsAll.length, sub: 'nginx proxy manager',
+      icon: svg('<path d="M4 4v16"/><path d="M20 4v16"/><path d="M8 12h7"/><path d="M12.5 8.5 16 12l-3.5 3.5"/>') },
+    { label: 'Webhooks', page: 'webhooks', count: _allWebhooks.length, sub: 'outbound fans',
+      icon: svg('<circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M8 6h8"/><path d="M7.5 7.5l3 7"/><path d="M16.5 7.5l-3 7"/>') },
+    { label: 'Chat Connectors', page: 'connectors', count: _allConnectors.length, sub: 'messaging channels',
+      icon: svg('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>') },
+    { label: 'Five9 Connectors', page: 'connectors', count: _allFive9Connectors.length, sub: 'digital engagement',
+      icon: svg('<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>') },
+    { label: 'OAuth Clients', page: 'oauthclients', count: _allOauthClients.length, sub: 'authorized apps',
+      icon: svg('<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>') },
+    { label: 'Consent Pages', page: 'consentpages', count: _consentPages.length, sub: 'oauth screens',
+      icon: svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/><line x1="9" y1="9" x2="11" y2="9"/>') },
+    { label: 'LDAP', page: 'ldap', count: _ldapConfigs.length, sub: 'directories',
+      icon: svg('<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/>') },
+    { label: 'Notification Groups', page: 'notifications', count: _notifGroups.length,
+      sub: _notifRules.length + ' routing rule' + (_notifRules.length === 1 ? '' : 's'),
+      icon: svg('<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>') },
+    { label: 'Report Feeds', page: 'reports', count: _allReportFeeds.length, sub: 'gocontact reports',
+      icon: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>') },
+    { label: 'GoContact', page: 'reports', count: _gcInstances.length, sub: 'instances',
+      icon: svg('<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>') },
+  ];
+  grid.innerHTML = items.map(it =>
+    '<button type="button" class="resource-tile" onclick="navigate(\'' + it.page + '\')">' +
+      '<span class="resource-tile-icon">' + it.icon + '</span>' +
+      '<span class="resource-tile-count">' + fmtNum(it.count) + '</span>' +
+      '<span class="resource-tile-label">' + it.label + '</span>' +
+      '<span class="resource-tile-sub">' + it.sub + '</span>' +
+    '</button>'
+  ).join('');
+  const total = items.reduce((s, it) => s + it.count, 0);
+  const totalEl = document.getElementById('ovResourcesTotal');
+  if (totalEl) totalEl.textContent = fmtNum(total) + ' total';
 }
 
 async function fetchRequestLogStats() {
@@ -2318,6 +2367,46 @@ const f9Wiz = Wizard.mount('five9Modal', {
     return p;
   },
 });
+
+const smtpWiz = Wizard.mount('smtpConfigModal', {
+  title: 'Email Provider',
+  subtitle: 'SMTP relay used to deliver notification emails',
+  saveLabel: 'Save',
+  onClose: () => closeSmtpConfigModal(),
+  onSave: ev => withBusy(ev.currentTarget, 'A guardar…', () => saveSmtpConfig()),
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    if (!Wizard.val('smtpHost')) flag('server', 'Host is required');
+    if (!Wizard.val('smtpFromAddress')) flag('sender', 'Sender email is required');
+    return p;
+  },
+});
+
+const smsWiz = Wizard.mount('smsConfigModal', {
+  title: 'SMS Providers',
+  subtitle: 'Routing and credentials for WeSender and Twilio',
+  saveLabel: 'Save',
+  onClose: () => closeSmsConfigModal(),
+  onSave: ev => withBusy(ev.currentTarget, 'A guardar…', () => saveSmsConfig()),
+  hidden: id => id === 'prefixes' && Wizard.val('smsRouting') !== 'by-prefix',
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    const routing = Wizard.val('smsRouting');
+    if (routing === 'failover' && Wizard.val('smsPrimary') === Wizard.val('smsSecondary')) {
+      flag('routing', 'Fallback provider must differ from primary');
+    }
+    if (routing === 'by-prefix' && _smsPrefixRuleCount() === 0) {
+      flag('prefixes', 'Add at least one prefix rule (or switch routing mode)');
+    }
+    return p;
+  },
+});
+
+function _smsPrefixRuleCount() {
+  return _smsCurrentPrefixRules.filter(r => (r.prefix || '').trim() !== '' || r.provider).length;
+}
 
 
 function connectorChannelChanged() {
@@ -5373,6 +5462,7 @@ let _currentUserId = null;
 
 // ─── SMTP / Email ─────────────────────────────────────────────────────────────
 let _smtpHasPassword = false;
+let _smtpConfigured = false;
 let _smtpTestController = null;
 let _smtpSendController = null;
 
@@ -5430,7 +5520,14 @@ async function fetchSmtpConfig() {
       clearBtn.style.display = 'none';
       setSmtpStatus('smtpStatus', 'No SMTP configuration active.', 'info');
     }
+    _smtpConfigured = !!cfg;
     _updateSmtpTabStatus(cfg);
+    // Deep-links (#email) open the modal before this fetch lands; upgrade it
+    // to edit mode now that we know a configuration exists.
+    if (cfg && !smtpWiz.freeNav && document.getElementById('smtpConfigModal').classList.contains('active')) {
+      smtpWiz.freeNav = true;
+      smtpWiz.render();
+    }
   } catch (e) {
     setSmtpStatus('smtpStatus', 'Failed to load: ' + e.message, 'err');
   }
@@ -5452,6 +5549,7 @@ function _readSmtpForm(includePasswordOnlyIfFilled) {
 }
 
 async function saveSmtpConfig() {
+  if (smtpWiz.focusProblem()) return;
   const body = _readSmtpForm(true);
   if (!body.host) { setSmtpStatus('smtpStatus', 'Host is required.', 'err'); return; }
   if (!body.fromAddress) { setSmtpStatus('smtpStatus', 'Sender email is required.', 'err'); return; }
@@ -8018,6 +8116,7 @@ async function syncProfileToNpm(profileName) {
 // ─── SMS (WeSender / Twilio) ─────────────────────────────────────────────────
 
 let _smsHasWeKey = false;
+let _smsConfigured = false;
 let _smsHasTwToken = false;
 let _smsCurrentPrefixRules = [];
 
@@ -8042,29 +8141,77 @@ function updateSmsRoutingVisibility() {
     else hint.textContent = 'Match each destination against the rules below in order. Use "*" as catch-all.';
   }
   _renderSmsProviderBadges();
+  // The Prefix rules step appears/disappears with the routing mode.
+  if (typeof smsWiz !== 'undefined' && smsWiz.render) smsWiz.render();
 }
 
-function _setTabDot(id, kind) {
-  const el = document.getElementById(id);
+function _fillChannelSummary(elId, rows) {
+  const el = document.getElementById(elId);
   if (!el) return;
-  const colors = { ok: '#22c55e', warn: '#ca8a04', mute: 'var(--text3)' };
-  el.style.background = colors[kind] || colors.mute;
+  el.textContent = '';
+  rows.forEach(pair => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:10px;line-height:1.5';
+    const key = document.createElement('span');
+    key.style.cssText = 'flex:0 0 84px;color:var(--text3);font-size:12px;padding-top:1px';
+    key.textContent = pair[0];
+    const val = document.createElement('span');
+    val.style.cssText = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    val.textContent = pair[1];
+    row.appendChild(key);
+    row.appendChild(val);
+    el.appendChild(row);
+  });
 }
 
 function _updateSmtpTabStatus(cfg) {
   const configured = cfg && cfg.host;
-  _setTabDot('smtpTabDot', configured ? 'ok' : 'warn');
-  const banner = document.getElementById('smtpSetupBanner');
-  if (banner) banner.style.display = configured ? 'none' : '';
+  const pill = document.getElementById('smtpCardPill');
+  if (pill) _setStatusPill(pill, configured ? 'Configured' : 'Not configured', configured ? 'ok' : 'warn');
+  if (configured) {
+    const secLabels = { starttls: 'STARTTLS', tls: 'TLS / SSL', none: 'None' };
+    const from = cfg.fromName ? cfg.fromName + ' <' + (cfg.fromAddress || '') + '>' : (cfg.fromAddress || '—');
+    _fillChannelSummary('smtpCardSummary', [
+      ['Server', cfg.host + ':' + (cfg.port || 587)],
+      ['Security', secLabels[cfg.security] || cfg.security || 'STARTTLS'],
+      ['From', from],
+    ]);
+  } else {
+    _fillChannelSummary('smtpCardSummary', [
+      ['Status', 'No SMTP server registered yet.'],
+      ['Impact', 'Rules that send email will fail silently.'],
+    ]);
+  }
 }
 
 function _updateSmsTabStatus(cfg) {
   const haveWe = cfg && cfg.wesender && cfg.wesender.hasApiKey;
   const haveTw = cfg && cfg.twilio && cfg.twilio.hasAuthToken && cfg.twilio.accountSid;
-  const active  = cfg && cfg.enabled && (haveWe || haveTw);
-  _setTabDot('smsTabDot', active ? 'ok' : (cfg ? 'warn' : 'warn'));
-  const banner = document.getElementById('smsSetupBanner');
-  if (banner) banner.style.display = cfg ? 'none' : '';
+  const pill = document.getElementById('smsCardPill');
+  if (pill) {
+    if (!cfg) _setStatusPill(pill, 'Not configured', 'warn');
+    else if (!cfg.enabled) _setStatusPill(pill, 'Disabled', 'mute');
+    else if (!haveWe && !haveTw) _setStatusPill(pill, 'Incomplete', 'warn');
+    else _setStatusPill(pill, 'Active', 'ok');
+  }
+  const modeLabels = { single: 'Single provider', failover: 'Primary + fallback', 'by-prefix': 'By phone prefix' };
+  const provNames = { wesender: 'WeSender', twilio: 'Twilio' };
+  if (cfg) {
+    const rows = [['Routing', modeLabels[cfg.routing] || 'Single provider']];
+    if (cfg.routing === 'failover') rows.push(['Path', (provNames[cfg.primary] || cfg.primary || '—') + ' → ' + (provNames[cfg.secondary] || cfg.secondary || '—')]);
+    else if (cfg.routing === 'by-prefix') rows.push(['Rules', (Array.isArray(cfg.prefixRules) ? cfg.prefixRules.length : 0) + ' prefix rule(s)']);
+    else rows.push(['Provider', provNames[cfg.primary] || cfg.primary || '—']);
+    const ready = [];
+    if (haveWe) ready.push('WeSender');
+    if (haveTw) ready.push('Twilio');
+    rows.push(['Credentials', ready.length ? ready.join(' + ') + ' ready' : 'None saved']);
+    _fillChannelSummary('smsCardSummary', rows);
+  } else {
+    _fillChannelSummary('smsCardSummary', [
+      ['Status', 'No SMS provider registered yet.'],
+      ['Impact', 'Critical alerts that need SMS will not go out.'],
+    ]);
+  }
 }
 
 function _setStatusPill(el, label, kind) {
@@ -8253,10 +8400,17 @@ async function fetchSmsConfig() {
     }
     updateSmsRoutingVisibility();
     renderSmsPrefixRules();
+    _smsConfigured = !!cfg;
     _updateSmsStatusPill(cfg);
     _updateSmsTabStatus(cfg);
     _renderSmsProviderBadges();
     _bindSmsLiveBadges();
+    // Deep-links (#sms) open the modal before this fetch lands; upgrade it
+    // to edit mode now that we know a configuration exists.
+    if (cfg && !smsWiz.freeNav && document.getElementById('smsConfigModal').classList.contains('active')) {
+      smsWiz.freeNav = true;
+      smsWiz.render();
+    }
   } catch (e) {
     setSmsStatus('smsStatus', 'Failed to load: ' + e.message, 'err');
   }
@@ -8299,6 +8453,7 @@ function _readSmsForm() {
 }
 
 async function saveSmsConfig() {
+  if (smsWiz.focusProblem()) return;
   const body = _readSmsForm();
   if (body.routing === 'failover' && body.primary === body.secondary) {
     setSmsStatus('smsStatus', 'Fallback provider must differ from primary.', 'err');
@@ -8380,6 +8535,10 @@ let _notifAddingMemberGroupId = null;
 let _notifCurrentTab = 'groups';
 
 function switchNotifTab(tab) {
+  // Legacy deep-links (#email / #sms) now live inside the channels tab:
+  // open the tab and surface the matching provider modal directly.
+  if (tab === 'email') { switchNotifTab('channels'); openSmtpConfigModal(); return; }
+  if (tab === 'sms') { switchNotifTab('channels'); openSmsConfigModal(); return; }
   _notifCurrentTab = tab;
   document.querySelectorAll('.notif-tab').forEach(b => {
     const active = b.getAttribute('data-tab') === tab;
@@ -8395,6 +8554,23 @@ function switchNotifTab(tab) {
   const addRuleBtn = document.getElementById('notifAddRuleBtn');
   if (addGroupBtn) addGroupBtn.style.display = isGroupRuleTab ? '' : 'none';
   if (addRuleBtn) addRuleBtn.style.display = isGroupRuleTab ? '' : 'none';
+}
+
+function openSmtpConfigModal() {
+  smtpWiz.open(_smtpConfigured);
+  document.getElementById('smtpConfigModal').classList.add('active');
+}
+function closeSmtpConfigModal() {
+  smtpWiz.close();
+  document.getElementById('smtpConfigModal').classList.remove('active');
+}
+function openSmsConfigModal() {
+  smsWiz.open(_smsConfigured);
+  document.getElementById('smsConfigModal').classList.add('active');
+}
+function closeSmsConfigModal() {
+  smsWiz.close();
+  document.getElementById('smsConfigModal').classList.remove('active');
 }
 
 function _setNotifStatus(elId, msg, kind) {

@@ -231,12 +231,25 @@
         </div>
       </div>
 
+      <!-- Resource inventory -->
+      <div class="card" style="margin-bottom:24px">
+        <div class="card-header">
+          <h3>Resources</h3>
+          <span id="ovResourcesTotal" style="font-size:12px;color:var(--text3);font-family:'JetBrains Mono',monospace"></span>
+        </div>
+        <div class="card-body">
+          <div class="resource-grid" id="ovResourcesGrid">
+            <div style="color:var(--text3);font-size:13px;text-align:center;padding:12px;grid-column:1/-1">Loading...</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Charts -->
       <div class="charts-row">
         <div class="chart-card">
           <div class="chart-header">Traffic <span id="chartTrafficLabel">last 24h</span></div>
           <div class="chart-body" style="position:relative">
-            <canvas id="chartTimeline" height="160" style="cursor:crosshair"></canvas>
+            <canvas id="chartTimeline" style="cursor:crosshair"></canvas>
             <div id="chartTooltip"
               style="display:none;position:fixed;z-index:999;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;box-shadow:var(--shadow);pointer-events:none;white-space:nowrap">
             </div>
@@ -1602,8 +1615,7 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
       <div style="display:flex;gap:0;margin-top:18px;border-bottom:1px solid var(--border)">
         <button type="button" class="notif-tab" data-tab="groups" onclick="switchNotifTab('groups')" style="background:none;border:none;border-bottom:2px solid var(--accent);padding:10px 16px;color:var(--text);font-size:13px;font-weight:500;cursor:pointer">Groups</button>
         <button type="button" class="notif-tab" data-tab="rules" onclick="switchNotifTab('rules')" style="background:none;border:none;border-bottom:2px solid transparent;padding:10px 16px;color:var(--text2);font-size:13px;cursor:pointer">Rules</button>
-        <button type="button" class="notif-tab" data-tab="email" onclick="switchNotifTab('email')" style="background:none;border:none;border-bottom:2px solid transparent;padding:10px 16px;color:var(--text2);font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px">Email Provider<span id="smtpTabDot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--text3);flex-shrink:0"></span></button>
-        <button type="button" class="notif-tab" data-tab="sms" onclick="switchNotifTab('sms')" style="background:none;border:none;border-bottom:2px solid transparent;padding:10px 16px;color:var(--text2);font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px">SMS Provider<span id="smsTabDot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--text3);flex-shrink:0"></span></button>
+        <button type="button" class="notif-tab" data-tab="channels" onclick="switchNotifTab('channels')" style="background:none;border:none;border-bottom:2px solid transparent;padding:10px 16px;color:var(--text2);font-size:13px;cursor:pointer">Delivery channels</button>
       </div>
 
       <!-- Groups tab -->
@@ -1649,256 +1661,222 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
         </div>
       </div>
 
-      <!-- Email tab -->
-      <div class="notif-tabpane" data-tab="email" style="margin-top:18px;display:none">
+      <!-- Channels tab -->
+      <div class="notif-tabpane" data-tab="channels" style="margin-top:18px;display:none">
+        <p style="margin:0 0 14px;font-size:12.5px;color:var(--text2);line-height:1.6;max-width:760px">Delivery channels registered for this instance. Each provider is configured once and shared by every notification rule that uses it.</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;max-width:980px">
 
-        <div id="smtpSetupBanner" style="display:none;border:1px solid var(--border);border-left:3px solid #ca8a04;border-radius:8px;padding:16px 20px;margin-bottom:20px;background:rgba(234,179,8,0.06)">
-          <div style="display:flex;gap:14px;align-items:flex-start">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#ca8a04" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-            <div>
-              <div style="font-size:13.5px;font-weight:600;color:var(--text);margin-bottom:4px">Email delivery not configured</div>
-              <div style="font-size:12.5px;color:var(--text2);line-height:1.6">Notification rules that route alerts to email will fail silently until you fill in the SMTP server details below and save the configuration.</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <h3>Server</h3>
-          </div>
-          <div class="card-body">
-            <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">Address of the SMTP server that will deliver the mail. Usually provided by your email provider (Gmail, Outlook 365, SendGrid, Mailgun, etc.) or by your organisation's mail server.</p>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
-            <div>
-              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Host</label>
-              <input id="smtpHost" type="text" placeholder="smtp.example.com" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
-            </div>
-            <div>
-              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Port</label>
-              <input id="smtpPort" type="number" min="1" max="65535" placeholder="587" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
-            </div>
-            <div>
-              <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Security</label>
-              <select id="smtpSecurity" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
-                <option value="starttls">STARTTLS (port 587)</option>
-                <option value="tls">TLS / SSL (port 465)</option>
-                <option value="none">None (unencrypted)</option>
-              </select>
-            </div>
-            <div style="display:flex;align-items:flex-end">
-              <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text2)">
-                <input id="smtpAllowInvalid" type="checkbox"> Accept self-signed certificates
-              </label>
-            </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="card" style="margin-top:16px">
-          <div class="card-header"><h3>Sending credentials</h3></div>
-          <div class="card-body">
-            <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">Account used by Midleman to authenticate against the SMTP server. Without it the server will usually reject the message (unless it accepts anonymous relay from your network). For Gmail/Outlook it is typically an <em>app password</em>; for SendGrid/Mailgun it's the service username and API key. Leave both empty if your server does not require authentication.</p>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
-              <div>
-                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Username</label>
-                <input id="smtpUsername" type="text" autocomplete="off" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+          <!-- Email · SMTP channel card -->
+          <div class="card notif-channel-card" style="display:flex;flex-direction:column">
+            <div style="padding:18px 20px 0;display:flex;align-items:flex-start;gap:14px">
+              <div style="width:40px;height:40px;border-radius:10px;background:var(--accent-bg);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
               </div>
-              <div>
-                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Password</label>
-                <input id="smtpPassword" type="password" autocomplete="new-password" placeholder="(unchanged)" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
-                <p style="font-size:11px;color:var(--text3);margin-top:6px" id="smtpPwHint">Leave empty to keep the current password.</p>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  <h3 style="margin:0;font-size:15px;font-weight:500">Email</h3>
+                  <span id="smtpCardPill" style="display:none;font-size:10.5px;padding:3px 9px;border-radius:8px;font-weight:500;letter-spacing:.3px"></span>
+                </div>
+                <p style="margin:3px 0 0;font-size:12px;color:var(--text3)">SMTP relay for all email notifications</p>
               </div>
             </div>
-          </div>
-        </div>
-
-        <div class="card" style="margin-top:16px">
-          <div class="card-header"><h3>Sender identity</h3></div>
-          <div class="card-body">
-            <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">What appears in the <code style="background:var(--surface2);padding:1px 6px;border-radius:4px">From:</code> header of outgoing messages. Recipients will see this address as the origin of the message and will reply to it. It must be an address the SMTP server is authorised to send from — otherwise messages may be rejected or flagged as spam.</p>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
-              <div>
-                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Email <span style="color:var(--err-text)">*</span></label>
-                <input id="smtpFromAddress" type="email" placeholder="no-reply@example.com" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
-              </div>
-              <div>
-                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Display name</label>
-                <input id="smtpFromName" type="text" placeholder="Acme" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
-              </div>
+            <div id="smtpCardSummary" style="padding:14px 20px 0;display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--text2);flex:1"></div>
+            <div style="padding:16px 20px 18px;display:flex;gap:8px;align-items:center">
+              <button class="btn btn-primary btn-sm" onclick="openSmtpConfigModal()">Configure</button>
+              <button class="btn btn-sm" onclick="openSmtpSendTestModal()">Send test email</button>
             </div>
           </div>
-        </div>
 
-        <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;align-items:center">
-          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A guardar…', async () => { await saveSmtpConfig(); })">Save</button>
-          <button class="btn btn-sm" id="smtpTestBtn" onclick="testSmtpConnectionUi()">Test connection</button>
-          <button class="btn btn-sm" id="smtpTestCancelBtn" onclick="cancelSmtpTest()" style="display:none;color:var(--err-text)">Cancel test</button>
-          <button class="btn btn-sm" onclick="openSmtpSendTestModal()">Send test email</button>
-          <button class="btn btn-sm" onclick="withBusy(this, 'A remover…', async () => { await clearSmtpConfig(); })" id="smtpClearBtn" style="display:none;margin-left:auto;color:var(--err-text)">Remove configuration</button>
+          <!-- SMS channel card -->
+          <div class="card notif-channel-card" style="display:flex;flex-direction:column">
+            <div style="padding:18px 20px 0;display:flex;align-items:flex-start;gap:14px">
+              <div style="width:40px;height:40px;border-radius:10px;background:var(--green-bg);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              </div>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  <h3 style="margin:0;font-size:15px;font-weight:500">SMS</h3>
+                  <span id="smsCardPill" style="display:none;font-size:10.5px;padding:3px 9px;border-radius:8px;font-weight:500;letter-spacing:.3px"></span>
+                </div>
+                <p style="margin:3px 0 0;font-size:12px;color:var(--text3)">WeSender · Twilio — single, failover or prefix routing</p>
+              </div>
+            </div>
+            <div id="smsCardSummary" style="padding:14px 20px 0;display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--text2);flex:1"></div>
+            <div style="padding:16px 20px 18px;display:flex;gap:8px;align-items:center">
+              <button class="btn btn-primary btn-sm" onclick="openSmsConfigModal()">Configure</button>
+              <button class="btn btn-sm" onclick="openSmsSendTestModal()">Send test</button>
+            </div>
+          </div>
+
         </div>
-        <div id="smtpStatus" style="margin-top:14px;font-size:12.5px"></div>
       </div>
 
-      <!-- SMS tab -->
-      <div class="notif-tabpane" data-tab="sms" style="margin-top:18px;display:none">
-
-        <div id="smsSetupBanner" style="display:none;border:1px solid var(--border);border-left:3px solid #ca8a04;border-radius:8px;padding:16px 20px;margin-bottom:20px;background:rgba(234,179,8,0.06)">
-          <div style="display:flex;gap:14px;align-items:flex-start">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#ca8a04" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-            <div>
-              <div style="font-size:13.5px;font-weight:600;color:var(--text);margin-bottom:4px">SMS delivery not configured</div>
-              <div style="font-size:12.5px;color:var(--text2);line-height:1.6">Notification rules that route alerts via SMS will not send until you configure a provider (WeSender or Twilio) below and enable SMS delivery.</div>
+      <!-- ═══ SMTP CONFIG MODAL ═══ -->
+      <div class="modal-overlay" id="smtpConfigModal">
+        <div class="wz-shell">
+          <section class="wz-step wz-stack" data-step-id="server" data-step-title="Server" data-step-hint="Address, port and encryption">
+            <div class="form-grid">
+              <div class="form-group span-2">
+                <label>Host *</label>
+                <input class="wz-input" id="smtpHost" type="text" placeholder="smtp.example.com">
+                <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px">Address of the SMTP server that delivers the mail — usually provided by your email provider (Gmail, Outlook 365, SendGrid, Mailgun, etc.) or by your organisation's mail server.</span>
+              </div>
+              <div class="form-group">
+                <label>Port</label>
+                <input class="wz-input" id="smtpPort" type="number" min="1" max="65535" placeholder="587">
+              </div>
+              <div class="form-group">
+                <label>Security</label>
+                <select class="wz-input" id="smtpSecurity">
+                  <option value="starttls">STARTTLS (port 587)</option>
+                  <option value="tls">TLS / SSL (port 465)</option>
+                  <option value="none">None (unencrypted)</option>
+                </select>
+              </div>
+              <div class="form-group span-2">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                  <input class="wz-input" id="smtpAllowInvalid" type="checkbox" style="cursor:pointer;accent-color:var(--accent)">
+                  <span>Accept self-signed certificates</span>
+                </label>
+              </div>
             </div>
+          </section>
+          <section class="wz-step wz-stack" data-step-id="credentials" data-step-title="Credentials" data-step-hint="Account used to authenticate">
+            <div class="form-grid">
+              <div class="form-group span-2">
+                <span style="font-size:12.5px;color:var(--text2);display:block;line-height:1.5">Account used by Midleman to authenticate against the SMTP server. Without it the server will usually reject the message (unless it accepts anonymous relay from your network). For Gmail/Outlook it is typically an <em>app password</em>; for SendGrid/Mailgun it's the service username and API key. Leave both empty if your server does not require authentication.</span>
+              </div>
+              <div class="form-group">
+                <label>Username</label>
+                <input class="wz-input" id="smtpUsername" type="text" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label>Password</label>
+                <input class="wz-input" id="smtpPassword" type="password" autocomplete="new-password" placeholder="(unchanged)">
+                <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px" id="smtpPwHint">Leave empty to keep the current password.</span>
+              </div>
+            </div>
+          </section>
+          <section class="wz-step wz-stack" data-step-id="sender" data-step-title="Sender identity" data-step-hint="What recipients see in From:">
+            <div class="form-grid">
+              <div class="form-group span-2">
+                <span style="font-size:12.5px;color:var(--text2);display:block;line-height:1.5">What appears in the <code style="background:var(--surface2);padding:1px 6px;border-radius:4px">From:</code> header of outgoing messages. Recipients will see this address as the origin of the message and will reply to it. It must be an address the SMTP server is authorised to send from — otherwise messages may be rejected or flagged as spam.</span>
+              </div>
+              <div class="form-group">
+                <label>Email *</label>
+                <input class="wz-input" id="smtpFromAddress" type="email" placeholder="no-reply@example.com">
+              </div>
+              <div class="form-group">
+                <label>Display name</label>
+                <input class="wz-input" id="smtpFromName" type="text" placeholder="Acme">
+              </div>
+            </div>
+          </section>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <button class="btn btn-sm" id="smtpTestBtn" onclick="testSmtpConnectionUi()">Test connection</button>
+            <button class="btn btn-sm" id="smtpTestCancelBtn" onclick="cancelSmtpTest()" style="display:none;color:var(--err-text)">Cancel test</button>
+            <button class="btn btn-sm" onclick="openSmtpSendTestModal()">Send test email</button>
+            <button class="btn btn-sm" onclick="withBusy(this, 'A remover…', async () => { await clearSmtpConfig(); })" id="smtpClearBtn" style="display:none;margin-left:auto;color:var(--err-text)">Remove configuration</button>
           </div>
+          <div id="smtpStatus" style="font-size:12.5px"></div>
         </div>
+      </div>
 
-        <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:4px;align-items:center;flex-wrap:wrap">
-          <span id="smsStatusPill" style="display:none;font-size:11px;padding:3px 10px;border-radius:10px;font-weight:500;letter-spacing:.3px"></span>
-          <button class="btn btn-sm" onclick="openSmsSendTestModal()" id="smsSendTestBtn">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-            Send test
-          </button>
-          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A guardar…', async () => { await saveSmsConfig(); })">Save</button>
-        </div>
-
-        <!-- ── Routing card ── -->
-        <div class="card" style="margin-top:18px">
-          <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-            <h3 style="margin:0">Routing</h3>
-            <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text2);cursor:pointer">
-              <input id="smsEnabled" type="checkbox" style="cursor:pointer">
-              <span>Enable SMS delivery</span>
-            </label>
-          </div>
-          <div class="card-body">
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
-              <div>
-                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Routing mode</label>
-                <select id="smsRouting" onchange="updateSmsRoutingVisibility()" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+      <!-- ═══ SMS CONFIG MODAL ═══ -->
+      <div class="modal-overlay" id="smsConfigModal">
+        <div class="wz-shell">
+          <section class="wz-step wz-stack" data-step-id="routing" data-step-title="Routing" data-step-hint="How messages leave the system">
+            <div class="form-grid">
+              <div class="form-group span-2">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                  <input class="wz-input" id="smsEnabled" type="checkbox" style="cursor:pointer;accent-color:var(--accent)">
+                  <span>Enable SMS delivery</span>
+                </label>
+              </div>
+              <div class="form-group">
+                <label>Routing mode</label>
+                <select class="wz-input" id="smsRouting" onchange="updateSmsRoutingVisibility()">
                   <option value="single">Single provider</option>
                   <option value="failover">Primary + fallback</option>
                   <option value="by-prefix">Route by phone prefix</option>
                 </select>
-                <p id="smsRoutingHint" style="font-size:11px;color:var(--text3);margin-top:6px;line-height:1.5">All messages go through the primary provider.</p>
+                <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px" id="smsRoutingHint">All messages go through the primary provider.</span>
               </div>
-              <div id="smsPrimaryWrap">
-                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Primary provider</label>
-                <select id="smsPrimary" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+              <div class="form-group" id="smsPrimaryWrap">
+                <label>Primary provider</label>
+                <select class="wz-input" id="smsPrimary">
                   <option value="wesender">WeSender</option>
                   <option value="twilio">Twilio</option>
                 </select>
               </div>
-              <div id="smsSecondaryWrap" style="display:none">
-                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Fallback provider</label>
-                <select id="smsSecondary" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+              <div class="form-group" id="smsSecondaryWrap" style="display:none">
+                <label>Fallback provider</label>
+                <select class="wz-input" id="smsSecondary">
                   <option value="twilio">Twilio</option>
                   <option value="wesender">WeSender</option>
                 </select>
               </div>
-              <div>
-                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Default country code</label>
-                <div style="display:flex;align-items:center;background:var(--surface2);border:1px solid var(--border);border-radius:6px;overflow:hidden">
-                  <span style="padding:8px 10px;color:var(--text3);font-size:13px;border-right:1px solid var(--border);background:var(--surface)">+</span>
-                  <input id="smsDefaultCC" type="text" placeholder="244" style="flex:1;padding:8px 10px;background:transparent;border:none;color:var(--text);font-size:13px;outline:none">
-                </div>
-                <p style="font-size:11px;color:var(--text3);margin-top:6px;line-height:1.5">Used to expand local numbers (without "+") to E.164.</p>
+              <div class="form-group">
+                <label>Default country code</label>
+                <input class="wz-input" id="smsDefaultCC" type="text" placeholder="244">
+                <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px">Used to expand local numbers (without "+") to E.164.</span>
               </div>
             </div>
-          </div>
-        </div>
-
-        <!-- ── Prefix rules card (only in by-prefix mode) ── -->
-        <div class="card" id="smsPrefixCard" style="margin-top:16px;display:none">
-          <div class="card-header"><h3>Prefix routing rules</h3></div>
-          <div class="card-body">
-            <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">Match destination numbers (in E.164) against each prefix in order. Use <code style="background:var(--surface2);padding:1px 6px;border-radius:4px;font-size:12px">*</code> as the last entry to catch everything else.</p>
-            <div id="smsPrefixRules" style="display:flex;flex-direction:column;gap:8px"></div>
-            <div style="margin-top:12px">
-              <button class="btn btn-sm" onclick="addSmsPrefixRule()">+ Add rule</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- ── Provider section header ── -->
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin:24px 0 10px;padding:0 4px">
-          <h3 style="margin:0;font-size:14px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;font-weight:500">Providers</h3>
-          <span style="font-size:11.5px;color:var(--text3)">Credentials are encrypted at rest</span>
-        </div>
-
-        <!-- ── WeSender card ── -->
-        <div class="card" data-sms-provider="wesender">
-          <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-            <div style="display:flex;align-items:center;gap:10px">
-              <div style="width:32px;height:32px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--text2)">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-              </div>
-              <div>
-                <h3 style="margin:0;font-size:14.5px">WeSender</h3>
-                <p style="margin:2px 0 0;font-size:11.5px;color:var(--text3)">Angola SMS gateway · api.wesender.co.ao</p>
+          </section>
+          <section class="wz-step wz-stack" data-step-id="prefixes" data-step-title="Prefix rules" data-step-hint="Route number prefixes to providers">
+            <div id="smsPrefixCard">
+              <p style="font-size:12.5px;color:var(--text2);margin:0 0 14px;line-height:1.5">Match destination numbers (in E.164) against each prefix in order. Use <code style="background:var(--surface2);padding:1px 6px;border-radius:4px;font-size:12px">*</code> as the last entry to catch everything else.</p>
+              <div id="smsPrefixRules" style="display:flex;flex-direction:column;gap:8px"></div>
+              <div style="margin-top:12px">
+                <button class="btn btn-sm" onclick="addSmsPrefixRule()">+ Add rule</button>
               </div>
             </div>
-            <div style="display:flex;gap:6px;align-items:center" id="smsWeBadges"></div>
-          </div>
-          <div class="card-body">
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
-              <div>
-                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Api Key <span style="color:var(--text3);text-transform:none;letter-spacing:0">(secret)</span></label>
-                <input id="smsWeApiKey" type="password" autocomplete="new-password" placeholder="(unchanged)" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
-                <p style="font-size:11px;color:var(--text3);margin-top:6px;line-height:1.5" id="smsWeKeyHint">Leave empty to keep the current key.</p>
+          </section>
+          <section class="wz-step wz-stack" data-step-id="wesender" data-step-title="WeSender" data-step-hint="Angola SMS gateway · api.wesender.co.ao">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:22px" id="smsWeBadges"></div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Api Key <span style="color:var(--text3);font-weight:400">(secret)</span></label>
+                <input class="wz-input" id="smsWeApiKey" type="password" autocomplete="new-password" placeholder="(unchanged)" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
+                <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px" id="smsWeKeyHint">Leave empty to keep the current key.</span>
               </div>
-              <div style="display:flex;align-items:flex-end;padding-bottom:4px">
-                <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text2);cursor:pointer">
-                  <input id="smsWeCEspeciais" type="checkbox" style="cursor:pointer">
+              <div class="form-group">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                  <input class="wz-input" id="smsWeCEspeciais" type="checkbox" style="cursor:pointer;accent-color:var(--accent)">
                   <span>Allow special characters <span style="color:var(--text3)">(CEspeciais)</span></span>
                 </label>
               </div>
             </div>
-          </div>
-        </div>
-
-        <!-- ── Twilio card ── -->
-        <div class="card" data-sms-provider="twilio" style="margin-top:14px">
-          <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-            <div style="display:flex;align-items:center;gap:10px">
-              <div style="width:32px;height:32px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--text2)">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h20v18H2z"/><path d="M2 9h20"/></svg>
+          </section>
+          <section class="wz-step wz-stack" data-step-id="twilio" data-step-title="Twilio" data-step-hint="International SMS · api.twilio.com">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:22px" id="smsTwBadges"></div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Account SID</label>
+                <input class="wz-input" id="smsTwSid" type="text" autocomplete="off" placeholder="ACxxxxxxxxxxxxxxxx" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
               </div>
-              <div>
-                <h3 style="margin:0;font-size:14.5px">Twilio</h3>
-                <p style="margin:2px 0 0;font-size:11.5px;color:var(--text3)">International SMS · api.twilio.com</p>
+              <div class="form-group">
+                <label>Auth Token <span style="color:var(--text3);font-weight:400">(secret)</span></label>
+                <input class="wz-input" id="smsTwToken" type="password" autocomplete="new-password" placeholder="(unchanged)" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
+                <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px" id="smsTwTokenHint">Leave empty to keep the current token.</span>
               </div>
-            </div>
-            <div style="display:flex;gap:6px;align-items:center" id="smsTwBadges"></div>
-          </div>
-          <div class="card-body">
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
-              <div>
-                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Account SID</label>
-                <input id="smsTwSid" type="text" autocomplete="off" placeholder="ACxxxxxxxxxxxxxxxx" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
-              </div>
-              <div>
-                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Auth Token <span style="color:var(--text3);text-transform:none;letter-spacing:0">(secret)</span></label>
-                <input id="smsTwToken" type="password" autocomplete="new-password" placeholder="(unchanged)" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
-                <p style="font-size:11px;color:var(--text3);margin-top:6px;line-height:1.5" id="smsTwTokenHint">Leave empty to keep the current token.</p>
-              </div>
-              <div>
-                <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">From number</label>
-                <input id="smsTwFrom" type="text" placeholder="+15551234567" style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
-                <p style="font-size:11px;color:var(--text3);margin-top:6px;line-height:1.5">Must be in E.164 and verified in your Twilio account.</p>
+              <div class="form-group span-2">
+                <label>From number</label>
+                <input class="wz-input" id="smsTwFrom" type="text" placeholder="+15551234567" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
+                <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px">Must be in E.164 and verified in your Twilio account.</span>
               </div>
             </div>
+          </section>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <span id="smsStatusPill" style="display:none;font-size:11px;padding:3px 10px;border-radius:10px;font-weight:500;letter-spacing:.3px"></span>
+            <button class="btn btn-sm" onclick="openSmsSendTestModal()" id="smsSendTestBtn">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              Send test
+            </button>
+            <span style="font-size:11.5px;color:var(--text3)">Credentials are encrypted at rest</span>
+            <button class="btn btn-sm" onclick="withBusy(this, 'A remover…', async () => { await clearSmsConfig(); })" id="smsClearBtn" style="display:none;margin-left:auto;color:var(--err-text)">Remove configuration</button>
           </div>
-        </div>
-
-        <!-- ── Footer actions ── -->
-        <div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap;align-items:center;padding-top:14px;border-top:1px solid var(--border)">
-          <button class="btn btn-sm" onclick="withBusy(this, 'A remover…', async () => { await clearSmsConfig(); })" id="smsClearBtn" style="display:none;color:var(--err-text)">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-            Remove configuration
-          </button>
-          <div style="flex:1;min-width:0">
-            <div id="smsStatus" style="font-size:12.5px"></div>
-          </div>
+          <div id="smsStatus" style="font-size:12.5px"></div>
         </div>
       </div>
 

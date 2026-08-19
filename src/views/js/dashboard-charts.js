@@ -18,8 +18,15 @@ function getThemeColors() {
 function drawTimelineChart(canvas, data) {
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.parentElement.getBoundingClientRect();
-  const w = rect.width - 32; // account for chart-body padding
-  const h = 160;
+  const w = Math.floor(rect.width - 32); // account for chart-body padding
+  const h = 240;
+
+  // The overview page may be hidden (display:none) when the poll fires or the
+  // theme switches: the parent then reports a zero width, and sizing the
+  // canvas against it produced a blank, broken chart. Bail out and let the
+  // ResizeObserver (or the next poll) retry once the page is visible again.
+  if (w < 60) { canvas._chartPending = true; return; }
+  canvas._chartPending = false;
 
   canvas.width = w * dpr;
   canvas.height = h * dpr;
@@ -266,9 +273,25 @@ async function fetchChartData() {
   } catch { }
 }
 
-window.addEventListener('resize', () => {
-  if (lastChartData) {
-    const canvas = document.getElementById('chartTimeline');
-    if (canvas) drawTimelineChart(canvas, lastChartData.timeline);
+function redrawOverviewCharts() {
+  const canvas = document.getElementById('chartTimeline');
+  if (canvas && lastChartData) drawTimelineChart(canvas, lastChartData.timeline);
+}
+
+// Window resize, sidebar collapse (a CSS grid transition — no resize event)
+// and hidden→visible page switches all change the chart's width. Observe the
+// container instead of guessing which event will fire.
+(function () {
+  const canvas = document.getElementById('chartTimeline');
+  if (!canvas || !canvas.parentElement) return;
+  if (typeof ResizeObserver === 'undefined') {
+    window.addEventListener('resize', redrawOverviewCharts);
+    return;
   }
-});
+  let raf = 0;
+  const ro = new ResizeObserver(() => {
+    if (raf) return;
+    raf = requestAnimationFrame(() => { raf = 0; redrawOverviewCharts(); });
+  });
+  ro.observe(canvas.parentElement);
+})();

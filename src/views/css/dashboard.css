@@ -27,7 +27,7 @@
 }
 
 [data-theme="light"] {
-  --bg: #f0f2f5;
+  --bg: #f3f3f3; /* rgb(243 243 243) */
   --bg2: #ffffff;
   --surface: #ffffff;
   --surface2: #f5f6fa;
@@ -195,7 +195,15 @@ body {
   gap: 10px;
   padding: 7px 10px;
   font-size: 13px;
-  font-weight: 400;
+  /* Buttons don't inherit the body font, so these links were rendering in the
+     UA default (Arial on Windows) — which has no Light face, so a thin weight
+     would have had no effect here at all. */
+  font-family: inherit;
+  /* Light (300) throughout the menu — the weight ladder below keeps one step
+     between states so "selected" still reads without anything turning bold.
+     Requires Inter 300 in the font import (see dashboard.html). */
+  font-weight: 300;
+  letter-spacing: 0.1px;
   color: var(--text2);
   border: none;
   background: none;
@@ -212,7 +220,7 @@ body {
 .sidebar-link svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--text); opacity: 0.7; transition: opacity var(--transition); }
 .sidebar-link:hover { background: var(--surface2); color: var(--text); }
 .sidebar-link:hover svg { opacity: 1; }
-.sidebar-link.active { background: var(--surface2); color: var(--text); font-weight: 500; }
+.sidebar-link.active { background: var(--surface2); color: var(--text); font-weight: 400; }
 .sidebar-link.active svg { opacity: 1; }
 
 .sidebar-link-label {
@@ -226,7 +234,7 @@ body {
 
 .sidebar-section-label {
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text3);
   text-transform: uppercase;
   letter-spacing: 0.8px;
@@ -453,7 +461,7 @@ body.sidebar-collapsed .sidebar-link[data-tooltip]::after {
   border: 1px solid var(--border2);
   color: var(--text);
   font-size: 12px;
-  font-weight: 400;
+  font-weight: 300;
   padding: 5px 10px;
   border-radius: 6px;
   white-space: nowrap;
@@ -695,6 +703,15 @@ body.sidebar-collapsed .sidebar-link:hover[data-tooltip]::after { opacity: 1; }
   padding: 20px;
 }
 
+/* Channel cards (Notifications → Delivery channels) sit in a gap-spaced grid,
+   so the global card margin-bottom is dropped; hover hints they're actionable. */
+.notif-channel-card {
+  margin-bottom: 0;
+}
+.notif-channel-card:hover {
+  border-color: var(--border2);
+}
+
 /* ─── Stats Grid ──────────────────────────────────────────────────────────── */
 .stats-grid {
   display: grid;
@@ -745,6 +762,54 @@ body.sidebar-collapsed .sidebar-link:hover[data-tooltip]::after { opacity: 1; }
   color: var(--text3);
   margin-top: 6px;
   font-family: 'JetBrains Mono', monospace;
+}
+
+/* Resource inventory tiles (Overview → Resources) */
+.resource-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  gap: 12px;
+}
+
+.resource-tile {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  column-gap: 8px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: background var(--transition), border-color var(--transition);
+}
+.resource-tile:hover { background: var(--surface2); border-color: var(--border2); }
+
+.resource-tile-icon { grid-column: 1; grid-row: 1; display: flex; color: var(--text3); transition: color var(--transition); }
+.resource-tile:hover .resource-tile-icon { color: var(--accent); }
+.resource-tile-count {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  line-height: 1;
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+}
+.resource-tile-label { grid-column: 1 / -1; grid-row: 2; font-size: 12px; font-weight: 500; color: var(--text); margin-top: 8px; }
+.resource-tile-sub {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Charts row */
