@@ -148,6 +148,13 @@ async function startApp(username) {
     appIntervals.push(setInterval(() => {
       if (currentPage === 'requests' && document.getElementById('rlAutoRefresh').checked) fetchRequestLogs();
     }, 5000));
+    // Backend error feed: drives the sidebar badge everywhere, and refreshes
+    // the list in place while the user is actually sitting on that page.
+    appIntervals.push(setInterval(() => {
+      fetchErrorStats();
+      if (currentPage === 'errors') fetchErrorFeed(false);
+    }, 10000));
+    fetchErrorStats();
   }
 }
 
@@ -453,6 +460,7 @@ const PAGE_TITLES = {
   notifications: 'Notifications',
   npm: 'Nginx Proxy Manager',
   audit: 'Audit Log',
+  errors: 'System Errors',
   reports: 'Report Feeds',
   webhookDestinations: 'Webhooks · Destinations'
 };
@@ -462,7 +470,7 @@ const PAGE_TITLES = {
 const ROUTABLE_PAGES = new Set([
   'overview','requests','proxyusers','profiles','connectors',
   'oauthclients','consentpages','ldap','email','sms','notifications',
-  'npm','audit','webhooks','ldap','reports',
+  'npm','audit','webhooks','ldap','reports','errors',
 ]);
 
 function navigate(page, opts = {}) {
@@ -531,6 +539,7 @@ function navigate(page, opts = {}) {
   if (pendingNotifTab) switchNotifTab(pendingNotifTab);
   if (page === 'npm') { if (typeof switchNpmSubpage === 'function') switchNpmSubpage(_npmCurrentSubpage || 'proxy-hosts'); fetchNpmConfig(); }
   if (page === 'audit') { fetchAuditLogs(true); }
+  if (page === 'errors') { fetchErrorFeed(true); }
   if (page === 'reports') { loadReportFeeds(); loadGcInstances(); rfStartSse(); rfViewerUpdateSelect(); }
   const titleEl = document.getElementById('topbarPageTitle');
   if (titleEl) titleEl.textContent = PAGE_TITLES[page] || page;

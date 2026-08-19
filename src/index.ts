@@ -1,3 +1,8 @@
+// MUST stay the first import: the module self-installs the console patch and
+// process-level handlers on evaluation, so keeping it first is what guarantees
+// no other module's top-level code throws before the feed is listening.
+import { queryErrors as queryErrorFeed, getErrorStats, getError as getErrorEntry, ackErrors, clearErrors } from './core/error-feed';
+
 import { loadConfig, reloadEnvFile, loadProxyProfiles, loadTcpUdpProfiles } from './core/config';
 import { UnauthorizedError, type ProxyProfile } from './core/types';
 import { invalidateProfileCache } from './proxy/proxy';
@@ -1305,6 +1310,52 @@ const server = Bun.serve({
                     const detail = getRequestLogDetail(id);
                     if (!detail) return jsonRes(404, { error: 'Request log not found' });
                     return jsonRes(200, detail as unknown as Record<string, unknown>);
+                }
+
+                // ── Backend error feed endpoints ──
+                // Feeds the "System Errors" dashboard page. Entries are
+                // deduplicated by fingerprint upstream in core/error-feed.
+
+                // GET /admin/errors/stats — badge counts + per-source rollup.
+                // Declared before the list route so the literal path wins.
+                if (url.pathname === '/admin/errors/stats' && req.method === 'GET') {
+                    return jsonRes(200, getErrorStats() as unknown as Record<string, unknown>);
+                }
+
+                if (url.pathname === '/admin/errors' && req.method === 'GET') {
+                    const sev = url.searchParams.get('severity');
+                    const state = url.searchParams.get('state');
+                    return jsonRes(200, queryErrorFeed({
+                        page: parseInt(url.searchParams.get('page') || '1', 10),
+                        limit: parseInt(url.searchParams.get('limit') || '50', 10),
+                        severity: sev === 'error' || sev === 'warn' ? sev : undefined,
+                        source: url.searchParams.get('source') || undefined,
+                        search: url.searchParams.get('search') || undefined,
+                        state: state === 'all' || state === 'acked' || state === 'open' ? state : undefined,
+                    }) as unknown as Record<string, unknown>);
+                }
+
+                // POST /admin/errors/ack — body { ids?: number[] }. Empty/absent
+                // ids acknowledges every open entry ("Mark all as read").
+                if (url.pathname === '/admin/errors/ack' && req.method === 'POST') {
+                    const body = await req.json().catch(() => ({})) as { ids?: unknown };
+                    const ids = Array.isArray(body.ids) ? body.ids.map(Number).filter(Number.isFinite) : [];
+                    const n = ackErrors(ids, getAuthedAdmin(req)?.username || null);
+                    return jsonRes(200, { status: 'acknowledged', count: n });
+                }
+
+                // DELETE /admin/errors — body { ids?: number[] }. Empty clears all.
+                if (url.pathname === '/admin/errors' && req.method === 'DELETE') {
+                    const body = await req.json().catch(() => ({})) as { ids?: unknown };
+                    const ids = Array.isArray(body.ids) ? body.ids.map(Number).filter(Number.isFinite) : [];
+                    const n = clearErrors(ids);
+                    return jsonRes(200, { status: 'cleared', count: n });
+                }
+
+                if (url.pathname.match(/^\/admin\/errors\/\d+$/) && req.method === 'GET') {
+                    const entry = getErrorEntry(parseInt(url.pathname.split('/').pop()!, 10));
+                    if (!entry) return jsonRes(404, { error: 'Error entry not found' });
+                    return jsonRes(200, entry as unknown as Record<string, unknown>);
                 }
 
                 // ── TCP/UDP proxy feature — disabled (code kept for future re-enable) ──

@@ -9984,3 +9984,221 @@ function rfClearInstance() {
   var sel = document.getElementById('rfInstanceName');
   if (sel) sel.value = '';
 }
+
+// ─── System Errors (backend error feed) ──────────────────────────────────────
+// Surfaces everything core/error-feed.ts captured: console.error/warn from any
+// module plus uncaught exceptions and unhandled rejections. Rows are grouped
+// server-side by fingerprint, so `count` is how many times that exact failure
+// recurred — not how many rows exist.
+
+const ERR_PAGE_SIZE = 50;
+let _errPage = 1;
+let _errEntries = [];
+// Highest error id already announced via toast. Prevents re-toasting the same
+// failure on every 10s poll; starts null so the first poll of a session only
+// establishes the baseline instead of shouting about pre-existing errors.
+let _errLastToastedId = null;
+let _errKnownSources = [];
+
+function errFilterVal(id) {
+  const el = document.getElementById(id);
+  return el ? el.value : '';
+}
+
+async function fetchErrorStats() {
+  try {
+    const res = await api('/admin/errors/stats');
+    if (!res.ok) return;
+    const s = await res.json();
+    renderErrorBadge(s);
+    renderErrorStatCards(s);
+    syncErrorSourceFilter(s.sources || []);
+
+    // Toast on genuinely new errors, so a failure in a background job is
+    // visible even when the user is sitting on another page.
+    if (s.latestId != null) {
+      if (_errLastToastedId === null) {
+        _errLastToastedId = s.latestId;
+      } else if (s.latestId > _errLastToastedId) {
+        _errLastToastedId = s.latestId;
+        toast('Novo erro no backend — ver System Errors', 'error');
+      }
+    }
+  } catch (e) { /* badge is best-effort; never break the dashboard over it */ }
+}
+
+function renderErrorBadge(s) {
+  const badge = document.getElementById('navErrorBadge');
+  if (!badge) return;
+  const n = s.openErrors || 0;
+  if (n > 0) {
+    badge.textContent = n > 99 ? '99+' : String(n);
+    badge.style.display = '';
+    badge.title = n + ' unacknowledged backend error' + (n === 1 ? '' : 's');
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function renderErrorStatCards(s) {
+  const set = function (id, v) { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('errStatErrors', String(s.openErrors || 0));
+  set('errStatWarnings', String(s.openWarnings || 0));
+  set('errStatSources', String((s.sources || []).length));
+  set('errStatLast', s.lastErrorAt ? errRelTime(s.lastErrorAt) : '—');
+}
+
+// Keeps the subsystem <select> in sync with whatever sources actually have
+// entries, preserving the user's current selection.
+function syncErrorSourceFilter(sources) {
+  const sel = document.getElementById('errFilterSource');
+  if (!sel) return;
+  const names = sources.map(function (s) { return s.source; }).sort();
+  if (names.join('|') === _errKnownSources.join('|')) return;
+  _errKnownSources = names;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">All</option>' +
+    names.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + '</option>'; }).join('');
+  if (names.indexOf(current) !== -1) sel.value = current;
+}
+
+function errRelTime(ms) {
+  const diff = Math.max(0, Date.now() - ms);
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+
+async function fetchErrorFeed(resetPage) {
+  if (resetPage) _errPage = 1;
+  const params = new URLSearchParams();
+  params.set('page', String(_errPage));
+  params.set('limit', String(ERR_PAGE_SIZE));
+  params.set('state', errFilterVal('errFilterState') || 'open');
+  const sev = errFilterVal('errFilterSeverity');
+  if (sev) params.set('severity', sev);
+  const src = errFilterVal('errFilterSource');
+  if (src) params.set('source', src);
+  const q = errFilterVal('errFilterSearch').trim();
+  if (q) params.set('search', q);
+  try {
+    const res = await api('/admin/errors?' + params.toString());
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    _errEntries = data.entries || [];
+    renderErrorFeed(_errEntries, data.total || 0);
+  } catch (e) {
+    const tbody = document.getElementById('errListBody');
+    if (tbody) tbody.innerHTML =
+      '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
+  }
+  fetchErrorStats();
+}
+
+function renderErrorFeed(entries, total) {
+  const tbody = document.getElementById('errListBody');
+  if (!tbody) return;
+  if (!entries.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Nenhum erro registado.</td></tr>';
+  } else {
+    tbody.innerHTML = entries.map(function (e, idx) {
+      const sevColor = e.severity === 'error' ? '#ef4444' : '#f59e0b';
+      const dim = e.acknowledged ? 'opacity:0.55;' : '';
+      const msg = e.message.length > 160 ? e.message.slice(0, 160) + '…' : e.message;
+      return '<tr style="border-top:1px solid var(--border);' + dim + '">' +
+        '<td style="padding:10px 12px;color:var(--text2);font-size:11.5px;white-space:nowrap" title="' + esc(new Date(e.lastSeen).toLocaleString()) + '">' + esc(errRelTime(e.lastSeen)) + '</td>' +
+        '<td style="padding:10px 8px"><span style="color:' + sevColor + ';font-weight:600;font-size:11px;text-transform:uppercase">' + esc(e.severity) + '</span></td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:11.5px;color:var(--text2)">' + esc(e.source) + '</td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:11.5px">' + esc(msg) + '</td>' +
+        '<td style="padding:10px 8px;font-size:11.5px;color:' + (e.count > 1 ? sevColor : 'var(--text3)') + ';font-weight:' + (e.count > 1 ? '600' : '400') + '">' + e.count + '&times;</td>' +
+        '<td style="padding:10px 12px;text-align:right;white-space:nowrap">' +
+          '<button class="btn btn-sm btn-ghost" onclick="showErrorDetail(' + idx + ')">Details</button> ' +
+          (e.acknowledged ? '' : '<button class="btn btn-sm btn-ghost" onclick="ackErrorEntry(' + e.id + ')">Mark read</button>') +
+        '</td>' +
+        '</tr>';
+    }).join('');
+  }
+  const totalEl = document.getElementById('errTotal');
+  if (totalEl) {
+    const from = total ? (_errPage - 1) * ERR_PAGE_SIZE + 1 : 0;
+    const to = Math.min(_errPage * ERR_PAGE_SIZE, total);
+    totalEl.textContent = total ? (from + '–' + to + ' de ' + total) : 'Sem entradas';
+  }
+  const prev = document.getElementById('errPrev');
+  const next = document.getElementById('errNext');
+  if (prev) prev.disabled = _errPage <= 1;
+  if (next) next.disabled = _errPage * ERR_PAGE_SIZE >= total;
+}
+
+function errPrevPage() { if (_errPage > 1) { _errPage--; fetchErrorFeed(false); } }
+function errNextPage() { _errPage++; fetchErrorFeed(false); }
+
+function showErrorDetail(idx) {
+  const e = _errEntries[idx];
+  if (!e) return;
+  const row = function (label, value, mono) {
+    return '<div style="margin-bottom:12px">' +
+      '<div style="font-size:11px;text-transform:uppercase;color:var(--text3);margin-bottom:4px">' + esc(label) + '</div>' +
+      '<div style="font-size:12.5px;' + (mono ? 'font-family:monospace;white-space:pre-wrap;word-break:break-word;background:var(--surface2);padding:10px;border-radius:6px;max-height:280px;overflow:auto' : '') + '">' + esc(value) + '</div>' +
+      '</div>';
+  };
+  document.getElementById('errDetailBody').innerHTML =
+    row('Severity', e.severity) +
+    row('Subsystem', e.source) +
+    row('Occurrences', e.count + '× · first ' + new Date(e.firstSeen).toLocaleString() + ' · last ' + new Date(e.lastSeen).toLocaleString()) +
+    row('Message', e.message, true) +
+    (e.context ? row('Context', e.context, true) : '') +
+    (e.stack ? row('Stack trace', e.stack, true) : '') +
+    (e.acknowledged ? row('Acknowledged', (e.acknowledgedBy || 'unknown') + ' · ' + new Date(e.acknowledgedAt).toLocaleString()) : '');
+  const modal = document.getElementById('errDetailModal');
+  if (modal) modal.style.display = 'flex';
+}
+
+function closeErrorDetail() {
+  const m = document.getElementById('errDetailModal');
+  if (m) m.style.display = 'none';
+}
+
+async function ackErrorEntry(id) {
+  try {
+    const res = await api('/admin/errors/ack', { method: 'POST', body: JSON.stringify({ ids: [id] }) });
+    if (!res.ok) return toast('Falha ao marcar como lido', 'error');
+    await fetchErrorFeed(false);
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+async function ackAllErrors(ev) {
+  await withBusy(ev, 'A marcar…', async function () {
+    try {
+      const res = await api('/admin/errors/ack', { method: 'POST', body: JSON.stringify({ ids: [] }) });
+      const d = await res.json().catch(function () { return {}; });
+      if (!res.ok) return toast(d.error || 'Falha', 'error');
+      toast((d.count || 0) + ' entrada(s) marcadas como lidas');
+      await fetchErrorFeed(true);
+    } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  });
+}
+
+async function clearAllErrors(ev) {
+  const ok = await showConfirm({
+    title: 'Limpar feed de erros',
+    message: 'Isto apaga permanentemente todas as entradas do feed.',
+    detail: 'O histórico não é recuperável. "Mark all as read" apenas esconde as entradas, mantendo-as disponíveis no filtro "Read".',
+    confirmText: 'Apagar tudo',
+    cancelText: 'Cancelar',
+    danger: true,
+  });
+  if (!ok) return;
+  await withBusy(ev, 'A limpar…', async function () {
+    try {
+      const res = await api('/admin/errors', { method: 'DELETE', body: JSON.stringify({ ids: [] }) });
+      const d = await res.json().catch(function () { return {}; });
+      if (!res.ok) return toast(d.error || 'Falha', 'error');
+      toast((d.count || 0) + ' entrada(s) apagadas');
+      _errLastToastedId = null;
+      await fetchErrorFeed(true);
+    } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  });
+}

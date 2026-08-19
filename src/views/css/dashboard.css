@@ -274,6 +274,12 @@ body {
   background: var(--border2);
   color: var(--text2);
 }
+/* Unacknowledged backend errors — must read as an alert, not a count. */
+.sidebar-badge.badge-danger,
+.sidebar-link.active .sidebar-badge.badge-danger {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ef4444;
+}
 
 .sidebar-footer {
   border-top: 1px solid var(--border);
