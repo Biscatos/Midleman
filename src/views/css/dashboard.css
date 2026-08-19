@@ -147,7 +147,7 @@ body {
 .sidebar-brand img { width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0; }
 .sidebar-brand-name {
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: -0.3px;
   color: var(--text);
   white-space: nowrap;
@@ -195,7 +195,7 @@ body {
   gap: 10px;
   padding: 7px 10px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 400;
   color: var(--text2);
   border: none;
   background: none;
@@ -209,10 +209,10 @@ body {
   overflow: hidden;
   position: relative;
 }
-.sidebar-link svg { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.55; transition: opacity var(--transition); }
+.sidebar-link svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--text); opacity: 0.7; transition: opacity var(--transition); }
 .sidebar-link:hover { background: var(--surface2); color: var(--text); }
 .sidebar-link:hover svg { opacity: 1; }
-.sidebar-link.active { background: var(--surface2); color: var(--text); font-weight: 600; }
+.sidebar-link.active { background: var(--surface2); color: var(--text); font-weight: 500; }
 .sidebar-link.active svg { opacity: 1; }
 
 .sidebar-link-label {
@@ -226,7 +226,7 @@ body {
 
 .sidebar-section-label {
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text3);
   text-transform: uppercase;
   letter-spacing: 0.8px;
@@ -264,7 +264,7 @@ body {
   border-radius: 10px;
   background: var(--surface2);
   color: var(--text3);
-  font-weight: 600;
+  font-weight: 500;
   flex-shrink: 0;
   transition: opacity 0.2s ease, max-width 0.25s ease;
   max-width: 60px;
@@ -339,7 +339,7 @@ body {
   align-items: center;
   justify-content: center;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   flex-shrink: 0;
 }
 .sidebar-user-info {
@@ -351,7 +351,7 @@ body {
 }
 .sidebar-user-name {
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -408,7 +408,7 @@ body.sidebar-collapsed .sidebar-link-label,
 body.sidebar-collapsed .sidebar-badge {
   display: none;
 }
-body.sidebar-collapsed .sidebar-link svg { opacity: 0.65; }
+body.sidebar-collapsed .sidebar-link svg { opacity: 0.85; }
 body.sidebar-collapsed .sidebar-link svg {
   display: block;
   margin: 0 auto;
@@ -453,7 +453,7 @@ body.sidebar-collapsed .sidebar-link[data-tooltip]::after {
   border: 1px solid var(--border2);
   color: var(--text);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 400;
   padding: 5px 10px;
   border-radius: 6px;
   white-space: nowrap;
