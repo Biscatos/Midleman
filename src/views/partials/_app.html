@@ -126,6 +126,14 @@
         </svg>
         <span class="sidebar-link-label">Audit Log</span>
       </button>
+      <button class="sidebar-link" data-page="errors" data-tooltip="Backend errors" onclick="navigate('errors')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        <span class="sidebar-link-label">System Errors</span>
+        <span class="sidebar-badge badge-danger" id="navErrorBadge" style="display:none" title="Unacknowledged backend errors">0</span>
+      </button>
     </nav>
 
     <div class="sidebar-footer">
@@ -3092,6 +3100,99 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       </div>
     </div>
 
+    <div class="page" id="pageErrors">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+        <div>
+          <h2>System Errors</h2>
+          <p>Every error and warning raised by the backend — including background jobs that never touch a request. Identical failures are grouped and counted.</p>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" onclick="fetchErrorFeed(true)">Refresh</button>
+          <button class="btn btn-sm" onclick="ackAllErrors(event)">Mark all as read</button>
+          <button class="btn btn-danger btn-sm" onclick="clearAllErrors(event)">Clear feed</button>
+        </div>
+      </div>
+
+      <div class="stats-grid" style="margin-bottom:16px">
+        <div class="stat-card">
+          <div class="stat-label">Open errors</div>
+          <div class="stat-value" id="errStatErrors" style="color:#ef4444">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Open warnings</div>
+          <div class="stat-value" id="errStatWarnings" style="color:#f59e0b">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Last error</div>
+          <div class="stat-value" id="errStatLast" style="font-size:16px">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Affected subsystems</div>
+          <div class="stat-value" id="errStatSources">0</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-body">
+          <div class="audit-filter-grid">
+            <div class="form-group">
+              <label for="errFilterState">State</label>
+              <select id="errFilterState" onchange="fetchErrorFeed(true)">
+                <option value="open">Unread</option>
+                <option value="acked">Read</option>
+                <option value="all">All</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="errFilterSeverity">Severity</label>
+              <select id="errFilterSeverity" onchange="fetchErrorFeed(true)">
+                <option value="error">Errors only</option>
+                <option value="">Errors + warnings</option>
+                <option value="warn">Warnings only</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="errFilterSource">Subsystem</label>
+              <select id="errFilterSource" onchange="fetchErrorFeed(true)">
+                <option value="">All</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="errFilterSearch">Search</label>
+              <input type="text" id="errFilterSearch" placeholder="message or stack" onkeydown="if(event.key==='Enter')fetchErrorFeed(true)">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--surface2);text-align:left">
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Last seen</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Sev</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Source</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Message</th>
+                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Count</th>
+                <th style="padding:10px 12px"></th>
+              </tr>
+            </thead>
+            <tbody id="errListBody">
+              <tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card-body" style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border)">
+          <span id="errTotal" style="font-size:12px;color:var(--text3)">—</span>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-ghost btn-sm" onclick="errPrevPage()" id="errPrev">‹ Prev</button>
+            <button class="btn btn-ghost btn-sm" onclick="errNextPage()" id="errNext">Next ›</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ SETTINGS ═══ -->
     </div><!-- /.content -->
   </div><!-- /.main -->
@@ -3105,6 +3206,17 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       <button onclick="closeAuditDetail()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">&times;</button>
     </div>
     <div style="padding:22px" id="auditDetailBody"></div>
+  </div>
+</div>
+
+<!-- Backend error detail modal -->
+<div id="errDetailModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+  <div style="max-width:720px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+    <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <h3 style="margin:0;font-size:15px">Backend error</h3>
+      <button onclick="closeErrorDetail()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">&times;</button>
+    </div>
+    <div style="padding:22px;max-height:70vh;overflow:auto" id="errDetailBody"></div>
   </div>
 </div>
 
@@ -3575,8 +3687,18 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer;margin-bottom:6px">
           <input id="cnWebhooksEnabled" type="checkbox" checked onchange="connectorWebhooksEnabledChanged()"> Deliver events to webhook targets
         </label>
-        <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Webhook Targets <span style="color:var(--text3)">(agent replies POSTed here — one URL per line)</span></label>
-        <textarea id="cnWebhookTargets" rows="3" placeholder="https://o-meu-bot.exemplo.com/gocontact-events" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px;font-family:'SF Mono',Monaco,monospace"></textarea>
+        <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Webhook Targets <span style="color:var(--text3)">(where agent replies, joins and closes are delivered)</span></label>
+        <div id="cnWebhookTargetsList"></div>
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <button type="button" class="btn btn-sm" onclick="addConnectorTarget('url')">+ URL</button>
+          <button type="button" class="btn btn-sm" onclick="addConnectorTarget('webhook')">+ Midleman Webhook</button>
+        </div>
+        <div style="font-size:10.5px;color:var(--text3);margin-top:6px;line-height:1.5">
+          A <strong>Midleman Webhook</strong> target hands the event to one of your Webhook distributors, which then owns
+          delivery — its retry policy, persistent retry, filters, templates and the DLQ all apply. Prefer it when the
+          delivery must not be lost; create the distributor on the Webhooks page first. A plain <strong>URL</strong>
+          target posts directly, with a bounded retry.
+        </div>
       </div>
     </div>
     <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border);flex-shrink:0;background:var(--surface);border-radius:0 0 var(--radius) var(--radius)">
@@ -3736,7 +3858,16 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer;margin-bottom:4px">
             <input id="f9WebhooksEnabled" type="checkbox" checked onchange="f9WebhooksEnabledChanged()"> Deliver events to webhook targets
           </label>
-          <textarea id="f9WebhookTargets" rows="3" placeholder="https://o-meu-bot.exemplo.com/five9-events" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px;font-family:'SF Mono',Monaco,monospace"></textarea>
+          <div id="f9WebhookTargetsList"></div>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <button type="button" class="btn btn-sm" onclick="addConnectorTarget('url')">+ URL</button>
+            <button type="button" class="btn btn-sm" onclick="addConnectorTarget('webhook')">+ Midleman Webhook</button>
+          </div>
+          <div style="font-size:10.5px;color:var(--text3);margin-top:6px;line-height:1.5">
+            Five9 pushes each agent reply once, so a target that is briefly down loses the message. A
+            <strong>Midleman Webhook</strong> target avoids that: the distributor takes over delivery with its own
+            retry policy and dead-letter queue.
+          </div>
         </div>
       </div>
 

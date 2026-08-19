@@ -8,6 +8,32 @@ import { timingSafeEqualStr } from '../auth/auth';
 // inbound handler (X-Forwarded-For alone is spoofable).
 const reqPeerIp = new WeakMap<Request, string>();
 
+/**
+ * Secret proving a fan-out request came from inside this process — used by
+ * connectors that deliver agent events through a distributor instead of
+ * calling the bot's URL directly (see core/connector-webhooks.ts). A request
+ * presenting it skips the distributor's inbound authToken and IP allowlist,
+ * which it must: the connector has no business knowing the operator's token,
+ * and an allowlist written for the outside world would reject us.
+ *
+ * SECURITY: the TOKEN is the boundary, not the loopback check beside it. It is
+ * a per-process UUID that is never persisted, never logged and never leaves
+ * this process — an outside caller cannot produce it. The loopback check is
+ * defence in depth only, and deliberately cannot be trusted on its own: with
+ * Midleman behind nginx on the same host (docker-compose.npm.yml), the socket
+ * peer for ordinary EXTERNAL traffic is also loopback. Do not weaken the token
+ * on the belief that the address check is doing the work.
+ */
+const INTERNAL_DISPATCH_TOKEN = crypto.randomUUID();
+const INTERNAL_DISPATCH_HEADER = 'X-Midleman-Internal';
+
+function isInternalDispatch(req: Request): boolean {
+    const presented = req.headers.get(INTERNAL_DISPATCH_HEADER);
+    if (!timingSafeEqualStr(presented, INTERNAL_DISPATCH_TOKEN)) return false;
+    const peer = reqPeerIp.get(req);
+    return peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1';
+}
+
 // Per-webhook outbound SSRF policy, keyed by webhook name. Kept current as
 // servers start/restart so DLQ and pending-retry paths (which only carry the
 // webhook name) apply the same policy as the live fan-out. Missing entry =
@@ -15,6 +41,15 @@ const reqPeerIp = new WeakMap<Request, string>();
 const webhookSsrfPolicies = new Map<string, SsrfPolicyOverride>();
 function policyFor(webhookName: string): SsrfPolicyOverride | undefined {
     return webhookSsrfPolicies.get(webhookName);
+}
+
+/** Register an SSRF policy for a non-distributor producer that parks entries in
+ *  the shared DLQ — connectors use the key `connector:<name>`. Without this a
+ *  replay would fall back to the global env policy and could refuse a target
+ *  the connector is explicitly configured to reach (e.g. a bot on a private
+ *  network), even though live delivery to it succeeds. */
+export function registerDlqSsrfPolicy(key: string, policy: SsrfPolicyOverride): void {
+    webhookSsrfPolicies.set(key, policy);
 }
 import {
     loadPersistedDlq, persistDlq, type StoredFailedFanout,
@@ -57,6 +92,17 @@ export interface FailedFanout {
     totalAttempts: number;
     failedAt: number; // Unix ms
     retrying: boolean;
+    /** Credential lookup for replay — see StoredFailedFanout.authRef. */
+    authRef?: { kind: 'connector'; connector: string; targetIndex: number; targetUrl: string };
+}
+
+/** Resolves an entry's `authRef` into the headers to send on replay. Registered
+ *  by the connector layer, which owns the credentials; keeping it a hook means
+ *  the DLQ never has to hold a secret. */
+type DlqAuthResolver = (ref: NonNullable<FailedFanout['authRef']>) => Record<string, string> | null;
+let dlqAuthResolver: DlqAuthResolver | null = null;
+export function setDlqAuthResolver(fn: DlqAuthResolver): void {
+    dlqAuthResolver = fn;
 }
 
 // ─── DLQ helpers ────────────────────────────────────────────────────────────
@@ -124,6 +170,13 @@ export async function retryFailedFanout(id: string): Promise<{ ok: boolean; stat
     entry.retrying = true;
     try {
         const headers = new Headers(entry.headers);
+        // Re-derive the credential now rather than replaying a stored (and
+        // redacted) one. A target whose auth has since been removed replays
+        // without it — better than sending the literal "[redacted]".
+        if (entry.authRef && dlqAuthResolver) {
+            const fresh = dlqAuthResolver(entry.authRef);
+            if (fresh) for (const [k, v] of Object.entries(fresh)) headers.set(k, v);
+        }
         const body = entry.body ?? undefined;
         const { res } = await fetchWithRetry(
             entry.targetUrl,
@@ -736,8 +789,13 @@ async function handleWebhookFanout(
         return new Response(challenge || '', { status: 200 });
     }
 
+    // In-process delivery from a connector: authenticated by the internal
+    // token instead of the operator-facing authToken/allowedIps (see
+    // INTERNAL_DISPATCH_TOKEN).
+    const internal = isInternalDispatch(req);
+
     // Auth check (per-webhook token)
-    if (webhook.authToken) {
+    if (webhook.authToken && !internal) {
         const providedToken = req.headers.get('X-Forward-Token') || url.searchParams.get('token') || url.searchParams.get('hub.verify_token');
         if (!timingSafeEqualStr(providedToken, webhook.authToken)) {
             console.warn(`❌ [webhook:${webhook.name}] Unauthorized ${req.method} from ${req.headers.get('X-Forwarded-For') || 'unknown'}`);
@@ -770,9 +828,11 @@ async function handleWebhookFanout(
         }
     }
 
-    const clientIp = resolveClientIp(reqPeerIp.get(req), req.headers.get('x-forwarded-for'), getTrustProxyConfig());
+    const clientIp = internal
+        ? `internal:${req.headers.get('X-Connector') || 'midleman'}`
+        : resolveClientIp(reqPeerIp.get(req), req.headers.get('x-forwarded-for'), getTrustProxyConfig());
 
-    if (!isIpAllowed(clientIp, webhook.allowedIps)) {
+    if (!internal && !isIpAllowed(clientIp, webhook.allowedIps)) {
         console.warn(`🚫 [webhook:${webhook.name}]: blocked IP ${clientIp}`);
         return jsonResponse(401, { error: 'Unauthorized', message: 'Your IP address is not allowed.' });
     }
@@ -785,6 +845,7 @@ async function handleWebhookFanout(
         }
     });
     forwardHeaders.delete('X-Forward-Token');
+    forwardHeaders.delete(INTERNAL_DISPATCH_HEADER); // never leaks past this process
     forwardHeaders.set('X-Request-ID', requestId);
 
     // Attempt to parse incoming JSON for interpolations. Prefer the
@@ -1197,6 +1258,52 @@ export async function restartWebhook(webhook: WebhookDistributor): Promise<Webho
 
 export function getWebhookServers(): Map<string, WebhookServer> {
     return servers;
+}
+
+/** Names of the distributors currently running — what a connector's target
+ *  dropdown can legitimately point at. */
+export function listRunningWebhookNames(): string[] {
+    return Array.from(servers.values()).filter(ws => !ws.isShuttingDown).map(ws => ws.webhook.name);
+}
+
+/**
+ * Hand a payload to one of this Midleman's Webhook Distributors, as if it had
+ * arrived on that distributor's port. Everything downstream then applies
+ * unchanged: conditional filters, body templates, per-destination retry,
+ * persistent retry, the DLQ and per-attempt logging.
+ *
+ * Delivered over loopback rather than by calling the fan-out directly, because
+ * the fan-out lives in closures inside the request handler — going through the
+ * port reuses all of it without restructuring working code, and the hop shows
+ * up in the request log where an operator expects to find it.
+ *
+ * Resolves once the distributor has ACCEPTED the payload (202). Actual delivery
+ * to the destinations is the distributor's job from then on, including retries.
+ */
+export async function dispatchToWebhook(
+    name: string,
+    body: string,
+    headers: Record<string, string> = {},
+): Promise<void> {
+    const ws = servers.get(name);
+    if (!ws) throw new Error(`Webhook "${name}" is not running (deleted, disabled, or failed to start)`);
+    if (ws.isShuttingDown) throw new Error(`Webhook "${name}" is shutting down`);
+
+    const port = ws.server.port ?? ws.webhook.port;
+    const res = await fetch(`http://127.0.0.1:${port}/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            ...headers,
+            [INTERNAL_DISPATCH_HEADER]: INTERNAL_DISPATCH_TOKEN,
+        },
+        body,
+        signal: AbortSignal.timeout(WEBHOOK_FETCH_TIMEOUT_MS),
+    });
+    if (res.status < 200 || res.status >= 300) {
+        const detail = await res.text().catch(() => '');
+        throw new Error(`Webhook "${name}" rejected the event: HTTP ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ''}`);
+    }
 }
 
 export function getWebhookStatus(): { name: string; port: number; targets: any[]; active: number; running: boolean; hasAuth: boolean }[] {

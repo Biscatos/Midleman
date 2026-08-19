@@ -13,8 +13,10 @@
  */
 
 import { log } from '../core/logger';
+import { deliverConnectorEvent, attemptsFor, shouldParkInDlq, parkFailedDelivery } from '../core/connector-webhooks';
+import { registerDlqSsrfPolicy } from './webhook-server';
 import type { Five9Connector } from '../core/connector-types-five9';
-import type { NormalizedInboundMessage, ConnectorWebhookTarget, MetaSettings, SmoochSettings } from '../core/connector-types';
+import type { NormalizedInboundMessage, MetaSettings, SmoochSettings } from '../core/connector-types';
 import { Five9ApiClient, Five9Error, type Five9SessionAuth, FETCH_TIMEOUT_MS } from '../five9/client';
 import {
     getFive9Session, upsertFive9Session, touchFive9Session, deleteFive9Session,
@@ -22,7 +24,6 @@ import {
     getFive9SessionByCorrelation, type Five9Session,
 } from '../five9/sessions';
 import { logRequest, headersToRecord } from '../telemetry/request-log';
-import { enqueueFailedFanout } from './webhook-server';
 import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { assertResolvedHostAllowed } from '../core/ssrf-guard';
 import { timingSafeEqualStr } from '../auth/auth';
@@ -438,43 +439,6 @@ interface AgentEvent {
     } | null;
 }
 
-async function postWebhookTarget(c: Five9Connector, target: ConnectorWebhookTarget, event: AgentEvent, maxAttempts = 3): Promise<void> {
-    await assertResolvedHostAllowed(target.url, ssrfPolicy(c));
-    const body = JSON.stringify(event);
-    let lastErr: unknown;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        if (attempt > 1) await Bun.sleep(1000 * Math.pow(2, attempt - 2));
-        const started = performance.now();
-        try {
-            const headers = new Headers({ 'Content-Type': 'application/json', 'X-Connector': c.name });
-            for (const [k, v] of Object.entries(target.customHeaders || {})) headers.set(k, v);
-            const res = await fetch(target.url, {
-                method: target.method || 'POST',
-                headers,
-                body,
-                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-                tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' },
-            } as RequestInit);
-            const resText = await res.text().catch(() => null);
-            logRequest({
-                requestId: event.message?.uuid || crypto.randomUUID(),
-                type: 'connector-fanout', targetName: c.name,
-                method: target.method || 'POST', path: `/${event.event}`,
-                targetUrl: target.url, reqHeaders: headersToRecord(headers),
-                reqBody: body, reqBodySize: body.length,
-                resStatus: res.status, resStatusText: res.statusText,
-                resBody: resText && resText.length <= 4096 ? resText : null,
-                durationMs: performance.now() - started,
-            });
-            if (res.status >= 200 && res.status < 300) return;
-            lastErr = new Error(`HTTP ${res.status}`);
-        } catch (err) {
-            lastErr = err;
-        }
-    }
-    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
-}
-
 async function fanoutFive9Event(cs: Five9ConnectorServer, session: Five9Session | null, event: AgentEvent): Promise<void> {
     const c = cs.connector;
     const jobs: Promise<void>[] = [];
@@ -487,27 +451,19 @@ async function fanoutFive9Event(cs: Five9ConnectorServer, session: Five9Session 
         }
     }
 
-    for (const target of (c.webhooksEnabled !== false ? c.webhookTargets || [] : [])) {
-        let job = postWebhookTarget(c, target, event, event.event === 'chat_closed' ? 3 : 1);
-        if (event.event === 'chat_closed') {
+    // Five9 is push-only — nothing re-reads an agent reply we failed to deliver,
+    // so agent_message gets real retries and a DLQ entry, same as chat_closed.
+    const allTargets = c.webhooksEnabled !== false ? c.webhookTargets || [] : [];
+    allTargets.forEach((target, targetIndex) => {
+        const attempts = attemptsFor(event.event, true);
+        let job = deliverConnectorEvent({ connectorName: c.name, target, event, ssrf: ssrfPolicy(c), maxAttempts: attempts });
+        if (shouldParkInDlq(event.event, true)) {
             job = job.catch(err => {
-                const body = JSON.stringify(event);
-                const errMsg = err instanceof Error ? err.message : String(err);
-                enqueueFailedFanout({
-                    webhookName: `connector:${c.name}`,
-                    requestId: crypto.randomUUID(),
-                    targetUrl: target.url,
-                    method: target.method || 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Connector': c.name, ...(target.customHeaders || {}) },
-                    body, bodyPreview: body, bodySize: body.length,
-                    path: '/chat_closed', clientIp: 'internal',
-                    retryConfig: undefined, lastError: errMsg, totalAttempts: 3,
-                });
-                log.warn(`📥 [five9:${c.name}] chat_closed → ${target.url} failed (${errMsg}) — parked in DLQ`);
+                parkFailedDelivery({ connectorName: c.name, target, targetIndex, event, error: err, attempts });
             });
         }
         jobs.push(job);
-    }
+    });
 
     const results = await Promise.allSettled(jobs);
     const failures = results.filter(r => r.status === 'rejected') as PromiseRejectedResult[];
@@ -1002,6 +958,8 @@ async function handleFive9Request(req: Request, cs: Five9ConnectorServer): Promi
 // ─── Server lifecycle ─────────────────────────────────────────────────────────
 
 export function startFive9ConnectorServer(connector: Five9Connector): Five9ConnectorServer {
+    // Same SSRF policy for DLQ replays as for live delivery (see GoContact).
+    registerDlqSsrfPolicy(`connector:${connector.name}`, ssrfPolicy(connector));
     const cs: Five9ConnectorServer = {
         connector,
         client: new Five9ApiClient(connector.five9.authBaseUrl),

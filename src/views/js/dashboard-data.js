@@ -2213,10 +2213,179 @@ function bhParseDayText(text, dayLabel) {
 const BH_DAY_LABELS = { 0: 'Sun', 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat' };
 
 function connectorWebhooksEnabledChanged() {
-  const on = document.getElementById('cnWebhooksEnabled').checked;
-  const ta = document.getElementById('cnWebhookTargets');
-  ta.disabled = !on;
-  ta.style.opacity = on ? '1' : '0.5';
+  const toggle = _cnEnabledId && document.getElementById(_cnEnabledId);
+  const list = _cnListId && document.getElementById(_cnListId);
+  if (!toggle || !list) return; // no modal owns the editor right now
+  const on = toggle.checked;
+  list.querySelectorAll('input,select,button').forEach(el => { el.disabled = !on; });
+  list.style.opacity = on ? '1' : '0.5';
+}
+
+// ── Connector webhook target editor ────────────────────────────────────────
+// Working copy of the targets being edited. Kept as objects (not lines of text)
+// because a target now carries a kind, an auth block and custom headers.
+let _cnTargets = [];
+
+// Which modal the editor is currently driving. Only one connector modal can be
+// open at a time, so a single active-context pointer is enough to share the
+// whole editor between the GoContact and Five9 forms.
+let _cnListId = 'cnWebhookTargetsList';
+let _cnEnabledId = 'cnWebhooksEnabled';
+function useConnectorTargetEditor(listId, enabledId) { _cnListId = listId; _cnEnabledId = enabledId; }
+/** Drop the working copy when a modal closes. Without this a cancelled edit
+ *  would still be sitting in _cnTargets for whichever form saves next. */
+function releaseConnectorTargetEditor() { _cnListId = null; _cnEnabledId = null; _cnTargets = []; }
+
+// Attribute-safe escaping. The global esc() escapes &<> but leaves quotes
+// intact, which would let a URL or token containing " break out of a value="…"
+// attribute — so these values get their own helper.
+function _cnAttr(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/** Distributor names for the "Midleman Webhook" dropdown. Loaded when the
+ *  connector modal opens so a webhook created moments ago shows up. */
+let _cnWebhookNames = [];
+
+async function loadConnectorWebhookNames() {
+  try {
+    const res = await api('/admin/webhooks');
+    const d = await res.json();
+    _cnWebhookNames = (d.webhooks || []).map(w => w.name);
+  } catch { _cnWebhookNames = []; }
+}
+
+function addConnectorTarget(kind) {
+  _cnTargets.push(kind === 'webhook'
+    ? { kind: 'webhook', webhookName: _cnWebhookNames[0] || '' }
+    : { kind: 'url', url: '', method: 'POST', auth: null });
+  renderConnectorTargets();
+}
+
+function removeConnectorTarget(i) {
+  _cnTargets.splice(i, 1);
+  renderConnectorTargets();
+}
+
+function connectorTargetFieldChanged(i, field, value) {
+  const t = _cnTargets[i];
+  if (!t) return;
+  if (field === 'authType') {
+    // Switching scheme drops any half-typed credential rather than carrying a
+    // value from one shape into another.
+    t.auth = !value ? null
+      : value === 'bearer' ? { type: 'bearer', token: '' }
+      : value === 'basic' ? { type: 'basic', username: '', password: '' }
+      : { type: 'header', name: '', value: '' };
+    renderConnectorTargets();
+    return;
+  }
+  if (field.startsWith('auth.')) {
+    if (!t.auth) return;
+    t.auth[field.slice(5)] = value;
+    return;
+  }
+  t[field] = value;
+}
+
+/** Turn the editor state into the payload shape, or return null after showing
+ *  the user what is wrong. An auth block whose secret was left blank is sent
+ *  as-is: the server matches it to the stored target and carries the old value
+ *  over, which is how every other credential in this UI behaves. */
+function serializeConnectorTargets(expectedListId) {
+  if (expectedListId && _cnListId !== expectedListId) {
+    toast('Webhook target editor is out of sync — reopen the connector and try again', 'error');
+    return null;
+  }
+  const out = [];
+  for (const t of _cnTargets) {
+    if ((t.kind === 'webhook' ? 'webhook' : 'url') === 'webhook') {
+      if (!t.webhookName) { toast('Pick a webhook for every "Midleman Webhook" target, or remove it', 'error'); return null; }
+      out.push({ kind: 'webhook', webhookName: t.webhookName });
+      continue;
+    }
+    const url = (t.url || '').trim();
+    if (!url) { toast('Every URL target needs a URL, or remove it', 'error'); return null; }
+    const target = { kind: 'url', url };
+    if (t.method && t.method !== 'POST') target.method = t.method;
+    if (t.auth?.type === 'bearer') target.auth = { type: 'bearer', token: t.auth.token || '' };
+    else if (t.auth?.type === 'basic') target.auth = { type: 'basic', username: t.auth.username || '', password: t.auth.password || '' };
+    else if (t.auth?.type === 'header') {
+      if (!t.auth.name) { toast(`Header auth on ${url} needs a header name`, 'error'); return null; }
+      target.auth = { type: 'header', name: t.auth.name, value: t.auth.value || '' };
+    }
+    out.push(target);
+  }
+  return out;
+}
+
+
+function renderConnectorTargets() {
+  const list = document.getElementById(_cnListId);
+  if (!list) return;
+  if (!_cnTargets.length) {
+    list.innerHTML = '<div style="font-size:11.5px;color:var(--text3);padding:8px 0">No targets yet — agent replies will only go out via direct reply.</div>';
+    return;
+  }
+  // A "webhook" target can only point at a distributor that already exists;
+  // they are created on the Webhooks page, not from here.
+  const noWebhooks = !_cnWebhookNames.length;
+  const inputStyle = "padding:6px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px";
+  list.innerHTML = _cnTargets.map((t, i) => {
+    const kind = t.kind === 'webhook' ? 'webhook' : 'url';
+    let head;
+    if (kind === 'webhook') {
+      const known = _cnWebhookNames.includes(t.webhookName);
+      const opts = _cnWebhookNames.map(n => `<option value="${_cnAttr(n)}"${n === t.webhookName ? ' selected' : ''}>${_cnAttr(n)}</option>`).join('');
+      const missing = t.webhookName && !known
+        ? `<option value="${_cnAttr(t.webhookName)}" selected>${_cnAttr(t.webhookName)} (not running)</option>` : '';
+      head = `<select style="${inputStyle};flex:1" onchange="connectorTargetFieldChanged(${i},'webhookName',this.value)">
+                <option value="">— pick a webhook —</option>${missing}${opts}
+              </select>${noWebhooks ? '<span style="font-size:10.5px;color:var(--text3)">none yet — create one on the Webhooks page</span>' : ''}`;
+    } else {
+      head = `<input type="text" value="${_cnAttr(t.url || '')}" placeholder="https://o-meu-bot.exemplo.com/gocontact-events"
+                     style="${inputStyle};flex:1;font-family:'SF Mono',Monaco,monospace"
+                     oninput="connectorTargetFieldChanged(${i},'url',this.value)">`;
+    }
+
+    let authRow = '';
+    if (kind === 'url') {
+      const a = t.auth || null;
+      const sel = (v, label) => `<option value="${v}"${(a?.type || '') === v ? ' selected' : ''}>${label}</option>`;
+      let fields = '';
+      if (a?.type === 'bearer') {
+        fields = `<input type="password" value="${_cnAttr(a.token || '')}" placeholder="${a.hasSecret ? '(kept — type to replace)' : 'token'}"
+                         style="${inputStyle};flex:1" oninput="connectorTargetFieldChanged(${i},'auth.token',this.value)">`;
+      } else if (a?.type === 'basic') {
+        fields = `<input type="text" value="${_cnAttr(a.username || '')}" placeholder="username" style="${inputStyle};flex:1"
+                         oninput="connectorTargetFieldChanged(${i},'auth.username',this.value)">
+                  <input type="password" value="${_cnAttr(a.password || '')}" placeholder="${a.hasSecret ? '(kept — type to replace)' : 'password'}"
+                         style="${inputStyle};flex:1" oninput="connectorTargetFieldChanged(${i},'auth.password',this.value)">`;
+      } else if (a?.type === 'header') {
+        fields = `<input type="text" value="${_cnAttr(a.name || '')}" placeholder="X-Api-Key" style="${inputStyle};flex:1"
+                         oninput="connectorTargetFieldChanged(${i},'auth.name',this.value)">
+                  <input type="password" value="${_cnAttr(a.value || '')}" placeholder="${a.hasSecret ? '(kept — type to replace)' : 'value'}"
+                         style="${inputStyle};flex:1" oninput="connectorTargetFieldChanged(${i},'auth.value',this.value)">`;
+      }
+      authRow = `<div style="display:flex;gap:6px;margin-top:6px">
+          <select style="${inputStyle};width:120px" onchange="connectorTargetFieldChanged(${i},'authType',this.value)">
+            ${sel('', 'No auth')}${sel('bearer', 'Bearer')}${sel('basic', 'Basic')}${sel('header', 'Header')}
+          </select>${fields}
+        </div>`;
+    }
+
+    return `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;background:var(--surface2)">
+        <div style="display:flex;gap:6px;align-items:center">
+          <span style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);width:64px;flex-shrink:0">${kind === 'webhook' ? 'Webhook' : 'URL'}</span>
+          ${head}
+          <button type="button" class="btn btn-sm" onclick="removeConnectorTarget(${i})" title="Remove this target">✕</button>
+        </div>
+        ${authRow}
+      </div>`;
+  }).join('');
+  connectorWebhooksEnabledChanged();
 }
 
 function generateConnectorToken() {
@@ -2295,7 +2464,11 @@ function openConnectorModal(connector = null) {
   document.getElementById('cnSmoochWebhookSecret').value = '';
   document.getElementById('cnSmoochWebhookSecret').placeholder = connector?.smooch?.hasWebhookSecret ? '(kept — type to replace)' : '';
   document.getElementById('cnDirectReply').checked = connector ? !!connector.directReply : false;
-  document.getElementById('cnWebhookTargets').value = (connector?.webhookTargets || []).map(t => t.url).join('\n');
+  // Deep copy: edits must not mutate the cached connector list before saving.
+  useConnectorTargetEditor('cnWebhookTargetsList', 'cnWebhooksEnabled');
+  _cnTargets = JSON.parse(JSON.stringify(connector?.webhookTargets || []));
+  renderConnectorTargets();
+  loadConnectorWebhookNames().then(renderConnectorTargets);
   document.getElementById('cnWebhooksEnabled').checked = connector ? connector.webhooksEnabled !== false : true;
   connectorWebhooksEnabledChanged();
   document.getElementById('cnAllowedIps').value = (connector?.allowedIps || []).join(', ');
@@ -2307,6 +2480,7 @@ function openConnectorModal(connector = null) {
 function closeConnectorModal() {
   document.getElementById('connectorModal').style.display = 'none';
   _editingConnector = null;
+  releaseConnectorTargetEditor();
 }
 
 async function saveConnector() {
@@ -2384,8 +2558,8 @@ async function saveConnector() {
     timezone: 'Africa/Luanda',
     weekly,
   };
-  const targets = document.getElementById('cnWebhookTargets').value
-    .split('\n').map(s => s.trim()).filter(Boolean).map(url => ({ url }));
+  const targets = serializeConnectorTargets('cnWebhookTargetsList');
+  if (targets === null) return; // validation already reported
   if (targets.length) body.webhookTargets = targets;
   body.webhooksEnabled = document.getElementById('cnWebhooksEnabled').checked;
   const pollInterval = parseInt(document.getElementById('cnPollInterval').value, 10);
@@ -8633,10 +8807,7 @@ function f9AutoReplyChanged() {
 }
 
 function f9WebhooksEnabledChanged() {
-  const on = document.getElementById('f9WebhooksEnabled').checked;
-  const ta = document.getElementById('f9WebhookTargets');
-  ta.disabled = !on;
-  ta.style.opacity = on ? '1' : '0.5';
+  connectorWebhooksEnabledChanged();
 }
 
 function generateF9CallbackToken() {
@@ -8687,9 +8858,12 @@ function openFive9Modal(connector = null) {
   // Delivery
   document.getElementById('f9DirectReply').checked = !!connector?.directReply;
   document.getElementById('f9PhoneFilter').value = (connector?.phoneNumberFilter || []).join(', ');
-  document.getElementById('f9WebhookTargets').value = (connector?.webhookTargets || []).map(t => t.url).join('\n');
+  useConnectorTargetEditor('f9WebhookTargetsList', 'f9WebhooksEnabled');
+  _cnTargets = JSON.parse(JSON.stringify(connector?.webhookTargets || []));
+  renderConnectorTargets();
+  loadConnectorWebhookNames().then(renderConnectorTargets);
   document.getElementById('f9WebhooksEnabled').checked = connector ? connector.webhooksEnabled !== false : true;
-  f9WebhooksEnabledChanged();
+  connectorWebhooksEnabledChanged();
   // Auto-reply
   document.getElementById('f9AutoReplyEnabled').checked = !!connector?.autoReply?.enabled;
   document.getElementById('f9AutoReplyText').value = connector?.autoReply?.text || '';
@@ -8714,6 +8888,7 @@ function openFive9Modal(connector = null) {
 function closeFive9Modal() {
   document.getElementById('five9Modal').style.display = 'none';
   _editingFive9Connector = null;
+  releaseConnectorTargetEditor();
 }
 
 async function saveFive9Connector(event) {
@@ -8752,8 +8927,8 @@ async function doSaveFive9Connector() {
   }
   const phoneFilter = document.getElementById('f9PhoneFilter').value.split(',').map(s => s.trim()).filter(Boolean);
   if (phoneFilter.length) body.phoneNumberFilter = phoneFilter;
-  const targets = document.getElementById('f9WebhookTargets').value
-    .split('\n').map(s => s.trim()).filter(Boolean).map(url => ({ url }));
+  const targets = serializeConnectorTargets('f9WebhookTargetsList');
+  if (targets === null) return; // validation already reported
   if (targets.length) body.webhookTargets = targets;
   body.webhooksEnabled = document.getElementById('f9WebhooksEnabled').checked;
   body.autoReply = {
@@ -9983,4 +10158,222 @@ function rfInstanceChanged() {
 function rfClearInstance() {
   var sel = document.getElementById('rfInstanceName');
   if (sel) sel.value = '';
+}
+
+// ─── System Errors (backend error feed) ──────────────────────────────────────
+// Surfaces everything core/error-feed.ts captured: console.error/warn from any
+// module plus uncaught exceptions and unhandled rejections. Rows are grouped
+// server-side by fingerprint, so `count` is how many times that exact failure
+// recurred — not how many rows exist.
+
+const ERR_PAGE_SIZE = 50;
+let _errPage = 1;
+let _errEntries = [];
+// Highest error id already announced via toast. Prevents re-toasting the same
+// failure on every 10s poll; starts null so the first poll of a session only
+// establishes the baseline instead of shouting about pre-existing errors.
+let _errLastToastedId = null;
+let _errKnownSources = [];
+
+function errFilterVal(id) {
+  const el = document.getElementById(id);
+  return el ? el.value : '';
+}
+
+async function fetchErrorStats() {
+  try {
+    const res = await api('/admin/errors/stats');
+    if (!res.ok) return;
+    const s = await res.json();
+    renderErrorBadge(s);
+    renderErrorStatCards(s);
+    syncErrorSourceFilter(s.sources || []);
+
+    // Toast on genuinely new errors, so a failure in a background job is
+    // visible even when the user is sitting on another page.
+    if (s.latestId != null) {
+      if (_errLastToastedId === null) {
+        _errLastToastedId = s.latestId;
+      } else if (s.latestId > _errLastToastedId) {
+        _errLastToastedId = s.latestId;
+        toast('Novo erro no backend — ver System Errors', 'error');
+      }
+    }
+  } catch (e) { /* badge is best-effort; never break the dashboard over it */ }
+}
+
+function renderErrorBadge(s) {
+  const badge = document.getElementById('navErrorBadge');
+  if (!badge) return;
+  const n = s.openErrors || 0;
+  if (n > 0) {
+    badge.textContent = n > 99 ? '99+' : String(n);
+    badge.style.display = '';
+    badge.title = n + ' unacknowledged backend error' + (n === 1 ? '' : 's');
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function renderErrorStatCards(s) {
+  const set = function (id, v) { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('errStatErrors', String(s.openErrors || 0));
+  set('errStatWarnings', String(s.openWarnings || 0));
+  set('errStatSources', String((s.sources || []).length));
+  set('errStatLast', s.lastErrorAt ? errRelTime(s.lastErrorAt) : '—');
+}
+
+// Keeps the subsystem <select> in sync with whatever sources actually have
+// entries, preserving the user's current selection.
+function syncErrorSourceFilter(sources) {
+  const sel = document.getElementById('errFilterSource');
+  if (!sel) return;
+  const names = sources.map(function (s) { return s.source; }).sort();
+  if (names.join('|') === _errKnownSources.join('|')) return;
+  _errKnownSources = names;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">All</option>' +
+    names.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + '</option>'; }).join('');
+  if (names.indexOf(current) !== -1) sel.value = current;
+}
+
+function errRelTime(ms) {
+  const diff = Math.max(0, Date.now() - ms);
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+
+async function fetchErrorFeed(resetPage) {
+  if (resetPage) _errPage = 1;
+  const params = new URLSearchParams();
+  params.set('page', String(_errPage));
+  params.set('limit', String(ERR_PAGE_SIZE));
+  params.set('state', errFilterVal('errFilterState') || 'open');
+  const sev = errFilterVal('errFilterSeverity');
+  if (sev) params.set('severity', sev);
+  const src = errFilterVal('errFilterSource');
+  if (src) params.set('source', src);
+  const q = errFilterVal('errFilterSearch').trim();
+  if (q) params.set('search', q);
+  try {
+    const res = await api('/admin/errors?' + params.toString());
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    _errEntries = data.entries || [];
+    renderErrorFeed(_errEntries, data.total || 0);
+  } catch (e) {
+    const tbody = document.getElementById('errListBody');
+    if (tbody) tbody.innerHTML =
+      '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
+  }
+  fetchErrorStats();
+}
+
+function renderErrorFeed(entries, total) {
+  const tbody = document.getElementById('errListBody');
+  if (!tbody) return;
+  if (!entries.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Nenhum erro registado.</td></tr>';
+  } else {
+    tbody.innerHTML = entries.map(function (e, idx) {
+      const sevColor = e.severity === 'error' ? '#ef4444' : '#f59e0b';
+      const dim = e.acknowledged ? 'opacity:0.55;' : '';
+      const msg = e.message.length > 160 ? e.message.slice(0, 160) + '…' : e.message;
+      return '<tr style="border-top:1px solid var(--border);' + dim + '">' +
+        '<td style="padding:10px 12px;color:var(--text2);font-size:11.5px;white-space:nowrap" title="' + esc(new Date(e.lastSeen).toLocaleString()) + '">' + esc(errRelTime(e.lastSeen)) + '</td>' +
+        '<td style="padding:10px 8px"><span style="color:' + sevColor + ';font-weight:600;font-size:11px;text-transform:uppercase">' + esc(e.severity) + '</span></td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:11.5px;color:var(--text2)">' + esc(e.source) + '</td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:11.5px">' + esc(msg) + '</td>' +
+        '<td style="padding:10px 8px;font-size:11.5px;color:' + (e.count > 1 ? sevColor : 'var(--text3)') + ';font-weight:' + (e.count > 1 ? '600' : '400') + '">' + e.count + '&times;</td>' +
+        '<td style="padding:10px 12px;text-align:right;white-space:nowrap">' +
+          '<button class="btn btn-sm btn-ghost" onclick="showErrorDetail(' + idx + ')">Details</button> ' +
+          (e.acknowledged ? '' : '<button class="btn btn-sm btn-ghost" onclick="ackErrorEntry(' + e.id + ')">Mark read</button>') +
+        '</td>' +
+        '</tr>';
+    }).join('');
+  }
+  const totalEl = document.getElementById('errTotal');
+  if (totalEl) {
+    const from = total ? (_errPage - 1) * ERR_PAGE_SIZE + 1 : 0;
+    const to = Math.min(_errPage * ERR_PAGE_SIZE, total);
+    totalEl.textContent = total ? (from + '–' + to + ' de ' + total) : 'Sem entradas';
+  }
+  const prev = document.getElementById('errPrev');
+  const next = document.getElementById('errNext');
+  if (prev) prev.disabled = _errPage <= 1;
+  if (next) next.disabled = _errPage * ERR_PAGE_SIZE >= total;
+}
+
+function errPrevPage() { if (_errPage > 1) { _errPage--; fetchErrorFeed(false); } }
+function errNextPage() { _errPage++; fetchErrorFeed(false); }
+
+function showErrorDetail(idx) {
+  const e = _errEntries[idx];
+  if (!e) return;
+  const row = function (label, value, mono) {
+    return '<div style="margin-bottom:12px">' +
+      '<div style="font-size:11px;text-transform:uppercase;color:var(--text3);margin-bottom:4px">' + esc(label) + '</div>' +
+      '<div style="font-size:12.5px;' + (mono ? 'font-family:monospace;white-space:pre-wrap;word-break:break-word;background:var(--surface2);padding:10px;border-radius:6px;max-height:280px;overflow:auto' : '') + '">' + esc(value) + '</div>' +
+      '</div>';
+  };
+  document.getElementById('errDetailBody').innerHTML =
+    row('Severity', e.severity) +
+    row('Subsystem', e.source) +
+    row('Occurrences', e.count + '× · first ' + new Date(e.firstSeen).toLocaleString() + ' · last ' + new Date(e.lastSeen).toLocaleString()) +
+    row('Message', e.message, true) +
+    (e.context ? row('Context', e.context, true) : '') +
+    (e.stack ? row('Stack trace', e.stack, true) : '') +
+    (e.acknowledged ? row('Acknowledged', (e.acknowledgedBy || 'unknown') + ' · ' + new Date(e.acknowledgedAt).toLocaleString()) : '');
+  const modal = document.getElementById('errDetailModal');
+  if (modal) modal.style.display = 'flex';
+}
+
+function closeErrorDetail() {
+  const m = document.getElementById('errDetailModal');
+  if (m) m.style.display = 'none';
+}
+
+async function ackErrorEntry(id) {
+  try {
+    const res = await api('/admin/errors/ack', { method: 'POST', body: JSON.stringify({ ids: [id] }) });
+    if (!res.ok) return toast('Falha ao marcar como lido', 'error');
+    await fetchErrorFeed(false);
+  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+async function ackAllErrors(ev) {
+  await withBusy(ev, 'A marcar…', async function () {
+    try {
+      const res = await api('/admin/errors/ack', { method: 'POST', body: JSON.stringify({ ids: [] }) });
+      const d = await res.json().catch(function () { return {}; });
+      if (!res.ok) return toast(d.error || 'Falha', 'error');
+      toast((d.count || 0) + ' entrada(s) marcadas como lidas');
+      await fetchErrorFeed(true);
+    } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  });
+}
+
+async function clearAllErrors(ev) {
+  const ok = await showConfirm({
+    title: 'Limpar feed de erros',
+    message: 'Isto apaga permanentemente todas as entradas do feed.',
+    detail: 'O histórico não é recuperável. "Mark all as read" apenas esconde as entradas, mantendo-as disponíveis no filtro "Read".',
+    confirmText: 'Apagar tudo',
+    cancelText: 'Cancelar',
+    danger: true,
+  });
+  if (!ok) return;
+  await withBusy(ev, 'A limpar…', async function () {
+    try {
+      const res = await api('/admin/errors', { method: 'DELETE', body: JSON.stringify({ ids: [] }) });
+      const d = await res.json().catch(function () { return {}; });
+      if (!res.ok) return toast(d.error || 'Falha', 'error');
+      toast((d.count || 0) + ' entrada(s) apagadas');
+      _errLastToastedId = null;
+      await fetchErrorFeed(true);
+    } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  });
 }

@@ -12,6 +12,7 @@
  */
 
 import type { ConnectorChannel, MetaSettings, SmoochSettings, ConnectorWebhookTarget } from './connector-types';
+import { validateWebhookTargets } from './connector-types';
 import { assertSafeOutboundUrl, SsrfBlockedError } from './ssrf-guard';
 
 export interface Five9Settings {
@@ -174,21 +175,8 @@ export function validateFive9ConnectorInput(input: unknown): string | null {
         allowedCidrs: c.targetAllowedCidrs as string[] | undefined,
     };
 
-    if (c.webhookTargets !== undefined) {
-        if (!Array.isArray(c.webhookTargets)) return '"webhookTargets" must be an array';
-        if (c.webhookTargets.length > 16) return '"webhookTargets" cannot exceed 16 entries';
-        for (const t of c.webhookTargets as unknown[]) {
-            if (!t || typeof t !== 'object') return '"webhookTargets" entries must be objects';
-            const wt = t as Record<string, unknown>;
-            if (typeof wt.url !== 'string' || !wt.url.trim()) return '"webhookTargets[].url" is required';
-            try { assertSafeOutboundUrl(wt.url as string, ssrfOverride); }
-            catch (e) { return e instanceof SsrfBlockedError ? `"${wt.url}": ${e.message}` : `"${wt.url}" is not a valid URL`; }
-            if (wt.method !== undefined && typeof wt.method !== 'string') return '"webhookTargets[].method" must be a string';
-            if (wt.customHeaders !== undefined && (typeof wt.customHeaders !== 'object' || wt.customHeaders === null)) {
-                return '"webhookTargets[].customHeaders" must be an object';
-            }
-        }
-    }
+    const targetsError = validateWebhookTargets(c.webhookTargets, ssrfOverride);
+    if (targetsError) return targetsError;
 
     if (c.webhooksEnabled !== undefined && typeof c.webhooksEnabled !== 'boolean') return '"webhooksEnabled" must be a boolean';
 

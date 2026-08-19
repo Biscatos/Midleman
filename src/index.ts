@@ -1,3 +1,8 @@
+// MUST stay the first import: the module self-installs the console patch and
+// process-level handlers on evaluation, so keeping it first is what guarantees
+// no other module's top-level code throws before the feed is listening.
+import { queryErrors as queryErrorFeed, getErrorStats, getError as getErrorEntry, ackErrors, clearErrors } from './core/error-feed';
+
 import { loadConfig, reloadEnvFile, loadProxyProfiles, loadTcpUdpProfiles } from './core/config';
 import { UnauthorizedError, type ProxyProfile } from './core/types';
 import { invalidateProfileCache } from './proxy/proxy';
@@ -8,7 +13,9 @@ import {
     loadPersistedConnectors, persistConnectors,
     loadPersistedFive9Connectors, persistFive9Connectors,
 } from './core/store';
-import { validateConnectorInput, type GoContactConnector } from './core/connector-types';
+import { validateConnectorInput, redactTargetAuth, type GoContactConnector } from './core/connector-types';
+import type { ConnectorWebhookTarget } from './core/connector-types';
+import { authHeaders } from './core/connector-webhooks';
 import { startConnectorServer, stopConnectorServer, stopAllConnectors, restartConnector, getConnectorStatus, closeConnectorSession } from './servers/connector-server';
 import { initConnectorSessions, shutdownConnectorSessions, listSessions as listConnectorSessions, deleteConnectorSessions } from './gocontact/sessions';
 import { validateFive9ConnectorInput, type Five9Connector } from './core/connector-types-five9';
@@ -23,7 +30,7 @@ import { migrateProfileCerts } from './core/cert-migration';
 import { scheduleAcmeRenewal, shutdownAcme, requestCertificate } from './sip/acme';
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort, isProxyServerRunning, setProxyLoginTemplate, setProxyLogo } from './servers/proxy-server';
 import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort, assignTcpUdpListenerPort, releaseProxyPort, releaseWebhookPort, releaseTcpUdpListenerPorts, getWebhookPort, assignConnectorPort, releaseConnectorPort, getConnectorPort } from './servers/port-manager';
-import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, dismissAllPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState } from './servers/webhook-server';
+import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, dismissAllPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState, setDlqAuthResolver, listRunningWebhookNames } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
 import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, cleanupExpiredPasswordResetTokens, findResetCandidateByEmail, logSmsSend,
@@ -347,6 +354,19 @@ for (const webhook of config.webhooks) {
 }
 
 // Start GoContact connectors (inbound listener + agent-reply poller)
+// DLQ replay needs the target's credential, which is deliberately NOT stored in
+// dlq.json (see StoredFailedFanout.authRef). Resolve it from the live connector
+// config at replay time instead — both connector families, since the DLQ is shared.
+setDlqAuthResolver(ref => {
+    const c: { webhookTargets?: ConnectorWebhookTarget[] } | undefined =
+        connectors.find(x => x.name === ref.connector) ?? five9Connectors.find(x => x.name === ref.connector);
+    // Match on the destination, not the index: the target list may have been
+    // reordered or trimmed since this entry was parked, and resolving by index
+    // alone would hand one receiver's credential to another.
+    const target = c?.webhookTargets?.find(t => (t.url || '') === ref.targetUrl);
+    return target?.auth ? authHeaders(target.auth) : null;
+});
+
 if (connectors.length > 0) {
     console.log(`💬 Connectors: ${connectors.map(c => c.name).join(', ')}`);
     for (const connector of connectors) {
@@ -1307,6 +1327,52 @@ const server = Bun.serve({
                     return jsonRes(200, detail as unknown as Record<string, unknown>);
                 }
 
+                // ── Backend error feed endpoints ──
+                // Feeds the "System Errors" dashboard page. Entries are
+                // deduplicated by fingerprint upstream in core/error-feed.
+
+                // GET /admin/errors/stats — badge counts + per-source rollup.
+                // Declared before the list route so the literal path wins.
+                if (url.pathname === '/admin/errors/stats' && req.method === 'GET') {
+                    return jsonRes(200, getErrorStats() as unknown as Record<string, unknown>);
+                }
+
+                if (url.pathname === '/admin/errors' && req.method === 'GET') {
+                    const sev = url.searchParams.get('severity');
+                    const state = url.searchParams.get('state');
+                    return jsonRes(200, queryErrorFeed({
+                        page: parseInt(url.searchParams.get('page') || '1', 10),
+                        limit: parseInt(url.searchParams.get('limit') || '50', 10),
+                        severity: sev === 'error' || sev === 'warn' ? sev : undefined,
+                        source: url.searchParams.get('source') || undefined,
+                        search: url.searchParams.get('search') || undefined,
+                        state: state === 'all' || state === 'acked' || state === 'open' ? state : undefined,
+                    }) as unknown as Record<string, unknown>);
+                }
+
+                // POST /admin/errors/ack — body { ids?: number[] }. Empty/absent
+                // ids acknowledges every open entry ("Mark all as read").
+                if (url.pathname === '/admin/errors/ack' && req.method === 'POST') {
+                    const body = await req.json().catch(() => ({})) as { ids?: unknown };
+                    const ids = Array.isArray(body.ids) ? body.ids.map(Number).filter(Number.isFinite) : [];
+                    const n = ackErrors(ids, getAuthedAdmin(req)?.username || null);
+                    return jsonRes(200, { status: 'acknowledged', count: n });
+                }
+
+                // DELETE /admin/errors — body { ids?: number[] }. Empty clears all.
+                if (url.pathname === '/admin/errors' && req.method === 'DELETE') {
+                    const body = await req.json().catch(() => ({})) as { ids?: unknown };
+                    const ids = Array.isArray(body.ids) ? body.ids.map(Number).filter(Number.isFinite) : [];
+                    const n = clearErrors(ids);
+                    return jsonRes(200, { status: 'cleared', count: n });
+                }
+
+                if (url.pathname.match(/^\/admin\/errors\/\d+$/) && req.method === 'GET') {
+                    const entry = getErrorEntry(parseInt(url.pathname.split('/').pop()!, 10));
+                    if (!entry) return jsonRes(404, { error: 'Error entry not found' });
+                    return jsonRes(200, entry as unknown as Record<string, unknown>);
+                }
+
                 // ── TCP/UDP proxy feature — disabled (code kept for future re-enable) ──
                 if (url.pathname.startsWith('/admin/tcpudp') ||
                     url.pathname.startsWith('/admin/sip-logs') ||
@@ -1770,7 +1836,7 @@ const server = Bun.serve({
                         phoneNumberFilter: c.phoneNumberFilter || [],
                         autoReply: c.autoReply || { enabled: false, text: '' },
                         businessHours: c.businessHours || { enabled: false, message: '', forwardToGoContact: false, weekly: [] },
-                        webhookTargets: c.webhookTargets || [],
+                        webhookTargets: (c.webhookTargets || []).map(redactTargetAuth),
                         webhooksEnabled: c.webhooksEnabled !== false,
                         pollIntervalMs: c.pollIntervalMs ?? 4000,
                         sessionTtlMinutes: c.sessionTtlMinutes ?? 120,
@@ -1862,8 +1928,31 @@ const server = Bun.serve({
                             if (!input.smooch.bearerToken && prev.smooch.bearerToken) input.smooch.bearerToken = prev.smooch.bearerToken;
                             if (!input.smooch.webhookSecret && prev.smooch.webhookSecret) input.smooch.webhookSecret = prev.smooch.webhookSecret;
                         }
+                        // Webhook target credentials: the editor renders them
+                        // masked and posts the secret back empty, so match each
+                        // incoming target to its stored twin (same destination)
+                        // and carry the secret over.
+                        if (Array.isArray(input.webhookTargets) && Array.isArray(prev.webhookTargets)) {
+                            const destOf = (t: any) => t?.kind === 'webhook' ? `webhook:${t.webhookName}` : `url:${t?.url}`;
+                            for (const t of input.webhookTargets as any[]) {
+                                if (!t?.auth) continue;
+                                const old = (prev.webhookTargets as any[]).find(p => destOf(p) === destOf(t) && p?.auth?.type === t.auth.type);
+                                if (!old) continue;
+                                if (t.auth.type === 'bearer' && !t.auth.token) t.auth.token = old.auth.token;
+                                if (t.auth.type === 'basic' && !t.auth.password) t.auth.password = old.auth.password;
+                                if (t.auth.type === 'header' && !t.auth.value) t.auth.value = old.auth.value;
+                            }
+                        }
                     }
 
+                    // A 'webhook' target must name a distributor that actually exists —
+                    // catching the typo here beats discovering it when an agent replies.
+                    for (const t of (Array.isArray(input.webhookTargets) ? input.webhookTargets : []) as any[]) {
+                        if (t?.kind !== 'webhook') continue;
+                        if (!config.webhooks.some(w => w.name === t.webhookName)) {
+                            return jsonRes(400, { error: `Webhook target "${t.webhookName}" does not exist — create it on the Webhooks page first` });
+                        }
+                    }
                     const error = validateConnectorInput(input);
                     if (error) return jsonRes(400, { error });
                     if (!input.gocontact.password) return jsonRes(400, { error: '"gocontact.password" is required' });
@@ -2007,7 +2096,7 @@ const server = Bun.serve({
                         directReply: c.directReply === true,
                         phoneNumberFilter: c.phoneNumberFilter || [],
                         autoReply: c.autoReply || { enabled: false, text: '' },
-                        webhookTargets: c.webhookTargets || [],
+                        webhookTargets: (c.webhookTargets || []).map(redactTargetAuth),
                         webhooksEnabled: c.webhooksEnabled !== false,
                         sessionTtlMinutes: c.sessionTtlMinutes ?? 120,
                         allowPrivateTargets: c.allowPrivateTargets !== false,
@@ -2080,6 +2169,14 @@ const server = Bun.serve({
                         }
                     }
 
+                    // A 'webhook' target must name a distributor that actually exists —
+                    // catching the typo here beats discovering it when an agent replies.
+                    for (const t of (Array.isArray(input.webhookTargets) ? input.webhookTargets : []) as any[]) {
+                        if (t?.kind !== 'webhook') continue;
+                        if (!config.webhooks.some(w => w.name === t.webhookName)) {
+                            return jsonRes(400, { error: `Webhook target "${t.webhookName}" does not exist — create it on the Webhooks page first` });
+                        }
+                    }
                     const error = validateFive9ConnectorInput(input);
                     if (error) return jsonRes(400, { error });
 
