@@ -49,6 +49,9 @@ function toggleTheme() {
   const next = THEME_MODES[(idx + 1) % THEME_MODES.length];
   localStorage.setItem(THEME_KEY, next);
   applyTheme();
+  // Chart colors are sampled at draw time — repaint immediately instead of
+  // waiting for the next poll.
+  if (typeof redrawOverviewCharts === 'function') redrawOverviewCharts();
 }
 const THEME_ICONS = {
   dark: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>`,
@@ -460,7 +463,7 @@ const PAGE_TITLES = {
   notifications: 'Notifications',
   npm: 'Nginx Proxy Manager',
   audit: 'Audit Log',
-  errors: 'System Errors',
+  errors: 'System Alerts',
   reports: 'Report Feeds',
   webhookDestinations: 'Webhooks · Destinations'
 };

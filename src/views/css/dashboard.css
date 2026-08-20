@@ -27,7 +27,7 @@
 }
 
 [data-theme="light"] {
-  --bg: #f0f2f5;
+  --bg: #f3f3f3; /* rgb(243 243 243) */
   --bg2: #ffffff;
   --surface: #ffffff;
   --surface2: #f5f6fa;
@@ -147,7 +147,7 @@ body {
 .sidebar-brand img { width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0; }
 .sidebar-brand-name {
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: -0.3px;
   color: var(--text);
   white-space: nowrap;
@@ -195,7 +195,15 @@ body {
   gap: 10px;
   padding: 7px 10px;
   font-size: 13px;
-  font-weight: 500;
+  /* Buttons don't inherit the body font, so these links were rendering in the
+     UA default (Arial on Windows) — which has no Light face, so a thin weight
+     would have had no effect here at all. */
+  font-family: inherit;
+  /* Light (300) throughout the menu — the weight ladder below keeps one step
+     between states so "selected" still reads without anything turning bold.
+     Requires Inter 300 in the font import (see dashboard.html). */
+  font-weight: 300;
+  letter-spacing: 0.1px;
   color: var(--text2);
   border: none;
   background: none;
@@ -209,10 +217,10 @@ body {
   overflow: hidden;
   position: relative;
 }
-.sidebar-link svg { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.55; transition: opacity var(--transition); }
+.sidebar-link svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--text); opacity: 0.7; transition: opacity var(--transition); }
 .sidebar-link:hover { background: var(--surface2); color: var(--text); }
 .sidebar-link:hover svg { opacity: 1; }
-.sidebar-link.active { background: var(--surface2); color: var(--text); font-weight: 600; }
+.sidebar-link.active { background: var(--surface2); color: var(--text); font-weight: 400; }
 .sidebar-link.active svg { opacity: 1; }
 
 .sidebar-link-label {
@@ -226,7 +234,7 @@ body {
 
 .sidebar-section-label {
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text3);
   text-transform: uppercase;
   letter-spacing: 0.8px;
@@ -264,7 +272,7 @@ body {
   border-radius: 10px;
   background: var(--surface2);
   color: var(--text3);
-  font-weight: 600;
+  font-weight: 500;
   flex-shrink: 0;
   transition: opacity 0.2s ease, max-width 0.25s ease;
   max-width: 60px;
@@ -339,7 +347,7 @@ body {
   align-items: center;
   justify-content: center;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   flex-shrink: 0;
 }
 .sidebar-user-info {
@@ -351,7 +359,7 @@ body {
 }
 .sidebar-user-name {
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -408,7 +416,7 @@ body.sidebar-collapsed .sidebar-link-label,
 body.sidebar-collapsed .sidebar-badge {
   display: none;
 }
-body.sidebar-collapsed .sidebar-link svg { opacity: 0.65; }
+body.sidebar-collapsed .sidebar-link svg { opacity: 0.85; }
 body.sidebar-collapsed .sidebar-link svg {
   display: block;
   margin: 0 auto;
@@ -453,7 +461,7 @@ body.sidebar-collapsed .sidebar-link[data-tooltip]::after {
   border: 1px solid var(--border2);
   color: var(--text);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 300;
   padding: 5px 10px;
   border-radius: 6px;
   white-space: nowrap;
@@ -695,10 +703,19 @@ body.sidebar-collapsed .sidebar-link:hover[data-tooltip]::after { opacity: 1; }
   padding: 20px;
 }
 
+/* Channel cards (Notifications → Delivery channels) sit in a gap-spaced grid,
+   so the global card margin-bottom is dropped; hover hints they're actionable. */
+.notif-channel-card {
+  margin-bottom: 0;
+}
+.notif-channel-card:hover {
+  border-color: var(--border2);
+}
+
 /* ─── Stats Grid ──────────────────────────────────────────────────────────── */
 .stats-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
+  grid-template-columns: repeat(6, 1fr);
   gap: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -746,6 +763,48 @@ body.sidebar-collapsed .sidebar-link:hover[data-tooltip]::after { opacity: 1; }
   margin-top: 6px;
   font-family: 'JetBrains Mono', monospace;
 }
+
+/* User Resources modal (Users → action menu → Resources) */
+.ur-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.ur-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.ur-table thead th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text3);
+  background: var(--surface2);
+}
+.ur-table thead th:first-child { border-radius: 6px 0 0 6px; }
+.ur-table thead th:last-child { border-radius: 0 6px 6px 0; }
+.ur-table tbody tr {
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+}
+.ur-table tbody tr:last-child { border-bottom: none; }
+.ur-table tbody tr:hover { background: var(--surface2); }
+.ur-table tbody td { padding: 9px 12px; }
 
 /* Charts row */
 .charts-row {
@@ -847,12 +906,14 @@ body.sidebar-collapsed .sidebar-link:hover[data-tooltip]::after { opacity: 1; }
     grid-template-columns: 1fr 1fr;
   }
 
-  .stat-card:nth-child(2) {
+  .stat-card:nth-child(2n) {
     border-right: none;
   }
 
   .stat-card:nth-child(1),
-  .stat-card:nth-child(2) {
+  .stat-card:nth-child(2),
+  .stat-card:nth-child(3),
+  .stat-card:nth-child(4) {
     border-bottom: 1px solid var(--border);
   }
 }
@@ -1254,6 +1315,60 @@ body.sidebar-collapsed .sidebar-link:hover[data-tooltip]::after { opacity: 1; }
   color: var(--red);
   background: var(--red-bg);
 }
+
+/* ── Invite wizard: account type cards ──────────────────────────────────── */
+.inv-type-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 540px) {
+  .inv-type-grid { grid-template-columns: 1fr; }
+}
+.inv-type-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font: inherit;
+  transition: background var(--transition), border-color var(--transition), box-shadow var(--transition);
+}
+.inv-type-card:hover { background: var(--surface2); border-color: var(--border2); }
+.inv-type-card.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.inv-type-check {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--border2);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: transparent;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+.inv-type-card.is-selected .inv-type-check {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.inv-type-icon { display: flex; color: var(--text2); margin-bottom: 8px; transition: color var(--transition); }
+.inv-type-card.is-selected .inv-type-icon { color: var(--accent); }
+.inv-type-name { display: block; font-size: 13.5px; font-weight: 600; color: var(--text); }
+.inv-type-desc { display: block; font-size: 11.5px; color: var(--text3); line-height: 1.5; margin-top: 4px; }
 
 /* ── Invite resource picker ─────────────────────────────────────────────── */
 .inv-picker-grid {
@@ -1713,6 +1828,15 @@ body.sidebar-collapsed .sidebar-link:hover[data-tooltip]::after { opacity: 1; }
   transform: translateY(80px);
   opacity: 0;
   transition: all 0.3s ease;
+  /* A fixed element with only `right` set (no `left`/`width`) shrink-wraps to
+     its content — fine for a short "Saved" but a longer wizard validation
+     message (e.g. "Add a webhook target or enable direct reply") then runs
+     the toast almost the full width of the screen, right over whatever modal
+     is open. Cap it and let it wrap instead. */
+  max-width: min(360px, calc(100vw - 48px));
+  white-space: normal;
+  word-wrap: break-word;
+  line-height: 1.4;
 }
 
 .toast.show {
@@ -2134,8 +2258,11 @@ body.nav-open .nav-backdrop { display: block; }
   }
   .page h2 { font-size: 19px; }
 
-  /* Stats grid */
+  /* Stats grid (6 cards → 2 columns of 3; the ≤600px block earlier in the
+     file repeats the same layout, the ≤380px block collapses to 1 column) */
   .stats-grid { grid-template-columns: 1fr 1fr; }
+  .stat-card:nth-child(2n) { border-right: none; }
+  .stat-card:nth-child(-n+4) { border-bottom: 1px solid var(--border); }
 
   /* Form layouts */
   .form-grid { grid-template-columns: 1fr; }
@@ -2293,4 +2420,273 @@ body.nav-open .nav-backdrop { display: block; }
   100% {
     background: transparent;
   }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Stepped connector modal ("wizard")
+
+   The connector form is ~30 fields; as one scroll it hid where you were and
+   what still needed filling. It is now split into steps listed down the left.
+   Creating walks Back/Next; editing jumps straight to any step by clicking it,
+   because changing one field should never mean paging through a wizard.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.wz-shell {
+  width: 100%;
+  max-width: 880px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  /* Fixed, not max: the dialog keeps one size across every step, so moving
+     between a 2-field pane and a 10-field one doesn't make it jump. Long panes
+     scroll inside .wz-body instead. */
+  height: min(680px, calc(100vh - 48px));
+  overflow: hidden;
+}
+
+.wz-titlebar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.wz-titlebar h3 { font-size: 16px; font-weight: 600; }
+.wz-subtitle { font-size: 11.5px; color: var(--text3); margin-top: 2px; }
+.wz-close {
+  background: none; border: none; color: var(--text2);
+  font-size: 20px; line-height: 1; cursor: pointer; padding: 0 2px;
+}
+.wz-close:hover { color: var(--text); }
+
+.wz-main { display: flex; min-height: 0; flex: 1; }
+.wz { display: flex; width: 100%; min-height: 0; }
+
+/* ── Step list ── */
+.wz-nav {
+  width: 208px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg2);
+  padding: 12px 10px;
+  overflow-y: auto;
+}
+.wz-nav-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+  text-align: left;
+  padding: 8px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--text2);
+  cursor: pointer;
+  font: inherit;
+  margin-bottom: 2px;
+}
+.wz-nav-item:hover { background: var(--surface2); color: var(--text); }
+.wz-nav-item.active {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--text);
+}
+.wz-nav-item[disabled] { opacity: .45; cursor: not-allowed; }
+.wz-nav-item[disabled]:hover { background: none; color: var(--text2); }
+
+.wz-dot {
+  width: 20px; height: 20px; flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10.5px; font-weight: 600;
+  color: var(--text3);
+  margin-top: 1px;
+}
+.wz-nav-item.active .wz-dot { border-color: var(--accent); background: var(--accent); color: #fff; }
+.wz-nav-item.done .wz-dot { border-color: var(--green); color: var(--green); }
+.wz-nav-item.invalid .wz-dot { border-color: var(--red); background: var(--red); color: #fff; }
+
+.wz-nav-text { min-width: 0; }
+.wz-nav-title { font-size: 12.5px; font-weight: 500; }
+.wz-nav-hint { font-size: 10.5px; color: var(--text3); margin-top: 1px; line-height: 1.35; }
+.wz-nav-item.active .wz-nav-hint { color: var(--text2); }
+
+/* ── Step panes ── */
+.wz-body { flex: 1; min-width: 0; overflow-y: auto; padding: 16px 20px 20px; }
+.wz-step { display: none; }
+.wz-step.active { display: block; }
+.wz-step-head { margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.wz-step-head h4 { font-size: 14px; font-weight: 600; color: var(--text); }
+.wz-step-head p { font-size: 11.5px; color: var(--text3); margin-top: 2px; }
+
+/* Section titles inside a step are subordinate to the step heading now. */
+.wz-step > div[style*="text-transform:uppercase"] { margin-top: 0 !important; }
+.wz-step > div[style*="text-transform:uppercase"] ~ div[style*="text-transform:uppercase"] { margin-top: 18px !important; }
+
+/* ── Footer ── */
+.wz-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--surface);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+.wz-progress { font-size: 11.5px; color: var(--text3); }
+.wz-foot-actions { display: flex; gap: 8px; }
+
+@media (max-width: 720px) {
+  .wz { flex-direction: column; }
+  .wz-nav {
+    width: auto; border-right: none; border-bottom: 1px solid var(--border);
+    display: flex; gap: 6px; overflow-x: auto; padding: 8px;
+  }
+  .wz-nav-item { width: auto; flex-shrink: 0; margin-bottom: 0; }
+  .wz-nav-hint { display: none; }
+  .wz-foot { flex-direction: column; align-items: stretch; gap: 8px; }
+  .wz-foot-actions { justify-content: flex-end; }
+}
+
+/* Shell-level extras (error banners and the like) sit between the panes and the
+   footer — they belong to the dialog, not to whichever step is showing. */
+.wz-extra { flex-shrink: 0; margin: 0 20px 12px; }
+/* Top-pinned extras (context strips) span the full width and own their padding. */
+.wz-extra[data-wz-pos="top"] { margin: 0; }
+
+/* The LDAP "test these credentials" bar is one such extra. Its original CSS
+   (.ldap-test-row) was written to live inside a flex ROW footer, sized with
+   flex:1 against the Cancel/Save buttons. Inside the wizard it's a lone child
+   of a flex COLUMN shell, which stretches it to the full dialog width — a
+   giant input for an optional, secondary action. Size it to its content
+   instead, like a small toolbar. */
+.wz-shell .ldap-test-row {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  min-width: 0;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.wz-shell .ldap-test-row input {
+  flex: 0 0 auto;
+  width: 220px;
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+}
+@media (max-width: 720px) {
+  /* Matches the wizard's own stacking breakpoint, not the standalone modal's. */
+  .wz-shell .ldap-test-row { align-self: stretch; width: auto; }
+  .wz-shell .ldap-test-row input { flex: 1; width: auto; }
+}
+
+/* Panes whose fields were laid out with flex gap rather than margins. */
+.wz-step.wz-stack.active { display: flex; flex-direction: column; gap: 14px; }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Wizard form controls
+
+   The dashboard had grown 46 distinct inline styles for what is the same
+   control — padding 6/7/8px, two backgrounds, three font sizes — which is what
+   made the forms look uneven. These classes are the single definition; only
+   declarations that carry intent (a nested panel's background, a flex hint, an
+   explicit narrow width) stay inline and still win.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.wz-body .wz-input:not([type="checkbox"]):not([type="radio"]) {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-family: inherit;
+  line-height: 1.35;
+  transition: border-color .12s ease, background .12s ease;
+}
+.wz-body .wz-input:not([type="checkbox"]):not([type="radio"]):hover { border-color: var(--border2); }
+.wz-body .wz-input:not([type="checkbox"]):not([type="radio"]):focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+}
+.wz-body .wz-input::placeholder { color: var(--text3); }
+.wz-body .wz-input:disabled { opacity: .55; cursor: not-allowed; }
+.wz-body select.wz-input { cursor: pointer; }
+.wz-body textarea.wz-input { resize: vertical; min-height: 68px; }
+
+/* Checkboxes keep their own size; the class is only a marker on them. */
+.wz-body input[type="checkbox"].wz-input,
+.wz-body input[type="radio"].wz-input {
+  width: 15px; height: 15px; flex-shrink: 0;
+  cursor: pointer; accent-color: var(--accent);
+}
+
+.wz-body .wz-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text2);
+  margin-bottom: 5px;
+  line-height: 1.4;
+}
+.wz-body .wz-label:has(+ .wz-input) { margin-bottom: 5px; }
+
+/* Consistent rhythm between field groups, whatever the pane came from. */
+.wz-body .wz-step > div + div { margin-top: 14px; }
+.wz-body .wz-step.wz-stack > div + div { margin-top: 0; }  /* gap already spaces these */
+
+/* Two-column groups collapse instead of squeezing on a narrow dialog. */
+@media (max-width: 720px) {
+  .wz-body [style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
+}
+
+/* ─── Topbar alerts fab ──────────────────────────────────────────────────────
+   Same floating circle as the theme/status/user buttons, plus a count badge.
+   It lives in the topbar rather than only in the sidebar so an alert is
+   visible from any page — and on mobile, where the sidebar is collapsed. */
+.topbar-alerts-btn { overflow: visible; }
+
+.topbar-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  letter-spacing: -0.2px;
+  /* Ring in the topbar colour so the badge reads as attached to the circle
+     rather than floating loose over whatever is behind it. */
+  box-shadow: 0 0 0 2px var(--bg), 0 2px 6px rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+}
+
+/* Tint the bell itself while something is unacknowledged — the badge alone is
+   easy to miss at the edge of the screen. */
+.topbar-alerts-btn.has-alerts { color: #ef4444; }
+.topbar-alerts-btn.has-alerts svg { animation: alertsNudge 2.4s ease-in-out infinite; }
+
+@keyframes alertsNudge {
+  0%, 88%, 100% { transform: rotate(0deg); }
+  91% { transform: rotate(-11deg); }
+  94% { transform: rotate(9deg); }
+  97% { transform: rotate(-5deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .topbar-alerts-btn.has-alerts svg { animation: none; }
 }

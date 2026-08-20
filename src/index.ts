@@ -33,7 +33,7 @@ import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, dismissAllPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState, setDlqAuthResolver, listRunningWebhookNames } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, cleanupExpiredPasswordResetTokens, findResetCandidateByEmail, logSmsSend,
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, setProxyUserBlocked, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, cleanupExpiredPasswordResetTokens, findResetCandidateByEmail, logSmsSend,
 listNotificationGroups, getNotificationGroup, createNotificationGroup, updateNotificationGroup, deleteNotificationGroup,
 addNotificationGroupMember, removeNotificationGroupMember,
 listNotificationRules, createNotificationRule, updateNotificationRule, deleteNotificationRule,
@@ -58,6 +58,31 @@ import { resolve } from 'path';
 const startedAt = Date.now();
 let activeRequests = 0;
 let isShuttingDown = false;
+
+// ── Process stats (CPU% / memory) for the admin dashboard ──────────────────
+// CPU% is a delta between consecutive samples; /health is polled every ~5s by
+// the dashboard, which doubles as the sampling interval. The first poll after
+// boot has no previous sample and reports cpuPercent: null.
+let lastCpuSample: { atMs: number; userUs: number; systemUs: number } | null = null;
+function getProcessStats() {
+    let cpuPercent: number | null = null;
+    if (typeof process.cpuUsage === 'function') {
+        const usage = process.cpuUsage();
+        const nowMs = Date.now();
+        if (lastCpuSample) {
+            const wallUs = (nowMs - lastCpuSample.atMs) * 1000;
+            const cpuUs = (usage.user - lastCpuSample.userUs) + (usage.system - lastCpuSample.systemUs);
+            if (wallUs > 0) cpuPercent = Math.round((cpuUs / wallUs) * 1000) / 10;
+        }
+        lastCpuSample = { atMs: nowMs, userUs: usage.user, systemUs: usage.system };
+    }
+    const mem = process.memoryUsage();
+    return {
+        cpuPercent,
+        memRssMb: Math.round(mem.rss / 1048576),
+        heapUsedMb: Math.round(mem.heapUsed / 1048576),
+    };
+}
 
 // Load configuration
 const config = loadConfig();
@@ -891,6 +916,7 @@ const server = Bun.serve({
                             activeRequests,
                             proxyProfiles: config.proxyProfiles.length,
                             webhooks: config.webhooks.length,
+                            process: getProcessStats(),
                         });
                     }
                     return jsonRes(200, { status: 'ok', uptime: uptimeSec });
@@ -1328,7 +1354,7 @@ const server = Bun.serve({
                 }
 
                 // ── Backend error feed endpoints ──
-                // Feeds the "System Errors" dashboard page. Entries are
+                // Feeds the "System Alerts" dashboard page. Entries are
                 // deduplicated by fingerprint upstream in core/error-feed.
 
                 // GET /admin/errors/stats — badge counts + per-source rollup.
@@ -2459,6 +2485,14 @@ const server = Bun.serve({
                     if (idx >= 0) {
                         // Preserve NPM-managed ids across saves (the user can't edit these directly).
                         const existing = config.proxyProfiles[idx];
+                        // Secrets: GET /admin/profiles redacts apiKey and accessKey
+                        // (it reports hasApiKey / hasAccessKey instead), so the editor
+                        // loads those fields blank and posts them back empty. Without
+                        // carrying the stored values over, saving an unchanged profile
+                        // silently WIPED both credentials. Same rule the webhook and
+                        // connector routes already apply to their tokens.
+                        if (!profile.apiKey && existing.apiKey) profile.apiKey = existing.apiKey;
+                        if (!profile.accessKey && existing.accessKey) profile.accessKey = existing.accessKey;
                         if (existing.npmProxyHostId !== undefined && profile.npmProxyHostId === undefined) profile.npmProxyHostId = existing.npmProxyHostId;
                         if (existing.npmCertificateId !== undefined && profile.npmCertificateId === undefined) profile.npmCertificateId = existing.npmCertificateId;
                         if (existing.npmOriginalForwardHost && !profile.npmOriginalForwardHost) profile.npmOriginalForwardHost = existing.npmOriginalForwardHost;
@@ -2708,6 +2742,29 @@ const server = Bun.serve({
                             });
                         }
                     }
+                    if (typeof body.blocked === 'boolean') {
+                        const current = getProxyUser(userId);
+                        if (!current) return jsonRes(404, { error: 'User not found' });
+                        const me = getAuthedAdmin(req);
+                        // Guard A: an admin cannot lock themselves out.
+                        if (body.blocked && me?.id === userId) {
+                            return jsonRes(409, { error: "You can't block your own account. Ask another admin." });
+                        }
+                        // Guard B: blocking the last admin would brick the dashboard.
+                        if (body.blocked && current.isAdmin && countAdmins() <= 1) {
+                            return jsonRes(409, { error: 'Cannot block the last admin. Promote someone else first.' });
+                        }
+                        const changed = setProxyUserBlocked(userId, body.blocked);
+                        if (changed) {
+                            logAudit({
+                                actorUserId: me?.id, actorUsername: me?.username,
+                                action: body.blocked ? 'proxy_user.block' : 'proxy_user.unblock',
+                                targetType: 'proxy_user', targetId: userId,
+                                details: { username: current.username },
+                                ip: reqClientIp(req), userAgent: req.headers.get('user-agent'),
+                            });
+                        }
+                    }
                     return jsonRes(200, { status: 'updated' });
                 }
 
@@ -2752,10 +2809,13 @@ const server = Bun.serve({
                 if (url.pathname.match(/^\/admin\/proxy-users\/\d+$/) && req.method === 'DELETE') {
                     const userId = parseInt(url.pathname.split('/').pop()!, 10);
                     const target = getProxyUser(userId);
+                    if (!target) return jsonRes(404, { error: 'User not found' });
+                    const me = getAuthedAdmin(req);
+                    if (me?.id === userId) return jsonRes(409, { error: "You can't delete your own account." });
+                    if (target.isAdmin) return jsonRes(409, { error: 'Administrator accounts must be removed from the Admins page.' });
                     const deleted = deleteProxyUser(userId);
                     if (!deleted) return jsonRes(404, { error: 'User not found' });
                     console.log(`🗑️  Proxy user #${userId} deleted`);
-                    const me = getAuthedAdmin(req);
                     logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'proxy_user.delete', targetType: 'proxy_user', targetId: userId, details: { username: target?.username }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                     return jsonRes(200, { status: 'deleted' });
                 }

@@ -207,8 +207,13 @@ function showContextMenu(e, btn) {
       u.totpEnabled
         ? { label: 'Disable 2FA', fn: () => disable2fa(u.id, u.username) }
         : (u.force2faSetup ? null : { label: 'Force 2FA', fn: () => force2fa(u.id, u.username) }),
+      u.blocked
+        ? { label: 'Unblock user', fn: () => toggleBlockProxyUser(u.id, u.username, false) }
+        : { label: 'Block user', fn: () => toggleBlockProxyUser(u.id, u.username, true), danger: true },
       '---',
-      { label: 'Delete', fn: () => deleteProxyUserAction(u.id, u.username), danger: true },
+      // Admins are removed from the Admins page — deleting them here is
+      // refused by the backend, so the entry is hidden to avoid confusion.
+      u.isAdmin ? null : { label: 'Delete', fn: () => deleteProxyUserAction(u.id, u.username), danger: true },
     ]);
   }
 }
@@ -232,6 +237,10 @@ async function fetchHealth() {
     document.getElementById('ovActive').textContent = (typeof d.activeRequests === 'number') ? d.activeRequests : '—';
     document.getElementById('ovProfiles').textContent = (typeof d.proxyProfiles === 'number') ? d.proxyProfiles : '—';
     document.getElementById('ovWebhooks').textContent = (typeof d.webhooks === 'number') ? d.webhooks : '—';
+    const cpuEl = document.getElementById('ovCpu');
+    if (cpuEl) cpuEl.textContent = (d.process && typeof d.process.cpuPercent === 'number') ? d.process.cpuPercent.toFixed(1) + '%' : '—';
+    const memEl = document.getElementById('ovMem');
+    if (memEl) memEl.textContent = (d.process && typeof d.process.memRssMb === 'number') ? fmtBytes(d.process.memRssMb * 1048576) : '—';
   } catch {
     document.getElementById('navDot').className = 'status-dot offline';
     document.getElementById('navStatus').textContent = 'Offline';
@@ -858,7 +867,7 @@ async function openProfileModal(profile = null) {
   // Pages may not be loaded yet on first open — make sure the dropdown has options.
   if (!_consentPages.length) await fetchConsentPages();
   editingProfile = profile;
-  document.getElementById('modalTitle').textContent = profile ? 'Edit Proxy' : 'New Proxy';
+  proxyWiz.open(!!profile, { title: profile ? 'Edit Proxy — ' + (profile.name || '') : 'New Proxy' });
   document.getElementById('pName').value = profile ? profile.name : ''; document.getElementById('pName').disabled = !!profile;
   document.getElementById('pTargetUrl').value = profile ? profile.targetUrl : '';
   document.getElementById('pApiKey').value = profile ? (profile.apiKey || '') : '';
@@ -926,6 +935,7 @@ function toggleProfileAuthMode() {
   document.getElementById('pLoginTitleGroup').style.display = mode === 'login' ? '' : 'none';
   document.getElementById('pLoginLogoGroup').style.display = mode === 'login' ? '' : 'none';
   document.getElementById('pConsentGroup').style.display = mode === 'login' ? '' : 'none';
+  proxyWiz.render(); // Access Key mode makes the key required
 }
 function toggleUpstreamAuthSection() {
   const on = document.getElementById('pUpstreamAuthToggle').checked;
@@ -936,6 +946,7 @@ function toggleUpstreamAuthSection() {
     document.getElementById('pAuthHeader').value = '';
     document.getElementById('pAuthPrefix').value = '';
   }
+  proxyWiz.render(); // turning it on makes the auth value required
 }
 function toggleConsentFields() {
   const on = document.getElementById('pConsentEnabled').checked;
@@ -945,7 +956,11 @@ function toggleRateLimitFields() {
   const on = document.getElementById('pRateLimitEnabled').checked;
   document.getElementById('pRateLimitFields').style.display = on ? 'grid' : 'none';
 }
-function closeProfileModal() { document.getElementById('profileModal').classList.remove('active'); editingProfile = null; }
+function closeProfileModal() {
+  document.getElementById('profileModal').classList.remove('active');
+  editingProfile = null;
+  proxyWiz.close();
+}
 
 function handleLogoUpload(input) {
   const file = input.files[0];
@@ -972,6 +987,9 @@ function clearLogo() {
   updateLogoPreview();
 }
 async function saveProfile() {
+  // Surface the offending step before the server rejects it — otherwise the
+  // error names a field sitting on a pane the user cannot see.
+  if (proxyWiz.focusProblem()) return;
   const body = { name: document.getElementById('pName').value.trim(), targetUrl: document.getElementById('pTargetUrl').value.trim() };
   const v = (id) => document.getElementById(id).value.trim();
   if (v('pApiKey')) body.apiKey = v('pApiKey');
@@ -1114,6 +1132,9 @@ function filterProxyUsersByRole() {
 
 function _roleBadge(u) {
   const parts = [];
+  if (u.blocked) {
+    parts.push('<span style="display:inline-block;background:rgba(225,112,85,.12);color:var(--red);border:1px solid rgba(225,112,85,.3);border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em" title="Blocked accounts cannot sign in anywhere">BLOCKED</span>');
+  }
   if (u.isAdmin) {
     parts.push('<span style="display:inline-block;background:rgba(59,130,246,.15);color:#2563eb;border:1px solid rgba(59,130,246,.3);border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em">ADMIN</span>');
   } else {
@@ -1151,7 +1172,7 @@ function renderProxyUsers(users) {
       : '';
     const emailCell = (emailLine || phoneLine) ? (emailLine + phoneLine) : `<span style="color:var(--text3)">—</span>`;
     const actionsCell = `<button data-type="proxyUser" data-id="${u.id}" onclick="showContextMenu(event,this)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:2px 10px;cursor:pointer;color:var(--text2);font-size:18px;line-height:1.2;letter-spacing:1px" title="Actions">&#8942;</button>`;
-    return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
+    return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s${u.blocked ? ';opacity:.55' : ''}" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
       <td style="padding:8px 12px">${nameCell}</td>
       <td style="padding:8px">${emailCell}</td>
       <td style="padding:8px">${_roleBadge(u)}</td>
@@ -1234,6 +1255,24 @@ async function deleteProxyUserAction(id, username) {
   try {
     const res = await api('/admin/proxy-users/' + id, { method: 'DELETE' });
     if (res.ok) { toast('User deleted'); fetchProxyUsers(); } else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function toggleBlockProxyUser(id, username, block) {
+  const confirmed = block
+    ? await showConfirm({
+        title: 'Bloquear utilizador',
+        message: 'Bloquear "' + username + '"?',
+        detail: 'O utilizador perde imediatamente todo o acesso: proxies, OAuth e área de administração. As sessões ativas são terminadas. Pode desbloquear a qualquer momento.',
+        confirmText: 'Bloquear',
+        danger: true,
+      })
+    : await showConfirm({ title: 'Desbloquear utilizador', message: 'Desbloquear "' + username + '"? O acesso é reposto de imediato.', confirmText: 'Desbloquear' });
+  if (!confirmed) return;
+  try {
+    const res = await api('/admin/proxy-users/' + id, { method: 'PUT', body: JSON.stringify({ blocked: block }) });
+    if (res.ok) { toast(block ? 'User blocked' : 'User unblocked'); fetchProxyUsers(); }
+    else { const d = await res.json().catch(() => ({})); toast(d.error || 'Failed', 'error'); }
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
@@ -1464,11 +1503,24 @@ let _userProfilesUsername = null;
 function openUserResourcesModal(userId, username) {
   _userProfilesUserId = userId;
   _userProfilesUsername = username;
-  document.getElementById('userProfilesTitle').textContent = 'Resources — ' + username;
+  // Context strip: avatar initial, display name, username · email, blocked flag.
+  const u = _allProxyUsers.find(x => x.id === userId);
+  const avatarEl = document.getElementById('urAvatar');
+  if (avatarEl) avatarEl.textContent = (((u && (u.fullName || u.username)) || username || '?').trim().charAt(0) || '?').toUpperCase();
+  const nameEl = document.getElementById('urName');
+  if (nameEl) nameEl.textContent = (u && u.fullName) || username;
+  const subEl = document.getElementById('urSub');
+  if (subEl) subEl.textContent = [username, u && u.email].filter(Boolean).join(' · ');
+  const blockedEl = document.getElementById('urBlockedBadge');
+  if (blockedEl) blockedEl.style.display = (u && u.blocked) ? '' : 'none';
+  if (typeof userResWiz !== 'undefined') {
+    userResWiz.open(true, { subtitle: 'Assign or remove the resources of ' + username });
+  }
   document.getElementById('userProfilesModal').classList.add('active');
   refreshUserResources();
 }
 function closeUserResourcesModal() {
+  if (typeof userResWiz !== 'undefined') userResWiz.close();
   document.getElementById('userProfilesModal').classList.remove('active');
   _userProfilesUserId = null;
   _userProfilesUsername = null;
@@ -1478,9 +1530,11 @@ function openUserProfilesModal(userId, username) { openUserResourcesModal(userId
 function closeUserProfilesModal() { closeUserResourcesModal(); }
 
 function _sourceBadge(source) {
-  if (source === 'direct') return '<span style="color:var(--text2);font-size:11px">Direct</span>';
-  if (source === 'ldap_group') return '<span style="color:var(--primary);font-size:11px" title="Granted by LDAP group membership">LDAP group</span>';
-  if (source === 'open') return '<span style="color:var(--text3);font-size:11px" title="Allow-list disabled — open to all users">Open</span>';
+  const pill = (label, bg, color, border, title) =>
+    '<span title="' + esc(title || '') + '" style="display:inline-block;background:' + bg + ';color:' + color + ';border:1px solid ' + border + ';border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em">' + label + '</span>';
+  if (source === 'direct') return pill('DIRECT', 'var(--accent-bg)', 'var(--accent)', 'rgba(0,120,212,0.25)', 'Assigned directly to this user');
+  if (source === 'ldap_group') return pill('LDAP GROUP', 'rgba(168,85,247,.12)', '#a855f7', 'rgba(168,85,247,.25)', 'Granted by LDAP group membership');
+  if (source === 'open') return pill('OPEN', 'var(--surface2)', 'var(--text3)', 'var(--border)', 'Allow-list disabled — open to all users');
   return '<span style="color:var(--text3)">—</span>';
 }
 
@@ -1513,6 +1567,8 @@ async function refreshUserResources() {
       });
     }
     const httpAssigned = httpProxies.filter(p => p.assigned);
+    const httpCountEl = document.getElementById('urHttpCount');
+    if (httpCountEl) httpCountEl.textContent = httpAssigned.length;
     if (httpBody) {
       if (httpAssigned.length === 0) {
         httpBody.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">No HTTP proxies accessible.</td></tr>';
@@ -1520,12 +1576,12 @@ async function refreshUserResources() {
         httpBody.innerHTML = httpAssigned.map(p => {
           const canRemove = p.source === 'direct';
           const action = canRemove
-            ? `<button onclick="removeProfileFromCurrentUser('${esc(p.name)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px">Remove</button>`
+            ? `<button onclick="removeProfileFromCurrentUser('${esc(p.name)}')" style="background:none;border:1px solid rgba(225,112,85,.35);border-radius:6px;padding:3px 10px;cursor:pointer;color:var(--red);font-size:11px;font-weight:600">Remove</button>`
             : '<span style="color:var(--text3);font-size:11px" title="Remove via the LDAP group rule">—</span>';
-          return `<tr style="border-bottom:1px solid var(--border)">
-            <td style="padding:8px 12px;font-weight:600;font-family:monospace">${esc(p.name)}</td>
-            <td style="padding:8px">${_sourceBadge(p.source)}</td>
-            <td style="padding:8px 12px;text-align:right">${action}</td>
+          return `<tr>
+            <td style="font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${esc(p.name)}</td>
+            <td>${_sourceBadge(p.source)}</td>
+            <td style="text-align:right">${action}</td>
           </tr>`;
         }).join('');
       }
@@ -1543,6 +1599,8 @@ async function refreshUserResources() {
       });
     }
     const oauthAssigned = oauthClients.filter(c => c.assigned);
+    const oauthCountEl = document.getElementById('urOauthCount');
+    if (oauthCountEl) oauthCountEl.textContent = oauthAssigned.length;
     if (oauthBody) {
       if (oauthAssigned.length === 0) {
         oauthBody.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">No OAuth clients accessible.</td></tr>';
@@ -1550,12 +1608,12 @@ async function refreshUserResources() {
         oauthBody.innerHTML = oauthAssigned.map(c => {
           const canRemove = c.source === 'direct';
           const action = canRemove
-            ? `<button onclick="removeOauthClientFromCurrentUser('${esc(c.clientId)}','${esc(c.name || c.clientId)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px">Remove</button>`
+            ? `<button onclick="removeOauthClientFromCurrentUser('${esc(c.clientId)}','${esc(c.name || c.clientId)}')" style="background:none;border:1px solid rgba(225,112,85,.35);border-radius:6px;padding:3px 10px;cursor:pointer;color:var(--red);font-size:11px;font-weight:600">Remove</button>`
             : '<span style="color:var(--text3);font-size:11px" title="Granted by LDAP or open allow-list">—</span>';
-          return `<tr style="border-bottom:1px solid var(--border)">
-            <td style="padding:8px 12px;font-weight:600">${esc(c.name || c.clientId)}<div style="font-size:10px;color:var(--text3);font-family:monospace">${esc(c.clientId)}</div></td>
-            <td style="padding:8px">${_sourceBadge(c.source)}</td>
-            <td style="padding:8px 12px;text-align:right">${action}</td>
+          return `<tr>
+            <td style="font-weight:600">${esc(c.name || c.clientId)}<div style="font-size:10px;color:var(--text3);font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${esc(c.clientId)}</div></td>
+            <td>${_sourceBadge(c.source)}</td>
+            <td style="text-align:right">${action}</td>
           </tr>`;
         }).join('');
       }
@@ -1716,13 +1774,14 @@ async function openCreateInviteModal() {
   document.getElementById('inviteGenError').style.display = 'none';
   document.getElementById('inviteGenResult').style.display = 'none';
   document.getElementById('inviteGenForm').style.display = '';
-  document.getElementById('inviteGenFooter').innerHTML = '<button class="btn" onclick="closeCreateInviteModal()">Close</button><button class="btn btn-primary" onclick="generateInvite()" id="inviteGenBtn">Generate Link</button>';
+  const shell = document.getElementById('inviteWizShell');
+  if (shell) shell.style.display = '';
+  if (typeof inviteWiz !== 'undefined') inviteWiz.open(false);
   document.getElementById('invEmailInput').value = '';
   document.getElementById('invNameInput').value = '';
   document.getElementById('invNoteInput').value = '';
   document.getElementById('invExpirySelect').value = '48';
-  document.getElementById('invAsAdmin').checked = false;
-  document.getElementById('invResourcesGroup').style.display = '';
+  invSelectType('user');
   const ps = document.getElementById('invProxySearch'); if (ps) ps.value = '';
   const os = document.getElementById('invOauthSearch'); if (os) os.value = '';
   const resendBtn = document.getElementById('resendInviteBtn');
@@ -1788,11 +1847,26 @@ function closeCreateInviteModal() {
 }
 
 function toggleInviteType() {
-  const asAdmin = document.getElementById('invAsAdmin').checked;
-  document.getElementById('invResourcesGroup').style.display = asAdmin ? 'none' : '';
+  // Back-compat alias — selection now happens through the account type cards.
+  invSelectType(document.getElementById('invAsAdmin').checked ? 'admin' : 'user');
+}
+
+/** Selects an account type card ('admin' | 'user'). The hidden invAsAdmin
+ *  checkbox stays the single source of truth for the rest of the code. */
+function invSelectType(kind) {
+  const asAdmin = kind === 'admin';
+  const cb = document.getElementById('invAsAdmin');
+  if (cb) cb.checked = asAdmin;
+  const adminCard = document.getElementById('invTypeAdminCard');
+  const userCard = document.getElementById('invTypeUserCard');
+  if (adminCard) adminCard.classList.toggle('is-selected', asAdmin);
+  if (userCard) userCard.classList.toggle('is-selected', !asAdmin);
+  // The Proxies / OAuth steps disappear from the wizard nav for admin invites.
+  if (typeof inviteWiz !== 'undefined') inviteWiz.render();
 }
 
 async function generateInvite() {
+  if (typeof inviteWiz !== 'undefined' && inviteWiz.focusProblem && inviteWiz.focusProblem()) return;
   const errEl = document.getElementById('inviteGenError');
   errEl.style.display = 'none';
   const asAdmin = document.getElementById('invAsAdmin').checked;
@@ -1808,8 +1882,9 @@ async function generateInvite() {
   if (!invitedName) { errEl.textContent = 'Enter the invitee\'s name.'; errEl.style.display = 'block'; return; }
   const note = document.getElementById('invNoteInput').value.trim();
   const expiresInHours = parseInt(document.getElementById('invExpirySelect').value, 10);
-  const btn = document.getElementById('inviteGenBtn');
-  btn.disabled = true; btn.textContent = 'Generating...';
+  const btn = (typeof inviteWiz !== 'undefined' && inviteWiz.saveBtn) ? inviteWiz.saveBtn : null;
+  const btnOrigLabel = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Generating...'; }
   try {
     const endpoint = asAdmin ? '/admin/admins/invite' : '/admin/invites';
     const payload = asAdmin
@@ -1817,12 +1892,14 @@ async function generateInvite() {
       : { profileNames, oauthClientIds, email, invitedName, note, expiresInHours };
     const res = await api(endpoint, { method: 'POST', body: JSON.stringify(payload) });
     const data = await res.json();
-    if (!res.ok) { errEl.textContent = data.error || 'Failed to generate invite.'; errEl.style.display = 'block'; btn.disabled = false; btn.textContent = 'Generate Link'; return; }
+    if (!res.ok) { errEl.textContent = data.error || 'Failed to generate invite.'; errEl.style.display = 'block'; if (btn) { btn.disabled = false; btn.textContent = btnOrigLabel || 'Generate Link'; } return; }
     const inviteToken = data.invite?.token || '';
     const link = data.inviteUrl || (window.location.origin + (asAdmin ? '/admin-invite/' : '/invite/') + inviteToken);
     document.getElementById('inviteLinkInput').value = link;
-    document.getElementById('inviteGenResult').style.display = 'block';
-    document.getElementById('inviteGenForm').style.display = 'none';
+    // Swap the wizard for the result panel (link + email actions live there).
+    document.getElementById('inviteGenResult').style.display = '';
+    const wizShell = document.getElementById('inviteWizShell');
+    if (wizShell) wizShell.style.display = 'none';
     // Stash token + flavor so the "Send by email" button can resend later.
     _lastInviteToken = inviteToken;
     _lastInviteIsAdmin = !!asAdmin;
@@ -1844,11 +1921,10 @@ async function generateInvite() {
         if (resendBtn) resendBtn.style.display = 'none';
       }
     }
-    document.getElementById('inviteGenFooter').innerHTML = '<button class="btn" onclick="closeCreateInviteModal()">Close</button><button class="btn btn-primary" onclick="openCreateInviteModal()">Generate Another</button>';
     fetchInvites();
   } catch (e) {
     errEl.textContent = 'Error: ' + e.message; errEl.style.display = 'block';
-    btn.disabled = false; btn.textContent = 'Generate Link';
+    if (btn) { btn.disabled = false; btn.textContent = btnOrigLabel || 'Generate Link'; }
   }
 }
 
@@ -2157,6 +2233,231 @@ function renderConnectors(connectors) {
 
 let _editingConnector = null;
 
+/**
+ * The reports code calls showToast(msg, isError) in 19 places, but only
+ * toast(msg, type) was ever defined — so every one of those calls threw after
+ * the action had already succeeded (the feed saved, then the success path blew
+ * up and surfaced "showToast is not defined" in the error banner).
+ */
+function showToast(msg, isError) { toast(msg, isError ? 'error' : 'success'); }
+
+// -- Connector wizards ------------------------------------------------------
+// Both connector modals are Wizard instances (see js/wizard.js). The panes live
+// in the HTML; the title bar, step nav and footer are built at mount time.
+
+const _wizHasProvider = id => ['meta-whatsapp', 'smooch'].includes(Wizard.val(id));
+/** Targets belong to whichever modal currently owns the shared row editor. */
+const _wizTargetCount = listId => (_cnListId === listId ? _cnTargets.length : 0);
+
+const cnWiz = Wizard.mount('connectorModal', {
+  title: 'Connector',
+  subtitle: 'GoContact webchat connector',
+  saveLabel: 'Save Connector',
+  onClose: () => closeConnectorModal(),
+  onSave: () => saveConnector(),
+  // The Channel step holds provider credentials, irrelevant to generic JSON.
+  hidden: id => id === 'channel' && !_wizHasProvider('cnChannel'),
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    if (!Wizard.val('cnName')) flag('basics', 'Name is required');
+    if (!Wizard.val('cnGoUsername')) flag('gocontact', 'GoContact username is required');
+    if ((Wizard.val('cnGoMode') || 'poll') === 'poll') {
+      if (!Wizard.val('cnGoBaseUrl')) flag('gocontact', 'Base URL is required in polling mode');
+      else if (!Wizard.val('cnGoHashKey')) flag('gocontact', 'Hash Key is required in polling mode');
+    } else {
+      if (!Wizard.val('cnGoAudience')) flag('gocontact', 'Audience is required in Webchat API mode');
+      else if (!Wizard.val('cnGoChannelUuid')) flag('gocontact', 'Channel UUID is required in Webchat API mode');
+    }
+    // A connector with nowhere to send agent replies is accepted by neither the
+    // API nor common sense.
+    if (!Wizard.checked('cnDirectReply') &&
+        !(Wizard.checked('cnWebhooksEnabled') && _wizTargetCount('cnWebhookTargetsList'))) {
+      flag('delivery', 'Add a webhook target or enable direct reply');
+    }
+    return p;
+  },
+});
+
+const rfWiz = Wizard.mount('reportFeedModal', {
+  title: 'Report Feed',
+  subtitle: 'GoContact report exposed as a consumer API',
+  saveLabel: 'Save Feed',
+  saveId: 'rfSaveBtn',
+  onClose: () => closeReportFeedModal(),
+  onSave: () => saveReportFeed(),
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    if (!Wizard.val('rfName')) flag('basics', 'Feed name is required');
+    else if (!Wizard.val('rfInstanceName')) flag('basics', 'Pick a GoContact instance');
+    if (!Wizard.val('rfApiKeys')) flag('routing', 'At least one API key is required');
+    if (!Wizard.val('rfTemplateId')) flag('report', 'Template ID is required');
+    else if (!Wizard.val('rfOwnerType')) flag('report', 'Owner type is required');
+    if (Wizard.checked('rfDetailEnabled') &&
+        !(Wizard.val('rfDetailIdFieldSelect') || Wizard.val('rfDetailIdField'))) {
+      flag('detail', 'Detail ID field is required when the detail route is on');
+    }
+    return p;
+  },
+});
+
+const proxyWiz = Wizard.mount('profileModal', {
+  title: 'Proxy',
+  subtitle: 'HTTP forwarder with its own auth and access rules',
+  saveLabel: 'Save Proxy',
+  onClose: () => closeProfileModal(),
+  onSave: () => saveProfile(),
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    if (!Wizard.val('pName')) flag('basics', 'Proxy name is required');
+    else if (!Wizard.val('pTargetUrl')) flag('basics', 'Target URL is required');
+    // Secrets only when creating: the admin API redacts them, so an existing
+    // profile loads with these blank, and the save path reads blank as "keep
+    // the stored value". Demanding them on edit would block every save.
+    const creating = !proxyWiz.freeNav;
+    if (creating && Wizard.checked('pUpstreamAuthToggle') && !Wizard.val('pApiKey')) {
+      flag('upstream', 'Auth value is required when upstream credentials are on');
+    }
+    if (creating && Wizard.val('pAuthMode') === 'accessKey' && !Wizard.val('pAccessKey')) {
+      flag('access', 'Access key is required in Access Key mode');
+    }
+    return p;
+  },
+});
+
+const sipWiz = Wizard.mount('sipModal', {
+  title: 'TCP/UDP Proxy',
+  subtitle: 'Generic stream relay — SIP aware when the upstream is UDP',
+  saveLabel: 'Save Proxy',
+  onClose: () => closeSipModal(),
+  onSave: () => saveSipProxy(),
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    if (!Wizard.val('sipName')) flag('basics', 'Profile name is required');
+    else if (!Wizard.val('sipUpstreamHost')) flag('basics', 'Upstream host is required');
+    else if (!Wizard.val('sipUpstreamPort')) flag('basics', 'Upstream port is required');
+    const anyListener = ['sipListenerUdp', 'sipListenerTcp', 'sipListenerTls'].some(Wizard.checked);
+    if (!anyListener) flag('listeners', 'Pick at least one inbound listener');
+    else if (Wizard.checked('sipListenerTls') && !Wizard.val('sipCertId')) {
+      flag('listeners', 'A TLS listener needs a certificate');
+    }
+    return p;
+  },
+});
+
+const ldapWiz = Wizard.mount('ldapModal', {
+  title: 'LDAP Directory',
+  subtitle: 'Authenticate dashboard and proxy users against Active Directory',
+  saveLabel: 'Create',
+  saveId: 'ldapSubmitBtn',
+  onClose: () => closeLdapModal(),
+  onSave: () => submitLdap(),
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    if (!Wizard.val('ldapName')) flag('connection', 'Connection name is required');
+    else if (!Wizard.val('ldapUrl')) flag('connection', 'Directory URL is required');
+    else if (!Wizard.val('ldapBaseDn')) flag('connection', 'Base DN is required');
+    const filter = Wizard.val('ldapUserFilter');
+    if (filter && !filter.includes('{login}')) flag('mapping', 'Search filter must contain {login}');
+    return p;
+  },
+});
+
+const f9Wiz = Wizard.mount('five9Modal', {
+  title: 'Five9 Connector',
+  subtitle: 'Five9 Digital Engagement connector',
+  saveLabel: 'Save Connector',
+  onClose: () => closeFive9Modal(),
+  onSave: ev => saveFive9Connector(ev),
+  hidden: id => id === 'channel' && !_wizHasProvider('f9Channel'),
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    if (!Wizard.val('f9Name')) flag('basics', 'Name is required');
+    if (!Wizard.checked('f9DirectReply') &&
+        !(Wizard.checked('f9WebhooksEnabled') && _wizTargetCount('f9WebhookTargetsList'))) {
+      flag('delivery', 'Add a webhook target or enable direct reply');
+    }
+    return p;
+  },
+});
+
+const smtpWiz = Wizard.mount('smtpConfigModal', {
+  title: 'Email Provider',
+  subtitle: 'SMTP relay used to deliver notification emails',
+  saveLabel: 'Save',
+  onClose: () => closeSmtpConfigModal(),
+  onSave: ev => withBusy(ev.currentTarget, 'A guardar…', () => saveSmtpConfig()),
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    if (!Wizard.val('smtpHost')) flag('server', 'Host is required');
+    if (!Wizard.val('smtpFromAddress')) flag('sender', 'Sender email is required');
+    return p;
+  },
+});
+
+const smsWiz = Wizard.mount('smsConfigModal', {
+  title: 'SMS Providers',
+  subtitle: 'Routing and credentials for WeSender and Twilio',
+  saveLabel: 'Save',
+  onClose: () => closeSmsConfigModal(),
+  onSave: ev => withBusy(ev.currentTarget, 'A guardar…', () => saveSmsConfig()),
+  hidden: id => id === 'prefixes' && Wizard.val('smsRouting') !== 'by-prefix',
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    const routing = Wizard.val('smsRouting');
+    if (routing === 'failover' && Wizard.val('smsPrimary') === Wizard.val('smsSecondary')) {
+      flag('routing', 'Fallback provider must differ from primary');
+    }
+    if (routing === 'by-prefix' && _smsPrefixRuleCount() === 0) {
+      flag('prefixes', 'Add at least one prefix rule (or switch routing mode)');
+    }
+    return p;
+  },
+});
+
+function _smsPrefixRuleCount() {
+  return _smsCurrentPrefixRules.filter(r => (r.prefix || '').trim() !== '' || r.provider).length;
+}
+
+const inviteWiz = Wizard.mount('createInviteModal', {
+  title: 'Generate Invite',
+  subtitle: 'One-time link that creates a new account or links access to an existing one',
+  saveLabel: 'Generate Link',
+  onClose: () => closeCreateInviteModal(),
+  onSave: () => generateInvite(),
+  hidden: id => (id === 'proxies' || id === 'oauth') && Wizard.checked('invAsAdmin'),
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    if (!Wizard.checked('invAsAdmin')) {
+      const anySelected = document.querySelector('.inv-proxy-cb:checked') || document.querySelector('.inv-oauth-cb:checked');
+      if (!anySelected) flag('proxies', 'Select at least one proxy or OAuth client');
+    }
+    const email = Wizard.val('invEmailInput');
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) flag('details', 'Enter a valid email for the invitee');
+    else if (!Wizard.val('invNameInput')) flag('details', "Enter the invitee's name");
+    return p;
+  },
+});
+
+// Resources modal is live management (assign/remove act immediately), so it
+// opens in edit mode: both steps unlocked, "Done" always available.
+const userResWiz = Wizard.mount('userProfilesModal', {
+  title: 'Manage Resources',
+  subtitle: 'Assign or remove the resources this user can access',
+  saveLabel: 'Done',
+  onClose: () => closeUserResourcesModal(),
+  onSave: () => closeUserResourcesModal(),
+});
+
+
 function connectorChannelChanged() {
   const channel = document.getElementById('cnChannel').value;
   const isMeta = channel === 'meta-whatsapp';
@@ -2169,6 +2470,7 @@ function connectorChannelChanged() {
   const row = document.getElementById('cnDirectReplyRow');
   row.style.display = hasProvider ? 'flex' : 'none';
   if (!hasProvider) document.getElementById('cnDirectReply').checked = false;
+  cnWiz.render(); // the Channel step drops out for the generic channel
 }
 
 function connectorAutoReplyChanged() {
@@ -2386,6 +2688,8 @@ function renderConnectorTargets() {
       </div>`;
   }).join('');
   connectorWebhooksEnabledChanged();
+  if (_cnListId === 'cnWebhookTargetsList') cnWiz.render();
+  if (_cnListId === 'f9WebhookTargetsList') f9Wiz.render();
 }
 
 function generateConnectorToken() {
@@ -2397,7 +2701,6 @@ function generateConnectorToken() {
 
 function openConnectorModal(connector = null) {
   _editingConnector = connector ? connector.name : null;
-  document.getElementById('connectorModalTitle').textContent = connector ? 'Edit Connector — ' + connector.name : 'New Connector';
   document.getElementById('cnName').value = connector?.name || '';
   document.getElementById('cnName').disabled = !!connector;
   document.getElementById('cnChannel').value = connector?.channel || 'meta-whatsapp';
@@ -2473,7 +2776,11 @@ function openConnectorModal(connector = null) {
   connectorWebhooksEnabledChanged();
   document.getElementById('cnAllowedIps').value = (connector?.allowedIps || []).join(', ');
   document.getElementById('cnEnabled').checked = connector ? connector.enabled !== false : true;
-  connectorChannelChanged();
+  cnWiz.open(!!connector, {
+    title: connector ? `Edit Connector — ${connector.name}` : 'New Connector',
+    subtitle: connector ? 'GoContact webchat connector' : 'GoContact webchat connector — walk the steps, or jump to one',
+  });
+  connectorChannelChanged(); // also re-renders the stepper
   document.getElementById('connectorModal').style.display = 'flex';
 }
 
@@ -2481,9 +2788,13 @@ function closeConnectorModal() {
   document.getElementById('connectorModal').style.display = 'none';
   _editingConnector = null;
   releaseConnectorTargetEditor();
+  cnWiz.close();
 }
 
 async function saveConnector() {
+  // Surface the offending step before the server rejects it — otherwise the
+  // toast names a field sitting on a pane the user cannot see.
+  if (cnWiz.focusProblem()) return;
   const body = {
     name: document.getElementById('cnName').value.trim().toLowerCase(),
     channel: document.getElementById('cnChannel').value,
@@ -4313,8 +4624,8 @@ function renderRequestLogs() {
   document.getElementById('rlPrev').disabled = page <= 1;
   document.getElementById('rlNext').disabled = page >= totalPages;
 }
-function reqLogPrevPage() { if (rlPage > 1) { rlPage--; fetchRequestLogs(); } }
-function reqLogNextPage() { if (rlData && rlPage < rlData.totalPages) { rlPage++; fetchRequestLogs(); } }
+function reqLogPrevPage() { if (rlPage > 1) { rlPage--; return fetchRequestLogs(); } }
+function reqLogNextPage() { if (rlData && rlPage < rlData.totalPages) { rlPage++; return fetchRequestLogs(); } }
 
 // ─── Request Detail ──────────────────────────────────────────────────────────
 async function openReqDetail(id) {
@@ -4620,7 +4931,7 @@ function renderTcpUdpProxies(list) {
 
 function openSipModal(proxy) {
   _editingSip = proxy || null;
-  document.getElementById('sipModalTitle').textContent = proxy ? 'Edit TCP/UDP Proxy' : 'New TCP/UDP Proxy';
+  sipWiz.open(!!proxy, { title: proxy ? 'Edit TCP/UDP Proxy — ' + (proxy.name || '') : 'New TCP/UDP Proxy' });
   document.getElementById('sipModalError').style.display = 'none';
   document.getElementById('sipName').value = proxy ? proxy.name : '';
   document.getElementById('sipName').disabled = !!proxy;
@@ -4680,6 +4991,7 @@ function toggleSipLogOptions() {
 function toggleSipTlsSection() {
   const tls = document.getElementById('sipListenerTls').checked;
   document.getElementById('sipTlsSection').style.display = tls ? '' : 'none';
+  sipWiz.render(); // listener choice drives what the Listeners step requires
 }
 
 function toggleSipUpstreamTls() {
@@ -4698,6 +5010,7 @@ function toggleSipAdvanced(btn) {
 function toggleSipRtpRelay() {
   const enabled = document.getElementById('sipRtpRelay').checked;
   document.getElementById('sipRtpRelayGroup').style.display = enabled ? 'block' : 'none';
+  sipWiz.render();
 }
 
 async function populateSipCertDropdown(selectedId) {
@@ -4719,9 +5032,11 @@ async function populateSipCertDropdown(selectedId) {
 function closeSipModal() {
   document.getElementById('sipModal').classList.remove('active');
   _editingSip = null;
+  sipWiz.close();
 }
 
 async function saveSipProxy() {
+  if (sipWiz.focusProblem()) return;
   const errEl = document.getElementById('sipModalError');
   errEl.style.display = 'none';
 
@@ -5196,6 +5511,7 @@ let _currentUserId = null;
 
 // ─── SMTP / Email ─────────────────────────────────────────────────────────────
 let _smtpHasPassword = false;
+let _smtpConfigured = false;
 let _smtpTestController = null;
 let _smtpSendController = null;
 
@@ -5253,7 +5569,14 @@ async function fetchSmtpConfig() {
       clearBtn.style.display = 'none';
       setSmtpStatus('smtpStatus', 'No SMTP configuration active.', 'info');
     }
+    _smtpConfigured = !!cfg;
     _updateSmtpTabStatus(cfg);
+    // Deep-links (#email) open the modal before this fetch lands; upgrade it
+    // to edit mode now that we know a configuration exists.
+    if (cfg && !smtpWiz.freeNav && document.getElementById('smtpConfigModal').classList.contains('active')) {
+      smtpWiz.freeNav = true;
+      smtpWiz.render();
+    }
   } catch (e) {
     setSmtpStatus('smtpStatus', 'Failed to load: ' + e.message, 'err');
   }
@@ -5275,6 +5598,7 @@ function _readSmtpForm(includePasswordOnlyIfFilled) {
 }
 
 async function saveSmtpConfig() {
+  if (smtpWiz.focusProblem()) return;
   const body = _readSmtpForm(true);
   if (!body.host) { setSmtpStatus('smtpStatus', 'Host is required.', 'err'); return; }
   if (!body.fromAddress) { setSmtpStatus('smtpStatus', 'Sender email is required.', 'err'); return; }
@@ -5542,6 +5866,16 @@ function renderLdapConfigs(configs) {
   ).join('');
 }
 
+/** Show the "test these credentials" bar only when editing.
+ *  The test endpoint is /admin/ldap/configs/{id}/test — it needs a saved
+ *  directory, so offering it on the create form was an action that could only
+ *  ever answer "save first". */
+function _ldapSyncTestRow() {
+  const editing = !!document.getElementById('ldapEditId').value;
+  const row = document.querySelector('#ldapModal .ldap-test-row');
+  if (row) row.style.display = editing ? '' : 'none';
+}
+
 function _ldapResetForm() {
   document.getElementById('ldapEditId').value = '';
   document.getElementById('ldapName').value = '';
@@ -5573,7 +5907,8 @@ function _ldapResetForm() {
 
 function openCreateLdapModal() {
   _ldapResetForm();
-  document.getElementById('ldapModalTitle').textContent = 'Novo directory LDAP';
+  _ldapSyncTestRow();
+  ldapWiz.open(false, { title: 'New LDAP Directory' });
   document.getElementById('ldapSubmitBtn').textContent = 'Create';
   document.getElementById('ldapModal').classList.add('active');
 }
@@ -5603,13 +5938,15 @@ function openEditLdapModal(id) {
   document.getElementById('ldapAdminGroups').value = (c.adminGroups || []).join('\n');
   document.getElementById('ldapDefaultProfile').value = c.defaultProfile || '';
   document.getElementById('ldapAutoAdoptLocal').checked = !!c.autoAdoptLocal;
-  document.getElementById('ldapModalTitle').textContent = 'Edit directory: ' + c.name;
+  _ldapSyncTestRow();
+  ldapWiz.open(true, { title: 'Edit Directory — ' + c.name });
   document.getElementById('ldapSubmitBtn').textContent = 'Save';
   document.getElementById('ldapModal').classList.add('active');
 }
 
 function closeLdapModal() {
   document.getElementById('ldapModal').classList.remove('active');
+  ldapWiz.close();
 }
 
 function _ldapCollectPayload(isEdit) {
@@ -5649,6 +5986,7 @@ function _ldapCollectPayload(isEdit) {
 }
 
 async function submitLdap() {
+  if (ldapWiz.focusProblem()) return;
   const editId = document.getElementById('ldapEditId').value;
   const isEdit = !!editId;
   const payload = _ldapCollectPayload(isEdit);
@@ -6156,10 +6494,10 @@ function truncStr(s, n) {
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
 }
 
-function sipLogPrevPage() { if (slPage > 1) { slPage--; fetchSipLogs(); } }
+function sipLogPrevPage() { if (slPage > 1) { slPage--; return fetchSipLogs(); } }
 function sipLogNextPage() {
   const maxPage = Math.max(1, Math.ceil(slTotal / slPageSize));
-  if (slPage < maxPage) { slPage++; fetchSipLogs(); }
+  if (slPage < maxPage) { slPage++; return fetchSipLogs(); }
 }
 
 // Auto-refresh: poll every 5s while on the SIP logs page with the checkbox on
@@ -6369,10 +6707,10 @@ function humanDuration(ms) {
   return Math.floor(ms / 60_000) + 'm ' + Math.floor((ms % 60_000) / 1000) + 's';
 }
 
-function connLogPrevPage() { if (clPage > 1) { clPage--; fetchConnLogs(); } }
+function connLogPrevPage() { if (clPage > 1) { clPage--; return fetchConnLogs(); } }
 function connLogNextPage() {
   const maxPage = Math.max(1, Math.ceil(clTotal / clPageSize));
-  if (clPage < maxPage) { clPage++; fetchConnLogs(); }
+  if (clPage < maxPage) { clPage++; return fetchConnLogs(); }
 }
 
 // ─── Certificates ──────────────────────────────────────────────────────────
@@ -7827,6 +8165,7 @@ async function syncProfileToNpm(profileName) {
 // ─── SMS (WeSender / Twilio) ─────────────────────────────────────────────────
 
 let _smsHasWeKey = false;
+let _smsConfigured = false;
 let _smsHasTwToken = false;
 let _smsCurrentPrefixRules = [];
 
@@ -7851,29 +8190,77 @@ function updateSmsRoutingVisibility() {
     else hint.textContent = 'Match each destination against the rules below in order. Use "*" as catch-all.';
   }
   _renderSmsProviderBadges();
+  // The Prefix rules step appears/disappears with the routing mode.
+  if (typeof smsWiz !== 'undefined' && smsWiz.render) smsWiz.render();
 }
 
-function _setTabDot(id, kind) {
-  const el = document.getElementById(id);
+function _fillChannelSummary(elId, rows) {
+  const el = document.getElementById(elId);
   if (!el) return;
-  const colors = { ok: '#22c55e', warn: '#ca8a04', mute: 'var(--text3)' };
-  el.style.background = colors[kind] || colors.mute;
+  el.textContent = '';
+  rows.forEach(pair => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:10px;line-height:1.5';
+    const key = document.createElement('span');
+    key.style.cssText = 'flex:0 0 84px;color:var(--text3);font-size:12px;padding-top:1px';
+    key.textContent = pair[0];
+    const val = document.createElement('span');
+    val.style.cssText = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    val.textContent = pair[1];
+    row.appendChild(key);
+    row.appendChild(val);
+    el.appendChild(row);
+  });
 }
 
 function _updateSmtpTabStatus(cfg) {
   const configured = cfg && cfg.host;
-  _setTabDot('smtpTabDot', configured ? 'ok' : 'warn');
-  const banner = document.getElementById('smtpSetupBanner');
-  if (banner) banner.style.display = configured ? 'none' : '';
+  const pill = document.getElementById('smtpCardPill');
+  if (pill) _setStatusPill(pill, configured ? 'Configured' : 'Not configured', configured ? 'ok' : 'warn');
+  if (configured) {
+    const secLabels = { starttls: 'STARTTLS', tls: 'TLS / SSL', none: 'None' };
+    const from = cfg.fromName ? cfg.fromName + ' <' + (cfg.fromAddress || '') + '>' : (cfg.fromAddress || '—');
+    _fillChannelSummary('smtpCardSummary', [
+      ['Server', cfg.host + ':' + (cfg.port || 587)],
+      ['Security', secLabels[cfg.security] || cfg.security || 'STARTTLS'],
+      ['From', from],
+    ]);
+  } else {
+    _fillChannelSummary('smtpCardSummary', [
+      ['Status', 'No SMTP server registered yet.'],
+      ['Impact', 'Rules that send email will fail silently.'],
+    ]);
+  }
 }
 
 function _updateSmsTabStatus(cfg) {
   const haveWe = cfg && cfg.wesender && cfg.wesender.hasApiKey;
   const haveTw = cfg && cfg.twilio && cfg.twilio.hasAuthToken && cfg.twilio.accountSid;
-  const active  = cfg && cfg.enabled && (haveWe || haveTw);
-  _setTabDot('smsTabDot', active ? 'ok' : (cfg ? 'warn' : 'warn'));
-  const banner = document.getElementById('smsSetupBanner');
-  if (banner) banner.style.display = cfg ? 'none' : '';
+  const pill = document.getElementById('smsCardPill');
+  if (pill) {
+    if (!cfg) _setStatusPill(pill, 'Not configured', 'warn');
+    else if (!cfg.enabled) _setStatusPill(pill, 'Disabled', 'mute');
+    else if (!haveWe && !haveTw) _setStatusPill(pill, 'Incomplete', 'warn');
+    else _setStatusPill(pill, 'Active', 'ok');
+  }
+  const modeLabels = { single: 'Single provider', failover: 'Primary + fallback', 'by-prefix': 'By phone prefix' };
+  const provNames = { wesender: 'WeSender', twilio: 'Twilio' };
+  if (cfg) {
+    const rows = [['Routing', modeLabels[cfg.routing] || 'Single provider']];
+    if (cfg.routing === 'failover') rows.push(['Path', (provNames[cfg.primary] || cfg.primary || '—') + ' → ' + (provNames[cfg.secondary] || cfg.secondary || '—')]);
+    else if (cfg.routing === 'by-prefix') rows.push(['Rules', (Array.isArray(cfg.prefixRules) ? cfg.prefixRules.length : 0) + ' prefix rule(s)']);
+    else rows.push(['Provider', provNames[cfg.primary] || cfg.primary || '—']);
+    const ready = [];
+    if (haveWe) ready.push('WeSender');
+    if (haveTw) ready.push('Twilio');
+    rows.push(['Credentials', ready.length ? ready.join(' + ') + ' ready' : 'None saved']);
+    _fillChannelSummary('smsCardSummary', rows);
+  } else {
+    _fillChannelSummary('smsCardSummary', [
+      ['Status', 'No SMS provider registered yet.'],
+      ['Impact', 'Critical alerts that need SMS will not go out.'],
+    ]);
+  }
 }
 
 function _setStatusPill(el, label, kind) {
@@ -8062,10 +8449,17 @@ async function fetchSmsConfig() {
     }
     updateSmsRoutingVisibility();
     renderSmsPrefixRules();
+    _smsConfigured = !!cfg;
     _updateSmsStatusPill(cfg);
     _updateSmsTabStatus(cfg);
     _renderSmsProviderBadges();
     _bindSmsLiveBadges();
+    // Deep-links (#sms) open the modal before this fetch lands; upgrade it
+    // to edit mode now that we know a configuration exists.
+    if (cfg && !smsWiz.freeNav && document.getElementById('smsConfigModal').classList.contains('active')) {
+      smsWiz.freeNav = true;
+      smsWiz.render();
+    }
   } catch (e) {
     setSmsStatus('smsStatus', 'Failed to load: ' + e.message, 'err');
   }
@@ -8108,6 +8502,7 @@ function _readSmsForm() {
 }
 
 async function saveSmsConfig() {
+  if (smsWiz.focusProblem()) return;
   const body = _readSmsForm();
   if (body.routing === 'failover' && body.primary === body.secondary) {
     setSmsStatus('smsStatus', 'Fallback provider must differ from primary.', 'err');
@@ -8189,6 +8584,10 @@ let _notifAddingMemberGroupId = null;
 let _notifCurrentTab = 'groups';
 
 function switchNotifTab(tab) {
+  // Legacy deep-links (#email / #sms) now live inside the channels tab:
+  // open the tab and surface the matching provider modal directly.
+  if (tab === 'email') { switchNotifTab('channels'); openSmtpConfigModal(); return; }
+  if (tab === 'sms') { switchNotifTab('channels'); openSmsConfigModal(); return; }
   _notifCurrentTab = tab;
   document.querySelectorAll('.notif-tab').forEach(b => {
     const active = b.getAttribute('data-tab') === tab;
@@ -8204,6 +8603,23 @@ function switchNotifTab(tab) {
   const addRuleBtn = document.getElementById('notifAddRuleBtn');
   if (addGroupBtn) addGroupBtn.style.display = isGroupRuleTab ? '' : 'none';
   if (addRuleBtn) addRuleBtn.style.display = isGroupRuleTab ? '' : 'none';
+}
+
+function openSmtpConfigModal() {
+  smtpWiz.open(_smtpConfigured);
+  document.getElementById('smtpConfigModal').classList.add('active');
+}
+function closeSmtpConfigModal() {
+  smtpWiz.close();
+  document.getElementById('smtpConfigModal').classList.remove('active');
+}
+function openSmsConfigModal() {
+  smsWiz.open(_smsConfigured);
+  document.getElementById('smsConfigModal').classList.add('active');
+}
+function closeSmsConfigModal() {
+  smsWiz.close();
+  document.getElementById('smsConfigModal').classList.remove('active');
 }
 
 function _setNotifStatus(elId, msg, kind) {
@@ -8799,6 +9215,7 @@ function f9ChannelChanged() {
   const row = document.getElementById('f9DirectReplyRow');
   row.style.display = (isMeta || isSmooch) ? 'block' : 'none';
   if (!isMeta && !isSmooch) document.getElementById('f9DirectReply').checked = false;
+  f9Wiz.render(); // the Channel step drops out when there is no provider
 }
 
 function f9AutoReplyChanged() {
@@ -8824,7 +9241,6 @@ function generateF9VerifyToken() {
 
 function openFive9Modal(connector = null) {
   _editingFive9Connector = connector ? connector.name : null;
-  document.getElementById('five9ModalTitle').textContent = connector ? 'Edit Five9 Connector — ' + connector.name : 'New Five9 Connector';
   document.getElementById('f9Name').value = connector?.name || '';
   document.getElementById('f9Name').disabled = !!connector;
   document.getElementById('f9Channel').value = connector?.channel || 'meta-whatsapp';
@@ -8882,6 +9298,10 @@ function openFive9Modal(connector = null) {
   // Advanced
   document.getElementById('f9SessionTtl').value = connector?.sessionTtlMinutes || '';
   f9ChannelChanged();
+  f9Wiz.open(!!connector, {
+    title: connector ? `Edit Five9 Connector — ${connector.name}` : 'New Five9 Connector',
+    subtitle: 'Five9 Digital Engagement connector',
+  });
   document.getElementById('five9Modal').style.display = 'flex';
 }
 
@@ -8889,9 +9309,13 @@ function closeFive9Modal() {
   document.getElementById('five9Modal').style.display = 'none';
   _editingFive9Connector = null;
   releaseConnectorTargetEditor();
+  f9Wiz.close();
 }
 
 async function saveFive9Connector(event) {
+  // Surface the offending step before the server rejects it — otherwise the
+  // toast names a field sitting on a pane the user cannot see.
+  if (f9Wiz.focusProblem()) return;
   await withBusy(event, 'A guardar…', async () => { await doSaveFive9Connector(); });
 }
 async function doSaveFive9Connector() {
@@ -9084,7 +9508,10 @@ function renderReportFeeds() {
 function openReportFeedModal(feed) {
   feed = feed || null;
   _editingReportFeed = feed ? feed.name : null;
-  document.getElementById('reportFeedModalTitle').textContent = feed ? 'Edit Feed — ' + feed.name : 'New Report Feed';
+  rfWiz.open(!!feed, {
+    title: feed ? 'Edit Feed — ' + feed.name : 'New Report Feed',
+    subtitle: 'GoContact report exposed as a consumer API',
+  });
   document.getElementById('rfName').value = feed ? feed.name : '';
   document.getElementById('rfName').disabled = !!feed;
   document.getElementById('rfBaseUrl').value = feed ? (feed.baseUrl || '') : '';
@@ -9188,6 +9615,7 @@ function openReportFeedModal(feed) {
 
 function closeReportFeedModal() {
   document.getElementById('reportFeedModal').style.display = 'none';
+  rfWiz.close();
 }
 
 function rfToggleAllOwners() {
@@ -9210,6 +9638,7 @@ function rfToggleDetail() {
   var enabled = document.getElementById('rfDetailEnabled').checked;
   document.getElementById('rfDetailFields').style.display = enabled ? 'flex' : 'none';
   rfToggleSourceFeed();
+  rfWiz.render(); // enabling the route makes its ID field required
 }
 
 function rfToggleMergeParent() {
@@ -9280,6 +9709,9 @@ function rfGenerateApiKey() {
 }
 
 async function saveReportFeed() {
+  // Surface the offending step before the server rejects it — otherwise the
+  // error names a field sitting on a pane the user cannot see.
+  if (rfWiz.focusProblem()) return;
   const btn = document.getElementById('rfSaveBtn');
   const errEl = document.getElementById('rfError');
   errEl.style.display = 'none';
@@ -9791,6 +10223,9 @@ async function rfFetchPreview() {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Fetch Columns Preview';
+    // Hook 3: the preview builds the field-map rows and repopulates the detail
+    // selects, so the stepper's view of what is filled in has just changed.
+    rfWiz.render();
   }
 }
 
@@ -10160,7 +10595,7 @@ function rfClearInstance() {
   if (sel) sel.value = '';
 }
 
-// ─── System Errors (backend error feed) ──────────────────────────────────────
+// ─── System Alerts (backend error feed) ──────────────────────────────────────
 // Surfaces everything core/error-feed.ts captured: console.error/warn from any
 // module plus uncaught exceptions and unhandled rejections. Rows are grouped
 // server-side by fingerprint, so `count` is how many times that exact failure
@@ -10196,22 +10631,36 @@ async function fetchErrorStats() {
         _errLastToastedId = s.latestId;
       } else if (s.latestId > _errLastToastedId) {
         _errLastToastedId = s.latestId;
-        toast('Novo erro no backend — ver System Errors', 'error');
+        toast('Novo alerta do sistema — ver System Alerts', 'error');
       }
     }
   } catch (e) { /* badge is best-effort; never break the dashboard over it */ }
 }
 
 function renderErrorBadge(s) {
-  const badge = document.getElementById('navErrorBadge');
-  if (!badge) return;
   const n = s.openErrors || 0;
-  if (n > 0) {
-    badge.textContent = n > 99 ? '99+' : String(n);
-    badge.style.display = '';
-    badge.title = n + ' unacknowledged backend error' + (n === 1 ? '' : 's');
-  } else {
-    badge.style.display = 'none';
+  const label = n + ' unacknowledged system alert' + (n === 1 ? '' : 's');
+  const text = n > 99 ? '99+' : String(n);
+
+  // Two places show the same count: the sidebar entry, and the floating
+  // topbar button that stays visible on every page (and when the sidebar is
+  // collapsed on mobile).
+  const badge = document.getElementById('navErrorBadge');
+  if (badge) {
+    badge.textContent = text;
+    badge.style.display = n > 0 ? '' : 'none';
+    badge.title = label;
+  }
+
+  const topBadge = document.getElementById('topbarAlertBadge');
+  const topBtn = document.getElementById('alertsBtn');
+  if (topBadge) {
+    topBadge.textContent = text;
+    topBadge.style.display = n > 0 ? '' : 'none';
+  }
+  if (topBtn) {
+    topBtn.title = n > 0 ? label : 'System alerts';
+    topBtn.classList.toggle('has-alerts', n > 0);
   }
 }
 

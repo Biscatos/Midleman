@@ -9,7 +9,7 @@
   <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='system';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/dashboard/css/dashboard.css">
   <link rel="stylesheet" href="/dashboard/css/request-detail.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/ace.min.js" crossorigin="anonymous"></script>
@@ -22,6 +22,7 @@
   <!-- INJECT_LOGIN -->
   <!-- INJECT_APP -->
 
+  <script src="/dashboard/js/wizard.js"></script>
   <script src="/dashboard/js/dashboard-app.js"></script>
   <script src="/dashboard/js/dashboard-charts.js"></script>
   <script src="/dashboard/js/dashboard-data.js"></script>
