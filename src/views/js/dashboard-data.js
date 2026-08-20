@@ -207,16 +207,20 @@ function showContextMenu(e, btn) {
       u.totpEnabled
         ? { label: 'Disable 2FA', fn: () => disable2fa(u.id, u.username) }
         : (u.force2faSetup ? null : { label: 'Force 2FA', fn: () => force2fa(u.id, u.username) }),
+      u.blocked
+        ? { label: 'Unblock user', fn: () => toggleBlockProxyUser(u.id, u.username, false) }
+        : { label: 'Block user', fn: () => toggleBlockProxyUser(u.id, u.username, true), danger: true },
       '---',
-      { label: 'Delete', fn: () => deleteProxyUserAction(u.id, u.username), danger: true },
+      // Admins are removed from the Admins page — deleting them here is
+      // refused by the backend, so the entry is hidden to avoid confusion.
+      u.isAdmin ? null : { label: 'Delete', fn: () => deleteProxyUserAction(u.id, u.username), danger: true },
     ]);
   }
 }
 
 // ─── Data Fetch ──────────────────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchConnectors(), fetchFive9Connectors(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchConsentPages(), fetchLdapConfigs(), fetchLdapAdoptions(), fetchNotifGroups(), fetchNotifRules(), loadReportFeeds(), loadGcInstances(), fetchNpmConfig()]);
-  renderResourceIndicators();
+  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchConnectors(), fetchFive9Connectors(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchConsentPages(), fetchLdapConfigs(), fetchLdapAdoptions()]);
 }
 
 async function fetchHealth() {
@@ -233,6 +237,10 @@ async function fetchHealth() {
     document.getElementById('ovActive').textContent = (typeof d.activeRequests === 'number') ? d.activeRequests : '—';
     document.getElementById('ovProfiles').textContent = (typeof d.proxyProfiles === 'number') ? d.proxyProfiles : '—';
     document.getElementById('ovWebhooks').textContent = (typeof d.webhooks === 'number') ? d.webhooks : '—';
+    const cpuEl = document.getElementById('ovCpu');
+    if (cpuEl) cpuEl.textContent = (d.process && typeof d.process.cpuPercent === 'number') ? d.process.cpuPercent.toFixed(1) + '%' : '—';
+    const memEl = document.getElementById('ovMem');
+    if (memEl) memEl.textContent = (d.process && typeof d.process.memRssMb === 'number') ? fmtBytes(d.process.memRssMb * 1048576) : '—';
   } catch {
     document.getElementById('navDot').className = 'status-dot offline';
     document.getElementById('navStatus').textContent = 'Offline';
@@ -242,54 +250,6 @@ async function fetchHealth() {
     document.getElementById('ovStatus').textContent = 'Offline';
     document.getElementById('ovStatus').style.color = 'var(--red)';
   }
-}
-
-// ─── Resource indicators (Overview) ──────────────────────────────────────────
-// One clickable tile per resource type Midleman manages; counts come from the
-// collections refreshAll() just fetched, so no extra endpoint is needed.
-function renderResourceIndicators() {
-  const grid = document.getElementById('ovResourcesGrid');
-  if (!grid) return;
-  const svg = inner => '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
-  const items = [
-    { label: 'Users', page: 'proxyusers', count: _allProxyUsers.length,
-      sub: _allInvites.length ? _allInvites.length + ' pending invite' + (_allInvites.length > 1 ? 's' : '') : 'no pending invites',
-      icon: svg('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>') },
-    { label: 'HTTP Proxies', page: 'profiles', count: _allProfiles.length, sub: 'forward profiles',
-      icon: svg('<rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><line x1="7" y1="7" x2="7.01" y2="7"/><line x1="7" y1="17" x2="7.01" y2="17"/><line x1="11" y1="7" x2="17" y2="7"/><line x1="11" y1="17" x2="17" y2="17"/>') },
-    { label: 'NPM Hosts', page: 'npm', count: _npmHostsAll.length, sub: 'nginx proxy manager',
-      icon: svg('<path d="M4 4v16"/><path d="M20 4v16"/><path d="M8 12h7"/><path d="M12.5 8.5 16 12l-3.5 3.5"/>') },
-    { label: 'Webhooks', page: 'webhooks', count: _allWebhooks.length, sub: 'outbound fans',
-      icon: svg('<circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M8 6h8"/><path d="M7.5 7.5l3 7"/><path d="M16.5 7.5l-3 7"/>') },
-    { label: 'Chat Connectors', page: 'connectors', count: _allConnectors.length, sub: 'messaging channels',
-      icon: svg('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>') },
-    { label: 'Five9 Connectors', page: 'connectors', count: _allFive9Connectors.length, sub: 'digital engagement',
-      icon: svg('<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>') },
-    { label: 'OAuth Clients', page: 'oauthclients', count: _allOauthClients.length, sub: 'authorized apps',
-      icon: svg('<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>') },
-    { label: 'Consent Pages', page: 'consentpages', count: _consentPages.length, sub: 'oauth screens',
-      icon: svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/><line x1="9" y1="9" x2="11" y2="9"/>') },
-    { label: 'LDAP', page: 'ldap', count: _ldapConfigs.length, sub: 'directories',
-      icon: svg('<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/>') },
-    { label: 'Notification Groups', page: 'notifications', count: _notifGroups.length,
-      sub: _notifRules.length + ' routing rule' + (_notifRules.length === 1 ? '' : 's'),
-      icon: svg('<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>') },
-    { label: 'Report Feeds', page: 'reports', count: _allReportFeeds.length, sub: 'gocontact reports',
-      icon: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>') },
-    { label: 'GoContact', page: 'reports', count: _gcInstances.length, sub: 'instances',
-      icon: svg('<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>') },
-  ];
-  grid.innerHTML = items.map(it =>
-    '<button type="button" class="resource-tile" onclick="navigate(\'' + it.page + '\')">' +
-      '<span class="resource-tile-icon">' + it.icon + '</span>' +
-      '<span class="resource-tile-count">' + fmtNum(it.count) + '</span>' +
-      '<span class="resource-tile-label">' + it.label + '</span>' +
-      '<span class="resource-tile-sub">' + it.sub + '</span>' +
-    '</button>'
-  ).join('');
-  const total = items.reduce((s, it) => s + it.count, 0);
-  const totalEl = document.getElementById('ovResourcesTotal');
-  if (totalEl) totalEl.textContent = fmtNum(total) + ' total';
 }
 
 async function fetchRequestLogStats() {
@@ -1172,6 +1132,9 @@ function filterProxyUsersByRole() {
 
 function _roleBadge(u) {
   const parts = [];
+  if (u.blocked) {
+    parts.push('<span style="display:inline-block;background:rgba(225,112,85,.12);color:var(--red);border:1px solid rgba(225,112,85,.3);border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em" title="Blocked accounts cannot sign in anywhere">BLOCKED</span>');
+  }
   if (u.isAdmin) {
     parts.push('<span style="display:inline-block;background:rgba(59,130,246,.15);color:#2563eb;border:1px solid rgba(59,130,246,.3);border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em">ADMIN</span>');
   } else {
@@ -1209,7 +1172,7 @@ function renderProxyUsers(users) {
       : '';
     const emailCell = (emailLine || phoneLine) ? (emailLine + phoneLine) : `<span style="color:var(--text3)">—</span>`;
     const actionsCell = `<button data-type="proxyUser" data-id="${u.id}" onclick="showContextMenu(event,this)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:2px 10px;cursor:pointer;color:var(--text2);font-size:18px;line-height:1.2;letter-spacing:1px" title="Actions">&#8942;</button>`;
-    return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
+    return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s${u.blocked ? ';opacity:.55' : ''}" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
       <td style="padding:8px 12px">${nameCell}</td>
       <td style="padding:8px">${emailCell}</td>
       <td style="padding:8px">${_roleBadge(u)}</td>
@@ -1292,6 +1255,24 @@ async function deleteProxyUserAction(id, username) {
   try {
     const res = await api('/admin/proxy-users/' + id, { method: 'DELETE' });
     if (res.ok) { toast('User deleted'); fetchProxyUsers(); } else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function toggleBlockProxyUser(id, username, block) {
+  const confirmed = block
+    ? await showConfirm({
+        title: 'Bloquear utilizador',
+        message: 'Bloquear "' + username + '"?',
+        detail: 'O utilizador perde imediatamente todo o acesso: proxies, OAuth e área de administração. As sessões ativas são terminadas. Pode desbloquear a qualquer momento.',
+        confirmText: 'Bloquear',
+        danger: true,
+      })
+    : await showConfirm({ title: 'Desbloquear utilizador', message: 'Desbloquear "' + username + '"? O acesso é reposto de imediato.', confirmText: 'Desbloquear' });
+  if (!confirmed) return;
+  try {
+    const res = await api('/admin/proxy-users/' + id, { method: 'PUT', body: JSON.stringify({ blocked: block }) });
+    if (res.ok) { toast(block ? 'User blocked' : 'User unblocked'); fetchProxyUsers(); }
+    else { const d = await res.json().catch(() => ({})); toast(d.error || 'Failed', 'error'); }
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
@@ -1522,11 +1503,24 @@ let _userProfilesUsername = null;
 function openUserResourcesModal(userId, username) {
   _userProfilesUserId = userId;
   _userProfilesUsername = username;
-  document.getElementById('userProfilesTitle').textContent = 'Resources — ' + username;
+  // Context strip: avatar initial, display name, username · email, blocked flag.
+  const u = _allProxyUsers.find(x => x.id === userId);
+  const avatarEl = document.getElementById('urAvatar');
+  if (avatarEl) avatarEl.textContent = (((u && (u.fullName || u.username)) || username || '?').trim().charAt(0) || '?').toUpperCase();
+  const nameEl = document.getElementById('urName');
+  if (nameEl) nameEl.textContent = (u && u.fullName) || username;
+  const subEl = document.getElementById('urSub');
+  if (subEl) subEl.textContent = [username, u && u.email].filter(Boolean).join(' · ');
+  const blockedEl = document.getElementById('urBlockedBadge');
+  if (blockedEl) blockedEl.style.display = (u && u.blocked) ? '' : 'none';
+  if (typeof userResWiz !== 'undefined') {
+    userResWiz.open(true, { subtitle: 'Assign or remove the resources of ' + username });
+  }
   document.getElementById('userProfilesModal').classList.add('active');
   refreshUserResources();
 }
 function closeUserResourcesModal() {
+  if (typeof userResWiz !== 'undefined') userResWiz.close();
   document.getElementById('userProfilesModal').classList.remove('active');
   _userProfilesUserId = null;
   _userProfilesUsername = null;
@@ -1536,9 +1530,11 @@ function openUserProfilesModal(userId, username) { openUserResourcesModal(userId
 function closeUserProfilesModal() { closeUserResourcesModal(); }
 
 function _sourceBadge(source) {
-  if (source === 'direct') return '<span style="color:var(--text2);font-size:11px">Direct</span>';
-  if (source === 'ldap_group') return '<span style="color:var(--primary);font-size:11px" title="Granted by LDAP group membership">LDAP group</span>';
-  if (source === 'open') return '<span style="color:var(--text3);font-size:11px" title="Allow-list disabled — open to all users">Open</span>';
+  const pill = (label, bg, color, border, title) =>
+    '<span title="' + esc(title || '') + '" style="display:inline-block;background:' + bg + ';color:' + color + ';border:1px solid ' + border + ';border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em">' + label + '</span>';
+  if (source === 'direct') return pill('DIRECT', 'var(--accent-bg)', 'var(--accent)', 'rgba(0,120,212,0.25)', 'Assigned directly to this user');
+  if (source === 'ldap_group') return pill('LDAP GROUP', 'rgba(168,85,247,.12)', '#a855f7', 'rgba(168,85,247,.25)', 'Granted by LDAP group membership');
+  if (source === 'open') return pill('OPEN', 'var(--surface2)', 'var(--text3)', 'var(--border)', 'Allow-list disabled — open to all users');
   return '<span style="color:var(--text3)">—</span>';
 }
 
@@ -1571,6 +1567,8 @@ async function refreshUserResources() {
       });
     }
     const httpAssigned = httpProxies.filter(p => p.assigned);
+    const httpCountEl = document.getElementById('urHttpCount');
+    if (httpCountEl) httpCountEl.textContent = httpAssigned.length;
     if (httpBody) {
       if (httpAssigned.length === 0) {
         httpBody.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">No HTTP proxies accessible.</td></tr>';
@@ -1578,12 +1576,12 @@ async function refreshUserResources() {
         httpBody.innerHTML = httpAssigned.map(p => {
           const canRemove = p.source === 'direct';
           const action = canRemove
-            ? `<button onclick="removeProfileFromCurrentUser('${esc(p.name)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px">Remove</button>`
+            ? `<button onclick="removeProfileFromCurrentUser('${esc(p.name)}')" style="background:none;border:1px solid rgba(225,112,85,.35);border-radius:6px;padding:3px 10px;cursor:pointer;color:var(--red);font-size:11px;font-weight:600">Remove</button>`
             : '<span style="color:var(--text3);font-size:11px" title="Remove via the LDAP group rule">—</span>';
-          return `<tr style="border-bottom:1px solid var(--border)">
-            <td style="padding:8px 12px;font-weight:600;font-family:monospace">${esc(p.name)}</td>
-            <td style="padding:8px">${_sourceBadge(p.source)}</td>
-            <td style="padding:8px 12px;text-align:right">${action}</td>
+          return `<tr>
+            <td style="font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${esc(p.name)}</td>
+            <td>${_sourceBadge(p.source)}</td>
+            <td style="text-align:right">${action}</td>
           </tr>`;
         }).join('');
       }
@@ -1601,6 +1599,8 @@ async function refreshUserResources() {
       });
     }
     const oauthAssigned = oauthClients.filter(c => c.assigned);
+    const oauthCountEl = document.getElementById('urOauthCount');
+    if (oauthCountEl) oauthCountEl.textContent = oauthAssigned.length;
     if (oauthBody) {
       if (oauthAssigned.length === 0) {
         oauthBody.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">No OAuth clients accessible.</td></tr>';
@@ -1608,12 +1608,12 @@ async function refreshUserResources() {
         oauthBody.innerHTML = oauthAssigned.map(c => {
           const canRemove = c.source === 'direct';
           const action = canRemove
-            ? `<button onclick="removeOauthClientFromCurrentUser('${esc(c.clientId)}','${esc(c.name || c.clientId)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--red);font-size:11px">Remove</button>`
+            ? `<button onclick="removeOauthClientFromCurrentUser('${esc(c.clientId)}','${esc(c.name || c.clientId)}')" style="background:none;border:1px solid rgba(225,112,85,.35);border-radius:6px;padding:3px 10px;cursor:pointer;color:var(--red);font-size:11px;font-weight:600">Remove</button>`
             : '<span style="color:var(--text3);font-size:11px" title="Granted by LDAP or open allow-list">—</span>';
-          return `<tr style="border-bottom:1px solid var(--border)">
-            <td style="padding:8px 12px;font-weight:600">${esc(c.name || c.clientId)}<div style="font-size:10px;color:var(--text3);font-family:monospace">${esc(c.clientId)}</div></td>
-            <td style="padding:8px">${_sourceBadge(c.source)}</td>
-            <td style="padding:8px 12px;text-align:right">${action}</td>
+          return `<tr>
+            <td style="font-weight:600">${esc(c.name || c.clientId)}<div style="font-size:10px;color:var(--text3);font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${esc(c.clientId)}</div></td>
+            <td>${_sourceBadge(c.source)}</td>
+            <td style="text-align:right">${action}</td>
           </tr>`;
         }).join('');
       }
@@ -1774,13 +1774,14 @@ async function openCreateInviteModal() {
   document.getElementById('inviteGenError').style.display = 'none';
   document.getElementById('inviteGenResult').style.display = 'none';
   document.getElementById('inviteGenForm').style.display = '';
-  document.getElementById('inviteGenFooter').innerHTML = '<button class="btn" onclick="closeCreateInviteModal()">Close</button><button class="btn btn-primary" onclick="generateInvite()" id="inviteGenBtn">Generate Link</button>';
+  const shell = document.getElementById('inviteWizShell');
+  if (shell) shell.style.display = '';
+  if (typeof inviteWiz !== 'undefined') inviteWiz.open(false);
   document.getElementById('invEmailInput').value = '';
   document.getElementById('invNameInput').value = '';
   document.getElementById('invNoteInput').value = '';
   document.getElementById('invExpirySelect').value = '48';
-  document.getElementById('invAsAdmin').checked = false;
-  document.getElementById('invResourcesGroup').style.display = '';
+  invSelectType('user');
   const ps = document.getElementById('invProxySearch'); if (ps) ps.value = '';
   const os = document.getElementById('invOauthSearch'); if (os) os.value = '';
   const resendBtn = document.getElementById('resendInviteBtn');
@@ -1846,11 +1847,26 @@ function closeCreateInviteModal() {
 }
 
 function toggleInviteType() {
-  const asAdmin = document.getElementById('invAsAdmin').checked;
-  document.getElementById('invResourcesGroup').style.display = asAdmin ? 'none' : '';
+  // Back-compat alias — selection now happens through the account type cards.
+  invSelectType(document.getElementById('invAsAdmin').checked ? 'admin' : 'user');
+}
+
+/** Selects an account type card ('admin' | 'user'). The hidden invAsAdmin
+ *  checkbox stays the single source of truth for the rest of the code. */
+function invSelectType(kind) {
+  const asAdmin = kind === 'admin';
+  const cb = document.getElementById('invAsAdmin');
+  if (cb) cb.checked = asAdmin;
+  const adminCard = document.getElementById('invTypeAdminCard');
+  const userCard = document.getElementById('invTypeUserCard');
+  if (adminCard) adminCard.classList.toggle('is-selected', asAdmin);
+  if (userCard) userCard.classList.toggle('is-selected', !asAdmin);
+  // The Proxies / OAuth steps disappear from the wizard nav for admin invites.
+  if (typeof inviteWiz !== 'undefined') inviteWiz.render();
 }
 
 async function generateInvite() {
+  if (typeof inviteWiz !== 'undefined' && inviteWiz.focusProblem && inviteWiz.focusProblem()) return;
   const errEl = document.getElementById('inviteGenError');
   errEl.style.display = 'none';
   const asAdmin = document.getElementById('invAsAdmin').checked;
@@ -1866,8 +1882,9 @@ async function generateInvite() {
   if (!invitedName) { errEl.textContent = 'Enter the invitee\'s name.'; errEl.style.display = 'block'; return; }
   const note = document.getElementById('invNoteInput').value.trim();
   const expiresInHours = parseInt(document.getElementById('invExpirySelect').value, 10);
-  const btn = document.getElementById('inviteGenBtn');
-  btn.disabled = true; btn.textContent = 'Generating...';
+  const btn = (typeof inviteWiz !== 'undefined' && inviteWiz.saveBtn) ? inviteWiz.saveBtn : null;
+  const btnOrigLabel = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Generating...'; }
   try {
     const endpoint = asAdmin ? '/admin/admins/invite' : '/admin/invites';
     const payload = asAdmin
@@ -1875,12 +1892,14 @@ async function generateInvite() {
       : { profileNames, oauthClientIds, email, invitedName, note, expiresInHours };
     const res = await api(endpoint, { method: 'POST', body: JSON.stringify(payload) });
     const data = await res.json();
-    if (!res.ok) { errEl.textContent = data.error || 'Failed to generate invite.'; errEl.style.display = 'block'; btn.disabled = false; btn.textContent = 'Generate Link'; return; }
+    if (!res.ok) { errEl.textContent = data.error || 'Failed to generate invite.'; errEl.style.display = 'block'; if (btn) { btn.disabled = false; btn.textContent = btnOrigLabel || 'Generate Link'; } return; }
     const inviteToken = data.invite?.token || '';
     const link = data.inviteUrl || (window.location.origin + (asAdmin ? '/admin-invite/' : '/invite/') + inviteToken);
     document.getElementById('inviteLinkInput').value = link;
-    document.getElementById('inviteGenResult').style.display = 'block';
-    document.getElementById('inviteGenForm').style.display = 'none';
+    // Swap the wizard for the result panel (link + email actions live there).
+    document.getElementById('inviteGenResult').style.display = '';
+    const wizShell = document.getElementById('inviteWizShell');
+    if (wizShell) wizShell.style.display = 'none';
     // Stash token + flavor so the "Send by email" button can resend later.
     _lastInviteToken = inviteToken;
     _lastInviteIsAdmin = !!asAdmin;
@@ -1902,11 +1921,10 @@ async function generateInvite() {
         if (resendBtn) resendBtn.style.display = 'none';
       }
     }
-    document.getElementById('inviteGenFooter').innerHTML = '<button class="btn" onclick="closeCreateInviteModal()">Close</button><button class="btn btn-primary" onclick="openCreateInviteModal()">Generate Another</button>';
     fetchInvites();
   } catch (e) {
     errEl.textContent = 'Error: ' + e.message; errEl.style.display = 'block';
-    btn.disabled = false; btn.textContent = 'Generate Link';
+    if (btn) { btn.disabled = false; btn.textContent = btnOrigLabel || 'Generate Link'; }
   }
 }
 
@@ -2407,6 +2425,37 @@ const smsWiz = Wizard.mount('smsConfigModal', {
 function _smsPrefixRuleCount() {
   return _smsCurrentPrefixRules.filter(r => (r.prefix || '').trim() !== '' || r.provider).length;
 }
+
+const inviteWiz = Wizard.mount('createInviteModal', {
+  title: 'Generate Invite',
+  subtitle: 'One-time link that creates a new account or links access to an existing one',
+  saveLabel: 'Generate Link',
+  onClose: () => closeCreateInviteModal(),
+  onSave: () => generateInvite(),
+  hidden: id => (id === 'proxies' || id === 'oauth') && Wizard.checked('invAsAdmin'),
+  problems() {
+    const p = {};
+    const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
+    if (!Wizard.checked('invAsAdmin')) {
+      const anySelected = document.querySelector('.inv-proxy-cb:checked') || document.querySelector('.inv-oauth-cb:checked');
+      if (!anySelected) flag('proxies', 'Select at least one proxy or OAuth client');
+    }
+    const email = Wizard.val('invEmailInput');
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) flag('details', 'Enter a valid email for the invitee');
+    else if (!Wizard.val('invNameInput')) flag('details', "Enter the invitee's name");
+    return p;
+  },
+});
+
+// Resources modal is live management (assign/remove act immediately), so it
+// opens in edit mode: both steps unlocked, "Done" always available.
+const userResWiz = Wizard.mount('userProfilesModal', {
+  title: 'Manage Resources',
+  subtitle: 'Assign or remove the resources this user can access',
+  saveLabel: 'Done',
+  onClose: () => closeUserResourcesModal(),
+  onSave: () => closeUserResourcesModal(),
+});
 
 
 function connectorChannelChanged() {

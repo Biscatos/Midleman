@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS proxy_users (
     phone_number TEXT NOT NULL DEFAULT '',
     phone_verified INTEGER NOT NULL DEFAULT 0,
     sms_2fa_enabled INTEGER NOT NULL DEFAULT 0,
+    blocked      INTEGER NOT NULL DEFAULT 0,
     roles        TEXT NOT NULL DEFAULT 'proxy',
     created_by_user_id INTEGER,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
@@ -385,6 +386,7 @@ function ensureProxyUsersColumns(d: Database): void {
         if (!cols.includes('phone_number')) d.exec("ALTER TABLE proxy_users ADD COLUMN phone_number TEXT NOT NULL DEFAULT ''");
         if (!cols.includes('phone_verified')) d.exec("ALTER TABLE proxy_users ADD COLUMN phone_verified INTEGER NOT NULL DEFAULT 0");
         if (!cols.includes('sms_2fa_enabled')) d.exec("ALTER TABLE proxy_users ADD COLUMN sms_2fa_enabled INTEGER NOT NULL DEFAULT 0");
+        if (!cols.includes('blocked')) d.exec("ALTER TABLE proxy_users ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0");
     } catch {}
 }
 
@@ -1052,12 +1054,17 @@ export function createSession(userId: number, ip: string, userAgent: string): st
 export function validateSession(sessionId: string): { user: AuthUser } | null {
     if (!db || !sessionId) return null;
     const row = db.prepare(`
-        SELECT s.id, s.expires_at, u.id as user_id, u.username, u.created_at, u.roles
+        SELECT s.id, s.expires_at, u.id as user_id, u.username, u.created_at, u.roles, u.blocked
         FROM sessions s JOIN proxy_users u ON s.user_id = u.id
         WHERE s.id = $id
     `).get({ $id: sessionId }) as any;
     if (!row) return null;
     if (new Date(row.expires_at) < new Date()) {
+        db.prepare('DELETE FROM sessions WHERE id = $id').run({ $id: sessionId });
+        return null;
+    }
+    // A blocked account loses every open session immediately.
+    if (row.blocked) {
         db.prepare('DELETE FROM sessions WHERE id = $id').run({ $id: sessionId });
         return null;
     }
@@ -1190,6 +1197,7 @@ function rowToProxyUser(r: any): ProxyUser {
         phoneNumber: r.phone_number ?? '',
         phoneVerified: !!r.phone_verified,
         sms2faEnabled: !!r.sms_2fa_enabled,
+        blocked: !!r.blocked,
     };
 }
 
@@ -1208,14 +1216,14 @@ export function listAllProxyUsers(): ProxyUser[] {
     // (admins lived in a separate table and had mirror rows here). After the
     // migration any admin is just a regular row with 'admin' in `roles`.
     const rows = db.prepare(
-        "SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, phone_number, phone_verified, sms_2fa_enabled, created_at FROM proxy_users WHERE auth_source != 'admin_shadow' ORDER BY username"
+        "SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, phone_number, phone_verified, sms_2fa_enabled, blocked, created_at FROM proxy_users WHERE auth_source != 'admin_shadow' ORDER BY username"
     ).all() as any[];
     return rows.map(rowToProxyUser);
 }
 
 export function getProxyUser(id: number): ProxyUser | null {
     if (!db) return null;
-    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, phone_number, phone_verified, sms_2fa_enabled, created_at FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
+    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, phone_number, phone_verified, sms_2fa_enabled, blocked, created_at FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
     return row ? rowToProxyUser(row) : null;
 }
 
@@ -1249,6 +1257,20 @@ export function deleteProxyUser(id: number): boolean {
     const row = db.prepare("SELECT roles FROM proxy_users WHERE id = $id").get({ $id: id }) as any;
     if (row && String(row.roles || '').includes('admin')) return false;
     const result = db.prepare('DELETE FROM proxy_users WHERE id = $id').run({ $id: id });
+    return result.changes > 0;
+}
+
+/** Block or unblock an account. Blocking destroys all open dashboard/SSO
+ *  sessions immediately; login paths (local, LDAP shadow, OAuth) all refuse
+ *  blocked accounts, so the user loses access to everything at once. */
+export function setProxyUserBlocked(id: number, blocked: boolean): boolean {
+    if (!db) return false;
+    const result = db.prepare("UPDATE proxy_users SET blocked = $b, updated_at = datetime('now') WHERE id = $id")
+        .run({ $b: blocked ? 1 : 0, $id: id });
+    if (blocked && result.changes > 0) {
+        db.prepare('DELETE FROM sessions WHERE user_id = $id').run({ $id: id });
+        try { db.prepare('DELETE FROM oauth_sso_sessions WHERE user_id = $id').run({ $id: id }); } catch { /* table may not exist yet */ }
+    }
     return result.changes > 0;
 }
 
@@ -1305,11 +1327,14 @@ export function updateProxyUserInfo(id: number, fullName: string, email: string,
 export async function verifyProxyUserCredentials(login: string, password: string): Promise<{ user: ProxyUser; totpSecret: string | null } | null> {
     if (!db) return null;
     // Try username first, then email
-    let row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, phone_number, phone_verified, sms_2fa_enabled, created_at FROM proxy_users WHERE username = $u').get({ $u: login }) as any;
+    let row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, phone_number, phone_verified, sms_2fa_enabled, blocked, created_at FROM proxy_users WHERE username = $u').get({ $u: login }) as any;
     if (!row && login.includes('@')) {
-        row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, phone_number, phone_verified, sms_2fa_enabled, created_at FROM proxy_users WHERE email = $e').get({ $e: login.toLowerCase() }) as any;
+        row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, phone_number, phone_verified, sms_2fa_enabled, blocked, created_at FROM proxy_users WHERE email = $e').get({ $e: login.toLowerCase() }) as any;
     }
     if (!row) return null;
+    // Blocked accounts cannot authenticate — same generic failure as a bad
+    // password so the response reveals nothing about the account's state.
+    if (row.blocked) return null;
     // Shadow accounts have no usable local password.
     if (row.auth_source === 'ldap') return null;
     const valid = await Bun.password.verify(password, row.password);
@@ -1515,7 +1540,7 @@ export interface LdapProxyProvisionInput {
 
 export type LdapProvisionOutcome =
     | { ok: true; user: ProxyUser; adopted?: { eventId: number; previousAuthSource: string; matchedOn: 'email' } }
-    | { ok: false; reason: 'username_collision' | 'multi_directory_conflict' | 'local_has_totp' | 'auto_adopt_disabled' | 'auth_unavailable';
+    | { ok: false; reason: 'username_collision' | 'multi_directory_conflict' | 'local_has_totp' | 'auto_adopt_disabled' | 'blocked' | 'auth_unavailable';
         collidingUserId?: number; otherConfigId?: number }
 ;
 
@@ -1557,6 +1582,9 @@ export function upsertLdapShadowProxyUserDetailed(input: LdapProxyProvisionInput
     // A) Same LDAP identity → straight update.
     const existing = findLdapShadowProxyUser(input.ldapConfigId, input.ldapDn);
     if (existing) {
+        // A blocked account stays blocked — directory sync must not resurrect access.
+        const b = db.prepare('SELECT blocked FROM proxy_users WHERE id = $id').get({ $id: existing.id }) as any;
+        if (b?.blocked) return { ok: false, reason: 'blocked' };
         db.prepare(`UPDATE proxy_users
             SET full_name = $fn, email = $em,
                 ldap_groups_last_seen = $g, ldap_last_sync_at = datetime('now'),
@@ -1569,9 +1597,10 @@ export function upsertLdapShadowProxyUserDetailed(input: LdapProxyProvisionInput
 
     // B+C) Look for an email collision (only if we have a non-empty email).
     if (normalizedEmail) {
-        const emailRow = db.prepare(`SELECT id, auth_source, ldap_config_id, totp_enabled, password, username, email, roles
+        const emailRow = db.prepare(`SELECT id, auth_source, ldap_config_id, totp_enabled, password, username, email, roles, blocked
             FROM proxy_users WHERE email = $e AND email != ''`).get({ $e: normalizedEmail }) as any;
         if (emailRow) {
+            if (emailRow.blocked) return { ok: false, reason: 'blocked' };
             if (emailRow.auth_source === 'ldap' && emailRow.ldap_config_id !== input.ldapConfigId) {
                 // B) Cross-directory conflict — always refuse.
                 return { ok: false, reason: 'multi_directory_conflict', collidingUserId: emailRow.id, otherConfigId: emailRow.ldap_config_id };

@@ -299,6 +299,8 @@ export interface ProxyUser {
   phoneVerified?: boolean;
   /** Whether the user opted in to SMS as their 2FA factor. */
   sms2faEnabled?: boolean;
+  /** Blocked accounts cannot authenticate anywhere (proxy, OAuth, dashboard). */
+  blocked?: boolean;
 }
 
 /**

@@ -229,18 +229,15 @@
           <div class="stat-value" id="ovWebhooks">--</div>
           <div class="stat-sub">active fans</div>
         </div>
-      </div>
-
-      <!-- Resource inventory -->
-      <div class="card" style="margin-bottom:24px">
-        <div class="card-header">
-          <h3>Resources</h3>
-          <span id="ovResourcesTotal" style="font-size:12px;color:var(--text3);font-family:'JetBrains Mono',monospace"></span>
+        <div class="stat-card">
+          <div class="stat-label">CPU</div>
+          <div class="stat-value" id="ovCpu">--</div>
+          <div class="stat-sub">process usage</div>
         </div>
-        <div class="card-body">
-          <div class="resource-grid" id="ovResourcesGrid">
-            <div style="color:var(--text3);font-size:13px;text-align:center;padding:12px;grid-column:1/-1">Loading...</div>
-          </div>
+        <div class="stat-card">
+          <div class="stat-label">Memory</div>
+          <div class="stat-value" id="ovMem">--</div>
+          <div class="stat-sub">rss</div>
         </div>
       </div>
 
@@ -4611,80 +4608,84 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
 
 <!-- Manage User Resources Modal (assign/remove HTTP proxies + OAuth clients) -->
 <div class="modal-overlay" id="userProfilesModal">
-  <div class="modal" style="max-width:620px">
-    <div class="modal-header">
-      <h3 id="userProfilesTitle">Resources</h3><button class="close-btn"
-        onclick="closeUserResourcesModal()">&times;</button>
-    </div>
-    <div class="modal-body">
-
-      <!-- ── HTTP Proxies ─────────────────────────────────────────────── -->
-      <div style="margin-bottom:22px">
-        <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:var(--text3);margin-bottom:10px">HTTP Proxies</div>
-        <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
-          <select id="upAddSelect"
-            style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
-            <option value="">Select proxy to assign...</option>
-          </select>
-          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A atribuir…', async () => { await assignProfileToCurrentUser(); })"
-            style="white-space:nowrap">Assign</button>
-        </div>
-        <table style="width:100%;border-collapse:collapse;font-size:13px">
-          <thead>
-            <tr style="background:var(--surface2);text-align:left">
-              <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Proxy</th>
-              <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Source</th>
-              <th style="padding:8px 12px"></th>
-            </tr>
-          </thead>
-          <tbody id="upListBody">
-            <tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">Loading...</td></tr>
-          </tbody>
-        </table>
+  <div class="wz-shell">
+    <!-- User context strip — pinned under the title bar, visible on every step -->
+    <div data-wz-pos="top" style="display:flex;align-items:center;gap:12px;padding:14px 22px;border-bottom:1px solid var(--border);background:var(--surface2)">
+      <div id="urAvatar" style="width:38px;height:38px;border-radius:10px;background:var(--accent-bg);color:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:15px;flex-shrink:0">?</div>
+      <div style="min-width:0;flex:1">
+        <div id="urName" style="font-weight:600;font-size:14px;color:var(--text)">—</div>
+        <div id="urSub" style="font-size:12px;color:var(--text3);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</div>
       </div>
-
-      <!-- ── OAuth Clients ────────────────────────────────────────────── -->
-      <div style="padding-top:18px;border-top:1px solid var(--border)">
-        <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:var(--text3);margin-bottom:10px">OAuth Clients</div>
-        <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
-          <select id="urcOauthSelect"
-            style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
-            <option value="">Select OAuth client to assign...</option>
-          </select>
-          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A atribuir…', async () => { await assignOauthClientToCurrentUser(); })"
-            style="white-space:nowrap">Assign</button>
-        </div>
-        <table style="width:100%;border-collapse:collapse;font-size:13px">
-          <thead>
-            <tr style="background:var(--surface2);text-align:left">
-              <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Client</th>
-              <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Source</th>
-              <th style="padding:8px 12px"></th>
-            </tr>
-          </thead>
-          <tbody id="urcOauthListBody">
-            <tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">Loading...</td></tr>
-          </tbody>
-        </table>
-      </div>
-
+      <span id="urBlockedBadge" style="display:none;background:rgba(225,112,85,.12);color:var(--red);border:1px solid rgba(225,112,85,.3);border-radius:10px;padding:2px 9px;font-size:10.5px;font-weight:600;letter-spacing:.04em">BLOCKED</span>
     </div>
-    <div class="modal-footer"><button class="btn" onclick="closeUserResourcesModal()">Close</button></div>
+
+    <section class="wz-step wz-stack" data-step-id="proxies" data-step-title="Proxies" data-step-hint="HTTP proxies this user can connect through">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="var(--text2)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><line x1="7" y1="7" x2="7.01" y2="7"/><line x1="7" y1="17" x2="7.01" y2="17"/><line x1="11" y1="7" x2="17" y2="7"/><line x1="11" y1="17" x2="17" y2="17"/></svg>
+        <span id="urHttpCount" class="ur-count">0</span>
+        <span style="font-size:11px;color:var(--text3)">assigned</span>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+        <select id="upAddSelect"
+          style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
+          <option value="">Select proxy to assign...</option>
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A atribuir…', async () => { await assignProfileToCurrentUser(); })"
+          style="white-space:nowrap">Assign</button>
+      </div>
+      <table class="ur-table">
+        <thead>
+          <tr>
+            <th>Proxy</th>
+            <th>Source</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="upListBody">
+          <tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="wz-step wz-stack" data-step-id="oauth" data-step-title="OAuth access" data-step-hint="OAuth clients this user can sign into">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="var(--text2)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+        <span id="urOauthCount" class="ur-count">0</span>
+        <span style="font-size:11px;color:var(--text3)">assigned</span>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+        <select id="urcOauthSelect"
+          style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
+          <option value="">Select OAuth client to assign...</option>
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A atribuir…', async () => { await assignOauthClientToCurrentUser(); })"
+          style="white-space:nowrap">Assign</button>
+      </div>
+      <table class="ur-table">
+        <thead>
+          <tr>
+            <th>Client</th>
+            <th>Source</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="urcOauthListBody">
+          <tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
   </div>
 </div>
 
-<!-- Create Invite Modal -->
+<!-- Create Invite Modal (wizard) -->
 <div class="modal-overlay" id="createInviteModal">
-  <div class="modal" style="max-width:min(720px, 95vw);width:100%">
-    <div class="modal-header">
-      <h3>Generate Invite Link</h3>
+  <!-- Result panel — shown after the link is generated, replaces the wizard -->
+  <div id="inviteGenResult" style="display:none;max-width:560px;width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden">
+    <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:16px">
+      <h3 style="margin:0;font-size:16px">Invite link generated</h3>
       <button class="close-btn" onclick="closeCreateInviteModal()">&times;</button>
     </div>
-    <div class="modal-body">
-      <div id="inviteGenError" style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);color:#fca5a5;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px"></div>
-
-      <!-- Result area (hidden until generated) -->
-      <div id="inviteGenResult" style="display:none;margin-bottom:16px">
+    <div style="padding:18px 22px">
         <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px;display:flex;align-items:center;gap:6px">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
           Link generated successfully
@@ -4702,60 +4703,76 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           </button>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:6px">Share this link with the user. It can be used only once.</div>
+    </div>
+    <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn" onclick="closeCreateInviteModal()">Close</button>
+      <button class="btn btn-primary" onclick="openCreateInviteModal()">Generate Another</button>
+    </div>
+  </div>
+
+  <div class="wz-shell" id="inviteWizShell">
+    <section class="wz-step wz-stack" data-step-id="type" data-step-title="Account type" data-step-hint="What the invitee becomes">
+      <input type="checkbox" id="invAsAdmin" style="display:none">
+      <div class="inv-type-grid">
+        <button type="button" class="inv-type-card" id="invTypeAdminCard" onclick="invSelectType('admin')">
+          <span class="inv-type-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
+          <span class="inv-type-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
+          <span class="inv-type-name">Administrator</span>
+          <span class="inv-type-desc">Full access to the dashboard, settings and every resource.</span>
+        </button>
+        <button type="button" class="inv-type-card is-selected" id="invTypeUserCard" onclick="invSelectType('user')">
+          <span class="inv-type-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
+          <span class="inv-type-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span>
+          <span class="inv-type-name">Resource user</span>
+          <span class="inv-type-desc">Access only to the proxies and OAuth clients selected in the next steps.</span>
+        </button>
       </div>
-
+    </section>
+    <section class="wz-step wz-stack" data-step-id="proxies" data-step-title="Proxies" data-step-hint="HTTP proxies the invitee can use">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:8px;flex-wrap:wrap">
+        <label style="margin:0">Proxies to assign <span style="color:var(--red)">*</span></label>
+        <span id="invSelectedSummary" style="font-size:11px;color:var(--text3)">Nothing selected</span>
+      </div>
+      <div class="inv-picker">
+        <div class="inv-picker-head">
+          <div class="inv-picker-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            <span>Proxies</span>
+            <span class="inv-picker-badge" id="invProxyCount">0</span>
+          </div>
+          <button type="button" class="inv-picker-action" onclick="invToggleAll('proxy')">Select visible</button>
+        </div>
+        <div class="inv-picker-search">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="invProxySearch" oninput="invFilter('proxy')" placeholder="Search proxies...">
+        </div>
+        <div id="invProxyList" class="inv-picker-list"><span class="inv-picker-empty">Loading...</span></div>
+      </div>
+      <p style="font-size:11px;color:var(--text3);margin:8px 0 0">Pick the proxies this user will be able to connect through.</p>
+    </section>
+    <section class="wz-step wz-stack" data-step-id="oauth" data-step-title="OAuth access" data-step-hint="OAuth clients the invitee can sign into">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:8px;flex-wrap:wrap">
+        <label style="margin:0">OAuth clients to grant</label>
+      </div>
+      <div class="inv-picker">
+        <div class="inv-picker-head">
+          <div class="inv-picker-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+            <span>OAuth clients</span>
+            <span class="inv-picker-badge" id="invOauthCount">0</span>
+          </div>
+          <button type="button" class="inv-picker-action" onclick="invToggleAll('oauth')">Select visible</button>
+        </div>
+        <div class="inv-picker-search">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="invOauthSearch" oninput="invFilter('oauth')" placeholder="Search OAuth clients...">
+        </div>
+        <div id="invOauthList" class="inv-picker-list"><span class="inv-picker-empty">Loading...</span></div>
+      </div>
+      <p style="font-size:11px;color:var(--text3);margin:8px 0 0">The user will be granted access to every selected resource.</p>
+    </section>
+    <section class="wz-step wz-stack" data-step-id="details" data-step-title="Invitee" data-step-hint="Who receives the invite">
       <div class="form-grid" style="gap:12px" id="inviteGenForm">
-        <div class="form-group span-2">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input type="checkbox" id="invAsAdmin" onchange="toggleInviteType()" style="accent-color:var(--accent);cursor:pointer">
-            <span>Invite as administrator (dashboard access)</span>
-          </label>
-          <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">If checked, resource selection below is ignored.</span>
-        </div>
-        <div class="form-group span-2" id="invResourcesGroup">
-          <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;gap:8px;flex-wrap:wrap">
-            <label style="margin:0">Resources to assign <span style="color:var(--red)">*</span></label>
-            <span id="invSelectedSummary" style="font-size:11px;color:var(--text3)">Nothing selected</span>
-          </div>
-
-          <div class="inv-picker-grid">
-            <!-- ── Proxies ─────────────────────────────────────────────────── -->
-            <div class="inv-picker">
-              <div class="inv-picker-head">
-                <div class="inv-picker-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-                  <span>Proxies</span>
-                  <span class="inv-picker-badge" id="invProxyCount">0</span>
-                </div>
-                <button type="button" class="inv-picker-action" onclick="invToggleAll('proxy')">Select visible</button>
-              </div>
-              <div class="inv-picker-search">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input type="text" id="invProxySearch" oninput="invFilter('proxy')" placeholder="Search proxies...">
-              </div>
-              <div id="invProxyList" class="inv-picker-list"><span class="inv-picker-empty">Loading...</span></div>
-            </div>
-
-            <!-- ── OAuth clients ──────────────────────────────────────────── -->
-            <div class="inv-picker">
-              <div class="inv-picker-head">
-                <div class="inv-picker-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-                  <span>OAuth clients</span>
-                  <span class="inv-picker-badge" id="invOauthCount">0</span>
-                </div>
-                <button type="button" class="inv-picker-action" onclick="invToggleAll('oauth')">Select visible</button>
-              </div>
-              <div class="inv-picker-search">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input type="text" id="invOauthSearch" oninput="invFilter('oauth')" placeholder="Search OAuth clients...">
-              </div>
-              <div id="invOauthList" class="inv-picker-list"><span class="inv-picker-empty">Loading...</span></div>
-            </div>
-          </div>
-
-          <p style="font-size:11px;color:var(--text3);margin:8px 0 0">The user will be granted access to every selected resource.</p>
-        </div>
         <div class="form-group span-2">
           <label>Invitee email <span style="color:var(--red)">*</span></label>
           <input type="email" id="invEmailInput" placeholder="e.g. john.doe@company.com" autocomplete="off">
@@ -4772,7 +4789,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
         <div class="form-group span-2">
           <label>Validity</label>
-          <select id="invExpirySelect" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px">
+          <select class="wz-input" id="invExpirySelect" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px">
             <option value="24">24 hours</option>
             <option value="48" selected>48 hours</option>
             <option value="72">3 days</option>
@@ -4782,11 +4799,8 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           </select>
         </div>
       </div>
-    </div>
-    <div class="modal-footer" id="inviteGenFooter">
-      <button class="btn" onclick="closeCreateInviteModal()">Close</button>
-      <button class="btn btn-primary" onclick="generateInvite()" id="inviteGenBtn">Generate Link</button>
-    </div>
+    </section>
+    <div id="inviteGenError" style="display:none;background:var(--red-bg);border:1px solid rgba(225,112,85,0.3);color:var(--red);padding:8px 12px;border-radius:6px;font-size:12px"></div>
   </div>
 </div>
 

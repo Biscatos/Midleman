@@ -81,6 +81,8 @@ class Wizard {
     // Anything else the page put in the shell — an error banner, a status
     // strip — belongs to the dialog as a whole, not to one step. Keep it
     // pinned between the panes and the footer instead of discarding it.
+    // Extras carrying data-wz-pos="top" pin under the title bar instead
+    // (context strips: who/what the whole dialog is about).
     const extras = [...this.shell.children].filter(el => !el.classList.contains('wz-step'));
 
     // Each pane gets its own heading, so the step is named twice — once in the
@@ -138,7 +140,9 @@ class Wizard {
     this.nextBtn.addEventListener('click', () => this.step(1));
     this.saveBtn.addEventListener('click', ev => this.cfg.onSave?.(ev));
 
-    this.shell.replaceChildren(titlebar, main, ...extras, foot);
+    const topExtras = extras.filter(el => el.dataset.wzPos === 'top');
+    const bottomExtras = extras.filter(el => el.dataset.wzPos !== 'top');
+    this.shell.replaceChildren(titlebar, ...topExtras, main, ...bottomExtras, foot);
     extras.forEach(el => el.classList.add('wz-extra'));
   }
 

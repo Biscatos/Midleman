@@ -715,7 +715,7 @@ body.sidebar-collapsed .sidebar-link:hover[data-tooltip]::after { opacity: 1; }
 /* ─── Stats Grid ──────────────────────────────────────────────────────────── */
 .stats-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
+  grid-template-columns: repeat(6, 1fr);
   gap: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -764,53 +764,47 @@ body.sidebar-collapsed .sidebar-link:hover[data-tooltip]::after { opacity: 1; }
   font-family: 'JetBrains Mono', monospace;
 }
 
-/* Resource inventory tiles (Overview → Resources) */
-.resource-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
-  gap: 12px;
-}
-
-.resource-tile {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: baseline;
-  column-gap: 8px;
-  padding: 14px 16px;
-  background: var(--surface);
+/* User Resources modal (Users → action menu → Resources) */
+.ur-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: var(--surface2);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  text-align: left;
-  font: inherit;
-  transition: background var(--transition), border-color var(--transition);
-}
-.resource-tile:hover { background: var(--surface2); border-color: var(--border2); }
-
-.resource-tile-icon { grid-column: 1; grid-row: 1; display: flex; color: var(--text3); transition: color var(--transition); }
-.resource-tile:hover .resource-tile-icon { color: var(--accent); }
-.resource-tile-count {
-  grid-column: 2;
-  grid-row: 1;
-  justify-self: end;
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.5px;
-  line-height: 1;
-  color: var(--text);
+  color: var(--text2);
+  font-size: 11px;
+  font-weight: 600;
   font-family: 'JetBrains Mono', monospace;
 }
-.resource-tile-label { grid-column: 1 / -1; grid-row: 2; font-size: 12px; font-weight: 500; color: var(--text); margin-top: 8px; }
-.resource-tile-sub {
-  grid-column: 1 / -1;
-  grid-row: 3;
-  font-size: 11px;
-  color: var(--text3);
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+
+.ur-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
 }
+.ur-table thead th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text3);
+  background: var(--surface2);
+}
+.ur-table thead th:first-child { border-radius: 6px 0 0 6px; }
+.ur-table thead th:last-child { border-radius: 0 6px 6px 0; }
+.ur-table tbody tr {
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+}
+.ur-table tbody tr:last-child { border-bottom: none; }
+.ur-table tbody tr:hover { background: var(--surface2); }
+.ur-table tbody td { padding: 9px 12px; }
 
 /* Charts row */
 .charts-row {
@@ -912,12 +906,14 @@ body.sidebar-collapsed .sidebar-link:hover[data-tooltip]::after { opacity: 1; }
     grid-template-columns: 1fr 1fr;
   }
 
-  .stat-card:nth-child(2) {
+  .stat-card:nth-child(2n) {
     border-right: none;
   }
 
   .stat-card:nth-child(1),
-  .stat-card:nth-child(2) {
+  .stat-card:nth-child(2),
+  .stat-card:nth-child(3),
+  .stat-card:nth-child(4) {
     border-bottom: 1px solid var(--border);
   }
 }
@@ -1319,6 +1315,60 @@ body.sidebar-collapsed .sidebar-link:hover[data-tooltip]::after { opacity: 1; }
   color: var(--red);
   background: var(--red-bg);
 }
+
+/* ── Invite wizard: account type cards ──────────────────────────────────── */
+.inv-type-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 540px) {
+  .inv-type-grid { grid-template-columns: 1fr; }
+}
+.inv-type-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font: inherit;
+  transition: background var(--transition), border-color var(--transition), box-shadow var(--transition);
+}
+.inv-type-card:hover { background: var(--surface2); border-color: var(--border2); }
+.inv-type-card.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.inv-type-check {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--border2);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: transparent;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+.inv-type-card.is-selected .inv-type-check {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.inv-type-icon { display: flex; color: var(--text2); margin-bottom: 8px; transition: color var(--transition); }
+.inv-type-card.is-selected .inv-type-icon { color: var(--accent); }
+.inv-type-name { display: block; font-size: 13.5px; font-weight: 600; color: var(--text); }
+.inv-type-desc { display: block; font-size: 11.5px; color: var(--text3); line-height: 1.5; margin-top: 4px; }
 
 /* ── Invite resource picker ─────────────────────────────────────────────── */
 .inv-picker-grid {
@@ -2208,8 +2258,11 @@ body.nav-open .nav-backdrop { display: block; }
   }
   .page h2 { font-size: 19px; }
 
-  /* Stats grid */
+  /* Stats grid (6 cards → 2 columns of 3; the ≤600px block earlier in the
+     file repeats the same layout, the ≤380px block collapses to 1 column) */
   .stats-grid { grid-template-columns: 1fr 1fr; }
+  .stat-card:nth-child(2n) { border-right: none; }
+  .stat-card:nth-child(-n+4) { border-bottom: 1px solid var(--border); }
 
   /* Form layouts */
   .form-grid { grid-template-columns: 1fr; }
@@ -2503,6 +2556,8 @@ body.nav-open .nav-backdrop { display: block; }
 /* Shell-level extras (error banners and the like) sit between the panes and the
    footer — they belong to the dialog, not to whichever step is showing. */
 .wz-extra { flex-shrink: 0; margin: 0 20px 12px; }
+/* Top-pinned extras (context strips) span the full width and own their padding. */
+.wz-extra[data-wz-pos="top"] { margin: 0; }
 
 /* The LDAP "test these credentials" bar is one such extra. Its original CSS
    (.ldap-test-row) was written to live inside a flex ROW footer, sized with
