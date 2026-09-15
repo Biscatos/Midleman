@@ -9417,7 +9417,10 @@ async function openFive9SessionsModal(name) {
             <strong>${esc(s.displayName)}</strong>
             <span style="color:var(--text3);margin-left:8px">${esc(s.customerId || s.chatId)}</span>
           </div>
-          <span style="color:var(--text3);font-size:11px">${s.lastActivityAt ? new Date(s.lastActivityAt).toLocaleString() : ''}</span>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="color:var(--text3);font-size:11px">${s.lastActivityAt ? new Date(s.lastActivityAt).toLocaleString() : ''}</span>
+            <button class="btn btn-sm btn-danger" onclick="closeFive9Session('${esc(s.connector)}','${esc(s.chatId)}')" title="Close this session — the next customer message opens a new Five9 conversation">Close</button>
+          </div>
         </div>
         <div style="color:var(--text2);margin-top:4px;font-family:'SF Mono',Monaco,monospace;font-size:11px">
           correlationId: ${esc(s.correlationId || '—')}
@@ -9426,6 +9429,16 @@ async function openFive9SessionsModal(name) {
   } catch (e) {
     list.innerHTML = '<div style="color:var(--red);padding:8px 0">Error: ' + esc(e.message) + '</div>';
   }
+}
+
+async function closeFive9Session(connector, chatId) {
+  if (!confirm('Close session ' + chatId + '?\n\nThe Five9 conversation stays open on the agent side until the agent ends it; the next customer message will start a new conversation.')) return;
+  try {
+    const res = await api('/admin/five9-connectors/sessions?connector=' + encodeURIComponent(connector) + '&chatId=' + encodeURIComponent(chatId), { method: 'DELETE' });
+    const d = await res.json();
+    if (res.ok) { toast('Session closed'); await openFive9SessionsModal(connector); }
+    else toast(d.error || 'Failed', 'error');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 function closeFive9SessionsModal() {
