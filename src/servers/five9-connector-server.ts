@@ -778,33 +778,58 @@ async function handleFive9Callback(req: Request, cs: Five9ConnectorServer, clien
     }
 
     let body: any;
-    try { body = JSON.parse(await req.text()); }
-    catch { return jsonResponse(400, { error: 'Bad Request', message: 'Body must be valid JSON' }); }
+    let rawBody = '';
+    try { rawBody = await req.text(); body = JSON.parse(rawBody); }
+    catch {
+        log.warn(`⚠️ FIVE9_CALLBACK ${fmtFields({ connector: c.name, result: 'rejected', reason: 'invalid-json', path: url.pathname, client_ip: clientIp, payload: rawBody.slice(0, 1000) })}`);
+        return jsonResponse(400, { error: 'Bad Request', message: 'Body must be valid JSON' });
+    }
 
-    // Route by query.original_url, or empty query = file attachment from agent
+    // ── Resolve the event type ─────────────────────────────────────────────────
+    // Five9 may deliver the callback in two shapes:
+    //   (a) wrapped:  { query: { original_url: ".../message" }, body: {...} }
+    //   (b) direct:   POST {callbackUrl}/<event>  with the event payload as body
+    // For (b) the event is the path segment after the configured callbackUrl.
     const originalUrl: string = body?.query?.original_url ?? '';
-    const hasQuery = originalUrl.length > 0;
-    const segment = hasQuery ? lastPathSegment(originalUrl) : '';
-    const cbCorrelationId = String(body?.body?.correlationId || '');
+    const inner: any = body?.body && typeof body.body === 'object' ? body.body : body ?? {};
+    let cbBasePath = '';
+    try { cbBasePath = new URL(c.five9.callbackUrl).pathname.replace(/\/$/, ''); } catch {}
+    const reqPath = url.pathname.replace(/\/$/, '');
+    const pathTail = cbBasePath && reqPath.startsWith(cbBasePath) ? reqPath.slice(cbBasePath.length) : reqPath;
+    const pathSegment = lastPathSegment(pathTail);
+    const bodyHint = String(inner?.eventType ?? inner?.event ?? inner?.type ?? body?.eventType ?? body?.event ?? '').toLowerCase();
+
+    const segment: string = originalUrl ? lastPathSegment(originalUrl)
+        : pathSegment && pathSegment !== lastPathSegment(cbBasePath) ? pathSegment
+        : bodyHint;
+    const looksLikeFile = !!inner?.fileData || segment === 'file' || segment === 'attachment' || segment === 'files';
+    const cbCorrelationId = String(inner?.correlationId ?? body?.correlationId ?? '');
+
     log.info(`📥 FIVE9_CALLBACK ${fmtFields({
-        connector: c.name, result: 'received', event: hasQuery ? segment : 'file',
+        connector: c.name, result: 'received',
+        event: looksLikeFile ? 'file' : (segment || 'unknown'),
+        path: url.pathname, original_url: originalUrl || undefined, shape: body?.body ? 'wrapped' : 'direct',
         correlation_id: cbCorrelationId || undefined, client_ip: clientIp,
         direct_reply: directReplyEnabled(c), webhook_targets: (c.webhookTargets || []).length,
+        body_keys: Object.keys(inner || {}).slice(0, 20).join(','),
+        payload: rawBody.slice(0, 2000),
     })}`);
 
-    // ── File attachment (empty query) ──────────────────────────────────────────
-    if (!hasQuery) {
-        const inner = body?.body ?? {};
-        const correlationId = String(inner?.correlationId || '');
+    // ── File attachment ────────────────────────────────────────────────────────
+    if (looksLikeFile) {
+        const correlationId = cbCorrelationId;
         const fileUrl = String(inner?.text || '');
         const category = String(inner?.fileData?.category || 'document');
         const agentName = String(inner?.agentData?.displayName || 'Agent');
         const timestamp = Number(inner?.timestamp) || Date.now();
 
-        if (!correlationId) return jsonResponse(200, { status: 'ignored', reason: 'no-correlationId' });
+        if (!correlationId) {
+            log.warn(`⚠️ FIVE9_CALLBACK ${fmtFields({ connector: c.name, result: 'ignored', reason: 'no-correlationId', event: 'file', path: url.pathname })}`);
+            return jsonResponse(200, { status: 'ignored', reason: 'no-correlationId' });
+        }
         const session = getFive9SessionByCorrelation(c.name, correlationId);
         if (!session) {
-            log.warn(`⚠️ [five9:${c.name}] attachment callback for unknown conversation ${correlationId}`);
+            log.warn(`⚠️ FIVE9_CALLBACK ${fmtFields({ connector: c.name, result: 'ignored', reason: 'unknown-conversation', event: 'file', correlation_id: correlationId })}`);
             return jsonResponse(200, { status: 'ignored', reason: 'unknown-conversation' });
         }
 
@@ -826,7 +851,7 @@ async function handleFive9Callback(req: Request, cs: Five9ConnectorServer, clien
         try { await fanoutFive9Event(cs, session, event); }
         catch (err) {
             cs.stats.lastError = err instanceof Error ? err.message : String(err);
-            log.warn(`⚠️ [five9:${c.name}] attachment fan-out failed:`, cs.stats.lastError);
+            log.warn(`⚠️ FIVE9_CALLBACK ${fmtFields({ connector: c.name, result: 'fanout-failed', event: 'file', correlation_id: correlationId, chat_id: session.customerId, direct_reply: directReplyEnabled(c), meta_token: !!c.meta?.accessToken, error: cs.stats.lastError })}`);
             return jsonResponse(502, { error: 'fan-out failed' });
         }
         touchFive9Session(c.name, session.chatId);
@@ -836,10 +861,12 @@ async function handleFive9Callback(req: Request, cs: Five9ConnectorServer, clien
     }
 
     // ── Routed events ──────────────────────────────────────────────────────────
-    const inner = body?.body ?? {};
-    const correlationId = String(inner?.correlationId || '');
+    const correlationId = cbCorrelationId;
 
-    if (!correlationId) return jsonResponse(200, { status: 'ignored', reason: 'no-correlationId' });
+    if (!correlationId) {
+        log.warn(`⚠️ FIVE9_CALLBACK ${fmtFields({ connector: c.name, result: 'ignored', reason: 'no-correlationId', event: segment || 'unknown', path: url.pathname, body_keys: Object.keys(inner || {}).slice(0, 20).join(',') })}`);
+        return jsonResponse(200, { status: 'ignored', reason: 'no-correlationId' });
+    }
 
     // create → analytics only
     if (segment === 'create') {
@@ -877,8 +904,8 @@ async function handleFive9Callback(req: Request, cs: Five9ConnectorServer, clien
     }
 
     // message → agent text
-    if (segment === 'message') {
-        const text = String(inner?.text || '');
+    if (segment === 'message' || segment === 'messages') {
+        const text = String(inner?.text ?? inner?.message ?? inner?.body?.text ?? '');
         const agentName = String(inner?.agentData?.displayName || inner?.displayName || 'Agent');
         const timestamp = Number(inner?.timestamp) || Date.now();
         const eventSerial = String(inner?.eventSerialNumber || timestamp);
@@ -919,7 +946,7 @@ async function handleFive9Callback(req: Request, cs: Five9ConnectorServer, clien
         return jsonResponse(200, { status: 'ok', event: 'chat_closed' });
     }
 
-    log.debug(`[five9:${c.name}] unhandled callback segment "${segment}" for ${correlationId}`);
+    log.warn(`⚠️ FIVE9_CALLBACK ${fmtFields({ connector: c.name, result: 'ignored', reason: 'unhandled-event', event: segment || 'unknown', path: url.pathname, correlation_id: correlationId, body_keys: Object.keys(inner || {}).slice(0, 20).join(','), hint: 'known events: create, accept, message, terminate, file' })}`);
     return jsonResponse(200, { status: 'ignored', reason: `unhandled segment: ${segment}` });
 }
 
