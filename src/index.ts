@@ -19,7 +19,7 @@ import { authHeaders } from './core/connector-webhooks';
 import { startConnectorServer, stopConnectorServer, stopAllConnectors, restartConnector, getConnectorStatus, closeConnectorSession } from './servers/connector-server';
 import { initConnectorSessions, shutdownConnectorSessions, listSessions as listConnectorSessions, deleteConnectorSessions } from './gocontact/sessions';
 import { validateFive9ConnectorInput, type Five9Connector } from './core/connector-types-five9';
-import { startFive9ConnectorServer, stopFive9ConnectorServer, stopAllFive9Connectors, restartFive9Connector, getFive9ConnectorStatus } from './servers/five9-connector-server';
+import { startFive9ConnectorServer, stopFive9ConnectorServer, stopAllFive9Connectors, restartFive9Connector, getFive9ConnectorStatus, closeFive9Session } from './servers/five9-connector-server';
 import { initFive9Sessions, shutdownFive9Sessions, listFive9Sessions, deleteFive9ConnectorSessions } from './five9/sessions';
 import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry/telemetry';
 import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart } from './telemetry/request-log';
@@ -545,6 +545,13 @@ const server = Bun.serve({
 
         if (isShuttingDown) {
             return jsonRes(503, { error: 'Service Unavailable', message: 'Server is shutting down' });
+        }
+
+        // A Five9 callback landing on the ADMIN port means the reverse proxy
+        // still points at the connector's old port. Make it loud.
+        if (req.method === 'POST' && /^\/five9(\/|$)/.test(url0.pathname)) {
+            console.warn(`🚫 FIVE9_CALLBACK result=misrouted reason=hit-admin-port path=${url0.pathname} admin_port=${config.port} hint="point the reverse proxy for this host at the Five9 connector port (see 'Connector ... on :PORT' at boot)"`);
+            return jsonRes(404, { error: 'Not Found', message: `Five9 callbacks must target the connector port, not the admin port ${config.port}` });
         }
 
         activeRequests++;
@@ -2156,6 +2163,16 @@ const server = Bun.serve({
                         lastActivityAt: s.lastActivityAt,
                     }));
                     return jsonRes(200, { sessions, total: sessions.length });
+                }
+
+                if (url.pathname === '/admin/five9-connectors/sessions' && req.method === 'DELETE') {
+                    const connector = (url.searchParams.get('connector') || '').toLowerCase();
+                    const chatId = url.searchParams.get('chatId') || '';
+                    if (!connector || !chatId) return jsonRes(400, { error: 'connector and chatId are required' });
+                    const result = await closeFive9Session(connector, chatId, 'admin');
+                    if (!result.closed) return jsonRes(404, { error: 'Session not found' });
+                    console.log(`🗑️  Five9 session ${connector}/${chatId} closed via admin (conversation ${result.correlationId})`);
+                    return jsonRes(200, { status: 'closed', connector, chatId, correlationId: result.correlationId });
                 }
 
                 if (url.pathname.match(/^\/admin\/five9-connectors\/[^/]+$/) && req.method === 'GET') {

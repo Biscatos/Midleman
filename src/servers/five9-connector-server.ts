@@ -769,11 +769,11 @@ async function handleFive9Callback(req: Request, cs: Five9ConnectorServer, clien
     const provided = url.searchParams.get('token') || req.headers.get('x-callback-token');
     if (cbToken) {
         if (!timingSafeEqualStr(provided, cbToken)) {
-            log.warn(`🚫 [five9:${c.name}] callback rejected: bad token (ip ${clientIp})`);
+            log.warn(`🚫 FIVE9_CALLBACK ${fmtFields({ connector: c.name, result: 'rejected', reason: 'bad-token', token_present: !!provided, client_ip: clientIp, path: url.pathname })}`);
             return jsonResponse(401, { error: 'Unauthorized' });
         }
     } else if (!c.allowedIps || c.allowedIps.length === 0) {
-        log.warn(`🚫 [five9:${c.name}] callback rejected: no callbackToken and no IP allowlist`);
+        log.warn(`🚫 FIVE9_CALLBACK ${fmtFields({ connector: c.name, result: 'rejected', reason: 'no-token-no-allowlist', client_ip: clientIp, path: url.pathname })}`);
         return jsonResponse(401, { error: 'Unauthorized', message: 'Configure five9.callbackToken or allowedIps' });
     }
 
@@ -785,6 +785,12 @@ async function handleFive9Callback(req: Request, cs: Five9ConnectorServer, clien
     const originalUrl: string = body?.query?.original_url ?? '';
     const hasQuery = originalUrl.length > 0;
     const segment = hasQuery ? lastPathSegment(originalUrl) : '';
+    const cbCorrelationId = String(body?.body?.correlationId || '');
+    log.info(`📥 FIVE9_CALLBACK ${fmtFields({
+        connector: c.name, result: 'received', event: hasQuery ? segment : 'file',
+        correlation_id: cbCorrelationId || undefined, client_ip: clientIp,
+        direct_reply: directReplyEnabled(c), webhook_targets: (c.webhookTargets || []).length,
+    })}`);
 
     // ── File attachment (empty query) ──────────────────────────────────────────
     if (!hasQuery) {
@@ -843,7 +849,7 @@ async function handleFive9Callback(req: Request, cs: Five9ConnectorServer, clien
 
     const session = getFive9SessionByCorrelation(c.name, correlationId);
     if (!session) {
-        log.warn(`⚠️ [five9:${c.name}] callback for unknown conversation ${correlationId} (${segment})`);
+        log.warn(`⚠️ FIVE9_CALLBACK ${fmtFields({ connector: c.name, result: 'ignored', reason: 'unknown-conversation', event: segment, correlation_id: correlationId, hint: 'session expired/closed or created on another instance' })}`);
         return jsonResponse(200, { status: 'ignored', reason: 'unknown-conversation' });
     }
 
@@ -887,12 +893,17 @@ async function handleFive9Callback(req: Request, cs: Five9ConnectorServer, clien
         try { await fanoutFive9Event(cs, session, event); }
         catch (err) {
             cs.stats.lastError = err instanceof Error ? err.message : String(err);
-            log.warn(`⚠️ [five9:${c.name}] message fan-out failed:`, cs.stats.lastError);
+            log.warn(`⚠️ FIVE9_CALLBACK ${fmtFields({
+                connector: c.name, result: 'fanout-failed', event: 'agent_message', correlation_id: correlationId,
+                chat_id: session.customerId, phone_number_id: session.phoneNumberId || undefined,
+                direct_reply: directReplyEnabled(c), meta_token: !!c.meta?.accessToken, error: cs.stats.lastError,
+            })}`);
             return jsonResponse(502, { error: 'fan-out failed' });
         }
         touchFive9Session(c.name, session.chatId);
         markCustomerReadOnMeta(cs, session);
         cs.stats.agentMessages++; cs.stats.lastAgentMessageAt = Date.now();
+        log.info(`📤 FIVE9_CALLBACK ${fmtFields({ connector: c.name, result: 'delivered', event: 'agent_message', correlation_id: correlationId, chat_id: session.customerId, direct_reply: directReplyEnabled(c), webhook_targets: (c.webhookTargets || []).length })}`);
         return jsonResponse(200, { status: 'ok', event: 'agent_message' });
     }
 
@@ -1160,9 +1171,35 @@ export function getFive9ConnectorStatus(name: string): object | null {
         name: cs.connector.name,
         channel: cs.connector.channel,
         enabled: cs.connector.enabled !== false,
+        running: !!cs.server && !cs.isShuttingDown,
         port: cs.server?.port ?? null,
+        directReply: directReplyEnabled(cs.connector),
         stats: { ...cs.stats },
     };
+}
+
+/**
+ * Close a session from the admin UI: fan out chat_closed (webhooks + direct
+ * reply consumers) and drop it locally so the next customer message opens a
+ * fresh Five9 conversation. The Five9-side conversation is NOT terminated
+ * (no anonymous API for it) — it closes when the agent ends it or it times out.
+ */
+export async function closeFive9Session(connectorName: string, chatId: string, reason: string): Promise<{ closed: boolean; correlationId?: string }> {
+    const cs = servers.get(connectorName);
+    const session = getFive9Session(connectorName, chatId);
+    if (!session) return { closed: false };
+    if (cs) {
+        const event: AgentEvent = {
+            connector: cs.connector.name, channel: cs.connector.channel, event: 'chat_closed', reason: 'agent',
+            chatId: session.customerId, displayName: session.displayName,
+            phoneNumberId: session.phoneNumberId || undefined, message: null,
+        };
+        await fanoutFive9Event(cs, null, event).catch(err =>
+            log.warn(`⚠️ FIVE9_WARN ${fmtFields({ connector: connectorName, chat_id: chatId, step: 'admin-close', action: 'chat_closed-fanout-failed', error: err instanceof Error ? err.message : String(err) })}`));
+    }
+    deleteFive9Session(connectorName, chatId);
+    log.info(`👋 FIVE9_STEP ${fmtFields({ connector: connectorName, chat_id: chatId, correlation_id: session.correlationId, step: 'admin-close', reason })}`);
+    return { closed: true, correlationId: session.correlationId };
 }
 
 export function listFive9ConnectorNames(): string[] {
