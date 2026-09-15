@@ -1075,6 +1075,10 @@ export function startFive9ConnectorServer(connector: Five9Connector): Five9Conne
     };
 
     if (connector.enabled !== false) {
+        // Never let Bun fall back to process.env.PORT (the admin port).
+        if (!Number.isInteger(connector.port) || connector.port <= 0) {
+            throw new Error(`[five9:${connector.name}] invalid listen port ${String(connector.port)}`);
+        }
         cs.server = Bun.serve({
             port: connector.port,
             idleTimeout: 0,

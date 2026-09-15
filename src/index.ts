@@ -336,7 +336,12 @@ const portAssignments = await assignAllPorts(
     config.webhooks.map(w => w.name),
     tcpUdpListenerKeys,
     config.port,
-    connectors.map(c => c.name),
+    // Both connector families share the portMap.connectors namespace. Five9
+    // connectors MUST be included here: otherwise their entry is dropped from
+    // ports.json on every boot and Bun.serve({ port: undefined }) silently
+    // falls back to process.env.PORT (= the admin port) → EADDRINUSE.
+    [...connectors.map(c => c.name), ...five9Connectors.map(c => c.name)],
+    Object.fromEntries(five9Connectors.filter(c => c.port > 0).map(c => [c.name, c.port])),
 );
 
 // Track profiles whose dedicated port shifted at boot — the upcoming NPM
@@ -410,6 +415,7 @@ if (five9Connectors.length > 0) {
     for (const connector of five9Connectors) {
         const assignedPort = portAssignments.connectors[connector.name];
         try {
+            if (!assignedPort) throw new Error(`no port assigned (ports.json) — refusing to fall back to process.env.PORT`);
             startFive9ConnectorServer({ ...connector, port: assignedPort });
         } catch (err) {
             console.error(`❌ Failed to start Five9 connector "${connector.name}":`, err instanceof Error ? err.message : err);
@@ -1749,7 +1755,9 @@ const server = Bun.serve({
                         if (existingPort > 0) portToUse = existingPort;
                     }
                     const excludePorts = getWebhookStatus().filter(s => s.name !== webhook.name).map(s => s.port).filter(Boolean);
-                    const assignedPort = await assignWebhookPort(webhook.name, portToUse, config.port, excludePorts);
+                    let assignedPort: number;
+                    try { assignedPort = await assignWebhookPort(webhook.name, portToUse, config.port, excludePorts); }
+                    catch (err) { return jsonRes(400, { error: err instanceof Error ? err.message : String(err) }); }
                     const webhookWithPort = { ...webhook, port: assignedPort };
 
                     // Update or add config entry (always save with assigned port)
@@ -2072,7 +2080,9 @@ const server = Bun.serve({
                         if (existingPort > 0) portToUse = existingPort;
                     }
                     const excludePorts = getConnectorStatus().filter(s => s.name !== connector.name).map(s => s.port || 0).filter(Boolean);
-                    const assignedPort = await assignConnectorPort(connector.name, portToUse, config.port, excludePorts);
+                    let assignedPort: number;
+                    try { assignedPort = await assignConnectorPort(connector.name, portToUse, config.port, excludePorts); }
+                    catch (err) { return jsonRes(400, { error: err instanceof Error ? err.message : String(err) }); }
                     const connectorWithPort = { ...connector, port: assignedPort };
 
                     if (existingIdx >= 0) connectors[existingIdx] = connectorWithPort;
@@ -2264,7 +2274,9 @@ const server = Bun.serve({
                         ...getConnectorStatus().map(s => s.port || 0),
                         ...five9Connectors.filter(c => c.name !== connector.name).map(c => getConnectorPort(c.name) || c.port || 0),
                     ].filter((p): p is number => p > 0);
-                    const assignedPort = await assignConnectorPort(connector.name, portToUse, config.port, excludePorts);
+                    let assignedPort: number;
+                    try { assignedPort = await assignConnectorPort(connector.name, portToUse, config.port, excludePorts); }
+                    catch (err) { return jsonRes(400, { error: err instanceof Error ? err.message : String(err) }); }
                     const connectorWithPort = { ...connector, port: assignedPort };
 
                     if (existingIdx >= 0) five9Connectors[existingIdx] = connectorWithPort;

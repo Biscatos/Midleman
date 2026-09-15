@@ -77,6 +77,17 @@ async function allocate(used: Set<number>, preferred?: number): Promise<number> 
     throw new Error('No free ports available');
 }
 
+/** Explicit ports must never collide with the admin port or another listener. */
+function assertNotReserved(configuredPort: number, adminPort: number, excludePorts: number[], name: string): void {
+    if (configuredPort <= 0) return;
+    if (configuredPort === adminPort) {
+        throw new Error(`Port ${configuredPort} is reserved for the admin dashboard (PORT) — choose another port for "${name}" or 0 for auto-assign`);
+    }
+    if (excludePorts.includes(configuredPort)) {
+        throw new Error(`Port ${configuredPort} is already used by another listener — choose another port for "${name}" or 0 for auto-assign`);
+    }
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -90,6 +101,9 @@ export async function assignAllPorts(
     tcpUdpNames: string[],
     adminPort: number,
     connectorNames: string[] = [],
+    /** Fallback preferred ports (e.g. persisted in the connector's own config)
+     *  used when ports.json has no entry for that connector yet. */
+    connectorPreferredPorts: Record<string, number> = {},
 ): Promise<{ proxies: Record<string, number>; webhooks: Record<string, number>; tcpUdp: Record<string, number>; connectors: Record<string, number> }> {
     const used = new Set<number>([adminPort]);
 
@@ -130,7 +144,11 @@ export async function assignAllPorts(
 
     const connectorPorts: Record<string, number> = {};
     for (const name of connectorNames) {
-        const port = await takePreferred(portMap.connectors?.[name]);
+        const preferred = portMap.connectors?.[name] ?? connectorPreferredPorts[name];
+        if (preferred === adminPort) {
+            console.warn(`⚠️  Connector "${name}" was configured on the admin port ${adminPort} — reassigning to a free port`);
+        }
+        const port = await takePreferred(preferred);
         connectorPorts[name] = port;
         used.add(port);
     }
@@ -160,6 +178,7 @@ export async function assignProxyPort(name: string, adminPort: number, excludePo
  * Assign a single new port for a webhook distributor (e.g., added via admin API).
  */
 export async function assignWebhookPort(name: string, configuredPort: number, adminPort: number, excludePorts: number[]): Promise<number> {
+    assertNotReserved(configuredPort, adminPort, excludePorts, name);
     if (!portMap.webhooks) portMap.webhooks = {};
     if (configuredPort > 0) {
         portMap.webhooks[name] = configuredPort;
@@ -242,6 +261,7 @@ export function getTcpUdpPort(name: string): number | undefined {
 
 /** Assign a port for a GoContact connector (explicit or auto). */
 export async function assignConnectorPort(name: string, configuredPort: number, adminPort: number, excludePorts: number[]): Promise<number> {
+    assertNotReserved(configuredPort, adminPort, excludePorts, name);
     if (!portMap.connectors) portMap.connectors = {};
     if (configuredPort > 0) {
         portMap.connectors[name] = configuredPort;
