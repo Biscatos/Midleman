@@ -18,13 +18,72 @@ import { log } from '../core/logger';
 export const FETCH_TIMEOUT_MS = 30_000;
 const FILE_UPLOAD_TIMEOUT_MS = 120_000;
 
+/** Structured detail attached to every Five9Error — for log correlation. */
+export interface Five9ErrorDetail {
+    /** Request URL with query string stripped (no tokens leak). */
+    url?: string;
+    /** Five9 host (data center), e.g. "app.nld1.eu.five9.com". */
+    host?: string;
+    httpStatus?: number;
+    /** Five9's own errorCode from body.five9ExceptionDetail (e.g. 500). */
+    five9ErrorCode?: number;
+    /** Five9's own message from body.five9ExceptionDetail. */
+    five9Message?: string;
+    /** Five9's own timestamp from body.five9ExceptionDetail (epoch ms). */
+    five9Timestamp?: number;
+    /** Raw body preview (first 300 chars). */
+    bodyPreview?: string;
+    durationMs?: number;
+}
+
 export class Five9Error extends Error {
-    constructor(public step: string, message: string, public httpStatus?: number) {
+    public readonly detail: Five9ErrorDetail;
+
+    constructor(public step: string, message: string, public httpStatus?: number, detail: Five9ErrorDetail = {}) {
         super(`[five9/${step}] ${message}`);
         this.name = 'Five9Error';
+        this.detail = { ...detail, httpStatus: httpStatus ?? detail.httpStatus };
     }
     /** HTTP 404 typically means the conversation was terminated/gone. */
     conversationGone = false;
+
+    /** Flat key/value record for structured logging. */
+    toLogFields(): Record<string, string | number | boolean> {
+        const d = this.detail;
+        const out: Record<string, string | number | boolean> = { step: this.step };
+        if (d.httpStatus !== undefined) out.http_status = d.httpStatus;
+        if (d.five9ErrorCode !== undefined) out.five9_error_code = d.five9ErrorCode;
+        if (d.five9Message) out.five9_message = d.five9Message;
+        if (d.five9Timestamp) out.five9_ts = new Date(d.five9Timestamp).toISOString();
+        if (d.host) out.five9_host = d.host;
+        if (d.url) out.url = d.url;
+        if (d.durationMs !== undefined) out.duration_ms = Math.round(d.durationMs);
+        if (this.conversationGone) out.conversation_gone = true;
+        if (d.bodyPreview) out.body = d.bodyPreview;
+        return out;
+    }
+}
+
+/** Parse Five9's standard error envelope {"five9ExceptionDetail":{timestamp,errorCode,message}}. */
+function parseFive9ExceptionDetail(text: string): Pick<Five9ErrorDetail, 'five9ErrorCode' | 'five9Message' | 'five9Timestamp'> {
+    try {
+        const j = JSON.parse(text);
+        const d = j?.five9ExceptionDetail ?? j;
+        if (!d || typeof d !== 'object') return {};
+        const out: Pick<Five9ErrorDetail, 'five9ErrorCode' | 'five9Message' | 'five9Timestamp'> = {};
+        if (typeof d.errorCode === 'number') out.five9ErrorCode = d.errorCode;
+        if (typeof d.message === 'string') out.five9Message = d.message;
+        if (typeof d.timestamp === 'number') out.five9Timestamp = d.timestamp;
+        return out;
+    } catch { return {}; }
+}
+
+/** Strip query string (tokens) and return {url, host} for logging. */
+function urlForLog(url: string): { url: string; host: string } {
+    try {
+        const u = new URL(url);
+        return { url: `${u.origin}${u.pathname}`, host: u.host };
+    } catch { return { url: url.split('?')[0], host: '' }; }
 }
 
 export interface Five9AuthResult {
@@ -57,23 +116,53 @@ export class Five9ApiClient {
         };
     }
 
-    private async checkStatus(res: Response, step: string): Promise<string> {
+    /** Build a Five9Error for a non-2xx response, enriched with Five9's error envelope. */
+    private httpError(step: string, url: string, res: Response, text: string, startedAt: number): Five9Error {
+        const preview = text.slice(0, 300);
+        const err = new Five9Error(step, `HTTP ${res.status} ${preview}`, res.status, {
+            ...urlForLog(url),
+            ...parseFive9ExceptionDetail(text),
+            bodyPreview: preview,
+            durationMs: performance.now() - startedAt,
+        });
+        if (res.status === 404) err.conversationGone = true;
+        return err;
+    }
+
+    /** Wrap network-level failures (timeout, DNS, TLS) so they carry step + url. */
+    private networkError(step: string, url: string, cause: unknown, startedAt: number): Five9Error {
+        const msg = cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
+        return new Five9Error(step, `network error: ${msg}`, undefined, {
+            ...urlForLog(url),
+            durationMs: performance.now() - startedAt,
+        });
+    }
+
+    private async checkStatus(res: Response, step: string, url: string, startedAt: number): Promise<string> {
         const text = await res.text().catch(() => '');
         if (res.status >= 200 && res.status < 300) return text;
-        const err = new Five9Error(step, `HTTP ${res.status} ${text.slice(0, 300)}`, res.status);
-        if (res.status === 404) err.conversationGone = true;
-        throw err;
+        throw this.httpError(step, url, res, text, startedAt);
     }
 
     private async jsonRequest(url: string, init: RequestInit, step: string): Promise<any> {
-        const res = await fetch(url, {
-            ...init,
-            signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-            tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' },
-        } as RequestInit);
-        const text = await this.checkStatus(res, step);
+        const startedAt = performance.now();
+        let res: Response;
+        try {
+            res = await fetch(url, {
+                ...init,
+                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+                tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' },
+            } as RequestInit);
+        } catch (cause) {
+            throw this.networkError(step, url, cause, startedAt);
+        }
+        const text = await this.checkStatus(res, step, url, startedAt);
         try { return text ? JSON.parse(text) : {}; }
-        catch { throw new Five9Error(step, `invalid JSON: ${text.slice(0, 300)}`); }
+        catch {
+            throw new Five9Error(step, `invalid JSON: ${text.slice(0, 300)}`, res.status, {
+                ...urlForLog(url), bodyPreview: text.slice(0, 300), durationMs: performance.now() - startedAt,
+            });
+        }
     }
 
     // ── Auth ─────────────────────────────────────────────────────────────────
@@ -88,8 +177,12 @@ export class Five9ApiClient {
             body: JSON.stringify({ tenantName }),
         }, 'anon-auth');
 
+        const missing = (field: string) => new Five9Error('anon-auth', `no ${field} in auth response`, 200, {
+            ...urlForLog(url), bodyPreview: JSON.stringify(data).slice(0, 300),
+        });
+
         const tokenId = data?.tokenId;
-        if (!tokenId) throw new Five9Error('anon-auth', 'no tokenId in auth response');
+        if (!tokenId) throw missing('tokenId');
 
         const farmId = String(data?.context?.farmId ?? '');
         const cloudClientUrl = String(data?.context?.cloudClientUrl ?? '');
@@ -97,9 +190,9 @@ export class Five9ApiClient {
         const apiHostRaw = data?.metadata?.dataCenters?.[0]?.apiUrls?.[0]?.host ?? '';
         const apiHost = apiHostRaw ? `https://${apiHostRaw}` : this.authBaseUrl;
 
-        if (!farmId) throw new Five9Error('anon-auth', 'no context.farmId in auth response');
-        if (!orgId) throw new Five9Error('anon-auth', 'no orgId in auth response');
-        if (!cloudClientUrl) throw new Five9Error('anon-auth', 'no context.cloudClientUrl in auth response');
+        if (!farmId) throw missing('context.farmId');
+        if (!orgId) throw missing('orgId');
+        if (!cloudClientUrl) throw missing('context.cloudClientUrl');
 
         return { tokenId, farmId, apiHost, cloudClientUrl, orgId };
     }
@@ -228,7 +321,7 @@ export class Five9ApiClient {
             } as RequestInit,
         );
         const exchangeText = await exchangeRes.text().catch(() => '');
-        if (!exchangeRes.ok) throw new Five9Error('file-exchange-token', `HTTP ${exchangeRes.status} ${exchangeText.slice(0, 300)}`, exchangeRes.status);
+        if (!exchangeRes.ok) throw this.httpError('file-exchange-token', exchangeRes.url || cloudUrl, exchangeRes, exchangeText, performance.now());
         let exchangeData: any = {};
         try { exchangeData = JSON.parse(exchangeText); } catch { throw new Five9Error('file-exchange-token', 'invalid JSON'); }
         const accessToken: string = exchangeData?.access_token ?? exchangeData?.accessToken;
@@ -246,7 +339,7 @@ export class Five9ApiClient {
             } as RequestInit,
         );
         const policyText = await policyRes.text().catch(() => '');
-        if (!policyRes.ok) throw new Five9Error('file-upload-policy', `HTTP ${policyRes.status} ${policyText.slice(0, 300)}`, policyRes.status);
+        if (!policyRes.ok) throw this.httpError('file-upload-policy', policyRes.url || cloudUrl, policyRes, policyText, performance.now());
         let policyData: any = {};
         try { policyData = JSON.parse(policyText); } catch { throw new Five9Error('file-upload-policy', 'invalid JSON'); }
         const uploadUrl: string = policyData?.uploadUrl;
@@ -264,7 +357,7 @@ export class Five9ApiClient {
         } as RequestInit);
         if (!putRes.ok) {
             const putText = await putRes.text().catch(() => '');
-            throw new Five9Error('file-upload-put', `HTTP ${putRes.status} ${putText.slice(0, 300)}`, putRes.status);
+            throw this.httpError('file-upload-put', uploadUrl, putRes, putText, performance.now());
         }
         await putRes.body?.cancel().catch(() => {});
 
@@ -282,7 +375,7 @@ export class Five9ApiClient {
             } as RequestInit,
         );
         const metaText = await metaRes.text().catch(() => '');
-        if (!metaRes.ok) throw new Five9Error('file-get-metadata', `HTTP ${metaRes.status} ${metaText.slice(0, 300)}`, metaRes.status);
+        if (!metaRes.ok) throw this.httpError('file-get-metadata', metaRes.url || cloudUrl, metaRes, metaText, performance.now());
         let metaData: any = {};
         try { metaData = JSON.parse(metaText); } catch { throw new Five9Error('file-get-metadata', 'invalid JSON'); }
         const fileDownloadId: string = metaData?.fileDownloadId ?? metaData?.id;
