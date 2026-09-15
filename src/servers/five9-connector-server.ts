@@ -685,7 +685,7 @@ async function injectFive9Inbound(cs: Five9ConnectorServer, session: Five9Sessio
         }
 
         const fileDownloadId = await cs.client.uploadClientFile(auth, bytes, filename, mimetype || 'application/octet-stream');
-        await cs.client.sendFileMessage(auth, session.correlationId, fileDownloadId, msg.text || '');
+        await cs.client.sendFileMessage(auth, session.correlationId, fileDownloadId, msg.text || '', filename);
         return;
     }
 

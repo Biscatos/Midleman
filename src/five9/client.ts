@@ -279,15 +279,18 @@ export class Five9ApiClient {
         );
     }
 
-    /** POST .../messages — file attachment (uses fileDownloadId from upload pipeline). */
-    async sendFileMessage(auth: Five9SessionAuth, correlationId: string, fileDownloadId: string, caption = ''): Promise<void> {
+    /** POST .../messages — file attachment (uses fileDownloadId from upload pipeline).
+     *  Five9 validates `message` as not-blank (eip.not.blank.message), so an empty
+     *  caption is replaced by the filename. */
+    async sendFileMessage(auth: Five9SessionAuth, correlationId: string, fileDownloadId: string, caption = '', filename = ''): Promise<void> {
+        const message = caption.trim() || (filename ? `📎 ${filename}` : '📎 Anexo');
         await this.jsonRequest(
             `${auth.apiHost}/appsvcs/rs/svc/conversations/${encodeURIComponent(correlationId)}/messages`,
             {
                 method: 'POST',
                 headers: this.convHeaders(auth),
                 body: JSON.stringify({
-                    message: caption,
+                    message,
                     attachments: [fileDownloadId],
                     messageType: 'TEXT',
                 }),
