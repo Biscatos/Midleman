@@ -474,6 +474,82 @@ async function fanoutFive9Event(cs: Five9ConnectorServer, session: Five9Session 
     }
 }
 
+// ─── Structured logging ───────────────────────────────────────────────────────
+//
+// Every Five9 failure is emitted as ONE line with a fixed marker + key=value
+// fields, so it can be found and parsed from system logs, e.g.:
+//
+//   ❌ FIVE9_ERROR connector=reomat step=anon-auth http_status=435 five9_error_code=500
+//      five9_message="Internal Server Error" tenant=REOMAT five9_host=app.nld1.eu.five9.com
+//      chat_id=244939609354 duration_ms=812 url=https://app.nld1.eu.five9.com/appsvcs/rs/svc/auth/anon
+//
+// grep tips:  grep FIVE9_ERROR | grep step=anon-auth
+//             grep 'FIVE9_ERROR connector=reomat'
+
+type LogFields = Record<string, string | number | boolean | undefined | null>;
+
+function fmtFields(fields: LogFields): string {
+    return Object.entries(fields)
+        .filter(([, v]) => v !== undefined && v !== null && v !== '')
+        .map(([k, v]) => {
+            const s = String(v);
+            return /[\s"=]/.test(s) ? `${k}=${JSON.stringify(s)}` : `${k}=${s}`;
+        })
+        .join(' ');
+}
+
+function five9Host(c: Five9Connector): string {
+    try { return new URL(c.five9.authBaseUrl).host; } catch { return c.five9.authBaseUrl; }
+}
+
+/** Base fields present on every Five9 log line for a connector. */
+function baseFields(c: Five9Connector, msg?: NormalizedInboundMessage): LogFields {
+    return {
+        connector: c.name,
+        tenant: c.five9.tenantName,
+        campaign: c.five9.campaignName,
+        five9_host: five9Host(c),
+        chat_id: msg?.chatId,
+        phone_number_id: msg?.phoneNumberId || undefined,
+        msg_id: msg?.messageId || undefined,
+    };
+}
+
+/** Classify an error into a stable `error_kind` for filtering/alerting. */
+function classifyFive9Error(err: unknown): string {
+    if (err instanceof Five9Error) {
+        const d = err.detail;
+        if (err.conversationGone) return 'conversation_gone';
+        if (d.httpStatus === undefined && err.message.includes('network error')) return 'network';
+        if (d.httpStatus === 435) return d.five9ErrorCode === 500 ? 'five9_internal_error' : 'five9_auth_rejected';
+        if (d.httpStatus === 401 || d.httpStatus === 403) return 'five9_unauthorized';
+        if (d.httpStatus !== undefined && d.httpStatus >= 500) return 'five9_server_error';
+        if (d.httpStatus !== undefined && d.httpStatus >= 400) return 'five9_client_error';
+        return 'five9_response_invalid';
+    }
+    if (err instanceof Error && /timed? ?out|abort/i.test(err.message)) return 'timeout';
+    return 'unknown';
+}
+
+/** Emit the single structured FIVE9_ERROR line. */
+function logFive9Error(c: Five9Connector, msg: NormalizedInboundMessage | undefined, err: unknown, extra: LogFields = {}): void {
+    const errFields: LogFields = err instanceof Five9Error
+        ? err.toLogFields()
+        : { step: extra.step ?? 'unknown', error: err instanceof Error ? `${err.name}: ${err.message}` : String(err) };
+    const fields: LogFields = {
+        ...baseFields(c, msg),
+        error_kind: classifyFive9Error(err),
+        ...errFields,
+        ...extra,
+    };
+    log.error(`❌ FIVE9_ERROR ${fmtFields(fields)}`);
+}
+
+/** Emit a structured FIVE9_STEP line (info) for successful steps. */
+function logFive9Step(c: Five9Connector, msg: NormalizedInboundMessage | undefined, step: string, extra: LogFields = {}): void {
+    log.info(`🔷 FIVE9_STEP ${fmtFields({ ...baseFields(c, msg), step, ...extra })}`);
+}
+
 // ─── Session management ───────────────────────────────────────────────────────
 
 function sessionKeyFor(msg: NormalizedInboundMessage): string {
@@ -506,13 +582,25 @@ async function ensureFive9Session(cs: Five9ConnectorServer, msg: NormalizedInbou
     if (existing) deleteFive9Session(c.name, key);
 
     // New session: anon auth → create conversation → poll until ACTIVE
+    // Each step logs a FIVE9_STEP line on success; failures bubble up as
+    // Five9Error (with step + Five9 error envelope) and are logged once by the
+    // caller as FIVE9_ERROR.
+    logFive9Step(c, msg, 'session-start', { session_key: key, reason: existing ? 'expired' : 'new' });
+
+    let t = performance.now();
     const auth = await cs.client.anonAuth(c.five9.tenantName);
+    logFive9Step(c, msg, 'anon-auth', {
+        duration_ms: Math.round(performance.now() - t),
+        farm_id: auth.farmId, org_id: auth.orgId, api_host: auth.apiHost,
+    });
+
     const nameParts = msg.displayName.split(' ');
     const firstName = nameParts[0] || msg.chatId;
     const lastName = nameParts.slice(1).join(' ') || '';
     const number1 = toE164(msg.chatId);
     const question = msg.text || '(arquivo)';
 
+    t = performance.now();
     const correlationId = await cs.client.createConversation(auth, {
         externalId: msg.chatId.replace(':', '_'), // Five9 externalId shouldn't contain colons
         campaignName: c.five9.campaignName,
@@ -520,8 +608,14 @@ async function ensureFive9Session(cs: Five9ConnectorServer, msg: NormalizedInbou
         contact: { firstName, lastName, number1 },
         question,
     });
+    logFive9Step(c, msg, 'create-conversation', {
+        duration_ms: Math.round(performance.now() - t),
+        correlation_id: correlationId, callback_url: c.five9.callbackUrl, // token deliberately omitted
+    });
 
+    t = performance.now();
     await cs.client.waitForActive(auth, correlationId);
+    logFive9Step(c, msg, 'wait-active', { duration_ms: Math.round(performance.now() - t), correlation_id: correlationId });
 
     const now = Date.now();
     const session: Five9Session = {
@@ -615,7 +709,10 @@ async function deliverFive9Inbound(cs: Five9ConnectorServer, msg: NormalizedInbo
             await injectFive9Inbound(cs, session, msg);
         } catch (err) {
             if (err instanceof Five9Error && err.conversationGone) {
-                log.warn(`⚠️ [five9:${c.name}] Conversation ${session.correlationId} gone — recreating for ${key}`);
+                log.warn(`⚠️ FIVE9_WARN ${fmtFields({
+                    ...baseFields(c, msg), ...err.toLogFields(),
+                    correlation_id: session.correlationId, action: 'recreate-session',
+                })}`);
                 deleteFive9Session(c.name, sessionKey);
                 session = await ensureFive9Session(cs, msg);
                 await injectFive9Inbound(cs, session, msg);
@@ -908,7 +1005,14 @@ async function handleFive9Request(req: Request, cs: Five9ConnectorServer): Promi
             const errMsg = err instanceof Error ? err.message : String(err);
             cs.stats.lastError = errMsg;
             deliveryErrors.push(errMsg);
-            log.error(`❌ [five9:${c.name}] Failed to deliver message from ${msg.chatId}:`, errMsg);
+            const existing = getFive9Session(c.name, sessionKeyFor(msg));
+            logFive9Error(c, msg, err, {
+                request_id: requestId,
+                client_ip: clientIp,
+                channel: c.channel,
+                correlation_id: existing?.correlationId,
+                session_state: existing ? 'existing' : 'none',
+            });
             logRequest({
                 requestId, type: 'connector', targetName: c.name,
                 method: 'POST', path: url.pathname, targetUrl: c.five9.authBaseUrl, clientIp,
