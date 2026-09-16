@@ -439,15 +439,37 @@ interface AgentEvent {
     } | null;
 }
 
-async function fanoutFive9Event(cs: Five9ConnectorServer, session: Five9Session | null, event: AgentEvent): Promise<void> {
+/** Five9 sends timestamps as ISO-8601 strings ("2026-09-15T18:22:53.707Z") or epoch ms. */
+function parseFive9Timestamp(v: unknown): number {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string') {
+        const n = Number(v);
+        if (Number.isFinite(n) && n > 0) return n;
+        const d = Date.parse(v);
+        if (Number.isFinite(d)) return d;
+    }
+    return Date.now();
+}
+
+/** Per-leg timings of the last fan-out, for latency diagnosis in logs. */
+interface FanoutTimings { meta_ms?: number; smooch_ms?: number; webhook_ms?: number; total_ms: number }
+
+function timed(job: Promise<void>, sink: (ms: number) => void): Promise<void> {
+    const t = performance.now();
+    return job.finally(() => sink(Math.round(performance.now() - t)));
+}
+
+async function fanoutFive9Event(cs: Five9ConnectorServer, session: Five9Session | null, event: AgentEvent, timings?: FanoutTimings): Promise<void> {
     const c = cs.connector;
     const jobs: Promise<void>[] = [];
+    const t0 = performance.now();
+    const tm: FanoutTimings = timings ?? { total_ms: 0 };
 
     if (directReplyEnabled(c) && event.event === 'agent_message' && event.message) {
         if (c.channel === 'meta-whatsapp') {
-            jobs.push(sendToMeta(c, event.chatId, event.message.text, event.message.file, session?.phoneNumberId || event.phoneNumberId));
+            jobs.push(timed(sendToMeta(c, event.chatId, event.message.text, event.message.file, session?.phoneNumberId || event.phoneNumberId), ms => { tm.meta_ms = ms; }));
         } else if (c.channel === 'smooch') {
-            jobs.push(sendToSmooch(c, event.chatId, event.message.text, event.message.file));
+            jobs.push(timed(sendToSmooch(c, event.chatId, event.message.text, event.message.file), ms => { tm.smooch_ms = ms; }));
         }
     }
 
@@ -462,10 +484,11 @@ async function fanoutFive9Event(cs: Five9ConnectorServer, session: Five9Session 
                 parkFailedDelivery({ connectorName: c.name, target, targetIndex, event, error: err, attempts });
             });
         }
-        jobs.push(job);
+        jobs.push(timed(job, ms => { tm.webhook_ms = Math.max(tm.webhook_ms ?? 0, ms); }));
     });
 
     const results = await Promise.allSettled(jobs);
+    tm.total_ms = Math.round(performance.now() - t0);
     const failures = results.filter(r => r.status === 'rejected') as PromiseRejectedResult[];
     if (failures.length > 0) {
         cs.stats.deliveryFailures += failures.length;
@@ -821,7 +844,7 @@ async function handleFive9Callback(req: Request, cs: Five9ConnectorServer, clien
         const fileUrl = String(inner?.text || '');
         const category = String(inner?.fileData?.category || 'document');
         const agentName = String(inner?.agentData?.displayName || 'Agent');
-        const timestamp = Number(inner?.timestamp) || Date.now();
+        const timestamp = parseFive9Timestamp(inner?.timestamp);
 
         if (!correlationId) {
             log.warn(`⚠️ FIVE9_CALLBACK ${fmtFields({ connector: c.name, result: 'ignored', reason: 'no-correlationId', event: 'file', path: url.pathname })}`);
@@ -907,7 +930,7 @@ async function handleFive9Callback(req: Request, cs: Five9ConnectorServer, clien
     if (segment === 'message' || segment === 'messages') {
         const text = String(inner?.text ?? inner?.message ?? inner?.body?.text ?? '');
         const agentName = String(inner?.agentData?.displayName || inner?.displayName || 'Agent');
-        const timestamp = Number(inner?.timestamp) || Date.now();
+        const timestamp = parseFive9Timestamp(inner?.timestamp);
         const eventSerial = String(inner?.eventSerialNumber || timestamp);
         const event: AgentEvent = {
             ...base, event: 'agent_message',
@@ -917,20 +940,31 @@ async function handleFive9Callback(req: Request, cs: Five9ConnectorServer, clien
                 agentName, userType: 'AGENT', file: null,
             },
         };
-        try { await fanoutFive9Event(cs, session, event); }
+        // Latency legs: five9_lag_ms = agent typed (Five9 timestamp) → callback reached us.
+        //                meta_ms / webhook_ms / total_ms = our fan-out. Whatever is left
+        //                between "delivered" and the phone is on Meta's side.
+        const receivedAt = Date.now();
+        const tm: FanoutTimings = { total_ms: 0 };
+        const lag = { five9_lag_ms: receivedAt - timestamp, event_serial: inner?.eventSerialNumber, msg_serial: inner?.messageSerialNumber };
+        try { await fanoutFive9Event(cs, session, event, tm); }
         catch (err) {
             cs.stats.lastError = err instanceof Error ? err.message : String(err);
             log.warn(`⚠️ FIVE9_CALLBACK ${fmtFields({
                 connector: c.name, result: 'fanout-failed', event: 'agent_message', correlation_id: correlationId,
                 chat_id: session.customerId, phone_number_id: session.phoneNumberId || undefined,
                 direct_reply: directReplyEnabled(c), meta_token: !!c.meta?.accessToken, error: cs.stats.lastError,
+                ...lag, ...tm,
             })}`);
             return jsonResponse(502, { error: 'fan-out failed' });
         }
         touchFive9Session(c.name, session.chatId);
         markCustomerReadOnMeta(cs, session);
         cs.stats.agentMessages++; cs.stats.lastAgentMessageAt = Date.now();
-        log.info(`📤 FIVE9_CALLBACK ${fmtFields({ connector: c.name, result: 'delivered', event: 'agent_message', correlation_id: correlationId, chat_id: session.customerId, direct_reply: directReplyEnabled(c), webhook_targets: (c.webhookTargets || []).length })}`);
+        log.info(`📤 FIVE9_CALLBACK ${fmtFields({
+            connector: c.name, result: 'delivered', event: 'agent_message', correlation_id: correlationId, chat_id: session.customerId,
+            direct_reply: directReplyEnabled(c), webhook_targets: (c.webhookTargets || []).length,
+            ...lag, ...tm,
+        })}`);
         return jsonResponse(200, { status: 'ok', event: 'agent_message' });
     }
 
