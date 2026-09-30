@@ -9269,6 +9269,10 @@ function f9ChannelChanged() {
   f9Wiz.render(); // the Channel step drops out when there is no provider
 }
 
+function f9BusinessHoursChanged() {
+  const on = document.getElementById('f9BusinessHoursEnabled').checked;
+  document.getElementById('f9BusinessHoursSection').style.display = on ? 'block' : 'none';
+}
 function f9AutoReplyChanged() {
   const on = document.getElementById('f9AutoReplyEnabled').checked;
   document.getElementById('f9AutoReplySection').style.display = on ? 'block' : 'none';
@@ -9347,6 +9351,17 @@ function openFive9Modal(connector = null) {
   document.getElementById('f9AutoReplyExpires').value = localValue;
   f9AutoReplyChanged();
   document.getElementById('f9AutoReplyDetails').open = !!connector?.autoReply?.enabled;
+  // Business hours
+  const f9bh = connector?.businessHours || {};
+  document.getElementById('f9BusinessHoursEnabled').checked = !!f9bh.enabled;
+  document.getElementById('f9BusinessHoursMessage').value = f9bh.message || '';
+  document.getElementById('f9BusinessHoursForward').checked = !!f9bh.forwardToFive9;
+  for (let d = 0; d <= 6; d++) {
+    const day = (f9bh.weekly || []).find(w => w.day === d);
+    document.getElementById('f9BhDay' + d).value = day ? bhRangesToText(day.ranges) : '';
+  }
+  f9BusinessHoursChanged();
+  document.getElementById('f9BusinessHoursDetails').open = !!f9bh.enabled;
   // Advanced
   document.getElementById('f9SessionTtl').value = connector?.sessionTtlMinutes || '';
   f9ChannelChanged();
@@ -9414,6 +9429,28 @@ async function doSaveFive9Connector() {
   };
   const arExpiresLocal = document.getElementById('f9AutoReplyExpires').value;
   if (arExpiresLocal) body.autoReply.expiresAt = new Date(arExpiresLocal).toISOString();
+  // Business hours — parse each day's ranges; surface a clean error before posting.
+  const f9BhEnabled = document.getElementById('f9BusinessHoursEnabled').checked;
+  const f9Weekly = [];
+  try {
+    for (let d = 0; d <= 6; d++) {
+      const ranges = bhParseDayText(document.getElementById('f9BhDay' + d).value, BH_DAY_LABELS[d]);
+      if (ranges.length) f9Weekly.push({ day: d, ranges });
+    }
+  } catch (e) { return toast(e.message, 'error'); }
+  if (f9BhEnabled && !document.getElementById('f9BusinessHoursMessage').value.trim()) {
+    return toast('Business hours: a message is required', 'error');
+  }
+  if (f9BhEnabled && f9Weekly.length === 0) {
+    return toast('Business hours enabled but no open hours defined — add at least one range or disable it', 'error');
+  }
+  body.businessHours = {
+    enabled: f9BhEnabled,
+    message: document.getElementById('f9BusinessHoursMessage').value.trim(),
+    forwardToFive9: document.getElementById('f9BusinessHoursForward').checked,
+    timezone: 'Africa/Luanda',
+    weekly: f9Weekly,
+  };
   const ttl = parseInt(document.getElementById('f9SessionTtl').value, 10);
   if (ttl) body.sessionTtlMinutes = ttl;
   const ips = document.getElementById('f9AllowedIps').value.split(',').map(s => s.trim()).filter(Boolean);
