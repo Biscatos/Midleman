@@ -3249,6 +3249,25 @@ async function prCancelAll() {
   await fetchWebhooks();
 }
 
+async function dlqDismissAll() {
+  const n = _dlqEntries.length;
+  if (!n) return toast('Nothing to dismiss', 'warning');
+  if (!confirm(`Dismiss all ${n} failed deliveries${_dlqModalWebhook ? ' of "' + _dlqModalWebhook + '"' : ''}?
+
+They will be removed from the queue and cannot be retried afterwards.`)) return;
+  const btn = document.getElementById('dlqDismissAllBtn'); btn.disabled = true;
+  try {
+    const body = _dlqModalWebhook ? { webhook: _dlqModalWebhook } : {};
+    const res = await api('/admin/webhooks/dlq/dismiss-all', { method: 'POST', body: JSON.stringify(body) });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'Dismiss failed');
+    toast(`Dismissed ${d.removed} failed deliveries`);
+    await refreshDlqModal();
+    await fetchWebhooks();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+  btn.disabled = false;
+}
+
 async function dlqDismissOne(id) {
   try {
     const res = await api(`/admin/webhooks/dlq/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -10854,9 +10873,9 @@ let _lsPurgePoll = null;
 function _lsMB(n) { n = Number(n) || 0; return n >= 1024 ? (n / 1024).toFixed(2) + ' GB' : n.toFixed(1) + ' MB'; }
 function _lsRenderPurge(p) {
   const el = document.getElementById('lsPurgeStatus'); if (!el || !p) return;
-  if (p.running) el.innerHTML = '<span class="btn-spinner" aria-hidden="true"></span> A apagar… ' + fmtNum(p.deleted || 0) + ' linhas';
-  else if (p.error) el.textContent = 'Última limpeza falhou: ' + p.error;
-  else if (p.finishedAt) el.textContent = 'Última limpeza: ' + fmtNum(p.deleted || 0) + ' linhas removidas (' + new Date(p.finishedAt).toLocaleString() + ')';
+  if (p.running) el.innerHTML = '<span class="btn-spinner" aria-hidden="true"></span> Deleting… ' + fmtNum(p.deleted || 0) + ' rows so far';
+  else if (p.error) el.textContent = 'Last clean-up failed: ' + p.error;
+  else if (p.finishedAt) el.textContent = 'Last clean-up: ' + fmtNum(p.deleted || 0) + ' rows removed (' + new Date(p.finishedAt).toLocaleString() + ')';
   else el.textContent = '';
 }
 async function fetchLogSettings() {
@@ -10910,7 +10929,7 @@ async function purgeLogsNow(ev) {
   const keepErrors = document.getElementById('lsPurgeKeepErrors').checked;
   const what = (hours ? 'rows older than ' + hours + 'h' : 'ALL rows') + (type ? ' of type "' + type + '"' : '') + (keepErrors ? ', keeping failed requests' : ', INCLUDING failed requests');
   if (!confirm('Delete ' + what + ' from the request log?\n\nThis cannot be undone.')) return;
-  await withBusy(ev, 'A iniciar…', async () => {
+  await withBusy(ev, 'Starting…', async () => {
     const res = await api('/admin/logs/purge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ olderThanHours: hours, type: type || undefined, keepErrors }) });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) return toast(d.error || 'Purge failed', 'error');
@@ -10919,7 +10938,7 @@ async function purgeLogsNow(ev) {
 }
 async function compactLogsNow(ev) {
   if (!confirm('Compact (VACUUM) the request-log database now?\n\nThe server will not answer requests while it runs — on a multi-GB file this can take minutes. Run it after a clean-up, off-peak.')) return;
-  await withBusy(ev, 'A compactar…', async () => {
+  await withBusy(ev, 'Compacting…', async () => {
     const res = await api('/admin/logs/compact', { method: 'POST' });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) return toast(d.error || 'Compact failed', 'error');

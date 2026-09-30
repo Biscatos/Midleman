@@ -162,6 +162,21 @@ export function dismissFailedFanout(id: string): boolean {
     return true;
 }
 
+/** Drop every DLQ entry (optionally only one webhook's). Returns how many were removed. */
+export function dismissAllFailedFanouts(webhookName?: string): number {
+    const before = deadLetterQueue.length;
+    if (webhookName) {
+        for (let i = deadLetterQueue.length - 1; i >= 0; i--) {
+            if (deadLetterQueue[i].webhookName === webhookName) deadLetterQueue.splice(i, 1);
+        }
+    } else {
+        deadLetterQueue.length = 0;
+    }
+    const removed = before - deadLetterQueue.length;
+    if (removed > 0) scheduleDlqFlush();
+    return removed;
+}
+
 export async function retryFailedFanout(id: string): Promise<{ ok: boolean; status?: number; error?: string }> {
     const entry = deadLetterQueue.find(e => e.id === id);
     if (!entry) return { ok: false, error: 'Not found' };

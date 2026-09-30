@@ -347,9 +347,13 @@ export async function captureResponseBody(res: Response): Promise<{ body: string
                 }
                 chunks.push(value);
             }
-        } finally {
-            if (truncated) { try { await reader.cancel(); } catch {} }
-            else { try { reader.releaseLock(); } catch {} }
+        } catch {
+            // Upstream stream error — keep whatever we already have.
+        }
+        if (truncated) {
+            // Never cancel a tee'd branch (it can stall the sibling the client is
+            // reading). Drain the rest in the background and discard it.
+            void (async () => { try { for (;;) { const { done } = await reader.read(); if (done) break; } } catch {} })();
         }
         const merged = new Uint8Array(Math.min(received, config.maxBodySize));
         let off = 0;
