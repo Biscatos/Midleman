@@ -23,6 +23,7 @@ import { startFive9ConnectorServer, stopFive9ConnectorServer, stopAllFive9Connec
 import { initFive9Sessions, shutdownFive9Sessions, listFive9Sessions, deleteFive9ConnectorSessions } from './five9/sessions';
 import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry/telemetry';
 import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart, getRequestLogBreakdown, getPurgeStatus, startPurge, compactDatabase, type RequestLogEntry, type PurgeOptions } from './telemetry/request-log';
+import { replayProxyRequest, ReplayError } from './proxy/replay';
 import { initLogSettings, getLogSettings, saveLogSettings, registerLogModeResolver, isLogMode, type LogMode } from './telemetry/log-settings';
 import { initSipLog, shutdownSipLog, querySipLogs, getSipLogDetail, getSipLogStats } from './telemetry/sip-log';
 import { initConnLog, shutdownConnLog, queryConnLogs } from './telemetry/tcpudp-conn-log';
@@ -31,7 +32,7 @@ import { migrateProfileCerts } from './core/cert-migration';
 import { scheduleAcmeRenewal, shutdownAcme, requestCertificate } from './sip/acme';
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort, isProxyServerRunning, setProxyLoginTemplate, setProxyLogo } from './servers/proxy-server';
 import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort, assignTcpUdpListenerPort, releaseProxyPort, releaseWebhookPort, releaseTcpUdpListenerPorts, getWebhookPort, assignConnectorPort, releaseConnectorPort, getConnectorPort } from './servers/port-manager';
-import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, dismissAllPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState, setDlqAuthResolver, listRunningWebhookNames } from './servers/webhook-server';
+import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, dismissAllFailedFanouts, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, dismissAllPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState, setDlqAuthResolver, listRunningWebhookNames } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
 import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, setProxyUserBlocked, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, cleanupExpiredPasswordResetTokens, findResetCandidateByEmail, logSmsSend,
@@ -1448,6 +1449,19 @@ const server = Bun.serve({
                     return jsonRes(200, getRequestLogChart() as unknown as Record<string, unknown>);
                 }
 
+                if (url.pathname.match(/^\/admin\/requests\/\d+\/resend$/) && req.method === 'POST') {
+                    const id = parseInt(url.pathname.split('/')[3], 10);
+                    try {
+                        const result = await replayProxyRequest(id, config.proxyProfiles);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'request.resend', targetType: 'request', targetId: String(id), details: { ok: result.ok, status: result.status, requestId: result.requestId, error: result.error }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(result.ok ? 200 : 502, result as unknown as Record<string, unknown>);
+                    } catch (e) {
+                        if (e instanceof ReplayError) return jsonRes(e.httpStatus, { error: e.message });
+                        return jsonRes(500, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+
                 if (url.pathname.match(/^\/admin\/requests\/\d+$/) && req.method === 'GET') {
                     const id = parseInt(url.pathname.split('/').pop()!, 10);
                     const detail = getRequestLogDetail(id);
@@ -1715,6 +1729,15 @@ const server = Bun.serve({
                     try { const b = await req.json() as any; webhookName = b?.webhook || undefined; } catch {}
                     const result = await retryAllFailedFanouts(webhookName);
                     return jsonRes(200, result);
+                }
+
+                if (url.pathname === '/admin/webhooks/dlq/dismiss-all' && req.method === 'POST') {
+                    let webhookName: string | undefined;
+                    try { const b = await req.json() as any; webhookName = b?.webhook || undefined; } catch {}
+                    const removed = dismissAllFailedFanouts(webhookName);
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'webhook.dlq.dismiss_all', targetType: 'webhook', targetId: webhookName, details: { removed }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { removed });
                 }
 
                 if (url.pathname.match(/^\/admin\/webhooks\/dlq\/[^/]+\/retry$/) && req.method === 'POST') {

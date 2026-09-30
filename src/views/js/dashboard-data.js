@@ -3249,6 +3249,25 @@ async function prCancelAll() {
   await fetchWebhooks();
 }
 
+async function dlqDismissAll() {
+  const n = _dlqEntries.length;
+  if (!n) return toast('Nothing to dismiss', 'warning');
+  if (!confirm(`Dismiss all ${n} failed deliveries${_dlqModalWebhook ? ' of "' + _dlqModalWebhook + '"' : ''}?
+
+They will be removed from the queue and cannot be retried afterwards.`)) return;
+  const btn = document.getElementById('dlqDismissAllBtn'); btn.disabled = true;
+  try {
+    const body = _dlqModalWebhook ? { webhook: _dlqModalWebhook } : {};
+    const res = await api('/admin/webhooks/dlq/dismiss-all', { method: 'POST', body: JSON.stringify(body) });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'Dismiss failed');
+    toast(`Dismissed ${d.removed} failed deliveries`);
+    await refreshDlqModal();
+    await fetchWebhooks();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+  btn.disabled = false;
+}
+
 async function dlqDismissOne(id) {
   try {
     const res = await api(`/admin/webhooks/dlq/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -4646,6 +4665,24 @@ async function openReqDetail(id) {
 }
 function closeReqDetail() { document.getElementById('reqDetailModal').style.display = 'none'; }
 
+async function resendRequest(id, btn) {
+  if (!confirm('Re-send this request to the upstream now?\n\nThe upstream will process it again. A new entry is written to the request log.')) return;
+  await withBusy(btn, 'Sending\u2026', async () => {
+    try {
+      const res = await api('/admin/requests/' + id + '/resend', { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      if (d.error && !d.requestId) return toast(d.error, 'error');
+      if (d.ok) toast('Re-sent: ' + d.status + ' ' + (d.statusText || '') + ' in ' + fmtMs(d.durationMs));
+      else toast('Re-sent, upstream answered ' + (d.status ? d.status + ' ' + (d.statusText || '') : d.error), 'error');
+      // Open the new log row so the response is right there.
+      const q = await api('/admin/requests?limit=1&requestId=' + encodeURIComponent(d.requestId));
+      const qd = await q.json().catch(() => ({}));
+      if (qd.requests && qd.requests[0]) openReqDetail(qd.requests[0].id);
+      if (typeof fetchRequestLogs === 'function' && currentPage === 'requests') fetchRequestLogs();
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
+  });
+}
+
 function renderReqDetail(d) {
   const sc = d.resStatus;
   const statusCls = !sc ? 'rdm-st-unknown' : sc < 300 ? 'rdm-st-ok' : sc < 400 ? 'rdm-st-redirect' : sc < 500 ? 'rdm-st-client' : 'rdm-st-server';
@@ -4666,6 +4703,14 @@ function renderReqDetail(d) {
   let resHCount = 0; try { resHCount = Object.keys(JSON.parse(d.resHeaders || '{}')).length; } catch { }
 
   document.getElementById('reqDetailTitle').innerHTML = `<span style="color:${mColor};font-weight:700">${esc(d.method)}</span> <span style="font-weight:400;color:var(--text2)">${esc(d.path)}</span>`;
+  const actions = document.getElementById('reqDetailActions');
+  if (actions) {
+    const canResend = (d.type === 'proxy' || d.type === 'target') && d.profileName;
+    const failed = !sc || sc >= 400 || d.error;
+    actions.innerHTML = canResend
+      ? `<button class="btn btn-sm ${failed ? 'btn-primary' : 'btn-ghost'}" id="reqResendBtn" onclick="resendRequest(${d.id}, this)" title="Re-send this request to the upstream with the profile's current credentials">Resend</button>`
+      : '';
+  }
 
   document.getElementById('reqDetailContent').innerHTML = `
 <div class="rdm-hero ${statusCls}">
@@ -10854,9 +10899,9 @@ let _lsPurgePoll = null;
 function _lsMB(n) { n = Number(n) || 0; return n >= 1024 ? (n / 1024).toFixed(2) + ' GB' : n.toFixed(1) + ' MB'; }
 function _lsRenderPurge(p) {
   const el = document.getElementById('lsPurgeStatus'); if (!el || !p) return;
-  if (p.running) el.innerHTML = '<span class="btn-spinner" aria-hidden="true"></span> A apagar… ' + fmtNum(p.deleted || 0) + ' linhas';
-  else if (p.error) el.textContent = 'Última limpeza falhou: ' + p.error;
-  else if (p.finishedAt) el.textContent = 'Última limpeza: ' + fmtNum(p.deleted || 0) + ' linhas removidas (' + new Date(p.finishedAt).toLocaleString() + ')';
+  if (p.running) el.innerHTML = '<span class="btn-spinner" aria-hidden="true"></span> Deleting… ' + fmtNum(p.deleted || 0) + ' rows so far';
+  else if (p.error) el.textContent = 'Last clean-up failed: ' + p.error;
+  else if (p.finishedAt) el.textContent = 'Last clean-up: ' + fmtNum(p.deleted || 0) + ' rows removed (' + new Date(p.finishedAt).toLocaleString() + ')';
   else el.textContent = '';
 }
 async function fetchLogSettings() {
@@ -10910,7 +10955,7 @@ async function purgeLogsNow(ev) {
   const keepErrors = document.getElementById('lsPurgeKeepErrors').checked;
   const what = (hours ? 'rows older than ' + hours + 'h' : 'ALL rows') + (type ? ' of type "' + type + '"' : '') + (keepErrors ? ', keeping failed requests' : ', INCLUDING failed requests');
   if (!confirm('Delete ' + what + ' from the request log?\n\nThis cannot be undone.')) return;
-  await withBusy(ev, 'A iniciar…', async () => {
+  await withBusy(ev, 'Starting…', async () => {
     const res = await api('/admin/logs/purge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ olderThanHours: hours, type: type || undefined, keepErrors }) });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) return toast(d.error || 'Purge failed', 'error');
@@ -10919,7 +10964,7 @@ async function purgeLogsNow(ev) {
 }
 async function compactLogsNow(ev) {
   if (!confirm('Compact (VACUUM) the request-log database now?\n\nThe server will not answer requests while it runs — on a multi-GB file this can take minutes. Run it after a clean-up, off-peak.')) return;
-  await withBusy(ev, 'A compactar…', async () => {
+  await withBusy(ev, 'Compacting…', async () => {
     const res = await api('/admin/logs/compact', { method: 'POST' });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) return toast(d.error || 'Compact failed', 'error');

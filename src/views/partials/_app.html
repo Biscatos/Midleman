@@ -432,7 +432,10 @@
           <div class="rdm-header-left">
             <h3 id="reqDetailTitle" class="rdm-title">Request Detail</h3>
           </div>
-          <button onclick="closeReqDetail()" class="rdm-close">&times;</button>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span id="reqDetailActions"></span>
+            <button onclick="closeReqDetail()" class="rdm-close">&times;</button>
+          </div>
         </div>
         <div id="reqDetailContent" class="rdm-body"></div>
       </div>
@@ -3096,7 +3099,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           <h2>Log Storage</h2>
           <p>Request-log retention, what gets captured, and manual clean-up of the SQLite database. Per-resource overrides live in each proxy, webhook and connector editor.</p>
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="withBusy(this, 'A actualizar…', async () => { await fetchLogSettings(); })">Refresh</button>
+        <button class="btn btn-ghost btn-sm" onclick="withBusy(this, 'Refreshing…', async () => { await fetchLogSettings(); })">Refresh</button>
       </div>
 
       <div class="stats-grid ls-stats">
@@ -3141,7 +3144,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
               <span class="ls-hint">For every proxy, webhook and connector without an override. <b>Errors only</b> keeps the body of failed deliveries (status ≥ 400 or network error) and drops the rest before it reaches the database.</span>
             </div>
             <div class="ls-actions">
-              <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A guardar…', saveLogSettings)">Save</button>
+              <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Saving…', saveLogSettings)">Save</button>
             </div>
           </div>
         </div>
@@ -4094,6 +4097,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         <button id="dlqRetryAllBtn" class="btn"
           style="padding:4px 14px;font-size:12px;background:var(--accent);color:#fff;border:none"
           onclick="dlqRetryAll()">Retry All</button>
+        <button id="dlqDismissAllBtn" class="btn btn-ghost" style="padding:4px 14px;font-size:12px" onclick="dlqDismissAll()">Dismiss All</button>
         <button onclick="closeDlqModal()"
           style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
       </div>
