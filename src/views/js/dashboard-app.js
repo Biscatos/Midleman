@@ -464,6 +464,7 @@ const PAGE_TITLES = {
   npm: 'Nginx Proxy Manager',
   audit: 'Audit Log',
   errors: 'System Alerts',
+  logsettings: 'Log Storage',
   reports: 'Report Feeds',
   webhookDestinations: 'Webhooks · Destinations'
 };
@@ -473,7 +474,7 @@ const PAGE_TITLES = {
 const ROUTABLE_PAGES = new Set([
   'overview','requests','proxyusers','profiles','connectors',
   'oauthclients','consentpages','ldap','email','sms','notifications',
-  'npm','audit','webhooks','ldap','reports','errors',
+  'npm','audit','webhooks','ldap','reports','errors','logsettings',
 ]);
 
 function navigate(page, opts = {}) {
@@ -543,6 +544,7 @@ function navigate(page, opts = {}) {
   if (page === 'npm') { if (typeof switchNpmSubpage === 'function') switchNpmSubpage(_npmCurrentSubpage || 'proxy-hosts'); fetchNpmConfig(); }
   if (page === 'audit') { fetchAuditLogs(true); }
   if (page === 'errors') { fetchErrorFeed(true); }
+  if (page === 'logsettings') { fetchLogSettings(); }
   if (page === 'reports') { loadReportFeeds(); loadGcInstances(); rfStartSse(); rfViewerUpdateSelect(); }
   const titleEl = document.getElementById('topbarPageTitle');
   if (titleEl) titleEl.textContent = PAGE_TITLES[page] || page;

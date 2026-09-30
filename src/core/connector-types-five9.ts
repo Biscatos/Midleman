@@ -38,6 +38,8 @@ export interface Five9Connector {
     name: string;
     port: number;
     enabled?: boolean;
+    /** Request-log capture mode for inbound + fan-out rows; unset = global default. */
+    logMode?: 'full' | 'errors-only' | 'off';
 
     channel: ConnectorChannel;
     five9: Five9Settings;

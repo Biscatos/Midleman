@@ -92,8 +92,20 @@ PROXY_INFOBIP_BLOCKED=.exe,.bat        # optional: block file extensions
 | Variable | Default | Description |
 |---|---|---|
 | `REQUEST_LOG_ENABLED` | `true` | Enable SQLite request logging |
-| `REQUEST_LOG_RETENTION_DAYS` | `7` | Auto-purge after N days |
+| `REQUEST_LOG_RETENTION_DAYS` | `7` | Auto-purge after N days (overridable from the dashboard) |
 | `REQUEST_LOG_MAX_BODY_SIZE` | `65536` | Max bytes captured per request body |
+
+Retention and capture mode can also be changed at runtime in **Settings → Log Storage** (persisted to `data/log-settings.json`, takes precedence over the env var). The same page shows the database size, lets you delete rows now (optionally keeping failed requests as evidence) and compact the file (VACUUM).
+
+Capture modes — global default plus a per-resource override on every HTTP proxy, webhook and connector:
+
+| Mode | Behaviour |
+|---|---|
+| `full` | Log every request (default) |
+| `errors-only` | Keep only rows with status ≥ 400 or a network error, including the request body, so they can be inspected or re-sent |
+| `off` | Log nothing for that resource (replaces the old "Disable Request Logs" checkbox) |
+
+Purges run hourly in 5 000-row batches and never block traffic. Deleted rows only free space inside the file; run **Compact** once (off-peak, it blocks the server) to shrink it on disk and enable incremental auto-vacuum from then on.
 
 ### OpenTelemetry (optional)
 

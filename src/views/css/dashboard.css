@@ -2690,3 +2690,35 @@ body.nav-open .nav-backdrop { display: block; }
 @media (prefers-reduced-motion: reduce) {
   .topbar-alerts-btn.has-alerts svg { animation: none; }
 }
+
+/* ─── Settings → Log Storage ─────────────────────────────────────────────── */
+.ls-stats { grid-template-columns: repeat(4, 1fr); margin-bottom: 16px; }
+.ls-stats .stat-card { padding: 14px 16px; }
+.ls-stats .stat-label { margin-bottom: 6px; }
+.ls-stats .stat-value { font-size: 18px; }
+.ls-stat-sub { font-size: 11px; color: var(--text3); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ls-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.ls-card { margin: 0; }
+.ls-card .card-header { padding: 10px 16px; }
+.ls-card .card-header h3 { font-size: 13px; }
+.ls-form { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; }
+.ls-form .form-group { margin: 0; }
+.ls-form .form-group label { font-size: 11px; margin-bottom: 5px; }
+.ls-form .form-group input, .ls-form .form-group select { padding: 6px 10px; font-size: 13px; height: 32px; }
+.ls-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ls-hint { font-size: 11px; color: var(--text3); line-height: 1.45; }
+.ls-hint code { font-size: 10.5px; }
+.ls-check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text); cursor: pointer; user-select: none; }
+.ls-check input { accent-color: var(--accent); cursor: pointer; }
+.ls-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.ls-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ls-table th { padding: 8px 16px; text-align: left; background: var(--surface2); color: var(--text3); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+.ls-table td { padding: 8px 16px; border-top: 1px solid var(--border); }
+.ls-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.ls-table .ls-empty { text-align: center; color: var(--text3); padding: 20px; }
+@media (max-width: 900px) {
+  .ls-stats { grid-template-columns: 1fr 1fr; }
+  .ls-stats .stat-card:nth-child(2n) { border-right: none; }
+  .ls-stats .stat-card:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+  .ls-cols { grid-template-columns: 1fr; }
+}

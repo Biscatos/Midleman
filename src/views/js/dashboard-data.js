@@ -257,6 +257,7 @@ async function fetchRequestLogStats() {
     const res = await api('/admin/requests/stats'); if (!res.ok) return;
     const s = await res.json();
     document.getElementById('navReqBadge').textContent = fmtNum(s.total);
+    const sizeBadge = document.getElementById('navLogSizeBadge'); if (sizeBadge) sizeBadge.textContent = (s.fileSizeMB || s.dbSizeMB || 0) + ' MB';
     const el = document.getElementById('ovQuickMetrics');
     if (s.total === 0) {
       el.innerHTML = '<div style="color:var(--text3);font-size:14px;text-align:center;padding:20px">No requests recorded yet.</div>';
@@ -881,7 +882,7 @@ async function openProfileModal(profile = null) {
   document.getElementById('pAuthMode').value = profile ? (profile.authMode || 'none') : 'none';
   document.getElementById('pRequire2fa').checked = profile ? !!profile.require2fa : false;
   document.getElementById('pIsWebApp').checked = profile ? !!profile.isWebApp : false;
-  document.getElementById('pDisableLogs').checked = profile ? !!profile.disableLogs : false;
+  document.getElementById('pLogMode').value = profile ? (profile.logMode || (profile.disableLogs ? 'off' : '')) : '';
   document.getElementById('pForwardPath').checked = profile ? profile.forwardPath !== false : true;
   document.getElementById('pAllowSelfSignedTls').checked = profile ? !!profile.allowSelfSignedTls : false;
   document.getElementById('pLoginTitle').value = profile ? (profile.loginTitle || '') : '';
@@ -1002,7 +1003,8 @@ async function saveProfile() {
     body.require2fa = document.getElementById('pRequire2fa').checked;
     body.isWebApp = document.getElementById('pIsWebApp').checked;
   }
-  body.disableLogs = document.getElementById('pDisableLogs').checked;
+  body.logMode = document.getElementById('pLogMode').value;
+  body.disableLogs = body.logMode === 'off';
   body.forwardPath = document.getElementById('pForwardPath').checked;
   body.allowSelfSignedTls = document.getElementById('pAllowSelfSignedTls').checked;
   const loginTitle = document.getElementById('pLoginTitle').value.trim();
@@ -2776,6 +2778,7 @@ function openConnectorModal(connector = null) {
   connectorWebhooksEnabledChanged();
   document.getElementById('cnAllowedIps').value = (connector?.allowedIps || []).join(', ');
   document.getElementById('cnEnabled').checked = connector ? connector.enabled !== false : true;
+  document.getElementById('cnLogMode').value = connector?.logMode || '';
   cnWiz.open(!!connector, {
     title: connector ? `Edit Connector — ${connector.name}` : 'New Connector',
     subtitle: connector ? 'GoContact webchat connector' : 'GoContact webchat connector — walk the steps, or jump to one',
@@ -2800,6 +2803,7 @@ async function saveConnector() {
     channel: document.getElementById('cnChannel').value,
     port: parseInt(document.getElementById('cnPort').value, 10) || 0,
     enabled: document.getElementById('cnEnabled').checked,
+    logMode: document.getElementById('cnLogMode').value,
     gocontact: {
       baseUrl: document.getElementById('cnGoBaseUrl').value.trim(),
       username: document.getElementById('cnGoUsername').value.trim(),
@@ -3813,7 +3817,7 @@ function collectPathsFromObject(obj, prefix, set, depth = 0) {
 
 async function fetchAndMergeWebhookPayloads() {
     try {
-        let url = '/admin/requests?type=webhook&limit=50';
+        let url = '/admin/requests?type=webhook&limit=50&includeBody=1';
         if (editingWebhook && editingWebhook.name) {
             url += '&target=' + encodeURIComponent(editingWebhook.name);
         }
@@ -3848,7 +3852,7 @@ async function fetchAndMergeWebhookPayloads() {
 
 async function fetchRecentWebhookPayload() {
     try {
-        let url = '/admin/requests?type=webhook&limit=1';
+        let url = '/admin/requests?type=webhook&limit=1&includeBody=1';
         if (editingWebhook && editingWebhook.name) {
             url += '&target=' + encodeURIComponent(editingWebhook.name);
         }
@@ -4344,6 +4348,7 @@ function openWebhookModal(webhook = null) {
   // Private/internal destinations are allowed by default; checkbox reflects the
   // stored value (true unless explicitly disabled), checked for new webhooks.
   document.getElementById('wAllowPrivateTargets').checked = webhook ? (webhook.allowPrivateTargets !== false) : true;
+  document.getElementById('wLogMode').value = webhook?.logMode || '';
   IpTagInput.setValue('wTargetAllowedCidrs', webhook?.targetAllowedCidrs || []);
 
   // Restore persisted test payload (used by the body template editor preview)
@@ -4500,6 +4505,7 @@ async function saveWebhook() {
   const at = document.getElementById('wAuthToken').value.trim(); if (at) body.authToken = at;
   const wIps = IpTagInput.getValue('wAllowedIps'); if (wIps.length) body.allowedIps = wIps;
   body.allowPrivateTargets = document.getElementById('wAllowPrivateTargets').checked;
+  body.logMode = document.getElementById('wLogMode').value;
   const wCidrs = IpTagInput.getValue('wTargetAllowedCidrs'); if (wCidrs.length) body.targetAllowedCidrs = wCidrs;
 
   const tp = (document.getElementById('wTestPayload').value || '').trim();
@@ -4792,7 +4798,7 @@ ${d.type === 'webhook' ? `
 async function loadFanoutDeliveries(reqId) {
   try {
     const [fRes, dlqRes, prRes] = await Promise.all([
-      api('/admin/requests?limit=100&type=webhook-fanout&search=' + reqId),
+      api('/admin/requests?limit=100&type=webhook-fanout&requestId=' + encodeURIComponent(reqId)),
       api('/admin/webhooks/dlq'),
       api('/admin/webhooks/pending-retry?requestId=' + encodeURIComponent(reqId)),
     ]);
@@ -9246,6 +9252,7 @@ function openFive9Modal(connector = null) {
   document.getElementById('f9Channel').value = connector?.channel || 'meta-whatsapp';
   document.getElementById('f9Port').value = connector?.port || '';
   document.getElementById('f9Enabled').checked = connector ? connector.enabled !== false : true;
+  document.getElementById('f9LogMode').value = connector?.logMode || '';
   // Five9 settings
   const f9 = connector?.five9 || {};
   document.getElementById('f9AuthBaseUrl').value = f9.authBaseUrl || '';
@@ -9325,6 +9332,7 @@ async function doSaveFive9Connector() {
     channel: document.getElementById('f9Channel').value,
     port: parseInt(document.getElementById('f9Port').value, 10) || 0,
     enabled: document.getElementById('f9Enabled').checked,
+    logMode: document.getElementById('f9LogMode').value,
     five9: {
       authBaseUrl: document.getElementById('f9AuthBaseUrl').value.trim(),
       tenantName: document.getElementById('f9TenantName').value.trim(),
@@ -10837,5 +10845,85 @@ async function clearAllErrors(ev) {
       _errLastToastedId = null;
       await fetchErrorFeed(true);
     } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  });
+}
+
+
+// ─── Log Storage (Settings → Log Storage) ───────────────────────────────────
+let _lsPurgePoll = null;
+function _lsMB(n) { n = Number(n) || 0; return n >= 1024 ? (n / 1024).toFixed(2) + ' GB' : n.toFixed(1) + ' MB'; }
+function _lsRenderPurge(p) {
+  const el = document.getElementById('lsPurgeStatus'); if (!el || !p) return;
+  if (p.running) el.innerHTML = '<span class="btn-spinner" aria-hidden="true"></span> A apagar… ' + fmtNum(p.deleted || 0) + ' linhas';
+  else if (p.error) el.textContent = 'Última limpeza falhou: ' + p.error;
+  else if (p.finishedAt) el.textContent = 'Última limpeza: ' + fmtNum(p.deleted || 0) + ' linhas removidas (' + new Date(p.finishedAt).toLocaleString() + ')';
+  else el.textContent = '';
+}
+async function fetchLogSettings() {
+  try {
+    const res = await api('/admin/logs/settings'); if (!res.ok) return toast('Could not load log settings', 'error');
+    const d = await res.json();
+    const modeLabel = { full: 'full', 'errors-only': 'errors only', off: 'off' };
+    document.getElementById('lsRetentionDays').value = d.retentionDays || '';
+    document.getElementById('lsEnvRetention').textContent = d.envRetentionDays;
+    document.getElementById('lsDefaultMode').value = d.defaultMode || 'full';
+    const st = d.stats || {}, br = d.breakdown || {};
+    document.getElementById('lsStatFile').textContent = _lsMB(st.fileSizeMB || st.dbSizeMB);
+    document.getElementById('lsStatFree').textContent = 'free pages ' + _lsMB(br.freelistMB) + ' · auto-vacuum ' + (br.autoVacuum || 'none');
+    document.getElementById('lsStatRows').textContent = fmtNum(br.total || 0);
+    document.getElementById('lsStatErrors').textContent = 'errors ' + fmtNum(br.errors || 0);
+    document.getElementById('lsStatOldest').textContent = st.oldest ? new Date(st.oldest + 'Z').toLocaleDateString() : '—';
+    document.getElementById('lsStatNewest').textContent = 'newest ' + (st.newest ? new Date(st.newest + 'Z').toLocaleString() : '—');
+    document.getElementById('lsStatRetention').textContent = (st.retentionDays || d.envRetentionDays) + ' days';
+    document.getElementById('lsStatMode').textContent = 'mode ' + (modeLabel[d.defaultMode] || 'full') + (d.retentionDays ? '' : ' · env retention');
+    const sizeBadge = document.getElementById('navLogSizeBadge'); if (sizeBadge) sizeBadge.textContent = _lsMB(st.fileSizeMB || st.dbSizeMB);
+    const tb = document.getElementById('lsBreakdownBody');
+    const types = br.types || [];
+    tb.innerHTML = types.length ? types.map(t => `<tr><td><code>${esc(t.type)}</code></td><td class="num">${fmtNum(t.count)}</td><td class="num">${fmtNum(t.errors || 0)}</td><td class="num">${br.total ? Math.round(t.count * 100 / br.total) : 0}%</td></tr>`).join('')
+      : '<tr><td colspan="4" class="ls-empty">No rows.</td></tr>';
+    _lsRenderPurge(d.purge);
+    if (d.purge && d.purge.running) _lsStartPoll();
+  } catch { toast('Could not load log settings', 'error'); }
+}
+async function saveLogSettings() {
+  const raw = document.getElementById('lsRetentionDays').value.trim();
+  const body = { retentionDays: raw === '' ? null : Number(raw), defaultMode: document.getElementById('lsDefaultMode').value };
+  const res = await api('/admin/logs/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || 'Save failed', 'error');
+  toast('Log settings saved');
+  fetchLogSettings();
+}
+function _lsStartPoll() {
+  if (_lsPurgePoll) return;
+  _lsPurgePoll = setInterval(async () => {
+    try {
+      const res = await api('/admin/logs/purge/status'); if (!res.ok) return;
+      const p = await res.json(); _lsRenderPurge(p);
+      if (!p.running) { clearInterval(_lsPurgePoll); _lsPurgePoll = null; toast('Clean-up finished: ' + fmtNum(p.deleted || 0) + ' rows deleted'); fetchLogSettings(); }
+    } catch {}
+  }, 1500);
+}
+async function purgeLogsNow(ev) {
+  const hours = Number(document.getElementById('lsPurgeAge').value) || 0;
+  const type = document.getElementById('lsPurgeType').value;
+  const keepErrors = document.getElementById('lsPurgeKeepErrors').checked;
+  const what = (hours ? 'rows older than ' + hours + 'h' : 'ALL rows') + (type ? ' of type "' + type + '"' : '') + (keepErrors ? ', keeping failed requests' : ', INCLUDING failed requests');
+  if (!confirm('Delete ' + what + ' from the request log?\n\nThis cannot be undone.')) return;
+  await withBusy(ev, 'A iniciar…', async () => {
+    const res = await api('/admin/logs/purge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ olderThanHours: hours, type: type || undefined, keepErrors }) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return toast(d.error || 'Purge failed', 'error');
+    _lsRenderPurge(d); _lsStartPoll();
+  });
+}
+async function compactLogsNow(ev) {
+  if (!confirm('Compact (VACUUM) the request-log database now?\n\nThe server will not answer requests while it runs — on a multi-GB file this can take minutes. Run it after a clean-up, off-peak.')) return;
+  await withBusy(ev, 'A compactar…', async () => {
+    const res = await api('/admin/logs/compact', { method: 'POST' });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return toast(d.error || 'Compact failed', 'error');
+    toast('Compacted: ' + _lsMB(d.beforeMB) + ' → ' + _lsMB(d.afterMB) + ' in ' + Math.round(d.durationMs / 1000) + 's');
+    fetchLogSettings();
   });
 }

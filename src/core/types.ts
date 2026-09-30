@@ -11,7 +11,8 @@ export interface ProxyProfile {
   authMode?: 'none' | 'accessKey' | 'login'; // Auth mode: none=public, accessKey=static key, login=user login with JWT
   require2fa?: boolean;   // If true, users MUST have TOTP enabled to access this profile (login mode only)
   isWebApp?: boolean;     // If true, treat as a web application (show login page instead of JSON 401)
-  disableLogs?: boolean;  // If true, skip request/response logging for this profile
+  disableLogs?: boolean;  // Legacy: if true, same as logMode = 'off'
+  logMode?: 'full' | 'errors-only' | 'off'; // Request-log capture mode; unset = global default (Settings → Logs)
   blockedExtensions?: Set<string>; // Optional set of blocked file extensions
   allowedIps?: string[];  // Optional IP allowlist (exact, CIDR, wildcard). Empty = unrestricted.
   allowedPaths?: string[]; // Optional path allowlist. Exact path or prefix ending with "*". Empty/undefined = all paths allowed.
@@ -156,6 +157,8 @@ export interface WebhookDistributor {
    *  block (including loopback/metadata) for matching addresses. */
   targetAllowedCidrs?: string[];
   silenceAlert?: WebhookSilenceAlert; // Optional inactivity notifier
+  /** Request-log capture mode for inbound + fan-out rows; unset = global default. */
+  logMode?: 'full' | 'errors-only' | 'off';
   /** Persisted JSON test payload used by the dashboard editor to preview
    *  template interpolation. Has no runtime effect on delivery. */
   testPayload?: string;
