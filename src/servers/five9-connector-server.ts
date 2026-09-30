@@ -21,8 +21,9 @@ import { Five9ApiClient, Five9Error, type Five9SessionAuth, FETCH_TIMEOUT_MS } f
 import {
     getFive9Session, upsertFive9Session, touchFive9Session, deleteFive9Session,
     updateFive9SessionLastInbound, markFive9SessionAutoReplied, purgeFive9ExpiredSessions,
-    getFive9SessionByCorrelation, type Five9Session,
+    getFive9SessionByCorrelation, getFive9OutOfHoursLastSent, markFive9OutOfHoursSent, type Five9Session,
 } from '../five9/sessions';
+import { isWithinBusinessHours } from '../core/business-hours';
 import { logRequest, headersToRecord } from '../telemetry/request-log';
 import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { assertResolvedHostAllowed } from '../core/ssrf-guard';
@@ -717,11 +718,53 @@ async function injectFive9Inbound(cs: Five9ConnectorServer, session: Five9Sessio
     }
 }
 
-async function deliverFive9Inbound(cs: Five9ConnectorServer, msg: NormalizedInboundMessage): Promise<Five9Session> {
+/** Outcome of one inbound message: a Five9 session, or an explicit reason why
+ *  none was opened (so the caller can tell "closed right now" apart). */
+type Five9InboundOutcome =
+    | { ok: true; session: Five9Session }
+    | { ok: false; reason: 'out_of_hours' };
+
+// Anti-spam throttle for the out-of-hours notice (same window as GoContact).
+const OUT_OF_HOURS_REPLY_WINDOW_MS = 8 * 60 * 60_000;
+
+/** Send the out-of-hours notice at most once per window per customer. Caller
+ *  holds the per-customer session lock, so concurrent messages can't double-fire. */
+function maybeSendFive9OutOfHoursReply(cs: Five9ConnectorServer, msg: NormalizedInboundMessage, sessionKey: string, text: string, session: Five9Session | null): void {
+    const c = cs.connector;
+    const last = getFive9OutOfHoursLastSent(c.name, sessionKey);
+    if (Date.now() - last < OUT_OF_HOURS_REPLY_WINDOW_MS) return;
+    markFive9OutOfHoursSent(c.name, sessionKey, Date.now());
+    const event: AgentEvent = {
+        connector: c.name, channel: c.channel, event: 'agent_message',
+        chatId: msg.chatId, displayName: msg.displayName,
+        phoneNumberId: msg.phoneNumberId || undefined,
+        message: {
+            uuid: `outofhours-${sessionKey}-${Date.now()}`, text, timestamp: Date.now(),
+            agentName: 'Out-of-Hours', userType: 'AUTO', file: null,
+        },
+    };
+    fanoutFive9Event(cs, session, event)
+        .then(() => log.info(`🌙 [five9:${c.name}] Out-of-hours reply sent to ${msg.chatId}`))
+        .catch(err => log.warn(`⚠️ [five9:${c.name}] Out-of-hours reply delivery failed:`, err instanceof Error ? err.message : err));
+}
+
+async function deliverFive9Inbound(cs: Five9ConnectorServer, msg: NormalizedInboundMessage): Promise<Five9InboundOutcome> {
     const c = cs.connector;
     const key = sessionKeyFor(msg);
 
     return withSessionLock(`${c.name}:${key}`, async () => {
+        // Out-of-hours gate: outside the weekly open hours send a single
+        // (throttled) notice. In reply-only mode no Five9 conversation is touched.
+        const bh = c.businessHours;
+        const outsideHours = !!bh?.enabled && !!bh.message?.trim()
+            && !isWithinBusinessHours(bh.weekly, bh.timezone, new Date());
+        if (outsideHours && bh!.forwardToFive9 !== true) {
+            maybeSendFive9OutOfHoursReply(cs, msg, key, bh!.message.trim(), null);
+            cs.stats.inboundMessages++;
+            cs.stats.lastInboundAt = Date.now();
+            return { ok: false, reason: 'out_of_hours' };
+        }
+
         let session = await ensureFive9Session(cs, msg);
         const sessionKey = session.chatId;
 
@@ -744,9 +787,16 @@ async function deliverFive9Inbound(cs: Five9ConnectorServer, msg: NormalizedInbo
             }
         }
 
+        // Forward mode + outside hours: the message reached Five9 above; also
+        // notify the customer (throttled). Suppresses the regular auto-reply so
+        // the customer never gets two automatic messages at once.
+        if (outsideHours) {
+            maybeSendFive9OutOfHoursReply(cs, msg, sessionKey, bh!.message.trim(), session);
+        }
+
         // Auto-reply (once per session, first message only)
         const ar = c.autoReply;
-        if (ar?.enabled && !session.autoReplied) {
+        if (!outsideHours && ar?.enabled && !session.autoReplied) {
             const expiresAt = ar.expiresAt ? new Date(ar.expiresAt).getTime() : Infinity;
             if (Date.now() <= expiresAt) {
                 const event: AgentEvent = {
@@ -767,7 +817,7 @@ async function deliverFive9Inbound(cs: Five9ConnectorServer, msg: NormalizedInbo
         touchFive9Session(c.name, sessionKey);
         cs.stats.inboundMessages++;
         cs.stats.lastInboundAt = Date.now();
-        return session;
+        return { ok: true, session };
     });
 }
 
@@ -1069,10 +1119,12 @@ async function handleFive9Request(req: Request, cs: Five9ConnectorServer): Promi
 
     const correlationIds: string[] = [];
     const deliveryErrors: string[] = [];
+    let outOfHours = 0;
     for (const msg of messages) {
         try {
-            const session = await deliverFive9Inbound(cs, msg);
-            correlationIds.push(session.correlationId);
+            const outcome = await deliverFive9Inbound(cs, msg);
+            if (outcome.ok) correlationIds.push(outcome.session.correlationId);
+            else outOfHours++;
         } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
             cs.stats.lastError = errMsg;
@@ -1109,6 +1161,7 @@ async function handleFive9Request(req: Request, cs: Five9ConnectorServer): Promi
         resJson.conversationIds = correlationIds;
     }
     if (deliveryErrors.length > 0) resJson.errors = deliveryErrors;
+    if (outOfHours > 0) { resJson.outOfHours = outOfHours; resJson.reason = 'out_of_hours'; }
     if (messages.length === 0) {
         resJson.hint = c.channel === 'meta-whatsapp'
             ? 'No messages extracted — send the Meta webhook envelope or a bare value object'

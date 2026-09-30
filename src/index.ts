@@ -2263,6 +2263,7 @@ const server = Bun.serve({
                         directReply: c.directReply === true,
                         phoneNumberFilter: c.phoneNumberFilter || [],
                         autoReply: c.autoReply || { enabled: false, text: '' },
+                        businessHours: c.businessHours || { enabled: false, message: '', forwardToFive9: false, weekly: [] },
                         webhookTargets: (c.webhookTargets || []).map(redactTargetAuth),
                         webhooksEnabled: c.webhooksEnabled !== false,
                         sessionTtlMinutes: c.sessionTtlMinutes ?? 120,
@@ -2402,6 +2403,24 @@ const server = Bun.serve({
                             text: String(input.autoReply.text || ''),
                         };
                         if (input.autoReply.expiresAt && typeof input.autoReply.expiresAt === 'string') connector.autoReply.expiresAt = input.autoReply.expiresAt;
+                    }
+                    if (input.businessHours && typeof input.businessHours === 'object') {
+                        const bh = input.businessHours;
+                        const weekly = Array.isArray(bh.weekly)
+                            ? bh.weekly.map((d: any) => ({
+                                day: Number(d.day),
+                                ranges: Array.isArray(d.ranges)
+                                    ? d.ranges.map((r: any) => ({ start: String(r.start), end: String(r.end) }))
+                                    : [],
+                            }))
+                            : [];
+                        connector.businessHours = {
+                            enabled: bh.enabled === true,
+                            message: String(bh.message || ''),
+                            forwardToFive9: bh.forwardToFive9 === true,
+                            timezone: bh.timezone ? String(bh.timezone) : undefined,
+                            weekly,
+                        };
                     }
                     if (typeof input.sessionTtlMinutes === 'number') connector.sessionTtlMinutes = input.sessionTtlMinutes;
                     if (typeof input.allowPrivateTargets === 'boolean') connector.allowPrivateTargets = input.allowPrivateTargets;

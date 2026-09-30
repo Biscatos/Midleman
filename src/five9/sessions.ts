@@ -66,6 +66,14 @@ CREATE INDEX IF NOT EXISTS idx_five9_sessions_activity
     ON sessions(connector, last_activity_at);
 CREATE INDEX IF NOT EXISTS idx_five9_sessions_correlation
     ON sessions(connector, correlation_id);
+-- Out-of-hours reply throttle. Reply-only mode never creates a session, so the
+-- flag cannot live on the session row. One row per (connector, session-key).
+CREATE TABLE IF NOT EXISTS out_of_hours_replies (
+    connector     TEXT NOT NULL,
+    chat_id       TEXT NOT NULL,
+    last_sent_at  INTEGER NOT NULL,
+    PRIMARY KEY (connector, chat_id)
+);
 `;
 
 export function initFive9Sessions(dataDir: string): void {
@@ -203,5 +211,22 @@ export function purgeFive9ExpiredSessions(connector: string, ttlMinutes: number)
 export function deleteFive9ConnectorSessions(connector: string): number {
     if (!db) return 0;
     const res = db.query('DELETE FROM sessions WHERE connector = $c').run({ $c: connector });
+    db.query('DELETE FROM out_of_hours_replies WHERE connector = $c').run({ $c: connector });
     return res.changes;
+}
+
+/** Unix ms of the last out-of-hours reply sent to (connector, chatId), or 0. */
+export function getFive9OutOfHoursLastSent(connector: string, chatId: string): number {
+    if (!db) return 0;
+    const row = db.query('SELECT last_sent_at FROM out_of_hours_replies WHERE connector = $c AND chat_id = $id')
+        .get({ $c: connector, $id: chatId }) as { last_sent_at: number } | null;
+    return row ? row.last_sent_at : 0;
+}
+
+export function markFive9OutOfHoursSent(connector: string, chatId: string, ts: number): void {
+    if (!db) return;
+    db.query(`INSERT INTO out_of_hours_replies (connector, chat_id, last_sent_at)
+              VALUES ($c, $id, $t)
+              ON CONFLICT(connector, chat_id) DO UPDATE SET last_sent_at = $t`)
+        .run({ $c: connector, $id: chatId, $t: ts });
 }

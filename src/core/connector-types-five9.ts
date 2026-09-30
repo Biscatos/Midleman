@@ -12,6 +12,7 @@
  */
 
 import type { ConnectorChannel, MetaSettings, SmoochSettings, ConnectorWebhookTarget } from './connector-types';
+import { type DaySchedule, validateWeekly, isValidTimeZone } from './business-hours';
 import { validateWebhookTargets } from './connector-types';
 import { assertSafeOutboundUrl, SsrfBlockedError } from './ssrf-guard';
 
@@ -64,6 +65,22 @@ export interface Five9Connector {
         enabled: boolean;
         text: string;
         expiresAt?: string;
+    };
+
+    /** Out-of-office-hours auto-reply. Same semantics as the GoContact
+     *  connector: when the customer writes OUTSIDE the weekly open hours, a
+     *  single configured message is sent back through the usual fan-out
+     *  (Meta / webhooks), at most once per anti-spam window per customer.
+     *  Evaluated in `timezone` (default Africa/Luanda). See core/business-hours.ts. */
+    businessHours?: {
+        enabled: boolean;
+        message: string;
+        /** false (default): only the notice is sent, no Five9 conversation is
+         *  created. true: the notice is sent AND the message is still forwarded
+         *  into Five9 so agents see it when they return. */
+        forwardToFive9?: boolean;
+        timezone?: string;
+        weekly?: DaySchedule[];
     };
 
     /** Idle session expiry in minutes (default 120). */
@@ -168,6 +185,27 @@ export function validateFive9ConnectorInput(input: unknown): string | null {
         if (ar.expiresAt !== undefined && ar.expiresAt !== '') {
             if (typeof ar.expiresAt !== 'string' || isNaN(Date.parse(ar.expiresAt as string))) {
                 return '"autoReply.expiresAt" must be a valid ISO datetime (or empty for no expiry)';
+            }
+        }
+    }
+
+    if (c.businessHours !== undefined) {
+        if (typeof c.businessHours !== 'object' || c.businessHours === null) return '"businessHours" must be an object';
+        const bh = c.businessHours as Record<string, unknown>;
+        if (typeof bh.enabled !== 'boolean') return '"businessHours.enabled" must be a boolean';
+        if (bh.forwardToFive9 !== undefined && typeof bh.forwardToFive9 !== 'boolean') return '"businessHours.forwardToFive9" must be a boolean';
+        if (bh.timezone !== undefined && bh.timezone !== '' && !isValidTimeZone(bh.timezone)) {
+            return '"businessHours.timezone" must be a valid IANA timezone (e.g. Africa/Luanda)';
+        }
+        const schedule = validateWeekly(bh.weekly);
+        if ('error' in schedule) return `"businessHours": ${schedule.error}`;
+        if (bh.enabled) {
+            if (!bh.message || typeof bh.message !== 'string' || !(bh.message as string).trim()) {
+                return '"businessHours.message" is required when business hours are enabled';
+            }
+            if ((bh.message as string).length > 2000) return '"businessHours.message" must be 2000 characters or fewer';
+            if (schedule.open === 0) {
+                return '"businessHours" is enabled but no open hours are defined — add at least one time range, or disable it';
             }
         }
     }
