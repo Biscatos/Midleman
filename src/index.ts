@@ -23,6 +23,7 @@ import { startFive9ConnectorServer, stopFive9ConnectorServer, stopAllFive9Connec
 import { initFive9Sessions, shutdownFive9Sessions, listFive9Sessions, deleteFive9ConnectorSessions } from './five9/sessions';
 import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry/telemetry';
 import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart, getRequestLogBreakdown, getPurgeStatus, startPurge, compactDatabase, type RequestLogEntry, type PurgeOptions } from './telemetry/request-log';
+import { replayProxyRequest, ReplayError } from './proxy/replay';
 import { initLogSettings, getLogSettings, saveLogSettings, registerLogModeResolver, isLogMode, type LogMode } from './telemetry/log-settings';
 import { initSipLog, shutdownSipLog, querySipLogs, getSipLogDetail, getSipLogStats } from './telemetry/sip-log';
 import { initConnLog, shutdownConnLog, queryConnLogs } from './telemetry/tcpudp-conn-log';
@@ -1446,6 +1447,19 @@ const server = Bun.serve({
 
                 if (url.pathname === '/admin/requests/chart' && req.method === 'GET') {
                     return jsonRes(200, getRequestLogChart() as unknown as Record<string, unknown>);
+                }
+
+                if (url.pathname.match(/^\/admin\/requests\/\d+\/resend$/) && req.method === 'POST') {
+                    const id = parseInt(url.pathname.split('/')[3], 10);
+                    try {
+                        const result = await replayProxyRequest(id, config.proxyProfiles);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'request.resend', targetType: 'request', targetId: String(id), details: { ok: result.ok, status: result.status, requestId: result.requestId, error: result.error }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(result.ok ? 200 : 502, result as unknown as Record<string, unknown>);
+                    } catch (e) {
+                        if (e instanceof ReplayError) return jsonRes(e.httpStatus, { error: e.message });
+                        return jsonRes(500, { error: e instanceof Error ? e.message : String(e) });
+                    }
                 }
 
                 if (url.pathname.match(/^\/admin\/requests\/\d+$/) && req.method === 'GET') {

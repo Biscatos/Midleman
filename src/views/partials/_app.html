@@ -432,7 +432,10 @@
           <div class="rdm-header-left">
             <h3 id="reqDetailTitle" class="rdm-title">Request Detail</h3>
           </div>
-          <button onclick="closeReqDetail()" class="rdm-close">&times;</button>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span id="reqDetailActions"></span>
+            <button onclick="closeReqDetail()" class="rdm-close">&times;</button>
+          </div>
         </div>
         <div id="reqDetailContent" class="rdm-body"></div>
       </div>

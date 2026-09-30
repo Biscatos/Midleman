@@ -4665,6 +4665,24 @@ async function openReqDetail(id) {
 }
 function closeReqDetail() { document.getElementById('reqDetailModal').style.display = 'none'; }
 
+async function resendRequest(id, btn) {
+  if (!confirm('Re-send this request to the upstream now?\n\nThe upstream will process it again. A new entry is written to the request log.')) return;
+  await withBusy(btn, 'Sending\u2026', async () => {
+    try {
+      const res = await api('/admin/requests/' + id + '/resend', { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      if (d.error && !d.requestId) return toast(d.error, 'error');
+      if (d.ok) toast('Re-sent: ' + d.status + ' ' + (d.statusText || '') + ' in ' + fmtMs(d.durationMs));
+      else toast('Re-sent, upstream answered ' + (d.status ? d.status + ' ' + (d.statusText || '') : d.error), 'error');
+      // Open the new log row so the response is right there.
+      const q = await api('/admin/requests?limit=1&requestId=' + encodeURIComponent(d.requestId));
+      const qd = await q.json().catch(() => ({}));
+      if (qd.requests && qd.requests[0]) openReqDetail(qd.requests[0].id);
+      if (typeof fetchRequestLogs === 'function' && currentPage === 'requests') fetchRequestLogs();
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
+  });
+}
+
 function renderReqDetail(d) {
   const sc = d.resStatus;
   const statusCls = !sc ? 'rdm-st-unknown' : sc < 300 ? 'rdm-st-ok' : sc < 400 ? 'rdm-st-redirect' : sc < 500 ? 'rdm-st-client' : 'rdm-st-server';
@@ -4685,6 +4703,14 @@ function renderReqDetail(d) {
   let resHCount = 0; try { resHCount = Object.keys(JSON.parse(d.resHeaders || '{}')).length; } catch { }
 
   document.getElementById('reqDetailTitle').innerHTML = `<span style="color:${mColor};font-weight:700">${esc(d.method)}</span> <span style="font-weight:400;color:var(--text2)">${esc(d.path)}</span>`;
+  const actions = document.getElementById('reqDetailActions');
+  if (actions) {
+    const canResend = (d.type === 'proxy' || d.type === 'target') && d.profileName;
+    const failed = !sc || sc >= 400 || d.error;
+    actions.innerHTML = canResend
+      ? `<button class="btn btn-sm ${failed ? 'btn-primary' : 'btn-ghost'}" id="reqResendBtn" onclick="resendRequest(${d.id}, this)" title="Re-send this request to the upstream with the profile's current credentials">Resend</button>`
+      : '';
+  }
 
   document.getElementById('reqDetailContent').innerHTML = `
 <div class="rdm-hero ${statusCls}">
