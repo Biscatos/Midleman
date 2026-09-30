@@ -135,6 +135,13 @@
         <span class="sidebar-link-label">System Alerts</span>
         <span class="sidebar-badge badge-danger" id="navErrorBadge" style="display:none" title="Unacknowledged system alerts">0</span>
       </button>
+      <button class="sidebar-link" data-page="logsettings" data-tooltip="Request log retention & storage" onclick="navigate('logsettings')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+        </svg>
+        <span class="sidebar-link-label">Log Storage</span>
+        <span class="sidebar-badge" id="navLogSizeBadge" title="Request log database size">0 MB</span>
+      </button>
     </nav>
 
     <div class="sidebar-footer">
@@ -3083,6 +3090,110 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       </div>
     </div>
 
+    <div class="page" id="pageLogsettings">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+        <div>
+          <h2>Log Storage</h2>
+          <p>Request-log retention, what gets captured, and manual clean-up of the SQLite database. Per-resource overrides live in each proxy, webhook and connector editor.</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="withBusy(this, 'A actualizar…', async () => { await fetchLogSettings(); })">Refresh</button>
+      </div>
+
+      <div class="stats-grid ls-stats">
+        <div class="stat-card">
+          <div class="stat-label">Database file</div>
+          <div class="stat-value" id="lsStatFile">—</div>
+          <div class="ls-stat-sub" id="lsStatFree">free pages —</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Rows</div>
+          <div class="stat-value" id="lsStatRows">0</div>
+          <div class="ls-stat-sub" id="lsStatErrors">errors —</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Oldest entry</div>
+          <div class="stat-value" id="lsStatOldest">—</div>
+          <div class="ls-stat-sub" id="lsStatNewest">newest —</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Retention</div>
+          <div class="stat-value" id="lsStatRetention">—</div>
+          <div class="ls-stat-sub" id="lsStatMode">mode —</div>
+        </div>
+      </div>
+
+      <div class="ls-cols">
+        <div class="card ls-card">
+          <div class="card-header"><h3>Retention &amp; capture</h3></div>
+          <div class="card-body ls-form">
+            <div class="form-group">
+              <label for="lsRetentionDays">Retention (days)</label>
+              <input type="number" id="lsRetentionDays" min="1" max="365" placeholder="env default">
+              <span class="ls-hint">Purged hourly in small batches. Empty = <code>REQUEST_LOG_RETENTION_DAYS</code> (<span id="lsEnvRetention">7</span>).</span>
+            </div>
+            <div class="form-group">
+              <label for="lsDefaultMode">Default capture mode</label>
+              <select id="lsDefaultMode">
+                <option value="full">Full — log every request</option>
+                <option value="errors-only">Errors only — keep failed requests</option>
+                <option value="off">Off — log nothing</option>
+              </select>
+              <span class="ls-hint">For every proxy, webhook and connector without an override. <b>Errors only</b> keeps the body of failed deliveries (status ≥ 400 or network error) and drops the rest before it reaches the database.</span>
+            </div>
+            <div class="ls-actions">
+              <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A guardar…', saveLogSettings)">Save</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card ls-card">
+          <div class="card-header"><h3>Clean up now</h3></div>
+          <div class="card-body ls-form">
+            <div class="ls-row">
+              <div class="form-group">
+                <label for="lsPurgeAge">Older than</label>
+                <select id="lsPurgeAge">
+                  <option value="0">Everything</option>
+                  <option value="1">1 hour</option>
+                  <option value="6">6 hours</option>
+                  <option value="24" selected>1 day</option>
+                  <option value="72">3 days</option>
+                  <option value="168">7 days</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="lsPurgeType">Type</label>
+                <select id="lsPurgeType">
+                  <option value="">All types</option>
+                  <option value="proxy">proxy</option>
+                  <option value="target">target</option>
+                  <option value="webhook">webhook</option>
+                  <option value="webhook-fanout">webhook-fanout</option>
+                  <option value="connector">connector</option>
+                  <option value="connector-fanout">connector-fanout</option>
+                </select>
+              </div>
+            </div>
+            <label class="ls-check"><input type="checkbox" id="lsPurgeKeepErrors" checked> Keep failed requests as evidence</label>
+            <div class="ls-actions">
+              <span id="lsPurgeStatus" class="ls-hint" style="margin:0 auto 0 0"></span>
+              <button class="btn btn-ghost btn-sm" onclick="compactLogsNow(event)" title="VACUUM rebuilds the file so it shrinks on disk. Blocks the server while it runs.">Compact</button>
+              <button class="btn btn-danger btn-sm" onclick="purgeLogsNow(event)">Delete rows</button>
+            </div>
+            <span class="ls-hint">Delete runs in the background (5 000-row batches) and never blocks traffic. <b>Compact</b> (VACUUM) rewrites the file and blocks the server for seconds to minutes on multi-GB files — run it once after a big clean-up, off-peak; it also enables incremental auto-vacuum from then on.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card ls-card">
+        <div class="card-header"><h3>Rows by type</h3></div>
+        <table class="ls-table">
+          <thead><tr><th>Type</th><th class="num">Rows</th><th class="num">Errors</th><th class="num">Share</th></tr></thead>
+          <tbody id="lsBreakdownBody"><tr><td colspan="4" class="ls-empty">—</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="page" id="pageErrors">
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
         <div>
@@ -3096,7 +3207,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
       </div>
 
-      <div class="stats-grid" style="margin-bottom:16px">
+      <div class="stats-grid ls-stats">
         <div class="stat-card">
           <div class="stat-label">Open errors</div>
           <div class="stat-value" id="errStatErrors" style="color:#ef4444">0</div>
@@ -3107,7 +3218,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
         <div class="stat-card">
           <div class="stat-label">Last error</div>
-          <div class="stat-value" id="errStatLast" style="font-size:16px">—</div>
+          <div class="stat-value" id="errStatLast">—</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Affected subsystems</div>
@@ -3115,8 +3226,8 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
       </div>
 
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-body">
+      <div class="card ls-card" style="margin-bottom:16px">
+        <div class="card-body ls-form">
           <div class="audit-filter-grid">
             <div class="form-group">
               <label for="errFilterState">State</label>
@@ -3314,6 +3425,16 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           <div id="wAllowedIps" class="ip-tag-wrap"></div>
         </div>
 
+        <div class="form-group span-2">
+          <label for="wLogMode">Request log mode</label>
+          <select id="wLogMode">
+              <option value="">Default (Settings → Logs)</option>
+              <option value="full">Full — log every request</option>
+              <option value="errors-only">Errors only — keep failed requests (4xx/5xx/network)</option>
+              <option value="off">Off — log nothing</option>
+          </select>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Applies to the inbound row and every fan-out row of this webhook. <i>Errors only</i> keeps failed deliveries (with the payload) for inspection and retry.</span>
+        </div>
         <!-- Outbound destination policy (SSRF) -->
         <div class="form-group span-2">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none"><input type="checkbox"
@@ -3465,6 +3586,15 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer">
             <input class="wz-input" id="cnEnabled" type="checkbox" checked> Enabled
           </label>
+        </div>
+        <div class="form-group">
+          <label for="cnLogMode">Request log mode</label>
+          <select class="wz-input" id="cnLogMode">
+              <option value="">Default (Settings → Logs)</option>
+              <option value="full">Full — log every request</option>
+              <option value="errors-only">Errors only — keep failed requests (4xx/5xx/network)</option>
+              <option value="off">Off — log nothing</option>
+          </select>
         </div>
       </div>
 
@@ -3731,6 +3861,15 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer">
             <input class="wz-input" id="f9Enabled" type="checkbox" checked> Enabled
           </label>
+        </div>
+        <div class="form-group">
+          <label for="f9LogMode">Request log mode</label>
+          <select class="wz-input" id="f9LogMode">
+              <option value="">Default (Settings → Logs)</option>
+              <option value="full">Full — log every request</option>
+              <option value="errors-only">Errors only — keep failed requests (4xx/5xx/network)</option>
+              <option value="off">Off — log nothing</option>
+          </select>
         </div>
       </div>
 
@@ -4300,12 +4439,14 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       <div class="form-section">Options</div>
       <div class="form-grid">
         <div class="form-group">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input class="wz-input" type="checkbox" id="pDisableLogs" style="cursor:pointer;accent-color:var(--accent)">
-            <span>Disable Request Logs</span>
-          </label>
-          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Skip logging requests and
-            responses for this proxy.</span>
+          <label for="pLogMode">Request log mode</label>
+          <select class="wz-input" id="pLogMode">
+              <option value="">Default (Settings → Logs)</option>
+              <option value="full">Full — log every request</option>
+              <option value="errors-only">Errors only — keep failed requests (4xx/5xx/network)</option>
+              <option value="off">Off — log nothing</option>
+          </select>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">What to keep in the request log for this proxy. <i>Errors only</i> stores failed requests with their body.</span>
         </div>
         <div class="form-group">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">

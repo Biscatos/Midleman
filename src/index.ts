@@ -22,7 +22,8 @@ import { validateFive9ConnectorInput, type Five9Connector } from './core/connect
 import { startFive9ConnectorServer, stopFive9ConnectorServer, stopAllFive9Connectors, restartFive9Connector, getFive9ConnectorStatus, closeFive9Session } from './servers/five9-connector-server';
 import { initFive9Sessions, shutdownFive9Sessions, listFive9Sessions, deleteFive9ConnectorSessions } from './five9/sessions';
 import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry/telemetry';
-import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart } from './telemetry/request-log';
+import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart, getRequestLogBreakdown, getPurgeStatus, startPurge, compactDatabase, type RequestLogEntry, type PurgeOptions } from './telemetry/request-log';
+import { initLogSettings, getLogSettings, saveLogSettings, registerLogModeResolver, isLogMode, type LogMode } from './telemetry/log-settings';
 import { initSipLog, shutdownSipLog, querySipLogs, getSipLogDetail, getSipLogStats } from './telemetry/sip-log';
 import { initConnLog, shutdownConnLog, queryConnLogs } from './telemetry/tcpudp-conn-log';
 import { initCertStore, shutdownCertStore, listCerts, getCert, getCertByDomain, createCert, updateCertPem, deleteCert, listProfilesUsingCert, generateSelfSigned } from './core/cert-store';
@@ -111,6 +112,22 @@ config.tcpUdpProfiles = [
 
 // Initialize OpenTelemetry
 initTelemetry(config.otel);
+
+// Request-log settings (retention / capture modes) — must precede initRequestLog
+initLogSettings(config.requestLog.dataDir);
+registerLogModeResolver((kind, name) => {
+    if (kind === 'profile') {
+        const p = config.proxyProfiles.find(x => x.name === name);
+        if (!p) return undefined;
+        return p.logMode || (p.disableLogs ? 'off' : undefined);
+    }
+    if (kind === 'webhook') return config.webhooks.find(x => x.name === name)?.logMode;
+    if (kind === 'connector') {
+        return connectors.find(x => x.name === name)?.logMode
+            ?? five9Connectors.find(x => x.name === name)?.logMode;
+    }
+    return undefined;
+});
 
 // Initialize request logging (SQLite)
 initRequestLog(config.requestLog);
@@ -1338,17 +1355,89 @@ const server = Bun.serve({
                     const result = queryRequestLogs({
                         page: parseInt(url.searchParams.get('page') || '1', 10),
                         limit: parseInt(url.searchParams.get('limit') || '50', 10),
-                        type: (url.searchParams.get('type') as 'target' | 'proxy' | 'webhook') || undefined,
+                        type: (url.searchParams.get('type') as RequestLogEntry['type']) || undefined,
                         profileName: url.searchParams.get('profile') || undefined,
                         targetName: url.searchParams.get('target') || undefined,
                         method: url.searchParams.get('method') || undefined,
                         status: url.searchParams.get('status') ? parseInt(url.searchParams.get('status')!, 10) : undefined,
+                        requestId: url.searchParams.get('requestId') || undefined,
                         search: url.searchParams.get('search') || undefined,
                         searchBody: url.searchParams.get('searchBody') === '1',
                         from: url.searchParams.get('from') || undefined,
                         to: url.searchParams.get('to') || undefined,
+                        includeBody: url.searchParams.get('includeBody') === '1',
                     });
                     return jsonRes(200, result as unknown as Record<string, unknown>);
+                }
+
+                // ── Request Log settings / maintenance (Settings → Logs) ──
+                if (url.pathname === '/admin/logs/settings' && req.method === 'GET') {
+                    return jsonRes(200, {
+                        ...getLogSettings(),
+                        envRetentionDays: config.requestLog.retentionDays,
+                        maxBodySize: config.requestLog.maxBodySize,
+                        stats: getRequestLogStats(),
+                        breakdown: getRequestLogBreakdown(),
+                        purge: getPurgeStatus(),
+                    } as unknown as Record<string, unknown>);
+                }
+                if (url.pathname === '/admin/logs/settings' && req.method === 'PUT') {
+                    const body = await req.json().catch(() => null) as Record<string, unknown> | null;
+                    if (!body) return jsonRes(400, { error: 'Invalid JSON' });
+                    const patch: { retentionDays?: number | null; defaultMode?: LogMode } = {};
+                    if ('retentionDays' in body) {
+                        const v = body.retentionDays;
+                        if (v === null || v === '' || v === 0) patch.retentionDays = null;
+                        else {
+                            const n = Number(v);
+                            if (!Number.isFinite(n) || n < 1 || n > 365) return jsonRes(400, { error: 'retentionDays must be between 1 and 365 (or empty for the env default)' });
+                            patch.retentionDays = Math.floor(n);
+                        }
+                    }
+                    if (body.defaultMode !== undefined) {
+                        if (!isLogMode(body.defaultMode)) return jsonRes(400, { error: 'defaultMode must be full | errors-only | off' });
+                        patch.defaultMode = body.defaultMode;
+                    }
+                    const saved = saveLogSettings(patch);
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'logs.settings.update', targetType: 'logs', details: saved as unknown as Record<string, unknown>, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, saved as unknown as Record<string, unknown>);
+                }
+                if (url.pathname === '/admin/logs/purge' && req.method === 'POST') {
+                    const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+                    const opts: PurgeOptions = {};
+                    if (body.olderThanHours !== undefined && body.olderThanHours !== null && body.olderThanHours !== '') {
+                        const h = Number(body.olderThanHours);
+                        if (!Number.isFinite(h) || h < 0) return jsonRes(400, { error: 'olderThanHours must be a non-negative number' });
+                        if (h > 0) opts.olderThanHours = h;
+                    }
+                    if (body.keepErrors === true) opts.keepErrors = true;
+                    if (typeof body.type === 'string' && body.type) {
+                        const allowed = ['target', 'proxy', 'webhook', 'webhook-fanout', 'connector', 'connector-fanout'];
+                        if (!allowed.includes(body.type)) return jsonRes(400, { error: 'Unknown type' });
+                        opts.type = body.type as RequestLogEntry['type'];
+                    }
+                    try {
+                        const status = startPurge(opts);
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'logs.purge', targetType: 'logs', details: opts as unknown as Record<string, unknown>, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(202, status as unknown as Record<string, unknown>);
+                    } catch (e) {
+                        return jsonRes(409, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+                if (url.pathname === '/admin/logs/purge/status' && req.method === 'GET') {
+                    return jsonRes(200, getPurgeStatus() as unknown as Record<string, unknown>);
+                }
+                if (url.pathname === '/admin/logs/compact' && req.method === 'POST') {
+                    try {
+                        const r = compactDatabase();
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'logs.compact', targetType: 'logs', details: r as unknown as Record<string, unknown>, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, r as unknown as Record<string, unknown>);
+                    } catch (e) {
+                        return jsonRes(409, { error: e instanceof Error ? e.message : String(e) });
+                    }
                 }
 
                 if (url.pathname === '/admin/requests/stats' && req.method === 'GET') {
@@ -1716,6 +1805,7 @@ const server = Bun.serve({
                             allowPrivateTargets: webhook.allowPrivateTargets !== false,
                             targetAllowedCidrs: webhook.targetAllowedCidrs || [],
                             silenceAlert: webhook.silenceAlert,
+                            logMode: webhook.logMode || '',
                             testPayload: webhook.testPayload,
                             running: status?.running ?? false,
                             active: status?.active ?? 0,
@@ -1748,6 +1838,11 @@ const server = Bun.serve({
                     if (typeof input.allowPrivateTargets === 'boolean') webhook.allowPrivateTargets = input.allowPrivateTargets;
                     if (Array.isArray(input.targetAllowedCidrs) && input.targetAllowedCidrs.length) webhook.targetAllowedCidrs = (input.targetAllowedCidrs as string[]).map(s => String(s).trim()).filter(Boolean);
                     if (input.silenceAlert && typeof input.silenceAlert === 'object') webhook.silenceAlert = input.silenceAlert as import('./core/types').WebhookSilenceAlert;
+                    if (input.logMode !== undefined) {
+                        if (input.logMode === '' || input.logMode === null) delete webhook.logMode;
+                        else if (isLogMode(input.logMode)) webhook.logMode = input.logMode;
+                        else return jsonRes(400, { error: 'logMode must be full | errors-only | off' });
+                    }
                     if (typeof input.testPayload === 'string' && input.testPayload.trim()) webhook.testPayload = input.testPayload;
 
                     // Reset any pending silence state so the next tick starts fresh.
@@ -1883,6 +1978,7 @@ const server = Bun.serve({
                         sessionTtlMinutes: c.sessionTtlMinutes ?? 120,
                         allowPrivateTargets: c.allowPrivateTargets !== false,
                         targetAllowedCidrs: c.targetAllowedCidrs || [],
+                        logMode: c.logMode || '',
                         stats: status?.stats ?? null,
                     };
                 };
@@ -2078,6 +2174,11 @@ const server = Bun.serve({
                     if (typeof input.pollIntervalMs === 'number') connector.pollIntervalMs = input.pollIntervalMs;
                     if (typeof input.sessionTtlMinutes === 'number') connector.sessionTtlMinutes = input.sessionTtlMinutes;
                     if (typeof input.allowPrivateTargets === 'boolean') connector.allowPrivateTargets = input.allowPrivateTargets;
+                    if (input.logMode !== undefined) {
+                        if (input.logMode === '' || input.logMode === null) delete connector.logMode;
+                        else if (isLogMode(input.logMode)) connector.logMode = input.logMode;
+                        else return jsonRes(400, { error: 'logMode must be full | errors-only | off' });
+                    }
                     if (Array.isArray(input.targetAllowedCidrs) && input.targetAllowedCidrs.length) connector.targetAllowedCidrs = (input.targetAllowedCidrs as string[]).map(s => String(s).trim()).filter(Boolean);
 
                     // Port: preserve the current one on update unless explicitly changed
@@ -2144,6 +2245,7 @@ const server = Bun.serve({
                         sessionTtlMinutes: c.sessionTtlMinutes ?? 120,
                         allowPrivateTargets: c.allowPrivateTargets !== false,
                         targetAllowedCidrs: c.targetAllowedCidrs || [],
+                        logMode: c.logMode || '',
                         stats: status?.stats ?? null,
                     };
                 };
@@ -2280,6 +2382,11 @@ const server = Bun.serve({
                     }
                     if (typeof input.sessionTtlMinutes === 'number') connector.sessionTtlMinutes = input.sessionTtlMinutes;
                     if (typeof input.allowPrivateTargets === 'boolean') connector.allowPrivateTargets = input.allowPrivateTargets;
+                    if (input.logMode !== undefined) {
+                        if (input.logMode === '' || input.logMode === null) delete connector.logMode;
+                        else if (isLogMode(input.logMode)) connector.logMode = input.logMode;
+                        else return jsonRes(400, { error: 'logMode must be full | errors-only | off' });
+                    }
                     if (Array.isArray(input.targetAllowedCidrs) && input.targetAllowedCidrs.length) connector.targetAllowedCidrs = (input.targetAllowedCidrs as string[]).map(s => String(s).trim()).filter(Boolean);
 
                     let portToUse = connector.port;
@@ -2367,6 +2474,7 @@ const server = Bun.serve({
                             require2fa: !!profile.require2fa,
                             isWebApp: !!profile.isWebApp,
                             disableLogs: !!profile.disableLogs,
+                            logMode: profile.logMode || (profile.disableLogs ? 'off' : ''),
                             forwardPath: profile.forwardPath !== false,
                             loginTitle: profile.loginTitle || '',
                             loginLogo: profile.loginLogo || '',
@@ -2406,6 +2514,7 @@ const server = Bun.serve({
                         require2fa: !!p.require2fa,
                         isWebApp: !!p.isWebApp,
                         disableLogs: !!p.disableLogs,
+                        logMode: p.logMode || (p.disableLogs ? 'off' : ''),
                         blockedExtensions: p.blockedExtensions ? Array.from(p.blockedExtensions) : [],
                         allowedIps: p.allowedIps || [],
                         allowedPaths: p.allowedPaths || [],
@@ -2454,6 +2563,11 @@ const server = Bun.serve({
                     if (typeof input.require2fa === 'boolean') profile.require2fa = input.require2fa;
                     if (typeof input.isWebApp === 'boolean') profile.isWebApp = input.isWebApp;
                     if (typeof input.disableLogs === 'boolean') profile.disableLogs = input.disableLogs;
+                    if (input.logMode !== undefined) {
+                        if (input.logMode === '' || input.logMode === null) { delete profile.logMode; }
+                        else if (isLogMode(input.logMode)) { profile.logMode = input.logMode; profile.disableLogs = input.logMode === 'off'; }
+                        else return jsonRes(400, { error: 'logMode must be full | errors-only | off' });
+                    }
                     if (typeof input.forwardPath === 'boolean') profile.forwardPath = input.forwardPath;
                     if (typeof input.loginTitle === 'string' && input.loginTitle) profile.loginTitle = input.loginTitle;
                     if (typeof input.loginLogo === 'string' && input.loginLogo) profile.loginLogo = input.loginLogo;

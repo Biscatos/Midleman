@@ -1,6 +1,6 @@
 import type { ProxyProfile } from '../core/types';
 import { startProxySpan, endProxySpan, recordProxyBlocked, recordProxyRedirect } from '../telemetry/telemetry';
-import { logRequest, captureRequestBody, captureResponseBody, headersToRecord } from '../telemetry/request-log';
+import { logRequest, captureRequestBody, captureResponseBody, headersToRecord, isLoggingEnabledFor } from '../telemetry/request-log';
 import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { verifyJwt, logAudit, timingSafeEqualStr } from '../auth/auth';
 
@@ -462,7 +462,7 @@ export async function handleProxyRequest(
     const forwardHeaders = new Headers();
     req.headers.forEach((value, key) => {
         const lower = key.toLowerCase();
-        if (lower !== 'host' && lower !== 'x-forward-token') {
+        if (lower !== 'host' && lower !== 'x-forward-token' && lower !== 'x-mid-api-key') {
             forwardHeaders.set(key, value);
         }
     });
@@ -488,7 +488,9 @@ export async function handleProxyRequest(
     }
 
     // Capture request body for logging before forwarding
-    const reqCapture = await captureRequestBody(req);
+    const reqCapture = (profile.disableLogs || !isLoggingEnabledFor('proxy', { profileName: profile.name }))
+        ? { body: null, size: 0 }
+        : await captureRequestBody(req);
     const requestId = req.headers.get('X-Request-ID') || crypto.randomUUID();
     const clientIp = getClientIP(req);
 
@@ -967,7 +969,7 @@ export async function handleDirectProxy(
     const forwardHeaders = new Headers();
     req.headers.forEach((value, key) => {
         const lower = key.toLowerCase();
-        if (lower !== 'host' && lower !== 'x-forward-token') {
+        if (lower !== 'host' && lower !== 'x-forward-token' && lower !== 'x-mid-api-key') {
             forwardHeaders.set(key, value);
         }
     });
@@ -992,7 +994,9 @@ export async function handleDirectProxy(
     }
 
     // ── Capture request body ──
-    const reqCapture = await captureRequestBody(req);
+    const reqCapture = (profile.disableLogs || !isLoggingEnabledFor('proxy', { profileName: profile.name }))
+        ? { body: null, size: 0 }
+        : await captureRequestBody(req);
     const requestId = req.headers.get('X-Request-ID') || crypto.randomUUID();
     const clientIp = getClientIP(req);
 

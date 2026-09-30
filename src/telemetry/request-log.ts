@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { resolve } from 'path';
-import { mkdirSync } from 'fs';
+import { mkdirSync, statSync } from 'fs';
+import { getLogSettings, resolveLogMode, type LogResourceKind } from './log-settings';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -61,6 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_request_logs_status ON request_logs(res_status);
 CREATE INDEX IF NOT EXISTS idx_request_logs_request_id ON request_logs(request_id);
 CREATE INDEX IF NOT EXISTS idx_request_logs_method ON request_logs(method);
 CREATE INDEX IF NOT EXISTS idx_request_logs_target ON request_logs(target_name);
+CREATE INDEX IF NOT EXISTS idx_request_logs_type_id ON request_logs(type, id);
 `;
 
 const MIGRATIONS = [
@@ -81,12 +83,18 @@ export function initRequestLog(cfg: Partial<RequestLogConfig> = {}): void {
     }
 
     const dbPath = resolve(config.dataDir, 'request-logs.db');
+    _dbPath = dbPath;
 
     try {
         mkdirSync(config.dataDir, { recursive: true });
         db = new Database(dbPath, { create: true });
         db.exec('PRAGMA journal_mode = WAL');
         db.exec('PRAGMA synchronous = NORMAL');
+        // Incremental auto-vacuum lets purges give pages back to the OS via
+        // `PRAGMA incremental_vacuum` instead of a full (blocking) VACUUM.
+        // On a pre-existing database this only takes effect after the next
+        // VACUUM (the "Compact" action in Settings → Logs).
+        try { db.exec('PRAGMA auto_vacuum = INCREMENTAL'); } catch {}
         db.exec(CREATE_TABLE);
 
         // Run migrations before indexes (ignore errors for already-applied migrations)
@@ -97,10 +105,10 @@ export function initRequestLog(cfg: Partial<RequestLogConfig> = {}): void {
         db.exec(CREATE_INDEXES);
 
         // Schedule auto-purge every hour
-        purgeOldLogs();
-        setInterval(purgeOldLogs, 60 * 60 * 1000);
+        void purgeOldLogs();
+        setInterval(() => { void purgeOldLogs(); }, 60 * 60 * 1000);
 
-        console.log(`📋 Request logging: enabled (retention: ${config.retentionDays}d, max body: ${(config.maxBodySize / 1024).toFixed(0)}KB)`);
+        console.log(`📋 Request logging: enabled (retention: ${getEffectiveRetentionDays()}d, max body: ${(config.maxBodySize / 1024).toFixed(0)}KB, default mode: ${getLogSettings().defaultMode})`);
         console.log(`   Database: ${dbPath}`);
     } catch (err) {
         console.error('❌ Failed to initialize request log database:', err);
@@ -214,8 +222,40 @@ function flushLogQueue(): void {
     }
 }
 
+/** Which configurable resource a log row belongs to, for per-resource log modes. */
+function resourceOf(type: RequestLogEntry['type'], entry: { profileName?: string; targetName?: string }): { kind: LogResourceKind; name: string | undefined } {
+    switch (type) {
+        case 'proxy':
+        case 'target':
+            return { kind: 'profile', name: entry.profileName || entry.targetName };
+        case 'webhook':
+        case 'webhook-fanout':
+            return { kind: 'webhook', name: entry.targetName };
+        case 'connector':
+        case 'connector-fanout':
+            return { kind: 'connector', name: entry.targetName };
+    }
+}
+
+/** True when the effective mode for this resource is anything but 'off'.
+ *  Callers that pay to capture bodies (proxy clone+read) can skip that work. */
+export function isLoggingEnabledFor(type: RequestLogEntry['type'], names: { profileName?: string; targetName?: string }): boolean {
+    if (!db) return false;
+    const r = resourceOf(type, names);
+    return resolveLogMode(r.kind, r.name) !== 'off';
+}
+
+function isErrorEntry(entry: RequestLogEntry): boolean {
+    if (entry.error) return true;
+    return typeof entry.resStatus === 'number' && entry.resStatus >= 400;
+}
+
 export function logRequest(entry: RequestLogEntry): void {
     if (!db) return;
+    const r = resourceOf(entry.type, entry);
+    const mode = resolveLogMode(r.kind, r.name);
+    if (mode === 'off') return;
+    if (mode === 'errors-only' && !isErrorEntry(entry)) return;
     _logQueue.push(entry);
     if (!_flushScheduled) {
         _flushScheduled = true;
@@ -275,17 +315,50 @@ export async function captureResponseBody(res: Response): Promise<{ body: string
             return { body: `[binary: ${contentType}${contentLength >= 0 ? ', ' + contentLength + ' bytes' : ''}]`, size: contentLength >= 0 ? contentLength : 0 };
         }
 
-        // Skip cloning when size is unknown (chunked) or known to be large —
-        // cloning forces Bun to buffer the entire body in memory which causes
-        // "Maximum response size reached" on large or streaming responses.
-        if (contentLength < 0 || contentLength > 64 * 1024) {
-            const sizeLabel = contentLength >= 0 ? `${contentLength} bytes` : 'unknown size';
-            return { body: `[response body not captured: ${sizeLabel}]`, size: contentLength >= 0 ? contentLength : 0 };
+        // Known-large bodies: skip entirely (cloning would buffer the whole thing).
+        if (contentLength > config.maxBodySize) {
+            return { body: `[response body not captured: ${contentLength} bytes]`, size: contentLength };
         }
 
         const clone = res.clone();
-        const text = await clone.text();
-        return { body: text, size: text.length };
+        if (contentLength >= 0) {
+            const text = await clone.text();
+            return { body: text, size: text.length };
+        }
+
+        // Unknown size (chunked / streaming — e.g. Kestrel, Express): read the
+        // clone incrementally and stop at maxBodySize so we keep the error
+        // payload of API responses without ever buffering an unbounded stream.
+        if (!clone.body) return { body: null, size: 0 };
+        const reader = clone.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let received = 0;
+        let truncated = false;
+        try {
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                if (!value) continue;
+                received += value.byteLength;
+                if (received > config.maxBodySize) {
+                    chunks.push(value.subarray(0, value.byteLength - (received - config.maxBodySize)));
+                    truncated = true;
+                    break;
+                }
+                chunks.push(value);
+            }
+        } finally {
+            if (truncated) { try { await reader.cancel(); } catch {} }
+            else { try { reader.releaseLock(); } catch {} }
+        }
+        const merged = new Uint8Array(Math.min(received, config.maxBodySize));
+        let off = 0;
+        for (const c of chunks) { merged.set(c, off); off += c.byteLength; }
+        const text = new TextDecoder().decode(merged);
+        return {
+            body: truncated ? text + `\n... [truncated at ${(config.maxBodySize / 1024).toFixed(0)}KB, chunked response]` : text,
+            size: received,
+        };
     } catch {
         return { body: null, size: 0 };
     }
@@ -344,15 +417,33 @@ export function redactUrlSecrets(s: string | null | undefined): string | null {
 export interface RequestLogQuery {
     page?: number;
     limit?: number;
-    type?: 'target' | 'proxy' | 'webhook';
+    type?: RequestLogEntry['type'];
     profileName?: string;
     targetName?: string;
     method?: string;
     status?: number;
+    requestId?: string;       // exact match (indexed) — used to load fan-outs of one request
     search?: string;          // search in path, target_url, request_id (+ body when searchBody)
     searchBody?: boolean;     // also match req_body / res_body — slower (no index)
     from?: string;            // ISO date
     to?: string;              // ISO date
+    /** Include req_body in list rows. Off by default: the column can hold 64KB
+     *  per row and only the webhook payload editor needs it. */
+    includeBody?: boolean;
+}
+
+// Short-lived caches so the dashboard's 3s/5s polling never re-runs a full
+// COUNT(*) over millions of rows on the main thread. Invalidated on purge.
+const COUNT_CACHE_TTL_MS = 15_000;
+const STATS_CACHE_TTL_MS = 30_000;
+const _countCache = new Map<string, { at: number; total: number }>();
+let _statsCache: { at: number; value: ReturnType<typeof getRequestLogStats> } | null = null;
+let _breakdownCache: { at: number; value: ReturnType<typeof getRequestLogBreakdown> } | null = null;
+
+function invalidateCaches(): void {
+    _countCache.clear();
+    _statsCache = null;
+    _breakdownCache = null;
 }
 
 export interface RequestLogListResult {
@@ -423,6 +514,10 @@ export function queryRequestLogs(query: RequestLogQuery): RequestLogListResult {
         conditions.push('res_status = $status');
         params.$status = query.status;
     }
+    if (query.requestId) {
+        conditions.push('request_id = $requestId');
+        params.$requestId = query.requestId;
+    }
     if (query.search) {
         // Body search is opt-in because it forces a full scan over potentially
         // large TEXT columns; the default search stays cheap (indexable cols).
@@ -442,12 +537,23 @@ export function queryRequestLogs(query: RequestLogQuery): RequestLogListResult {
 
     const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
 
-    const countRow = db.prepare(`SELECT COUNT(*) as total FROM request_logs ${where}`).get(params as any) as { total: number };
-    const total = countRow?.total || 0;
+    // Exact request_id lookups are tiny and never worth caching; everything
+    // else (notably the unfiltered default view) is cached briefly.
+    const cacheKey = query.requestId ? null : where + '|' + JSON.stringify(params);
+    let total: number;
+    const cached = cacheKey ? _countCache.get(cacheKey) : undefined;
+    if (cached && Date.now() - cached.at < COUNT_CACHE_TTL_MS) {
+        total = cached.total;
+    } else {
+        const countRow = db.prepare(`SELECT COUNT(*) as total FROM request_logs ${where}`).get(params as any) as { total: number };
+        total = countRow?.total || 0;
+        if (cacheKey) _countCache.set(cacheKey, { at: Date.now(), total });
+    }
 
+    const bodyCol = query.includeBody ? 'req_body, ' : '';
     const rows = db.prepare(`
         SELECT id, request_id, timestamp, type, profile_name, target_name, method, path, target_url,
-               client_ip, req_body, res_status, res_status_text, duration_ms, req_body_size, res_body_size, error, attempts
+               client_ip, ${bodyCol}res_status, res_status_text, duration_ms, req_body_size, res_body_size, error, attempts
         FROM request_logs ${where}
         ORDER BY id DESC
         LIMIT $limit OFFSET $offset
@@ -470,7 +576,7 @@ export function queryRequestLogs(query: RequestLogQuery): RequestLogListResult {
                 path: r.path,
                 targetUrl: r.target_url,
                 clientIp: r.client_ip,
-                reqBody: r.req_body,
+                ...(query.includeBody ? { reqBody: r.req_body } : {}),
                 resStatus: r.res_status,
                 resStatusText: r.res_status_text,
                 durationMs: r.duration_ms,
@@ -533,21 +639,172 @@ export function getRequestLogDetail(id: number): RequestLogDetail | null {
 
 // ─── Purge ──────────────────────────────────────────────────────────────────
 
-function purgeOldLogs(): void {
+let _dbPath = '';
+
+/** Retention in days: dashboard setting wins, then env/config, then 7. */
+export function getEffectiveRetentionDays(): number {
+    const s = getLogSettings();
+    if (s.retentionDays && s.retentionDays > 0) return s.retentionDays;
+    return config.retentionDays > 0 ? config.retentionDays : 7;
+}
+
+/** request_logs.timestamp is stored by SQLite's datetime('now') as
+ *  "YYYY-MM-DD HH:MM:SS" (UTC, space separator). Cutoffs must use the same
+ *  shape — an ISO string with a "T" does not compare correctly. */
+function toSqliteUtc(d: Date): string {
+    return d.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+const PURGE_BATCH = 5000;
+
+export interface PurgeOptions {
+    /** Delete rows older than this many hours. Omit/0 = no age filter (everything matching). */
+    olderThanHours?: number;
+    /** Keep rows that represent failures (res_status >= 400 or error set). */
+    keepErrors?: boolean;
+    /** Restrict to one row type. */
+    type?: RequestLogEntry['type'];
+}
+
+export interface PurgeStatus {
+    running: boolean;
+    deleted: number;
+    startedAt: string | null;
+    finishedAt: string | null;
+    error: string | null;
+    options: PurgeOptions | null;
+}
+
+const _purge: PurgeStatus = { running: false, deleted: 0, startedAt: null, finishedAt: null, error: null, options: null };
+
+export function getPurgeStatus(): PurgeStatus {
+    return { ..._purge, options: _purge.options ? { ..._purge.options } : null };
+}
+
+const yieldToLoop = () => new Promise<void>(r => setTimeout(r, 0));
+
+/**
+ * Delete in small batches, yielding to the event loop between them, so a
+ * multi-million-row purge never freezes proxy traffic (bun:sqlite is sync).
+ * Returns the number of rows deleted.
+ */
+async function deleteInBatches(where: string, params: Record<string, any>): Promise<number> {
+    if (!db) return 0;
+    const stmt = db.prepare(`DELETE FROM request_logs WHERE id IN (SELECT id FROM request_logs ${where} LIMIT ${PURGE_BATCH})`);
+    let total = 0;
+    for (;;) {
+        const changes = (stmt.run(params as any) as any).changes as number;
+        total += changes;
+        _purge.deleted = total;
+        if (changes < PURGE_BATCH) break;
+        await yieldToLoop();
+    }
+    return total;
+}
+
+/** Give freed pages back to the OS without a full VACUUM. No-op until the
+ *  database has been VACUUMed once with auto_vacuum=INCREMENTAL set. */
+function reclaimSpace(): void {
     if (!db) return;
+    try { db.exec('PRAGMA incremental_vacuum'); } catch {}
+    try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch {}
+}
+
+function buildPurgeWhere(opts: PurgeOptions): { where: string; params: Record<string, any> } {
+    const conds: string[] = [];
+    const params: Record<string, any> = {};
+    if (opts.olderThanHours && opts.olderThanHours > 0) {
+        conds.push('timestamp < $cutoff');
+        params.$cutoff = toSqliteUtc(new Date(Date.now() - opts.olderThanHours * 3600 * 1000));
+    }
+    if (opts.keepErrors) {
+        conds.push('(error IS NULL AND (res_status IS NULL OR res_status < 400))');
+    }
+    if (opts.type) {
+        conds.push('type = $type');
+        params.$type = opts.type;
+    }
+    return { where: conds.length ? 'WHERE ' + conds.join(' AND ') : '', params };
+}
+
+/** Scheduled retention purge (hourly). */
+async function purgeOldLogs(): Promise<void> {
+    if (!db || _purge.running) return;
     try {
-        const cutoff = new Date(Date.now() - config.retentionDays * 24 * 60 * 60 * 1000).toISOString();
-        const result = db.prepare('DELETE FROM request_logs WHERE timestamp < $cutoff').run({ $cutoff: cutoff });
-        if ((result as any).changes > 0) {
-            console.log(`🧹 Purged ${(result as any).changes} request log(s) older than ${config.retentionDays} days`);
+        const days = getEffectiveRetentionDays();
+        const { where, params } = buildPurgeWhere({ olderThanHours: days * 24 });
+        const deleted = await deleteInBatches(where, params);
+        if (deleted > 0) {
+            invalidateCaches();
+            reclaimSpace();
+            console.log(`🧹 Purged ${deleted} request log(s) older than ${days} day(s)`);
         }
     } catch (err) {
         console.error('⚠️  Failed to purge old request logs:', err);
     }
 }
 
-export function getRequestLogStats(): { total: number; oldest: string | null; newest: string | null; dbSizeMB: number } {
-    if (!db) return { total: 0, oldest: null, newest: null, dbSizeMB: 0 };
+/**
+ * Manual purge from the dashboard. Runs in the background; poll
+ * getPurgeStatus() for progress. Rejects if one is already running.
+ */
+export function startPurge(opts: PurgeOptions): PurgeStatus {
+    if (!db) throw new Error('Request logging is disabled');
+    if (_purge.running) throw new Error('A purge is already running');
+    _purge.running = true;
+    _purge.deleted = 0;
+    _purge.startedAt = new Date().toISOString();
+    _purge.finishedAt = null;
+    _purge.error = null;
+    _purge.options = { ...opts };
+    const { where, params } = buildPurgeWhere(opts);
+    (async () => {
+        try {
+            const deleted = await deleteInBatches(where, params);
+            invalidateCaches();
+            reclaimSpace();
+            console.log(`🧹 Manual purge removed ${deleted} request log(s) (${JSON.stringify(opts)})`);
+        } catch (err) {
+            _purge.error = err instanceof Error ? err.message : String(err);
+            console.error('⚠️  Manual purge failed:', err);
+        } finally {
+            _purge.running = false;
+            _purge.finishedAt = new Date().toISOString();
+        }
+    })();
+    return getPurgeStatus();
+}
+
+/**
+ * Full VACUUM: rebuilds the file so it actually shrinks after purges and
+ * enables incremental auto-vacuum for the future. Blocks the process for the
+ * duration (seconds to minutes on a multi-GB file) — the UI warns about it.
+ */
+export function compactDatabase(): { beforeMB: number; afterMB: number; durationMs: number } {
+    if (!db) throw new Error('Request logging is disabled');
+    if (_purge.running) throw new Error('Wait for the running purge to finish');
+    const before = fileSizeMB();
+    const t0 = performance.now();
+    try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch {}
+    db.exec('VACUUM');
+    invalidateCaches();
+    return { beforeMB: before, afterMB: fileSizeMB(), durationMs: Math.round(performance.now() - t0) };
+}
+
+function fileSizeMB(): number {
+    try {
+        let bytes = statSync(_dbPath).size;
+        try { bytes += statSync(_dbPath + '-wal').size; } catch {}
+        return Math.round(bytes / (1024 * 1024) * 100) / 100;
+    } catch {
+        return 0;
+    }
+}
+
+export function getRequestLogStats(): { total: number; oldest: string | null; newest: string | null; dbSizeMB: number; fileSizeMB: number; retentionDays: number } {
+    const empty = { total: 0, oldest: null, newest: null, dbSizeMB: 0, fileSizeMB: 0, retentionDays: getEffectiveRetentionDays() };
+    if (!db) return empty;
+    if (_statsCache && Date.now() - _statsCache.at < STATS_CACHE_TTL_MS) return _statsCache.value;
 
     try {
         const stats = db.prepare(`
@@ -562,14 +819,46 @@ export function getRequestLogStats(): { total: number; oldest: string | null; ne
         const pageSize = (db.prepare('PRAGMA page_size').get() as any)?.page_size || 4096;
         const dbSizeMB = Math.round((pageCount * pageSize) / (1024 * 1024) * 100) / 100;
 
-        return {
+        const value = {
             total: stats?.total || 0,
             oldest: stats?.oldest || null,
             newest: stats?.newest || null,
             dbSizeMB,
+            fileSizeMB: fileSizeMB(),
+            retentionDays: getEffectiveRetentionDays(),
         };
+        _statsCache = { at: Date.now(), value };
+        return value;
     } catch {
-        return { total: 0, oldest: null, newest: null, dbSizeMB: 0 };
+        return empty;
+    }
+}
+
+/** Per-type row and error counts for the Settings → Logs page (cached 30s). */
+export function getRequestLogBreakdown(): { types: { type: string; count: number; errors: number }[]; total: number; errors: number; freelistMB: number; autoVacuum: string } {
+    const empty = { types: [], total: 0, errors: 0, freelistMB: 0, autoVacuum: 'none' };
+    if (!db) return empty;
+    if (_breakdownCache && Date.now() - _breakdownCache.at < STATS_CACHE_TTL_MS) return _breakdownCache.value;
+    try {
+        const types = db.prepare(`
+            SELECT type, COUNT(*) as count,
+                   SUM(CASE WHEN error IS NOT NULL OR res_status >= 400 THEN 1 ELSE 0 END) as errors
+            FROM request_logs GROUP BY type ORDER BY count DESC
+        `).all() as { type: string; count: number; errors: number }[];
+        const freelist = (db.prepare('PRAGMA freelist_count').get() as any)?.freelist_count || 0;
+        const pageSize = (db.prepare('PRAGMA page_size').get() as any)?.page_size || 4096;
+        const av = (db.prepare('PRAGMA auto_vacuum').get() as any)?.auto_vacuum;
+        const value = {
+            types,
+            total: types.reduce((a, t) => a + t.count, 0),
+            errors: types.reduce((a, t) => a + (t.errors || 0), 0),
+            freelistMB: Math.round(freelist * pageSize / (1024 * 1024) * 100) / 100,
+            autoVacuum: av === 2 ? 'incremental' : av === 1 ? 'full' : 'none',
+        };
+        _breakdownCache = { at: Date.now(), value };
+        return value;
+    } catch {
+        return empty;
     }
 }
 

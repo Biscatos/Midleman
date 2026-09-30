@@ -158,6 +158,8 @@ export interface GoContactConnector {
   name: string;            // unique, lowercase
   port: number;            // dedicated inbound listener port (0 = auto-assign)
   enabled?: boolean;       // default true — disabled connectors don't listen/poll
+  /** Request-log capture mode for inbound + fan-out rows; unset = global default. */
+  logMode?: 'full' | 'errors-only' | 'off';
 
   channel: ConnectorChannel;
   gocontact: GoContactSettings;

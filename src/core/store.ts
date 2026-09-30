@@ -18,6 +18,7 @@ interface StoredProfile {
     require2fa?: boolean;
     isWebApp?: boolean;
     disableLogs?: boolean;
+    logMode?: 'full' | 'errors-only' | 'off';
     blockedExtensions?: string[];
     allowedIps?: string[];
     allowedPaths?: string[];
@@ -83,6 +84,7 @@ function toRuntime(stored: StoredProfile): ProxyProfile {
     if (stored.require2fa) profile.require2fa = stored.require2fa;
     if (stored.isWebApp) profile.isWebApp = stored.isWebApp;
     if (stored.disableLogs) profile.disableLogs = stored.disableLogs;
+    if (stored.logMode) profile.logMode = stored.logMode;
 
     if (stored.blockedExtensions && stored.blockedExtensions.length > 0) {
         profile.blockedExtensions = new Set(
@@ -137,6 +139,7 @@ function toStored(profile: ProxyProfile): StoredProfile {
     if (profile.require2fa) stored.require2fa = profile.require2fa;
     if (profile.isWebApp) stored.isWebApp = profile.isWebApp;
     if (profile.disableLogs) stored.disableLogs = profile.disableLogs;
+    if (profile.logMode) stored.logMode = profile.logMode;
     if (profile.blockedExtensions && profile.blockedExtensions.size > 0) {
         stored.blockedExtensions = Array.from(profile.blockedExtensions);
     }
@@ -353,6 +356,7 @@ interface StoredWebhook {
     allowPrivateTargets?: boolean;
     targetAllowedCidrs?: string[];
     silenceAlert?: import('./types').WebhookSilenceAlert;
+    logMode?: 'full' | 'errors-only' | 'off';
     testPayload?: string;
     npmProxyHostId?: number;
     npmOriginalForwardHost?: string;
@@ -383,6 +387,7 @@ export function loadPersistedWebhooks(): WebhookDistributor[] {
                 allowPrivateTargets: w.allowPrivateTargets,
                 targetAllowedCidrs: w.targetAllowedCidrs?.length ? w.targetAllowedCidrs : undefined,
                 silenceAlert: w.silenceAlert,
+                logMode: w.logMode,
                 testPayload: w.testPayload,
                 npmProxyHostId: w.npmProxyHostId,
                 npmOriginalForwardHost: w.npmOriginalForwardHost,
@@ -412,6 +417,7 @@ export function persistWebhooks(webhooks: WebhookDistributor[]): void {
             allowPrivateTargets: w.allowPrivateTargets,
             targetAllowedCidrs: w.targetAllowedCidrs?.length ? w.targetAllowedCidrs : undefined,
             silenceAlert: w.silenceAlert,
+            logMode: w.logMode,
             testPayload: w.testPayload,
             npmProxyHostId: w.npmProxyHostId,
             npmOriginalForwardHost: w.npmOriginalForwardHost,
