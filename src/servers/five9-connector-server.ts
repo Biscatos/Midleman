@@ -615,7 +615,7 @@ async function ensureFive9Session(cs: Five9ConnectorServer, msg: NormalizedInbou
     const auth = await cs.client.anonAuth(c.five9.tenantName);
     logFive9Step(c, msg, 'anon-auth', {
         duration_ms: Math.round(performance.now() - t),
-        farm_id: auth.farmId, org_id: auth.orgId, api_host: auth.apiHost,
+        farm_id: auth.farmId, org_id: auth.orgId, api_host: auth.apiHost, api_host_candidates: auth.apiHostCandidates || '', reauth_host: auth.reauthHost || '',
     });
 
     const nameParts = msg.displayName.split(' ');
