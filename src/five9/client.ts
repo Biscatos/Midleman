@@ -89,8 +89,12 @@ function urlForLog(url: string): { url: string; host: string } {
 export interface Five9AuthResult {
     tokenId: string;
     farmId: string;
-    /** Full HTTPS URL derived from auth response: "https://{apiUrls[0].host}" */
+    /** Full HTTPS URL of the ACTIVE data center from the auth response. */
     apiHost: string;
+    /** Every data-center host Five9 listed, active one marked with "*" (for logs). */
+    apiHostCandidates?: string;
+    /** Set when a second anon-auth was done on the active data center. */
+    reauthHost?: string;
     /** Cloud services base URL, e.g. "https://files.eu.five9.com/" */
     cloudClientUrl: string;
     /** Tenant/org identifier — used as tenantId in conversation creation */
@@ -168,9 +172,29 @@ export class Five9ApiClient {
     // ── Auth ─────────────────────────────────────────────────────────────────
 
     /** POST {authBaseUrl}/appsvcs/rs/svc/auth/anon?cookieless=true
-     *  Returns session credentials including the dynamic API host. */
+     *  Returns session credentials including the dynamic API host.
+     *
+     *  Five9 mints the anonymous token on the shard that answers the login call
+     *  and the token is only honoured THERE: a token from app.nld1 is rejected
+     *  by app.frk1 with 401 "User is not logged in." even when the response's
+     *  metadata names frk1 as the active data center. So when the active data
+     *  center differs from the host we logged in on, log in again on that
+     *  host and use the token it issues. */
     async anonAuth(tenantName: string): Promise<Five9AuthResult> {
-        const url = `${this.authBaseUrl}/appsvcs/rs/svc/auth/anon?cookieless=true`;
+        const first = await this.anonAuthAt(this.authBaseUrl, tenantName);
+        const loginHost = first.activeLoginHost || first.apiHostRaw;
+        let authHost = ''; let protocol = 'https:';
+        try { const u = new URL(this.authBaseUrl); authHost = u.host; protocol = u.protocol; } catch {}
+        if (!loginHost || loginHost.toLowerCase() === authHost.toLowerCase()) {
+            return first.result;
+        }
+        // Re-authenticate on the active data center so the token is valid there.
+        const second = await this.anonAuthAt(`${protocol}//${loginHost}`, tenantName);
+        return { ...second.result, apiHostCandidates: first.result.apiHostCandidates, reauthHost: loginHost };
+    }
+
+    private async anonAuthAt(baseUrl: string, tenantName: string): Promise<{ result: Five9AuthResult; apiHostRaw: string; activeLoginHost: string }> {
+        const url = `${baseUrl.replace(/\/+$/, '')}/appsvcs/rs/svc/auth/anon?cookieless=true`;
         const data = await this.jsonRequest(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -187,14 +211,22 @@ export class Five9ApiClient {
         const farmId = String(data?.context?.farmId ?? '');
         const cloudClientUrl = String(data?.context?.cloudClientUrl ?? '');
         const orgId = String(data?.orgId ?? '');
-        const apiHostRaw = data?.metadata?.dataCenters?.[0]?.apiUrls?.[0]?.host ?? '';
-        const apiHost = apiHostRaw ? `https://${apiHostRaw}` : this.authBaseUrl;
+        // Prefer the data center flagged `active: true`; fall back to the first
+        // one listed, then to the host we authenticated on.
+        const dcs: any[] = Array.isArray(data?.metadata?.dataCenters) ? data.metadata.dataCenters : [];
+        const hostOf = (dc: any) => String(dc?.apiUrls?.[0]?.host ?? '');
+        const activeDc = dcs.find(dc => dc?.active === true && hostOf(dc));
+        const chosenDc = activeDc ?? dcs.find(dc => hostOf(dc));
+        const apiHostRaw = chosenDc ? hostOf(chosenDc) : '';
+        const apiHost = apiHostRaw ? `https://${apiHostRaw}` : baseUrl;
+        const apiHostCandidates = dcs.map(dc => `${hostOf(dc) || '?'}${dc?.active === true ? '*' : ''}`).join(',');
+        const activeLoginHost = chosenDc ? String(chosenDc?.loginUrls?.[0]?.host ?? '') : '';
 
         if (!farmId) throw missing('context.farmId');
         if (!orgId) throw missing('orgId');
         if (!cloudClientUrl) throw missing('context.cloudClientUrl');
 
-        return { tokenId, farmId, apiHost, cloudClientUrl, orgId };
+        return { result: { tokenId, farmId, apiHost, cloudClientUrl, orgId, apiHostCandidates }, apiHostRaw, activeLoginHost };
     }
 
     // ── Conversation ─────────────────────────────────────────────────────────
