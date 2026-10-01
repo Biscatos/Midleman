@@ -4217,6 +4217,10 @@ const server = Bun.serve({
                     const pkceRequired = body.pkceRequired === undefined ? true : !!body.pkceRequired;
                     try {
                         const { client, clientSecret } = await createOauthClient(name, redirectUris, { pkceRequired });
+                        if (typeof body.postLogoutRedirectUri === 'string' && body.postLogoutRedirectUri.trim()) {
+                            try { updateOauthClient(client.clientId, { postLogoutRedirectUri: body.postLogoutRedirectUri.trim() }); client.postLogoutRedirectUri = body.postLogoutRedirectUri.trim(); }
+                            catch (e) { return jsonRes(400, { error: e instanceof Error ? e.message : String(e) }); }
+                        }
                         console.log(`🪪 OAuth client created: ${client.name} (${client.clientId})`);
                         const me = getAuthedAdmin(req);
                         logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'oauth_client.create', targetType: 'oauth_client', targetId: client.clientId, details: { name, redirectUris }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
@@ -4241,6 +4245,7 @@ const server = Bun.serve({
                     }
                     if (typeof body.consentEnabled === 'boolean') input.consentEnabled = body.consentEnabled;
                     if (typeof body.pkceRequired === 'boolean') input.pkceRequired = body.pkceRequired;
+                    if (typeof body.postLogoutRedirectUri === 'string') input.postLogoutRedirectUri = body.postLogoutRedirectUri.trim();
                     if (body.consentPageId === null) {
                         input.consentPageId = null;
                     } else if (typeof body.consentPageId === 'number') {

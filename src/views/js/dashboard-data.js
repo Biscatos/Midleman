@@ -5294,6 +5294,7 @@ async function openEditOauthClientModal(clientId) {
     document.getElementById('oauthClientUris').value = urisText;
     _editingOauthClientOriginalUris = urisText;
     document.getElementById('oauthClientPkceRequired').checked = client.pkceRequired !== false;
+    document.getElementById('oauthClientPostLogoutUri').value = client.postLogoutRedirectUri || '';
     document.getElementById('oauthClientConsentEnabled').checked = !!client.consentEnabled;
     _populateConsentPageDropdown('oauthClientConsentPageId', client.consentPageId);
     toggleOauthClientConsentFields();
@@ -5330,7 +5331,7 @@ async function submitOauthClient() {
   try {
     const res = await api('/admin/oauth-clients', {
       method: 'POST',
-      body: JSON.stringify({ name, redirectUris, pkceRequired }),
+      body: JSON.stringify({ name, redirectUris, pkceRequired, postLogoutRedirectUri: document.getElementById('oauthClientPostLogoutUri').value.trim() }),
     });
     const data = await res.json();
     if (!res.ok) return toast(data.error || 'Failed to create', 'error');
@@ -5371,6 +5372,7 @@ async function submitEditOauthClient() {
     consentEnabled,
     consentPageId,
     pkceRequired,
+    postLogoutRedirectUri: document.getElementById('oauthClientPostLogoutUri').value.trim(),
   };
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(_editingOauthClientId), {
