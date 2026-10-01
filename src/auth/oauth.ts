@@ -104,6 +104,7 @@ export function initOauth(): void {
     // pre-2.20) cannot send code_challenge — admins can opt out per-client at
     // their own risk. New clients should always keep this on.
     if (!cols.includes('pkce_required'))         db.exec("ALTER TABLE oauth_clients ADD COLUMN pkce_required INTEGER NOT NULL DEFAULT 1");
+    if (!cols.includes('post_logout_redirect_uri')) db.exec("ALTER TABLE oauth_clients ADD COLUMN post_logout_redirect_uri TEXT");
     // Cleanup expired codes / refresh tokens / sessions once per hour.
     cleanupExpired();
     setInterval(cleanupExpired, 60 * 60 * 1000);
@@ -140,6 +141,9 @@ export interface OauthClient {
      *  client. Default true. Only disable for legacy clients that cannot send a
      *  code_challenge — it removes a defense against auth-code interception. */
     pkceRequired: boolean;
+    /** Where /oauth/logout sends the browser when the request carries no valid
+     *  post_logout_redirect_uri. Empty = origin of the first redirect_uri. */
+    postLogoutRedirectUri: string;
 }
 
 function randomToken(byteLength: number): string {
@@ -182,7 +186,7 @@ export async function createOauthClient(name: string, redirectUris: string[], op
     db.prepare('INSERT INTO oauth_clients (client_id, name, secret_hash, redirect_uris, pkce_required) VALUES ($id, $n, $h, $r, $pk)')
         .run({ $id: clientId, $n: name.trim(), $h: secretHash, $r: JSON.stringify(redirectUris), $pk: pkceRequired ? 1 : 0 });
     return {
-        client: { clientId, name: name.trim(), redirectUris, createdAt: new Date().toISOString(), consentEnabled: false, consentPageId: null, consentTitle: '', consentBody: '', allowListEnabled: false, pkceRequired },
+        client: { clientId, name: name.trim(), redirectUris, createdAt: new Date().toISOString(), consentEnabled: false, consentPageId: null, consentTitle: '', consentBody: '', allowListEnabled: false, pkceRequired, postLogoutRedirectUri: '' },
         clientSecret,
     };
 }
@@ -195,6 +199,8 @@ export interface UpdateOauthClientInput {
     consentPageId?: number | null;
     /** Toggle PKCE enforcement for this client. */
     pkceRequired?: boolean;
+    /** Default post-logout landing page. Empty string clears it. */
+    postLogoutRedirectUri?: string;
 }
 
 export interface UpdateOauthClientResult {
@@ -257,6 +263,20 @@ export function updateOauthClient(clientId: string, input: UpdateOauthClientInpu
             params.$pk = v;
         }
     }
+    if (input.postLogoutRedirectUri !== undefined) {
+        const v = String(input.postLogoutRedirectUri || '').trim();
+        if (v) {
+            let u: URL;
+            try { u = new URL(v); } catch { throw new Error('postLogoutRedirectUri must be an absolute URL'); }
+            if (u.protocol !== 'https:' && !(u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1'))) {
+                throw new Error('postLogoutRedirectUri must use https (http only for localhost)');
+            }
+        }
+        if (v !== (existing.post_logout_redirect_uri || '')) {
+            sets.push('post_logout_redirect_uri = $plr');
+            params.$plr = v;
+        }
+    }
 
     if (sets.length === 0) {
         return { updated: false, redirectUrisChanged: false, revokedRefreshTokens: 0 };
@@ -302,6 +322,7 @@ function rowToClient(r: any): OauthClient {
         allowListEnabled: !!r.allow_list_enabled,
         // Default true when the column is missing on very old rows.
         pkceRequired: r.pkce_required === undefined || r.pkce_required === null ? true : !!r.pkce_required,
+        postLogoutRedirectUri: r.post_logout_redirect_uri || '',
     };
 }
 

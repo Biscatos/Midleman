@@ -137,11 +137,13 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
 
                     // 1) Local-first
                     let cred = await verifyProxyUserCredentials(username, password);
+                    let ldapTotpPolicy: 'disabled' | 'optional' | 'required' = 'optional';
                     let ldapDiagnostic: { reason?: string; detail?: string; configName?: string } | null = null;
 
                     // 2) Fallback to LDAP
                     if (!cred) {
                         const ldap = await tryLdapLogin('proxy', username, password);
+                        if (ldap.ok) ldapTotpPolicy = ldap.auth.totpPolicy;
                         if (ldap.ok) {
                             const outcome = upsertLdapShadowProxyUserDetailed({
                                 ldapConfigId: ldap.auth.configId,
@@ -197,7 +199,8 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                             // instead of falling through to the setup branch.
                             cred = { user: shadow, totpSecret: shadow.totpEnabled ? getProxyUserTotpSecret(shadow.id) : null };
                         } else if (ldap.reason === 'server_error') {
-                            return jsonRes(502, { error: 'Directory configuration error. Ask an admin to check the LDAP directory.' });
+                            logAudit({ action: 'proxy.login.failed', actorUsername: username, targetType: 'proxy_profile', targetId: profile.name, details: { profile: profile.name, reason: 'ldap_server_error', ldapDetail: ldap.detail }, ip: clientIp, userAgent });
+                            return jsonRes(503, { error: 'Sign-in is temporarily unavailable. Please try again in a few minutes.' });
                         } else {
                             // Capture WHY ldap failed so the proxy.login.failed
                             // audit entry below carries something actionable
@@ -234,7 +237,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                         return jsonRes(403, { error: 'You do not have access to this application' });
                     }
 
-                    const require2fa = !!profile.require2fa || !!cred.user.force2faSetup;
+                    const require2fa = !!profile.require2fa || !!cred.user.force2faSetup || ldapTotpPolicy === 'required';
                     const totpEnabled = cred.user.totpEnabled;
 
                     // If no TOTP required and user hasn't set up TOTP, issue JWT directly

@@ -23,8 +23,7 @@ import {
     recordFailedAttempt,
     MAX_ATTEMPTS_PER_IP,
     generateTotpSecret, setupProxyUserTotp,
-    createSmsOtpChallenge, verifySmsOtpChallenge, logSmsSend,
-} from '../auth/auth';
+    createSmsOtpChallenge, verifySmsOtpChallenge, logSmsSend, getProxyUserTotpSecret } from '../auth/auth';
 import { sendSms, render2faCodeSms, isSmsConfigured as isSmsReady } from '../core/sms';
 import { tryLdapLogin } from '../auth/ldap';
 import QRCode from 'qrcode';
@@ -346,6 +345,10 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
     // same way as any other user. The admin-specific safety net (refuse
     // first-time TOTP enrolment via OAuth) lives in the post-cred block below.
     let cred: { user: import('../core/types').ProxyUser; totpSecret: string | null } | null = null;
+    // 2FA policy of the LDAP directory the user authenticated against
+    // (disabled | optional | required). Local users keep 'optional'.
+    let ldapTotpPolicy: 'disabled' | 'optional' | 'required' = 'optional';
+    let ldapDirectory: string | undefined;
 
     // 1) Proxy user local (covers admins too)
     if (!cred) cred = await verifyProxyUserCredentials(username, password);
@@ -426,11 +429,26 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
             if (ldap.grantedProfile) {
                 assignProxyUserToProfile(shadow.id, ldap.grantedProfile);
             }
-            cred = { user: shadow, totpSecret: null };
+            // Load the stored TOTP secret so an LDAP user who already enrolled
+            // is challenged for a code instead of silently let through.
+            cred = { user: shadow, totpSecret: shadow.totpEnabled ? getProxyUserTotpSecret(shadow.id) : null };
+            ldapTotpPolicy = ldap.auth.totpPolicy;
+            ldapDirectory = ldap.auth.configName;
         } else if (ldap.reason === 'server_error') {
+            // Technical detail goes to the audit log only; the person at the
+            // login screen gets a plain, non-technical message.
+            logAudit({
+                action: 'oauth.login.failed',
+                actorUsername: username,
+                targetType: 'oauth_client',
+                targetId: authReq.clientId,
+                details: { clientId: authReq.clientId, reason: 'ldap_server_error', ldapDetail: ldap.detail },
+                ip: clientIp,
+                userAgent: req.headers.get('user-agent') || undefined,
+            });
             const newId = storeAuthRequest(authReq);
-            return new Response(JSON.stringify({ error: 'Directory configuration error. Ask an admin to check the LDAP directory.', auth_request: newId }), {
-                status: 502,
+            return new Response(JSON.stringify({ error: 'Sign-in is temporarily unavailable. Please try again in a few minutes.', auth_request: newId }), {
+                status: 503,
                 headers: { 'Content-Type': 'application/json' },
             });
         } else {
@@ -506,7 +524,12 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
         });
     }
 
-    if (cred.user.totpEnabled && cred.totpSecret) {
+    // Directory policy 'disabled' = never prompt for a second factor (admins
+    // are still bound by the admin rule above). 'required' = enrol now if the
+    // user has no TOTP yet (handled further down with force2faSetup).
+    const skipSecondFactor = !isAdmin && ldapTotpPolicy === 'disabled';
+
+    if (!skipSecondFactor && cred.user.totpEnabled && cred.totpSecret) {
         const newAuthRequestId = storeAuthRequest(authReq);
         const challengeToken = createOauthLoginChallenge(cred.user.id, cred.totpSecret, newAuthRequestId);
         return new Response(JSON.stringify({ status: 'totp_required', challengeToken }), {
@@ -518,6 +541,7 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
     // SMS as 2FA — only when the user has no TOTP enabled. Requires a verified
     // phone, the user-side opt-in, and a configured SMS provider.
     if (
+        !skipSecondFactor &&
         !cred.user.totpEnabled &&
         cred.user.sms2faEnabled &&
         cred.user.phoneVerified &&
@@ -586,7 +610,8 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
 
     // Non-admin user flagged "Pending setup" by an admin → force TOTP enrolment now.
     // Admins are handled by the explicit isAdmin block above and must enrol via dashboard.
-    if (!isAdmin && cred.user.force2faSetup) {
+    const mustEnrolTotp = !isAdmin && !cred.user.totpEnabled && (cred.user.force2faSetup || ldapTotpPolicy === 'required');
+    if (mustEnrolTotp) {
         const totp = generateTotpSecret(cred.user.username);
         const qrDataUrl = await QRCode.toDataURL(totp.otpauthUrl, { width: 200, margin: 2 }).catch(() => null);
         const newAuthRequestId = storeAuthRequest(authReq);
@@ -597,7 +622,7 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
             actorUsername: cred.user.username,
             targetType: 'oauth_client',
             targetId: authReq.clientId,
-            details: { clientId: authReq.clientId, reason: 'force_2fa_setup' },
+            details: { clientId: authReq.clientId, reason: cred.user.force2faSetup ? 'force_2fa_setup' : 'ldap_policy_required', directory: ldapDirectory },
             ip: clientIp,
             userAgent: req.headers.get('user-agent') || undefined,
         });
@@ -1029,6 +1054,9 @@ export function handleOauthLogout(req: Request, url: URL): Response {
     const idTokenHint = params.get('id_token_hint');
     const postLogoutRedirectUri = params.get('post_logout_redirect_uri');
     const state = params.get('state');
+    // OIDC RP-initiated logout lets the client identify itself with client_id
+    // when it has no id_token at hand (e.g. Supabase-style sessions).
+    const clientIdParam = params.get('client_id');
 
     const ip = getClientIp(req);
     const ua = req.headers.get('user-agent') || '';
@@ -1083,42 +1111,58 @@ export function handleOauthLogout(req: Request, url: URL): Response {
 
     const clearCookie = `${SSO_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
 
-    // If post_logout_redirect_uri is requested, validate it against the client's
-    // registered redirect_uris (prevents open-redirect attacks), then redirect.
-    if (postLogoutRedirectUri) {
-        let redirectAllowed = false;
-        if (idTokenHint) {
-            const payload = verifyJwt(idTokenHint);
-            const clientId = payload?.aud as string | undefined;
-            if (clientId) {
-                const client = getOauthClient(clientId);
-                if (client) {
-                    redirectAllowed = isRedirectUriAllowed(client, postLogoutRedirectUri);
-                }
-            }
-        }
+    // Resolve the client: id_token_hint's audience wins, then client_id.
+    let client: ReturnType<typeof getOauthClient> = null;
+    const hintClientId = idTokenHint ? (verifyJwt(idTokenHint)?.aud as string | undefined) : undefined;
+    if (hintClientId) client = getOauthClient(hintClientId);
+    if (!client && clientIdParam) client = getOauthClient(clientIdParam);
 
-        if (redirectAllowed) {
-            const redirectTo = new URL(postLogoutRedirectUri);
-            if (state) redirectTo.searchParams.set('state', state);
-            return new Response(null, {
-                status: 302,
-                headers: {
-                    'Location': redirectTo.toString(),
-                    'Set-Cookie': clearCookie,
-                    'Cache-Control': 'no-store',
-                },
-            });
+    // Where to send the browser afterwards, most specific first:
+    //   1. post_logout_redirect_uri, only if it matches the client's registered
+    //      post-logout URI or one of its redirect_uris (no open redirects);
+    //   2. the client's configured post-logout URI;
+    //   3. the origin of the client's first redirect_uri (the app's home).
+    let target: URL | null = null;
+    if (client) {
+        if (postLogoutRedirectUri) {
+            const allowed = (client.postLogoutRedirectUri && postLogoutRedirectUri === client.postLogoutRedirectUri)
+                || isRedirectUriAllowed(client, postLogoutRedirectUri);
+            if (allowed) { try { target = new URL(postLogoutRedirectUri); } catch { target = null; } }
         }
-        // post_logout_redirect_uri not validated — still log out, but don't redirect.
+        if (!target && client.postLogoutRedirectUri) {
+            try { target = new URL(client.postLogoutRedirectUri); } catch { target = null; }
+        }
+        if (!target && client.redirectUris[0]) {
+            try { target = new URL(new URL(client.redirectUris[0]).origin + '/'); } catch { target = null; }
+        }
     }
 
-    return new Response(JSON.stringify({ status: 'ok' }), {
+    if (target) {
+        if (state) target.searchParams.set('state', state);
+        return new Response(null, {
+            status: 302,
+            headers: {
+                'Location': target.toString(),
+                'Set-Cookie': clearCookie,
+                'Cache-Control': 'no-store',
+            },
+        });
+    }
+
+    // No client could be resolved: a browser gets a plain "signed out" page,
+    // an API caller (POST / JSON accept) keeps the JSON body.
+    const wantsJson = req.method === 'POST' || /application\/json/i.test(req.headers.get('accept') || '');
+    if (wantsJson) {
+        return new Response(JSON.stringify({ status: 'ok' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Set-Cookie': clearCookie, 'Cache-Control': 'no-store' },
+        });
+    }
+    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signed out</title>
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f6f7f9;color:#1f2937}.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:32px 36px;max-width:420px;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.06)}h1{font-size:20px;margin:0 0 8px}p{margin:0;color:#6b7280;font-size:14px}</style></head>
+<body><div class="card"><h1>You have been signed out</h1><p>You can close this window or go back to the application and sign in again.</p></div></body></html>`;
+    return new Response(html, {
         status: 200,
-        headers: {
-            'Content-Type': 'application/json',
-            'Set-Cookie': clearCookie,
-            'Cache-Control': 'no-store',
-        },
+        headers: { 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': clearCookie, 'Cache-Control': 'no-store' },
     });
 }

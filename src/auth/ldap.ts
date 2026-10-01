@@ -18,7 +18,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
-import { Client, type SearchOptions } from 'ldapts';
+import { Client, InvalidCredentialsError, type SearchOptions } from 'ldapts';
 import { getAuthDb } from './auth';
 
 // ─── Schema ─────────────────────────────────────────────────────────────────
@@ -454,7 +454,7 @@ export interface LdapAuthResult {
 }
 
 export type LdapAuthFailure =
-    | { ok: false; reason: 'invalid_credentials' }
+    | { ok: false; reason: 'invalid_credentials'; detail?: string }
     | { ok: false; reason: 'user_not_found' }
     | { ok: false; reason: 'server_error'; detail: string };
 
@@ -531,10 +531,21 @@ export async function authenticateAgainst(cfg: LdapConfig, login: string, passwo
         await verifyClient.bind(dn, password);
     } catch (err) {
         await verifyClient.unbind().catch(() => {});
-        // ldapts surfaces InvalidCredentialsError on wrong password
+        // ldapts raises InvalidCredentialsError (LDAP result code 49) on a wrong
+        // password. Its message is "<server text> Code: 0x31", and Active
+        // Directory's server text is "AcceptSecurityContext error, data 52e"
+        // — neither contains the words "invalid credentials", so match on the
+        // error class / numeric code, and on AD's data sub-codes (52e wrong
+        // password, 525 no such user, 530/531 logon restrictions, 532/773
+        // password expired / must change, 533 disabled, 701 account expired,
+        // 775 locked). All of those are the user's problem, not the server's.
         const msg = err instanceof Error ? err.message : String(err);
-        if (/invalid credentials|49/i.test(msg)) {
-            return { ok: false, reason: 'invalid_credentials' };
+        const code = (err as any)?.code;
+        const isInvalid = err instanceof InvalidCredentialsError || code === 49
+            || /invalid credentials|Code: 0x31\b/i.test(msg)
+            || /data (52e|525|530|531|532|533|701|773|775)\b/i.test(msg);
+        if (isInvalid) {
+            return { ok: false, reason: 'invalid_credentials', detail: msg };
         }
         return { ok: false, reason: 'server_error', detail: 'user bind failed: ' + msg };
     }

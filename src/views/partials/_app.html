@@ -3335,6 +3335,11 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           <textarea id="oauthClientUris" class="form-input" rows="3" placeholder="https://xxxx.supabase.co/auth/v1/callback" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px;resize:vertical"></textarea>
           <p style="font-size:11.5px;color:var(--text3);margin-top:6px">HTTPS required (except http://localhost for dev). Exact match — no wildcards.</p>
         </div>
+        <div class="form-group">
+          <label class="form-label">Post-logout redirect (optional)</label>
+          <input type="text" id="oauthClientPostLogoutUri" class="form-input" placeholder="https://app.example.com/login" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px">
+          <p style="font-size:11.5px;color:var(--text3);margin-top:6px">Where <code>/oauth/logout?client_id=…</code> sends the browser after signing out. Leave empty to use the origin of the first redirect URI.</p>
+        </div>
         <div id="oauthClientUrisChangeWarning" style="display:none;background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.25);color:#ca8a04;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:14px">
           Changing redirect URIs revokes every refresh token for this client — apps will have to re-authenticate.
         </div>
