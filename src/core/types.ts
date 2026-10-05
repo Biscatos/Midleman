@@ -120,6 +120,9 @@ export interface WebhookDestination {
   /** Conditional delivery: if set, ALL conditions must match the incoming
    *  payload for this target to receive the request. Empty/undefined = always deliver. */
   filter?: WebhookFilterCondition[];
+  /** 'all' (default): every condition must match (AND). 'any': at least one
+   *  condition must match (OR). Only meaningful with 2+ conditions. */
+  filterMode?: 'all' | 'any';
   retry?: WebhookRetryConfig; // Per-destination retry config (overrides distributor-level)
   /** Per-destination persistent retry. When enabled, failures go to the
    *  pending-retry queue (not the DLQ) and are retried indefinitely. */

@@ -611,6 +611,7 @@ export function validateWebhookInput(input: unknown): string | null {
             if (dest.dropEmpty !== undefined && typeof dest.dropEmpty !== 'boolean') return '"dropEmpty" must be a boolean';
             if (dest.customHeaders && typeof dest.customHeaders !== 'object') return '"customHeaders" must be an object';
             if (dest.forwardHeaders !== undefined && typeof dest.forwardHeaders !== 'boolean') return '"forwardHeaders" must be a boolean';
+            if (dest.filterMode !== undefined && dest.filterMode !== 'all' && dest.filterMode !== 'any') return '"filterMode" must be "all" or "any"';
             if (dest.filter !== undefined) {
                 if (!Array.isArray(dest.filter)) return '"filter" must be an array of conditions';
                 const validOps = new Set(['eq', 'neq', 'exists', 'notExists', 'contains', 'in']);

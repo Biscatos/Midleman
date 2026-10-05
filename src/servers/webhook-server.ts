@@ -892,6 +892,8 @@ async function handleWebhookFanout(
         if (data === null || data === undefined) {
             return { matched: false, reason: `payload could not be parsed as JSON (condition "${target.filter[0].path}" needs it)` };
         }
+        const anyMode = target.filterMode === 'any';
+        const failures: string[] = [];
         for (const cond of target.filter) {
             const actual = resolvePath(data, cond.path);
             let ok: boolean;
@@ -908,11 +910,15 @@ async function handleWebhookFanout(
                     break;
                 default: ok = true;
             }
+            if (ok && anyMode) return { matched: true };
             if (!ok) {
                 const actualDesc = actual === undefined ? 'not found in payload' : JSON.stringify(actual);
-                return { matched: false, reason: `"${cond.path}" ${cond.op} "${cond.value ?? ''}" — actual: ${actualDesc}` };
+                const reason = `"${cond.path}" ${cond.op} "${cond.value ?? ''}" — actual: ${actualDesc}`;
+                if (!anyMode) return { matched: false, reason };
+                failures.push(reason);
             }
         }
+        if (anyMode) return { matched: false, reason: `none of ${failures.length} condition(s) matched: ${failures.join('; ')}` };
         return { matched: true };
     }
 

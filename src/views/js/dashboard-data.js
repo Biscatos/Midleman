@@ -3935,7 +3935,7 @@ function toggleRetrySection() {
 
 function addWebhookTarget(target = "") {
   if (typeof target === 'string') {
-    webhookTargetState.push({ type: 'basic', enabled: true, url: target, method: 'POST', bodyTemplate: '', customBody: false, dropEmpty: false, customHeaders: [], forwardHeaders: false, filter: [], retry: null, retryOpen: false, persistentRetry: null, persistentRetryOpen: false });
+    webhookTargetState.push({ type: 'basic', enabled: true, url: target, method: 'POST', bodyTemplate: '', customBody: false, dropEmpty: false, customHeaders: [], forwardHeaders: false, filter: [], filterMode: 'all', retry: null, retryOpen: false, persistentRetry: null, persistentRetryOpen: false });
   } else {
     const headersArr = [];
     if (target.customHeaders) {
@@ -3963,6 +3963,7 @@ function addWebhookTarget(target = "") {
       customHeaders: headersArr,
       forwardHeaders: target.forwardHeaders === true,
       filter: filterArr,
+      filterMode: target.filterMode === 'any' ? 'any' : 'all',
       retry: target.retry || null,
       retryOpen: !!target.retry,
       persistentRetry: target.persistentRetry || null,
@@ -4188,13 +4189,20 @@ function renderDestinationEditorMarkup(i) {
            <div id="previewUrl_${i}" style="display:none;font-size:10px;color:var(--accent);margin-top:2px;margin-left:4px"></div>
         </div>
 
-        <!-- Conditional delivery: only fires when ALL conditions match the incoming payload -->
+        <!-- Conditional delivery: fires when ALL (default) or ANY of the conditions match the incoming payload -->
         <div style="border:1px solid var(--border);border-radius:4px;padding:8px;background:var(--surface)">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:2px">
             <span style="font-size:11px;color:var(--text2);font-weight:600">Conditional delivery</span>
-            <button onclick="addWebhookTargetFilter(${i})" class="btn" style="padding:2px 6px;font-size:10px">+ Add condition</button>
+            <span style="display:inline-flex;align-items:center;gap:6px;margin-left:auto">
+              ${(t.filter || []).length >= 2 ? `<label style="font-size:10px;color:var(--text3)">Match</label>
+              <select onchange="updateWebhookTargetField(${i}, 'filterMode', this.value); updateAllPreviews(); renderDestinationEditor(${i})" style="padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:10.5px;outline:none">
+                <option value="all" ${t.filterMode !== 'any' ? 'selected' : ''}>all conditions (AND)</option>
+                <option value="any" ${t.filterMode === 'any' ? 'selected' : ''}>any condition (OR)</option>
+              </select>` : ''}
+              <button onclick="addWebhookTargetFilter(${i})" class="btn" style="padding:2px 6px;font-size:10px">+ Add condition</button>
+            </span>
           </div>
-          <div style="font-size:10px;color:var(--text3);margin-bottom:2px">No conditions = always deliver. With conditions, ALL of them must match the incoming payload for this destination to fire.</div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:2px">No conditions = always deliver. With conditions, ${t.filterMode === 'any' ? '<b>at least one</b> of them must match' : '<b>all</b> of them must match'} the incoming payload for this destination to fire.${(t.filter || []).length >= 2 && t.filterMode !== 'any' ? ' Two conditions on the same field with different values will never both match — switch to "any condition" for that.' : ''}</div>
           ${filterHtml}
         </div>
 
@@ -4546,6 +4554,7 @@ async function saveWebhook() {
       }
       if (isDisabled) dest.enabled = false;
       if (hasFilter) dest.filter = filterConditions;
+      if (hasFilter && t.filterMode === 'any') dest.filterMode = 'any';
       if (hasRetryOverride) dest.retry = t.retry;
       if (hasPersistent) {
           dest.persistentRetry = {
