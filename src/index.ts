@@ -24,6 +24,7 @@ import { initFive9Sessions, shutdownFive9Sessions, listFive9Sessions, deleteFive
 import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry/telemetry';
 import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart, getRequestLogBreakdown, getPurgeStatus, startPurge, compactDatabase, type RequestLogEntry, type PurgeOptions } from './telemetry/request-log';
 import { replayProxyRequest, ReplayError } from './proxy/replay';
+import { normalizeCorsInput } from './core/cors';
 import { initLogSettings, getLogSettings, saveLogSettings, registerLogModeResolver, isLogMode, type LogMode } from './telemetry/log-settings';
 import { initSipLog, shutdownSipLog, querySipLogs, getSipLogDetail, getSipLogStats } from './telemetry/sip-log';
 import { initConnLog, shutdownConnLog, queryConnLogs } from './telemetry/tcpudp-conn-log';
@@ -2561,6 +2562,7 @@ const server = Bun.serve({
                         allowedIps: p.allowedIps || [],
                         allowedPaths: p.allowedPaths || [],
                         rateLimit: p.rateLimit || null,
+                        cors: p.cors || null,
                         forwardPath: p.forwardPath !== false,
                         loginTitle: p.loginTitle || '',
                         loginLogo: p.loginLogo || '',
@@ -2633,6 +2635,10 @@ const server = Bun.serve({
                         if (typeof rl.requestsPerMinute === 'number' && rl.requestsPerMinute > 0) {
                             profile.rateLimit = { requestsPerMinute: rl.requestsPerMinute, perIp: !!rl.perIp };
                         }
+                    }
+                    if (input.cors && typeof input.cors === 'object') {
+                        const cors = normalizeCorsInput(input.cors as Record<string, unknown>);
+                        if (cors.enabled || cors.allowedOrigins.length) profile.cors = cors;
                     }
                     if (Array.isArray(input.allowedPaths) && input.allowedPaths.length) {
                         profile.allowedPaths = (input.allowedPaths as string[]).map(s => s.trim()).filter(Boolean);

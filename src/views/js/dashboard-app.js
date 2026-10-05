@@ -529,6 +529,7 @@ function navigate(page, opts = {}) {
     const parentLink = document.querySelector('[data-page="webhooks"]');
     if (parentLink) parentLink.classList.add('active');
   }
+  if (SIDEBAR_EXT_PAGES.has(page)) setSidebarExt(true, false);
   if (page === 'requests') { rlPage = 1; fetchRequestLogs(); }
   if (page === 'tcpudp') {
     if (pendingTcpTab) switchTcpUdpTab(pendingTcpTab);
@@ -593,6 +594,28 @@ function hashSuffixFromHash(hash) {
   if (parts.length < 2 || !parts[1]) return null;
   try { return decodeURIComponent(parts.slice(1).join('/')); } catch { return parts.slice(1).join('/'); }
 }
+
+// Extensions group (Connectors, Report Feeds): collapsed by default, state
+// remembered per browser; auto-opens when one of its pages is the target.
+const SIDEBAR_EXT_PAGES = new Set(['connectors', 'reports']);
+function setSidebarExt(open, persist = true) {
+  const el = document.getElementById('sidebarExt');
+  const btn = document.getElementById('sidebarExtToggle');
+  if (!el) return;
+  el.classList.toggle('open', !!open);
+  if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (persist) { try { localStorage.setItem('mm.sidebarExtOpen', open ? '1' : '0'); } catch {} }
+}
+function toggleSidebarExt() {
+  const el = document.getElementById('sidebarExt');
+  setSidebarExt(!(el && el.classList.contains('open')));
+}
+(function restoreSidebarExt() {
+  let open = false;
+  try { open = localStorage.getItem('mm.sidebarExtOpen') === '1'; } catch {}
+  if (SIDEBAR_EXT_PAGES.has(pageFromHash(location.hash) || '')) open = true;
+  setSidebarExt(open, false);
+})();
 
 function toggleNavMobile() {
   document.body.classList.toggle('nav-open');

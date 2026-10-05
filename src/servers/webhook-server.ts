@@ -892,6 +892,8 @@ async function handleWebhookFanout(
         if (data === null || data === undefined) {
             return { matched: false, reason: `payload could not be parsed as JSON (condition "${target.filter[0].path}" needs it)` };
         }
+        const anyMode = target.filterMode === 'any';
+        const failures: string[] = [];
         for (const cond of target.filter) {
             const actual = resolvePath(data, cond.path);
             let ok: boolean;
@@ -908,11 +910,15 @@ async function handleWebhookFanout(
                     break;
                 default: ok = true;
             }
+            if (ok && anyMode) return { matched: true };
             if (!ok) {
                 const actualDesc = actual === undefined ? 'not found in payload' : JSON.stringify(actual);
-                return { matched: false, reason: `"${cond.path}" ${cond.op} "${cond.value ?? ''}" — actual: ${actualDesc}` };
+                const reason = `"${cond.path}" ${cond.op} "${cond.value ?? ''}" — actual: ${actualDesc}`;
+                if (!anyMode) return { matched: false, reason };
+                failures.push(reason);
             }
         }
+        if (anyMode) return { matched: false, reason: `none of ${failures.length} condition(s) matched: ${failures.join('; ')}` };
         return { matched: true };
     }
 
@@ -958,8 +964,13 @@ async function handleWebhookFanout(
         return value;
     }
 
+    // Destinations switched off in the dashboard stay configured but are not delivered to.
+    const activeTargets = webhook.targets.filter(t => typeof t === 'string' || t.enabled !== false);
+    const disabledCount = webhook.targets.length - activeTargets.length;
+    if (disabledCount > 0) console.log(`⏸️  [webhook:${webhook.name}] ${disabledCount} destination(s) disabled — skipped`);
+
     // Fire-and-forget background execution
-    Promise.allSettled(webhook.targets.map(async (target) => {
+    Promise.allSettled(activeTargets.map(async (target) => {
         const fetchStart = performance.now();
         
         let tUrl: string;
@@ -1141,12 +1152,12 @@ async function handleWebhookFanout(
 
     // Return immediate 202 Accepted to the caller
     const processingMs = performance.now() - startTime;
-    console.log(`📡 [webhook:${webhook.name}] 202 Accepted fan-out to ${webhook.targets.length} targets (${processingMs.toFixed(2)}ms) - ${requestId}`);
+    console.log(`📡 [webhook:${webhook.name}] 202 Accepted fan-out to ${activeTargets.length} targets (${processingMs.toFixed(2)}ms) - ${requestId}`);
 
     const resJson = {
         status: 'Accepted',
         message: 'Webhook payload accepted and is being fanned out.',
-        targetsCount: webhook.targets.length,
+        targetsCount: activeTargets.length,
         requestId,
     };
 

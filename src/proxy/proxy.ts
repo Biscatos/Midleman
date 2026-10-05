@@ -3,6 +3,7 @@ import { startProxySpan, endProxySpan, recordProxyBlocked, recordProxyRedirect }
 import { logRequest, captureRequestBody, captureResponseBody, headersToRecord, isLoggingEnabledFor } from '../telemetry/request-log';
 import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { verifyJwt, logAudit, timingSafeEqualStr } from '../auth/auth';
+import { corsPreflightResponse, applyCorsToResponse } from '../core/cors';
 
 // The real socket peer IP, captured at the server boundary (Bun's
 // server.requestIP) and looked up here per request. We avoid threading it
@@ -202,6 +203,24 @@ setInterval(() => {
  * and serves the response publicly (or with optional access key protection).
  */
 export async function handleProxyRequest(
+    req: Request,
+    url: URL,
+    profiles: ProxyProfile[],
+    startTime: number,
+    renderLoginHtml?: (profileName: string, require2fa: boolean) => string
+): Promise<Response> {
+    // CORS is decided by the profile named in the path. Preflight is answered
+    // here, before auth, because browsers send it without credentials.
+    const corsProfile = getProfileMap(profiles).get(url.pathname.split('/')[2]?.toLowerCase() || '');
+    if (corsProfile?.cors?.enabled) {
+        const pre = corsPreflightResponse(corsProfile.cors, req);
+        if (pre) return pre;
+    }
+    const res = await handleProxyRequestInner(req, url, profiles, startTime, renderLoginHtml);
+    return corsProfile?.cors?.enabled ? applyCorsToResponse(corsProfile.cors, req, res) : res;
+}
+
+async function handleProxyRequestInner(
     req: Request,
     url: URL,
     profiles: ProxyProfile[],
@@ -812,6 +831,20 @@ if(location.pathname===P.slice(0,-1)){_r.call(history,null,"",P+location.search+
  * Transparent proxying: requests are forwarded as-is to the upstream.
  */
 export async function handleDirectProxy(
+    req: Request,
+    profile: ProxyProfile,
+    startTime: number,
+    renderLoginHtml?: (profileName: string, require2fa: boolean) => string
+): Promise<Response> {
+    if (profile.cors?.enabled) {
+        const pre = corsPreflightResponse(profile.cors, req);
+        if (pre) return pre;
+    }
+    const res = await handleDirectProxyInner(req, profile, startTime, renderLoginHtml);
+    return profile.cors?.enabled ? applyCorsToResponse(profile.cors, req, res) : res;
+}
+
+async function handleDirectProxyInner(
     req: Request,
     profile: ProxyProfile,
     startTime: number,

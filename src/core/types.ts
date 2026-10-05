@@ -29,6 +29,7 @@ export interface ProxyProfile {
   allowSelfSignedTls?: boolean; // If true, skip TLS certificate validation for this upstream (for internal services)
   supabaseMode?: boolean; // If true (with authMode='login'): keeps the static apiKey header (Supabase anon key) AND adds Authorization: Bearer <userJwt> from the login cookie, so Supabase RLS sees the authenticated user.
   rateLimit?: ProxyRateLimitConfig; // Optional cap on requests forwarded to the upstream
+  cors?: import('./cors').ProxyCorsConfig; // Optional CORS policy enforced by the proxy (preflight + response headers)
 
   // -- Nginx Proxy Manager integration (optional addon) --
   // Public hostnames to be served by NPM in front. Empty/undefined = profile is not synced to NPM.
@@ -107,6 +108,8 @@ export interface WebhookFilterCondition {
 
 export interface WebhookDestination {
   url: string;
+  /** false = keep the destination configured but skip it during fan-out. Default true. */
+  enabled?: boolean;
   method?: string; // e.g. "POST", "GET"
   customHeaders?: Record<string, string>;
   forwardHeaders?: boolean; // If true, inherit all incoming request headers
@@ -117,6 +120,9 @@ export interface WebhookDestination {
   /** Conditional delivery: if set, ALL conditions must match the incoming
    *  payload for this target to receive the request. Empty/undefined = always deliver. */
   filter?: WebhookFilterCondition[];
+  /** 'all' (default): every condition must match (AND). 'any': at least one
+   *  condition must match (OR). Only meaningful with 2+ conditions. */
+  filterMode?: 'all' | 'any';
   retry?: WebhookRetryConfig; // Per-destination retry config (overrides distributor-level)
   /** Per-destination persistent retry. When enabled, failures go to the
    *  pending-retry queue (not the DLQ) and are retried indefinitely. */

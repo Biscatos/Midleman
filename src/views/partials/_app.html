@@ -79,20 +79,6 @@
         <span class="sidebar-link-label">Webhooks</span>
         <span class="sidebar-badge" id="navWebhookBadge">0</span>
       </button>
-      <button class="sidebar-link" data-page="connectors" data-tooltip="Chat Connectors" onclick="navigate('connectors')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-        </svg>
-        <span class="sidebar-link-label">Chat Connectors</span>
-        <span class="sidebar-badge" id="navConnectorBadge">0</span>
-      </button>
-      <button class="sidebar-link" data-page="reports" data-tooltip="Report Feeds" onclick="navigate('reports')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>
-        </svg>
-        <span class="sidebar-link-label">Report Feeds</span>
-        <span class="sidebar-badge" id="navReportBadge">0</span>
-      </button>
 
       <div class="sidebar-section-label sidebar-section-label--master">Settings</div>
       <div class="sidebar-section-label sidebar-section-label--sub">Integrations</div>
@@ -142,6 +128,33 @@
         <span class="sidebar-link-label">Log Storage</span>
         <span class="sidebar-badge" id="navLogSizeBadge" title="Request log database size">0 MB</span>
       </button>
+
+      <!-- Extensions: features kept out of the main navigation (still reachable by URL hash). -->
+      <div class="sidebar-ext" id="sidebarExt">
+        <button class="sidebar-ext-toggle" id="sidebarExtToggle" onclick="toggleSidebarExt()" data-tooltip="Extensions" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.5 11H19V7a2 2 0 0 0-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4a2 2 0 0 0-2 2v3.8h1.5a2.7 2.7 0 0 1 0 5.4H2V20a2 2 0 0 0 2 2h3.8v-1.5a2.7 2.7 0 0 1 5.4 0V22H17a2 2 0 0 0 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z"/>
+          </svg>
+          <span class="sidebar-link-label">Extensions</span>
+          <svg class="sidebar-ext-chevron" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="sidebar-ext-body" id="sidebarExtBody">
+      <button class="sidebar-link" data-page="connectors" data-tooltip="Chat Connectors" onclick="navigate('connectors')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+        </svg>
+        <span class="sidebar-link-label">Chat Connectors</span>
+        <span class="sidebar-badge" id="navConnectorBadge">0</span>
+      </button>
+      <button class="sidebar-link" data-page="reports" data-tooltip="Report Feeds" onclick="navigate('reports')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>
+        </svg>
+        <span class="sidebar-link-label">Report Feeds</span>
+        <span class="sidebar-badge" id="navReportBadge">0</span>
+      </button>
+        </div>
+      </div>
     </nav>
 
     <div class="sidebar-footer">
@@ -4477,6 +4490,41 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
             </div>
           </div>
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Requests over the limit get a 429 response. Unchecked "per client IP" means the limit is a single shared budget for the whole proxy.</span>
+        </div>
+        <div class="form-group span-2">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input class="wz-input" type="checkbox" id="pCorsEnabled" onchange="toggleCorsFields()" style="cursor:pointer;accent-color:var(--accent)">
+            <span>CORS policy</span>
+          </label>
+          <div id="pCorsFields" style="display:none;margin-top:10px;grid-template-columns:1fr 1fr;gap:10px">
+            <div style="grid-column:span 2">
+              <label class="wz-label" style="font-size:11.5px;color:var(--text3)">Allowed origins (one per line)</label>
+              <textarea class="wz-input" id="pCorsOrigins" rows="3" placeholder="https://app.example.com&#10;https://*.example.com&#10;*" style="font-family:monospace"></textarea>
+            </div>
+            <div>
+              <label class="wz-label" style="font-size:11.5px;color:var(--text3)">Allowed methods</label>
+              <input class="wz-input" type="text" id="pCorsMethods" placeholder="GET, POST, PUT, PATCH, DELETE, OPTIONS">
+            </div>
+            <div>
+              <label class="wz-label" style="font-size:11.5px;color:var(--text3)">Allowed request headers</label>
+              <input class="wz-input" type="text" id="pCorsHeaders" placeholder="(echo what the browser asks for)">
+            </div>
+            <div>
+              <label class="wz-label" style="font-size:11.5px;color:var(--text3)">Exposed response headers</label>
+              <input class="wz-input" type="text" id="pCorsExposed" placeholder="X-Request-ID, Content-Disposition">
+            </div>
+            <div>
+              <label class="wz-label" style="font-size:11.5px;color:var(--text3)">Preflight cache (seconds)</label>
+              <input class="wz-input" type="number" id="pCorsMaxAge" min="0" max="86400" placeholder="600">
+            </div>
+            <div style="grid-column:span 2">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input class="wz-input" type="checkbox" id="pCorsCredentials" style="cursor:pointer;accent-color:var(--accent)">
+                <span>Allow credentials (cookies / Authorization) — not allowed together with <code>*</code></span>
+              </label>
+            </div>
+          </div>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">When enabled, the proxy answers preflight requests itself and replaces any CORS headers from the upstream, so only the listed origins can call this proxy from a browser. Leave disabled to pass the upstream's CORS headers through unchanged.</span>
         </div>
       </div>
           </section>

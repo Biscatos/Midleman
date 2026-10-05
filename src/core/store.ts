@@ -1,4 +1,5 @@
 import type { ProxyProfile, WebhookDistributor, TcpUdpProfile, NpmCustomLocation } from './types';
+import { validateCorsInput } from './cors';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { assertSafeOutboundUrl, SsrfBlockedError } from './ssrf-guard';
@@ -23,6 +24,7 @@ interface StoredProfile {
     allowedIps?: string[];
     allowedPaths?: string[];
     rateLimit?: { requestsPerMinute: number; perIp?: boolean };
+    cors?: import('./cors').ProxyCorsConfig;
     port?: number;
     forwardPath?: boolean;
     passthrough?: boolean;
@@ -94,6 +96,7 @@ function toRuntime(stored: StoredProfile): ProxyProfile {
     if (stored.allowedIps && stored.allowedIps.length > 0) profile.allowedIps = stored.allowedIps;
     if (stored.allowedPaths && stored.allowedPaths.length > 0) profile.allowedPaths = stored.allowedPaths;
     if (stored.rateLimit && stored.rateLimit.requestsPerMinute > 0) profile.rateLimit = stored.rateLimit;
+    if (stored.cors && typeof stored.cors === 'object') profile.cors = stored.cors;
 
     if (stored.port !== undefined) profile.port = stored.port;
     if (stored.forwardPath !== undefined) profile.forwardPath = stored.forwardPath;
@@ -146,6 +149,7 @@ function toStored(profile: ProxyProfile): StoredProfile {
     if (profile.allowedIps && profile.allowedIps.length > 0) stored.allowedIps = profile.allowedIps;
     if (profile.allowedPaths && profile.allowedPaths.length > 0) stored.allowedPaths = profile.allowedPaths;
     if (profile.rateLimit && profile.rateLimit.requestsPerMinute > 0) stored.rateLimit = profile.rateLimit;
+    if (profile.cors) stored.cors = profile.cors;
 
     if (profile.port !== undefined) stored.port = profile.port;
     if (profile.forwardPath !== undefined) stored.forwardPath = profile.forwardPath;
@@ -320,6 +324,11 @@ export function validateProfileInput(input: unknown): string | null {
             return '"rateLimit.requestsPerMinute" must be a number between 1 and 1,000,000';
         }
         if (rl.perIp !== undefined && typeof rl.perIp !== 'boolean') return '"rateLimit.perIp" must be a boolean';
+    }
+
+    {
+        const corsErr = validateCorsInput(p.cors);
+        if (corsErr) return corsErr;
     }
 
     if (p.allowedPaths !== undefined) {
@@ -596,11 +605,13 @@ export function validateWebhookInput(input: unknown): string | null {
             if (typeof dest.url !== 'string') return 'Custom action must have a valid string "url"';
             try { assertSafeOutboundUrl(dest.url, ssrfOverride); }
             catch (e) { return e instanceof SsrfBlockedError ? `"${dest.url}": ${e.message}` : `"${dest.url}" is not a valid URL`; }
+            if (dest.enabled !== undefined && typeof dest.enabled !== 'boolean') return '"enabled" must be a boolean';
             if (dest.method && typeof dest.method !== 'string') return '"method" must be a string';
             if (dest.bodyTemplate && typeof dest.bodyTemplate !== 'string') return '"bodyTemplate" must be a string';
             if (dest.dropEmpty !== undefined && typeof dest.dropEmpty !== 'boolean') return '"dropEmpty" must be a boolean';
             if (dest.customHeaders && typeof dest.customHeaders !== 'object') return '"customHeaders" must be an object';
             if (dest.forwardHeaders !== undefined && typeof dest.forwardHeaders !== 'boolean') return '"forwardHeaders" must be a boolean';
+            if (dest.filterMode !== undefined && dest.filterMode !== 'all' && dest.filterMode !== 'any') return '"filterMode" must be "all" or "any"';
             if (dest.filter !== undefined) {
                 if (!Array.isArray(dest.filter)) return '"filter" must be an array of conditions';
                 const validOps = new Set(['eq', 'neq', 'exists', 'notExists', 'contains', 'in']);
