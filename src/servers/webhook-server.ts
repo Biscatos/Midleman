@@ -958,8 +958,13 @@ async function handleWebhookFanout(
         return value;
     }
 
+    // Destinations switched off in the dashboard stay configured but are not delivered to.
+    const activeTargets = webhook.targets.filter(t => typeof t === 'string' || t.enabled !== false);
+    const disabledCount = webhook.targets.length - activeTargets.length;
+    if (disabledCount > 0) console.log(`⏸️  [webhook:${webhook.name}] ${disabledCount} destination(s) disabled — skipped`);
+
     // Fire-and-forget background execution
-    Promise.allSettled(webhook.targets.map(async (target) => {
+    Promise.allSettled(activeTargets.map(async (target) => {
         const fetchStart = performance.now();
         
         let tUrl: string;
@@ -1141,12 +1146,12 @@ async function handleWebhookFanout(
 
     // Return immediate 202 Accepted to the caller
     const processingMs = performance.now() - startTime;
-    console.log(`📡 [webhook:${webhook.name}] 202 Accepted fan-out to ${webhook.targets.length} targets (${processingMs.toFixed(2)}ms) - ${requestId}`);
+    console.log(`📡 [webhook:${webhook.name}] 202 Accepted fan-out to ${activeTargets.length} targets (${processingMs.toFixed(2)}ms) - ${requestId}`);
 
     const resJson = {
         status: 'Accepted',
         message: 'Webhook payload accepted and is being fanned out.',
-        targetsCount: webhook.targets.length,
+        targetsCount: activeTargets.length,
         requestId,
     };
 

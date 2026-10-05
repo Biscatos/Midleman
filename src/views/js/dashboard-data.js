@@ -845,6 +845,9 @@ function renderProfiles(profiles) {
     const rateLimitBadge = (p.rateLimit && p.rateLimit.requestsPerMinute)
       ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px" title="${p.rateLimit.requestsPerMinute} req/min${p.rateLimit.perIp ? ' per IP' : ' shared'}">${p.rateLimit.requestsPerMinute}/min${p.rateLimit.perIp ? ' /IP' : ''}</span>`
       : '';
+    const corsBadge = (p.cors && p.cors.enabled)
+      ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px" title="${esc((p.cors.allowedOrigins || []).join(', '))}">CORS</span>`
+      : '';
     const blockedVal = p.blockedExtensions?.length
       ? `<span style="color:var(--red)">${esc(p.blockedExtensions.join(', '))}</span>`
       : '<span style="color:var(--text3)">None</span>';
@@ -854,7 +857,7 @@ function renderProfiles(profiles) {
   <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${p.port || '<span style="color:var(--text3)">N/A</span>'}</td>
   <td style="padding:8px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'SF Mono',Monaco,monospace;color:var(--text2)" title="${esc(p.targetUrl)}">${esc(p.targetUrl)}</td>
   <td style="padding:8px">${authVal}</td>
-  <td style="padding:8px">${accessBadge}${ipBadge}${rateLimitBadge}</td>
+  <td style="padding:8px">${accessBadge}${ipBadge}${rateLimitBadge}${corsBadge}</td>
   <td style="padding:8px">${blockedVal}</td>
   <td style="padding:8px 12px;text-align:right">
     <button data-type="profile" data-name="${esc(p.name)}" onclick="showContextMenu(event,this)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:2px 10px;cursor:pointer;color:var(--text2);font-size:18px;line-height:1.2;letter-spacing:1px" title="Actions">&#8942;</button>
@@ -899,6 +902,15 @@ async function openProfileModal(profile = null) {
   document.getElementById('pRateLimitRpm').value = (profile && profile.rateLimit) ? profile.rateLimit.requestsPerMinute : '';
   document.getElementById('pRateLimitPerIp').checked = !!(profile && profile.rateLimit && profile.rateLimit.perIp);
   toggleRateLimitFields();
+  const cors = (profile && profile.cors) || null;
+  document.getElementById('pCorsEnabled').checked = !!(cors && cors.enabled);
+  document.getElementById('pCorsOrigins').value = cors ? (cors.allowedOrigins || []).join('\n') : '';
+  document.getElementById('pCorsMethods').value = cors && cors.allowedMethods ? cors.allowedMethods.join(', ') : '';
+  document.getElementById('pCorsHeaders').value = cors && cors.allowedHeaders ? cors.allowedHeaders.join(', ') : '';
+  document.getElementById('pCorsExposed').value = cors && cors.exposedHeaders ? cors.exposedHeaders.join(', ') : '';
+  document.getElementById('pCorsMaxAge').value = cors && cors.maxAge != null ? cors.maxAge : '';
+  document.getElementById('pCorsCredentials').checked = !!(cors && cors.allowCredentials);
+  toggleCorsFields();
   // NPM fields (hidden inputs — populated by Adopt flow; managed via the Nginx PM page otherwise)
   document.getElementById('pPublicHostnames').value = profile?.publicHostnames ? profile.publicHostnames.join(', ') : '';
   document.getElementById('pTlsMode').value = profile?.tlsMode || 'none';
@@ -952,6 +964,10 @@ function toggleUpstreamAuthSection() {
 function toggleConsentFields() {
   const on = document.getElementById('pConsentEnabled').checked;
   document.getElementById('pConsentFields').style.display = on ? '' : 'none';
+}
+function toggleCorsFields() {
+  const on = document.getElementById('pCorsEnabled').checked;
+  document.getElementById('pCorsFields').style.display = on ? 'grid' : 'none';
 }
 function toggleRateLimitFields() {
   const on = document.getElementById('pRateLimitEnabled').checked;
@@ -1038,6 +1054,22 @@ async function saveProfile() {
     body.rateLimit = { requestsPerMinute: rpm, perIp: document.getElementById('pRateLimitPerIp').checked };
   } else {
     body.rateLimit = null;
+  }
+  {
+    const csv = id => document.getElementById(id).value.split(',').map(s => s.trim()).filter(Boolean);
+    const origins = document.getElementById('pCorsOrigins').value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    const corsEnabled = document.getElementById('pCorsEnabled').checked;
+    if (corsEnabled && origins.length === 0) { toast('CORS: add at least one allowed origin or disable the policy.', 'error'); return; }
+    if (corsEnabled || origins.length) {
+      body.cors = { enabled: corsEnabled, allowedOrigins: origins };
+      const m = csv('pCorsMethods'); if (m.length) body.cors.allowedMethods = m;
+      const h = csv('pCorsHeaders'); if (h.length) body.cors.allowedHeaders = h;
+      const e = csv('pCorsExposed'); if (e.length) body.cors.exposedHeaders = e;
+      const ma = document.getElementById('pCorsMaxAge').value.trim(); if (ma !== '') body.cors.maxAge = Number(ma);
+      if (document.getElementById('pCorsCredentials').checked) body.cors.allowCredentials = true;
+    } else {
+      body.cors = null;
+    }
   }
   // NPM fields (hidden — only meaningful for adopted profiles; preserved across saves)
   const hostnamesRaw = v('pPublicHostnames');
@@ -2136,6 +2168,7 @@ function renderWebhooks(webhooks) {
       ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 6px;border-radius:4px;font-size:11px;margin-left:4px" title="${esc(w.allowedIps.join(', '))}">IP restricted</span>`
       : '';
     const numTargets = w.targets.length;
+    const numPaused = w.targets.filter(t => typeof t === 'object' && t && t.enabled === false).length;
     const dlqCount = _dlqByWebhook[w.name] || 0;
     const pendingCount = _pendingByWebhook[w.name] || 0;
     const dlqDot = dlqCount > 0
@@ -2165,7 +2198,7 @@ function renderWebhooks(webhooks) {
   <td style="padding:8px 12px;font-weight:600">${esc(w.name)}</td>
   <td style="padding:8px">${statusBadge}${wNpmBadge}</td>
   <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${w.port}</td>
-  <td style="padding:8px"><a href="javascript:void(0)" onclick="manageWebhookDestinations('${esc(w.name)}')" style="color:var(--accent);text-decoration:none">${numTargets} destination${numTargets === 1 ? '' : 's'} →</a></td>
+  <td style="padding:8px"><a href="javascript:void(0)" onclick="manageWebhookDestinations('${esc(w.name)}')" style="color:var(--accent);text-decoration:none">${numTargets} destination${numTargets === 1 ? '' : 's'}${numPaused ? ' (' + numPaused + ' paused)' : ''} →</a></td>
   <td style="padding:8px">${authBadge}${wIpBadge}</td>
   <td style="padding:8px;color:var(--accent2)">${w.active > 0 ? w.active : '<span style="color:var(--text3)">0</span>'}</td>
   <td style="padding:8px 12px;text-align:right">
@@ -3902,7 +3935,7 @@ function toggleRetrySection() {
 
 function addWebhookTarget(target = "") {
   if (typeof target === 'string') {
-    webhookTargetState.push({ type: 'basic', url: target, method: 'POST', bodyTemplate: '', customBody: false, dropEmpty: false, customHeaders: [], forwardHeaders: false, filter: [], retry: null, retryOpen: false, persistentRetry: null, persistentRetryOpen: false });
+    webhookTargetState.push({ type: 'basic', enabled: true, url: target, method: 'POST', bodyTemplate: '', customBody: false, dropEmpty: false, customHeaders: [], forwardHeaders: false, filter: [], retry: null, retryOpen: false, persistentRetry: null, persistentRetryOpen: false });
   } else {
     const headersArr = [];
     if (target.customHeaders) {
@@ -3921,6 +3954,7 @@ function addWebhookTarget(target = "") {
         && !target.bodyTemplate && !target.dropEmpty && target.forwardHeaders !== true;
     webhookTargetState.push({
       type: isBasicShape ? 'basic' : 'custom',
+      enabled: target.enabled !== false,
       url: target.url || '',
       method: target.method || 'POST',
       bodyTemplate: target.bodyTemplate || '',
@@ -3943,6 +3977,13 @@ function addWebhookTargetFilter(index) {
   webhookTargetState[index].filter.push({ path: '', op: 'eq', value: '' });
   webhookFormDirty = true;
   renderDestinationEditor(index);
+}
+
+function toggleWebhookTargetEnabled(index, enabled) {
+  if (!webhookTargetState[index]) return;
+  webhookTargetState[index].enabled = !!enabled;
+  webhookFormDirty = true;
+  renderWebhookTargets();
 }
 
 function removeWebhookTargetFilter(index, fIndex) {
@@ -4071,9 +4112,13 @@ function renderWebhookTargets() {
       t.persistentRetryOpen ? badge('Persistent', true) : '',
     ].filter(Boolean).join(' ') || '<span style="color:var(--text3);font-size:11px">Default</span>';
 
+    const on = t.enabled !== false;
+    const toggle = `<label title="${on ? 'Enabled — click to pause deliveries to this destination' : 'Disabled — click to resume deliveries'}" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-right:8px;vertical-align:middle">
+        <input type="checkbox" ${on ? 'checked' : ''} onchange="toggleWebhookTargetEnabled(${i}, this.checked)" style="accent-color:var(--accent);cursor:pointer;margin:0">
+      </label>`;
     return `
-    <tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
-      <td style="padding:8px 12px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'SF Mono',Monaco,monospace;color:var(--text2)" title="${esc(t.url)}">${t.url ? esc(t.url) : '<span style="color:var(--text3)">(no URL)</span>'}</td>
+    <tr style="border-bottom:1px solid var(--border);transition:background 0.15s;${on ? '' : 'opacity:.55'}" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
+      <td style="padding:8px 12px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'SF Mono',Monaco,monospace;color:var(--text2)" title="${esc(t.url)}">${toggle}${t.url ? esc(t.url) : '<span style="color:var(--text3)">(no URL)</span>'}${on ? '' : ' ' + badge('Paused')}</td>
       <td style="padding:8px">${typeBadges}</td>
       <td style="padding:8px">${activeFilters.length ? badge(`${activeFilters.length} condition${activeFilters.length === 1 ? '' : 's'}`, true) : '<span style="color:var(--text3);font-size:11px">—</span>'}</td>
       <td style="padding:8px">${retryBadges}</td>
@@ -4472,8 +4517,10 @@ async function saveWebhook() {
       const filterConditions = buildWebhookTargetFilter(t);
       const hasFilter = filterConditions.length > 0;
 
-      // Basic forward with no retry override stays as a plain URL string.
-      if (t.type === 'basic' && !hasRetryOverride && !hasPersistent && !hasFilter) {
+      const isDisabled = t.enabled === false;
+      // Basic forward with no retry override stays as a plain URL string
+      // (a paused destination needs the object form to carry enabled:false).
+      if (t.type === 'basic' && !hasRetryOverride && !hasPersistent && !hasFilter && !isDisabled) {
           targetsRaw.push(t.url.trim());
           continue;
       }
@@ -4497,6 +4544,7 @@ async function saveWebhook() {
           dest.bodyTemplate = (t.customBody && t.bodyTemplate.trim()) ? t.bodyTemplate.trim() : undefined;
           dest.dropEmpty = (t.customBody && t.dropEmpty) ? true : undefined;
       }
+      if (isDisabled) dest.enabled = false;
       if (hasFilter) dest.filter = filterConditions;
       if (hasRetryOverride) dest.retry = t.retry;
       if (hasPersistent) {
