@@ -440,7 +440,10 @@
       if (el) { el.textContent = t.forgotSent; el.classList.add('visible'); el.style.color = 'var(--green)'; el.style.background = 'var(--green-bg)'; el.style.borderColor = 'var(--green-bdr)'; }
     }
 
-    document.getElementById('loginPass').addEventListener('keydown', e => { if (e.key === 'Enter') doStep1(); });
+    // Enter in either field submits, exactly like clicking the sign-in button.
+    const submitOnEnter = e => { if (e.key === 'Enter') { e.preventDefault(); if (!document.getElementById('loginBtn').disabled) doStep1(); } };
+    document.getElementById('loginUser').addEventListener('keydown', submitOnEnter);
+    document.getElementById('loginPass').addEventListener('keydown', submitOnEnter);
     document.getElementById('totpVerifyCode').addEventListener('keydown', e => { if (e.key === 'Enter') doTotpVerify(); });
     document.getElementById('totpSetupCode').addEventListener('keydown', e => { if (e.key === 'Enter') doTotpSetup(); });
 

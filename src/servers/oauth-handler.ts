@@ -521,7 +521,7 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
             userAgent: req.headers.get('user-agent') || undefined,
         });
         const newId = storeAuthRequest(authReq);
-        return new Response(JSON.stringify({ error: 'access_denied', error_description: 'Não tem acesso a esta aplicação.', auth_request: newId }), {
+        return new Response(JSON.stringify({ error: 'access_denied', error_description: 'You do not have access to this application.', auth_request: newId }), {
             status: 403,
             headers: { 'Content-Type': 'application/json' },
         });

@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="pt" data-theme="dark">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Criar Conta — {{LOGIN_TITLE}}</title>
+  <title>Create account —{{LOGIN_TITLE}}</title>
   <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='dark';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
   <!-- MM_THEME -->
   <link rel="icon" href="{{LOGIN_LOGO_URL}}" type="image/x-icon">
@@ -65,13 +65,13 @@
 
     <!-- Invalid / expired -->
     <div id="invalidBox" style="display:{{INVALID_DISPLAY}}">
-      <h2 class="invalid-title">Link inválido</h2>
+      <h2 class="invalid-title">Invalid link</h2>
       <p class="invalid-msg">{{INVALID_MSG}}</p>
     </div>
 
     <!-- Valid invite -->
     <div id="formBox" style="display:{{FORM_DISPLAY}}">
-      <h2 id="pageTitle">Criar conta</h2>
+      <h2 id="pageTitle">Create account</h2>
       <p class="greeting" id="pageGreeting"></p>
 
       <!-- Info box: email + note -->
@@ -94,9 +94,9 @@
       <!-- New user: password form -->
       <div id="newUserForm">
         <div class="form-group">
-          <label>Palavra-passe</label>
+          <label>Password</label>
           <div class="pw-row">
-            <input type="password" id="invPassword" placeholder="Mínimo 6 caracteres" autocomplete="new-password" oninput="checkStrength(this.value)">
+            <input type="password" id="invPassword" placeholder="At least 6 characters" autocomplete="new-password" oninput="checkStrength(this.value)">
             <button type="button" class="pw-eye" onclick="togglePw('invPassword',this)" tabindex="-1">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
@@ -105,20 +105,20 @@
           <div class="pw-hint" id="pwHint"></div>
         </div>
         <div class="form-group">
-          <label>Confirmar palavra-passe</label>
+          <label>Confirm password</label>
           <div class="pw-row">
-            <input type="password" id="invPassword2" placeholder="Repita a palavra-passe" autocomplete="new-password">
+            <input type="password" id="invPassword2" placeholder="Repeat password" autocomplete="new-password">
             <button type="button" class="pw-eye" onclick="togglePw('invPassword2',this)" tabindex="-1">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
           </div>
         </div>
-        <button class="btn-primary" id="regBtn" onclick="doRegister()">Criar conta e aceitar</button>
+        <button class="btn-primary" id="regBtn" onclick="doRegister()">Create account and accept</button>
       </div>
 
       <!-- Returning user: just accept -->
       <div id="returningUserForm" style="display:none">
-        <button class="btn-primary" id="acceptBtn" onclick="doAccept()">Aceitar acesso</button>
+        <button class="btn-primary" id="acceptBtn" onclick="doAccept()">Accept access</button>
       </div>
     </div>
     </div>
@@ -140,14 +140,14 @@
 
     if (IS_RETURNING) {
       const name = INV_NAME ? INV_NAME.split(' ')[0] : '';
-      document.getElementById('pageTitle').textContent = 'Bem-vindo' + (name ? ', ' + name : '') + '!';
-      document.getElementById('pageGreeting').textContent = 'Já tem uma conta. Clique em Aceitar para ativar o seu acesso.';
+      document.getElementById('pageTitle').textContent = 'Welcome' + (name ? ', ' + name : '');
+      document.getElementById('pageGreeting').textContent = 'You already have an account. Click Accept access to activate your access.';
       document.getElementById('newUserForm').style.display = 'none';
       document.getElementById('returningUserForm').style.display = 'block';
     } else {
       const name = INV_NAME ? INV_NAME.split(' ')[0] : '';
-      document.getElementById('pageTitle').textContent = 'Criar conta' + (name ? ', ' + name : '');
-      document.getElementById('pageGreeting').textContent = 'Defina a sua palavra-passe para activar o acesso.';
+      document.getElementById('pageTitle').textContent = 'Create account' + (name ? ', ' + name : '');
+      document.getElementById('pageGreeting').textContent = 'Set your password to activate your access.';
     }
 
     function togglePw(id, btn) {
@@ -164,7 +164,7 @@
       let s=0;
       if(v.length>=8) s++; if(v.length>=12) s++;
       if(/[A-Z]/.test(v)) s++; if(/[0-9]/.test(v)) s++; if(/[^A-Za-z0-9]/.test(v)) s++;
-      const l=[{w:'20%',c:'var(--red)',t:'Muito fraca'},{w:'40%',c:'var(--red)',t:'Fraca'},{w:'60%',c:'var(--orange)',t:'Razoável'},{w:'80%',c:'var(--green)',t:'Boa'},{w:'100%',c:'var(--green)',t:'Forte'}][Math.min(s,4)];
+      const l=[{w:'20%',c:'var(--red)',t:'Very weak'},{w:'40%',c:'var(--red)',t:'Weak'},{w:'60%',c:'var(--orange)',t:'Fair'},{w:'80%',c:'var(--green)',t:'Good'},{w:'100%',c:'var(--green)',t:'Strong'}][Math.min(s,4)];
       bar.style.width=l.w; bar.style.background=l.c; hint.textContent=l.t; hint.style.color=l.c;
     }
 
@@ -185,8 +185,8 @@
       clearError();
       const pw  = document.getElementById('invPassword').value;
       const pw2 = document.getElementById('invPassword2').value;
-      if (!pw || pw.length < 6) { showError('A palavra-passe deve ter pelo menos 6 caracteres.'); return; }
-      if (pw !== pw2) { showError('As palavras-passe não coincidem.'); return; }
+      if (!pw || pw.length < 6) { showError('Password must be at least 6 characters.'); return; }
+      if (pw !== pw2) { showError('Passwords do not match.'); return; }
       const btn = document.getElementById('regBtn');
       btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
       try {
@@ -195,9 +195,9 @@
           body: JSON.stringify({ password: pw }),
         });
         const data = await res.json();
-        if (!res.ok) { showError(data.error || 'Erro ao criar conta.'); btn.disabled=false; btn.textContent='Criar conta e aceitar'; return; }
-        showSuccess('Conta criada com sucesso. Já pode fazer login com o seu email e palavra-passe.');
-      } catch { showError('Erro de rede. Tente novamente.'); btn.disabled=false; btn.textContent='Criar conta e aceitar'; }
+        if (!res.ok) { showError(data.error || 'Could not create the account.'); btn.disabled=false; btn.textContent='Create account and accept'; return; }
+        showSuccess('Account created. You can now sign in with your email and password.');
+      } catch { showError('Network error. Try again.'); btn.disabled=false; btn.textContent='Create account and accept'; }
     }
 
     async function doAccept() {
@@ -209,9 +209,9 @@
           body: JSON.stringify({ password: '' }),
         });
         const data = await res.json();
-        if (!res.ok) { document.getElementById('regError').textContent=data.error||'Erro.'; document.getElementById('regError').classList.add('visible'); btn.disabled=false; btn.textContent='Aceitar acesso'; return; }
-        showSuccess('Acesso ativado com sucesso. Já pode fazer login com as suas credenciais existentes.');
-      } catch { document.getElementById('regError').textContent='Erro de rede.'; document.getElementById('regError').classList.add('visible'); btn.disabled=false; btn.textContent='Aceitar acesso'; }
+        if (!res.ok) { document.getElementById('regError').textContent=data.error||'Something went wrong.'; document.getElementById('regError').classList.add('visible'); btn.disabled=false; btn.textContent='Accept access'; return; }
+        showSuccess('Access activated. You can now sign in with your existing credentials.');
+      } catch { document.getElementById('regError').textContent='Network error.'; document.getElementById('regError').classList.add('visible'); btn.disabled=false; btn.textContent='Accept access'; }
     }
 
     document.addEventListener('keydown', e => {

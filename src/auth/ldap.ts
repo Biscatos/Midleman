@@ -59,11 +59,17 @@ CREATE TABLE IF NOT EXISTS ldap_admin_groups (
 
 export type LdapScope = 'admin' | 'proxy' | 'both';
 export type LdapTotpPolicy = 'disabled' | 'optional' | 'required';
+/** 'service' = search with a service account (bind DN), then verify the user's password.
+ *  'user'    = no service account: bind directly as the user (user@domain / DOMAIN\user)
+ *              and read their own entry with that same connection. */
+export type LdapBindMode = 'service' | 'user';
 
 export interface LdapConfig {
     id: number;
     name: string;
     url: string;             // ldap://... or ldaps://...
+    bindMode: LdapBindMode;
+    upnSuffix: string;       // user mode: domain appended to bare logins (ucall.co.ao → jdoe@ucall.co.ao)
     bindDn: string;
     baseDn: string;
     userFilter: string;      // contains {login} placeholder
@@ -87,6 +93,8 @@ export interface LdapConfig {
 export interface LdapConfigInput {
     name: string;
     url: string;
+    bindMode?: LdapBindMode;
+    upnSuffix?: string;
     bindDn?: string;
     bindPassword?: string; // plaintext; only persisted on create/update
     baseDn: string;
@@ -170,6 +178,12 @@ export function initLdap(dataDir: string): void {
         if (!cols.includes('auto_adopt_local')) {
             db.exec("ALTER TABLE ldap_configs ADD COLUMN auto_adopt_local INTEGER NOT NULL DEFAULT 0");
         }
+        if (!cols.includes('bind_mode')) {
+            db.exec("ALTER TABLE ldap_configs ADD COLUMN bind_mode TEXT NOT NULL DEFAULT 'service'");
+        }
+        if (!cols.includes('upn_suffix')) {
+            db.exec("ALTER TABLE ldap_configs ADD COLUMN upn_suffix TEXT NOT NULL DEFAULT ''");
+        }
     } catch {}
     const count = (db.prepare('SELECT COUNT(*) as c FROM ldap_configs WHERE enabled = 1').get() as any)?.c || 0;
     console.log(`🪪 LDAP: ${count} enabled directory(ies)`);
@@ -215,6 +229,8 @@ function rowToConfig(r: any): LdapConfig {
         id: r.id,
         name: r.name,
         url: r.url,
+        bindMode: (r.bind_mode === 'user' ? 'user' : 'service') as LdapBindMode,
+        upnSuffix: r.upn_suffix || '',
         bindDn: r.bind_dn || '',
         baseDn: r.base_dn,
         userFilter: r.user_filter,
@@ -258,6 +274,12 @@ function validateInput(input: LdapConfigInput, isCreate: boolean): void {
     if (input.userFilter !== undefined && !input.userFilter.includes('{login}')) {
         throw new Error('userFilter must contain the {login} placeholder');
     }
+    if (input.bindMode !== undefined && input.bindMode !== 'service' && input.bindMode !== 'user') {
+        throw new Error('bindMode must be service|user');
+    }
+    if (input.upnSuffix !== undefined && input.upnSuffix.trim() && !/^@?[a-z0-9.-]+$/i.test(input.upnSuffix.trim())) {
+        throw new Error('upnSuffix must be a domain such as example.com');
+    }
     if (input.scope && !['admin', 'proxy', 'both'].includes(input.scope)) {
         throw new Error('scope must be admin|proxy|both');
     }
@@ -277,13 +299,15 @@ export function createLdapConfig(input: LdapConfigInput): LdapConfig {
     validateInput(input, true);
     const enc = encryptBindPassword(input.bindPassword || '');
     db.prepare(`INSERT INTO ldap_configs
-        (name, url, bind_dn, bind_password_enc, base_dn, user_filter,
+        (name, url, bind_mode, upn_suffix, bind_dn, bind_password_enc, base_dn, user_filter,
          username_attr, email_attr, fullname_attr, group_attr,
          start_tls, tls_verify, scope, totp_policy, enabled, timeout_ms, default_profile, auto_adopt_local)
-        VALUES ($n, $u, $bd, $bp, $base, $f, $ua, $ea, $fa, $ga,
+        VALUES ($n, $u, $bm, $us, $bd, $bp, $base, $f, $ua, $ea, $fa, $ga,
                 $st, $tv, $sc, $tp, $en, $to, $dp, $aa)`).run({
         $n: input.name.trim(),
         $u: input.url.trim(),
+        $bm: input.bindMode === 'user' ? 'user' : 'service',
+        $us: normalizeUpnSuffix(input.upnSuffix),
         $bd: (input.bindDn || '').trim(),
         $bp: enc,
         $base: input.baseDn.trim(),
@@ -322,6 +346,8 @@ export function updateLdapConfig(id: number, input: Partial<LdapConfigInput>): L
 
     if (input.name !== undefined) set('name', 'n', input.name.trim());
     if (input.url !== undefined) set('url', 'u', input.url.trim());
+    if (input.bindMode !== undefined) set('bind_mode', 'bm', input.bindMode === 'user' ? 'user' : 'service');
+    if (input.upnSuffix !== undefined) set('upn_suffix', 'us', normalizeUpnSuffix(input.upnSuffix));
     if (input.bindDn !== undefined) set('bind_dn', 'bd', input.bindDn.trim());
     if (input.bindPassword !== undefined) set('bind_password_enc', 'bp', encryptBindPassword(input.bindPassword));
     if (input.baseDn !== undefined) set('base_dn', 'base', input.baseDn.trim());
@@ -397,6 +423,50 @@ function getBindPassword(id: number): string {
     return row ? decryptBindPassword(row.bind_password_enc) : '';
 }
 
+function normalizeUpnSuffix(v: string | undefined): string {
+    return (v || '').trim().replace(/^@/, '').toLowerCase();
+}
+
+/** Name to bind with in 'user' mode: logins that already carry a domain
+ *  (jdoe@corp.com, CORP\jdoe) are used as typed; bare ones get the UPN suffix. */
+export function userBindName(cfg: Pick<LdapConfig, 'upnSuffix'>, login: string): string {
+    const l = login.trim();
+    if (l.includes('@') || l.includes('\\') || /^(cn|uid)=/i.test(l)) return l;
+    return cfg.upnSuffix ? `${l}@${cfg.upnSuffix}` : l;
+}
+
+/** The short account name used in the search filter (jdoe@corp.com / CORP\jdoe → jdoe). */
+function shortLogin(login: string): string {
+    const l = login.trim();
+    if (l.includes('\\')) return l.split('\\').pop() || l;
+    if (l.includes('@')) return l.split('@')[0];
+    return l;
+}
+
+function newClient(cfg: LdapConfig): Client {
+    return new Client({
+        url: cfg.url,
+        timeout: cfg.timeoutMs,
+        connectTimeout: cfg.timeoutMs,
+        tlsOptions: cfg.url.startsWith('ldaps:') || cfg.startTls
+            ? { rejectUnauthorized: cfg.tlsVerify }
+            : undefined,
+    });
+}
+
+/** Wrong password / locked / expired etc. — the user's problem, not the server's.
+ *  ldapts raises InvalidCredentialsError (result code 49); Active Directory adds
+ *  "data <code>" sub-codes: 52e wrong password, 525 no such user, 530/531 logon
+ *  restrictions, 532/773 password expired / must change, 533 disabled,
+ *  701 account expired, 775 locked. */
+function isInvalidCredentials(err: unknown): boolean {
+    const msg = err instanceof Error ? err.message : String(err);
+    const code = (err as any)?.code;
+    return err instanceof InvalidCredentialsError || code === 49
+        || /invalid credentials|Code: 0x31\b/i.test(msg)
+        || /data (52e|525|530|531|532|533|701|773|775)\b/i.test(msg);
+}
+
 // ─── Connection pool ────────────────────────────────────────────────────────
 // One ldapts.Client per config id. ldapts keeps the underlying socket open
 // across operations, which is what we want for the >100 logins/min target.
@@ -466,6 +536,7 @@ export type LdapAuthOutcome =
 export async function authenticateAgainst(cfg: LdapConfig, login: string, password: string): Promise<LdapAuthOutcome> {
     if (!cfg.enabled) return { ok: false, reason: 'server_error', detail: 'config disabled' };
     if (!login || !password) return { ok: false, reason: 'invalid_credentials' };
+    if (cfg.bindMode === 'user') return authenticateWithUserBind(cfg, login, password);
 
     const adminClient = await getClient(cfg).catch(err => {
         return { __err: err instanceof Error ? err.message : String(err) } as any;
@@ -531,26 +602,57 @@ export async function authenticateAgainst(cfg: LdapConfig, login: string, passwo
         await verifyClient.bind(dn, password);
     } catch (err) {
         await verifyClient.unbind().catch(() => {});
-        // ldapts raises InvalidCredentialsError (LDAP result code 49) on a wrong
-        // password. Its message is "<server text> Code: 0x31", and Active
-        // Directory's server text is "AcceptSecurityContext error, data 52e"
-        // — neither contains the words "invalid credentials", so match on the
-        // error class / numeric code, and on AD's data sub-codes (52e wrong
-        // password, 525 no such user, 530/531 logon restrictions, 532/773
-        // password expired / must change, 533 disabled, 701 account expired,
-        // 775 locked). All of those are the user's problem, not the server's.
         const msg = err instanceof Error ? err.message : String(err);
-        const code = (err as any)?.code;
-        const isInvalid = err instanceof InvalidCredentialsError || code === 49
-            || /invalid credentials|Code: 0x31\b/i.test(msg)
-            || /data (52e|525|530|531|532|533|701|773|775)\b/i.test(msg);
-        if (isInvalid) {
+        if (isInvalidCredentials(err)) {
             return { ok: false, reason: 'invalid_credentials', detail: msg };
         }
         return { ok: false, reason: 'server_error', detail: 'user bind failed: ' + msg };
     }
     await verifyClient.unbind().catch(() => {});
+    return { ok: true, result: entryToResult(cfg, entry, login) };
+}
 
+/** 'user' bind mode: no service account. The user's own credentials open the
+ *  connection, and that same connection reads their entry (Active Directory
+ *  lets every account read its own attributes and memberOf). */
+async function authenticateWithUserBind(cfg: LdapConfig, login: string, password: string): Promise<LdapAuthOutcome> {
+    const client = newClient(cfg);
+    try {
+        if (cfg.startTls && cfg.url.startsWith('ldap:')) {
+            await client.startTLS({ rejectUnauthorized: cfg.tlsVerify });
+        }
+        try {
+            await client.bind(userBindName(cfg, login), password);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (isInvalidCredentials(err)) return { ok: false, reason: 'invalid_credentials', detail: msg };
+            return { ok: false, reason: 'server_error', detail: 'user bind failed: ' + msg };
+        }
+        const filter = cfg.userFilter.replace(/\{login\}/g, escapeLdapFilter(shortLogin(login)));
+        let entries: any[];
+        try {
+            const res = await client.search(cfg.baseDn, {
+                scope: 'sub',
+                filter,
+                attributes: [cfg.usernameAttr, cfg.emailAttr, cfg.fullnameAttr, cfg.groupAttr, 'dn'],
+                sizeLimit: 2,
+            });
+            entries = res.searchEntries || [];
+        } catch (err) {
+            return { ok: false, reason: 'server_error', detail: 'search failed: ' + (err instanceof Error ? err.message : String(err)) };
+        }
+        if (entries.length === 0) return { ok: false, reason: 'server_error', detail: 'signed in, but the search filter did not find the user entry — check Base DN and the search filter' };
+        if (entries.length > 1) return { ok: false, reason: 'server_error', detail: 'user filter matched multiple entries — refine filter' };
+        return { ok: true, result: entryToResult(cfg, entries[0], login) };
+    } catch (err) {
+        return { ok: false, reason: 'server_error', detail: err instanceof Error ? err.message : String(err) };
+    } finally {
+        await client.unbind().catch(() => {});
+    }
+}
+
+function entryToResult(cfg: LdapConfig, entry: any, login: string): LdapAuthResult {
+    const dn: string = entry.dn;
     // Extract attrs (ldapts returns string | string[] | Buffer)
     const pick = (key: string): string => {
         const v = entry[key];
@@ -572,20 +674,17 @@ export async function authenticateAgainst(cfg: LdapConfig, login: string, passwo
     }
 
     return {
-        ok: true,
-        result: {
-            configId: cfg.id,
-            configName: cfg.name,
-            dn,
-            username: pick(cfg.usernameAttr) || login,
-            email: pick(cfg.emailAttr),
-            fullName: pick(cfg.fullnameAttr),
-            groups: pickArray(cfg.groupAttr),
-            raw,
-            totpPolicy: cfg.totpPolicy,
-            scope: cfg.scope,
-            autoAdoptLocal: cfg.autoAdoptLocal,
-        },
+        configId: cfg.id,
+        configName: cfg.name,
+        dn,
+        username: pick(cfg.usernameAttr) || shortLogin(login),
+        email: pick(cfg.emailAttr),
+        fullName: pick(cfg.fullnameAttr),
+        groups: pickArray(cfg.groupAttr),
+        raw,
+        totpPolicy: cfg.totpPolicy,
+        scope: cfg.scope,
+        autoAdoptLocal: cfg.autoAdoptLocal,
     };
 }
 
@@ -603,7 +702,7 @@ export interface LdapTestOutcome {
  * user-search step against it. Never attempts a user bind — that's reserved
  * for the actual login path.
  */
-export async function testLdapConfig(cfg: LdapConfig, sampleLogin?: string): Promise<LdapTestOutcome> {
+export async function testLdapConfig(cfg: LdapConfig, sampleLogin?: string, samplePassword?: string): Promise<LdapTestOutcome> {
     const started = Date.now();
     const steps: LdapTestOutcome['steps'] = [];
     let client: Client | null = null;
@@ -628,7 +727,21 @@ export async function testLdapConfig(cfg: LdapConfig, sampleLogin?: string): Pro
             }
         }
 
-        if (cfg.bindDn) {
+        if (cfg.bindMode === 'user') {
+            if (!sampleLogin || !samplePassword) {
+                steps.push({ step: 'user_bind', ok: true, detail: 'no service account — enter a login and password to test signing in' });
+                const ok = steps.every(s => s.ok);
+                return { ok, durationMs: Date.now() - started, steps };
+            }
+            try {
+                await client.bind(userBindName(cfg, sampleLogin), samplePassword);
+                steps.push({ step: 'user_bind', ok: true, detail: 'bound as ' + userBindName(cfg, sampleLogin) });
+            } catch (err) {
+                steps.push({ step: 'user_bind', ok: false, detail: isInvalidCredentials(err) ? 'wrong login or password, or the account is locked/expired' : (err instanceof Error ? err.message : String(err)) });
+                return { ok: false, durationMs: Date.now() - started, steps };
+            }
+            sampleLogin = shortLogin(sampleLogin);
+        } else if (cfg.bindDn) {
             try {
                 await client.bind(cfg.bindDn, getBindPassword(cfg.id));
                 steps.push({ step: 'admin_bind', ok: true });
@@ -818,7 +931,10 @@ export async function runLdapSync(): Promise<LdapSyncReport> {
         configs: [],
     };
 
-    const configs = listLdapConfigs().filter(c => c.enabled);
+    // Directories in 'user' bind mode have no service account, so there is
+    // nothing to search with between logins: their users' groups are refreshed
+    // at every sign-in instead.
+    const configs = listLdapConfigs().filter(c => c.enabled && c.bindMode !== 'user');
     for (const cfg of configs) {
         const acc = { configId: cfg.id, configName: cfg.name, users: 0, groupsUpdated: 0, revokedClients: 0, orphans: 0, errors: [] as string[] };
         report.configs.push(acc);

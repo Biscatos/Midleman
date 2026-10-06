@@ -384,9 +384,9 @@ function showConfirm(opts) {
     message = parts.shift();
     detail = parts.join('\n\n');
   }
-  if (!title) title = 'Confirmação';
-  const confirmText = o.confirmText || 'Confirmar';
-  const cancelText  = o.cancelText  || 'Cancelar';
+  if (!title) title = 'Confirm';
+  const confirmText = o.confirmText || 'Confirm';
+  const cancelText  = o.cancelText  || 'Cancel';
   const danger = (o.danger !== false);
 
   document.getElementById('confirmModalTitle').textContent = title;
@@ -438,7 +438,7 @@ async function doLogout() {
   if (confirmBtn) {
     confirmBtn.dataset.loading = '1';
     confirmBtn.disabled = true;
-    confirmBtn.innerHTML = '<span class="btn-spinner"></span> A terminar sessão…';
+    confirmBtn.innerHTML = '<span class="btn-spinner"></span> Signing out…';
   }
   if (cancelBtn) cancelBtn.disabled = true;
   if (closeBtn)  closeBtn.disabled  = true;
@@ -684,7 +684,7 @@ async function withBusy(btnOrEvent, busyLabel, fn) {
   const wasDisabled = btn.disabled;
   btn.disabled = true;
   btn.setAttribute('aria-busy', 'true');
-  btn.innerHTML = '<span class="btn-spinner" aria-hidden="true"></span> ' + (busyLabel || 'A processar…');
+  btn.innerHTML = '<span class="btn-spinner" aria-hidden="true"></span> ' + (busyLabel || 'Processing…');
   try {
     return await fn();
   } finally {

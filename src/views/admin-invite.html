@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="pt" data-theme="dark">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Convite de Administrador — Midleman</title>
+  <title>Administrator invite — Midleman</title>
   <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='dark';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
   <!-- MM_THEME -->
   <style>
@@ -61,18 +61,18 @@
 
     <!-- Invalid / expired -->
     <div id="invalidBox" style="display:{{INVALID_DISPLAY}}">
-      <h2 class="invalid-title">Convite inválido</h2>
+      <h2 class="invalid-title">Invalid invite</h2>
       <p class="invalid-msg">{{INVALID_MSG}}</p>
     </div>
 
     <!-- Valid invite -->
     <div id="formBox" style="display:{{FORM_DISPLAY}}">
-      <h2>Configurar conta</h2>
-      <p class="greeting">Foi convidado a tornar-se administrador do Midleman. Escolha um username e defina a sua password.</p>
+      <h2>Set up account</h2>
+      <p class="greeting">You have been invited to become a Midleman administrator. Choose a username and set your password.</p>
 
       <div class="info-box" id="infoBox">
         <div class="info-row" id="nameRow" style="display:none">
-          <span class="info-label">Nome</span>
+          <span class="info-label">Name</span>
           <span class="info-val" id="nameDisplay"></span>
         </div>
         <div class="info-row" id="emailRow" style="display:none">
@@ -87,18 +87,18 @@
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
         </svg>
-        <div id="regSuccessMsg">Conta criada com sucesso! Pode agora fazer login no dashboard.</div>
+        <div id="regSuccessMsg">Account created. You can now sign in to the dashboard.</div>
       </div>
 
       <div id="registerForm">
         <div class="form-group">
           <label>Username *</label>
-          <input type="text" id="invUsername" placeholder="ex: joao.silva" autocomplete="username" spellcheck="false">
+          <input type="text" id="invUsername" placeholder="e.g. john.smith" autocomplete="username" spellcheck="false">
         </div>
         <div class="form-group">
           <label>Password *</label>
           <div class="pw-row">
-            <input type="password" id="invPassword" placeholder="Mínimo 8 caracteres" autocomplete="new-password" oninput="checkStrength(this.value)">
+            <input type="password" id="invPassword" placeholder="At least 8 characters" autocomplete="new-password" oninput="checkStrength(this.value)">
             <button type="button" class="pw-eye" onclick="togglePw('invPassword',this)" tabindex="-1">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
@@ -107,15 +107,15 @@
           <div class="pw-hint" id="pwHint"></div>
         </div>
         <div class="form-group">
-          <label>Confirmar password *</label>
+          <label>Confirm password *</label>
           <div class="pw-row">
-            <input type="password" id="invPassword2" placeholder="Repita a password" autocomplete="new-password">
+            <input type="password" id="invPassword2" placeholder="Repeat password" autocomplete="new-password">
             <button type="button" class="pw-eye" onclick="togglePw('invPassword2',this)" tabindex="-1">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
           </div>
         </div>
-        <button class="btn-primary" id="regBtn" onclick="doRegister()">Criar conta de administrador</button>
+        <button class="btn-primary" id="regBtn" onclick="doRegister()">Create administrator account</button>
       </div>
     </div>
     </div>
@@ -151,7 +151,7 @@
       if (/[0-9]/.test(pw)) score++;
       if (/[^A-Za-z0-9]/.test(pw)) score++;
       const cols = ['var(--red)','var(--orange)','var(--orange)','var(--green)','var(--green)'];
-      const labels = ['Muito fraca','Fraca','Razoável','Boa','Forte'];
+      const labels = ['Very weak','Weak','Fair','Good','Strong'];
       bar.style.width = (score * 20) + '%';
       bar.style.background = cols[score - 1] || cols[0];
       hint.textContent = labels[score - 1] || '';
@@ -164,9 +164,9 @@
       const username = document.getElementById('invUsername').value.trim();
       const pw1 = document.getElementById('invPassword').value;
       const pw2 = document.getElementById('invPassword2').value;
-      if (!username || username.length < 2) { errEl.textContent = 'Username deve ter pelo menos 2 caracteres.'; errEl.className = 'error visible'; return; }
-      if (!pw1 || pw1.length < 8) { errEl.textContent = 'A password deve ter pelo menos 8 caracteres.'; errEl.className = 'error visible'; return; }
-      if (pw1 !== pw2) { errEl.textContent = 'As passwords não coincidem.'; errEl.className = 'error visible'; return; }
+      if (!username || username.length < 2) { errEl.textContent = 'Username must be at least 2 characters.'; errEl.className = 'error visible'; return; }
+      if (!pw1 || pw1.length < 8) { errEl.textContent = 'Password must be at least 8 characters.'; errEl.className = 'error visible'; return; }
+      if (pw1 !== pw2) { errEl.textContent = 'Passwords do not match.'; errEl.className = 'error visible'; return; }
       btn.disabled = true;
       btn.innerHTML = '<span class="spinner"></span>';
       try {
@@ -176,14 +176,14 @@
           body: JSON.stringify({ username, password: pw1 }),
         });
         const data = await res.json();
-        if (!res.ok) { errEl.textContent = data.error || 'Erro ao criar conta.'; errEl.className = 'error visible'; btn.disabled = false; btn.textContent = 'Criar conta de administrador'; return; }
+        if (!res.ok) { errEl.textContent = data.error || 'Could not create the account.'; errEl.className = 'error visible'; btn.disabled = false; btn.textContent = 'Create administrator account'; return; }
         document.getElementById('registerForm').style.display = 'none';
         document.getElementById('regSuccess').className = 'success-box visible';
       } catch (e) {
-        errEl.textContent = 'Erro de rede. Tente novamente.';
+        errEl.textContent = 'Network error. Try again.';
         errEl.className = 'error visible';
         btn.disabled = false;
-        btn.textContent = 'Criar conta de administrador';
+        btn.textContent = 'Create administrator account';
       }
     }
   </script>

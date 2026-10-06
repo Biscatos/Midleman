@@ -342,7 +342,7 @@
           <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px">
             <input class="mm-switch" type="checkbox" id="rlAutoRefresh" checked style=""> Auto-refresh
           </label>
-          <button class="btn btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await fetchRequestLogs(); })">Refresh</button>
+          <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchRequestLogs(); })">Refresh</button>
         </div>
       </div>
       <div class="mm-filterbar">
@@ -389,7 +389,7 @@
               <option value="500">500</option>
               <option value="502">502</option>
             </select>
-            <button class="btn btn-sm btn-primary" onclick="withBusy(this, 'A carregar…', async () => { await fetchRequestLogs(); })">Filter</button>
+            <button class="btn btn-sm btn-primary" onclick="withBusy(this, 'Loading…', async () => { await fetchRequestLogs(); })">Filter</button>
           </div>
         
       </div>
@@ -428,8 +428,8 @@
         style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--text2)">
         <span id="reqLogInfo"></span>
         <div style="display:flex;gap:6px">
-          <button class="btn btn-sm" id="rlPrev" onclick="withBusy(this, 'A carregar…', async () => { await reqLogPrevPage(); })" disabled>Prev</button>
-          <button class="btn btn-sm" id="rlNext" onclick="withBusy(this, 'A carregar…', async () => { await reqLogNextPage(); })" disabled>Next</button>
+          <button class="btn btn-sm" id="rlPrev" onclick="withBusy(this, 'Loading…', async () => { await reqLogPrevPage(); })" disabled>Prev</button>
+          <button class="btn btn-sm" id="rlNext" onclick="withBusy(this, 'Loading…', async () => { await reqLogNextPage(); })" disabled>Next</button>
         </div>
       </div>
     </div>
@@ -467,7 +467,7 @@
             <p>Stream-level proxies (TCP, UDP, TLS). Used for SIP/VoIP and other non-HTTP protocols. Each profile can listen on multiple transports and forward to a single upstream.</p>
           </div>
           <div style="display:flex;gap:8px">
-            <button class="btn btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await fetchSipProxies(); })">Reload</button>
+            <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchSipProxies(); })">Reload</button>
             <button class="btn btn-primary btn-sm" onclick="openSipModal()">+ TCP/UDP Proxy</button>
           </div>
         </div>
@@ -522,7 +522,7 @@
                 <option value="tcp">TCP</option>
                 <option value="tls">TLS</option>
               </select>
-              <button class="btn btn-sm btn-primary" onclick="withBusy(this, 'A carregar…', async () => { await fetchConnLogs(); })">Filter</button>
+              <button class="btn btn-sm btn-primary" onclick="withBusy(this, 'Loading…', async () => { await fetchConnLogs(); })">Filter</button>
             </div>
           
       </div>
@@ -550,8 +550,8 @@
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--text2)">
           <span id="connLogInfo"></span>
           <div style="display:flex;gap:6px">
-            <button class="btn btn-sm" id="clPrev" onclick="withBusy(this, 'A carregar…', async () => { await connLogPrevPage(); })" disabled>Prev</button>
-            <button class="btn btn-sm" id="clNext" onclick="withBusy(this, 'A carregar…', async () => { await connLogNextPage(); })" disabled>Next</button>
+            <button class="btn btn-sm" id="clPrev" onclick="withBusy(this, 'Loading…', async () => { await connLogPrevPage(); })" disabled>Prev</button>
+            <button class="btn btn-sm" id="clNext" onclick="withBusy(this, 'Loading…', async () => { await connLogNextPage(); })" disabled>Next</button>
           </div>
         </div>
       </div>
@@ -596,7 +596,7 @@
               <option value="SUBSCRIBE">SUBSCRIBE</option>
               <option value="MESSAGE">MESSAGE</option>
             </select>
-            <button class="btn btn-sm btn-primary" onclick="withBusy(this, 'A carregar…', async () => { await fetchSipLogs(); })">Filter</button>
+            <button class="btn btn-sm btn-primary" onclick="withBusy(this, 'Loading…', async () => { await fetchSipLogs(); })">Filter</button>
           </div>
         
       </div>
@@ -626,8 +626,8 @@
         style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--text2)">
         <span id="sipLogInfo"></span>
         <div style="display:flex;gap:6px">
-          <button class="btn btn-sm" id="slPrev" onclick="withBusy(this, 'A carregar…', async () => { await sipLogPrevPage(); })" disabled>Prev</button>
-          <button class="btn btn-sm" id="slNext" onclick="withBusy(this, 'A carregar…', async () => { await sipLogNextPage(); })" disabled>Next</button>
+          <button class="btn btn-sm" id="slPrev" onclick="withBusy(this, 'Loading…', async () => { await sipLogPrevPage(); })" disabled>Prev</button>
+          <button class="btn btn-sm" id="slNext" onclick="withBusy(this, 'Loading…', async () => { await sipLogNextPage(); })" disabled>Next</button>
         </div>
       </div>
       </div> <!-- /tabPaneSipMessages -->
@@ -641,7 +641,7 @@
             <p>Central TLS certificate store used by TCP/UDP proxies. Add via upload, Let's Encrypt, or self-signed. ACME certs auto-renew 30 days before expiry; affected proxies hot-reload without restart.</p>
           </div>
           <div style="display:flex;gap:8px">
-            <button class="btn btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await fetchCerts(); })">Reload</button>
+            <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchCerts(); })">Reload</button>
             <button class="btn btn-primary btn-sm" onclick="openCertModal()">+ New Certificate</button>
           </div>
         </div>
@@ -744,7 +744,7 @@
         </div>
         <div style="display:flex;gap:8px;flex-shrink:0">
           <button class="btn btn-sm" onclick="document.getElementById('webhookModal').style.display='flex'">Webhook settings</button>
-          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A guardar…', async () => { await saveWebhook(); })">Save Webhook</button>
+          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Saving…', async () => { await saveWebhook(); })">Save Webhook</button>
         </div>
       </div>
 
@@ -754,8 +754,8 @@
             <span style="font-size:12.5px;font-weight:600">Test Payload (optional)</span>
             <div style="display:flex;gap:6px">
               <button class="btn btn-sm" onclick="toggleTestPayload()" style="padding:2px 8px;font-size:11px" tabindex="-1">Show/Hide</button>
-              <button class="btn btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await fetchRecentWebhookPayload(); })" style="padding:2px 8px;font-size:10px" tabindex="-1">Fetch recent request</button>
-              <button class="btn btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await fetchAndMergeWebhookPayloads(); })" style="padding:2px 8px;font-size:10px" tabindex="-1" title="Analyzes the last 50 payloads and builds a unified schema of every field seen">Fetch &amp; merge (50)</button>
+              <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchRecentWebhookPayload(); })" style="padding:2px 8px;font-size:10px" tabindex="-1">Fetch recent request</button>
+              <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchAndMergeWebhookPayloads(); })" style="padding:2px 8px;font-size:10px" tabindex="-1" title="Analyzes the last 50 payloads and builds a unified schema of every field seen">Fetch &amp; merge (50)</button>
             </div>
           </div>
           <div id="wTestPayloadContainer" style="display:none">
@@ -874,9 +874,9 @@
             clients.</p>
         </div>
         <div style="display:flex;gap:8px">
-          <button class="btn btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await reloadProfiles(); })">Reload</button>
+          <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await reloadProfiles(); })">Reload</button>
           <button class="btn btn-sm" onclick="openNpmImportModal()" id="npmImportBtn" style="display:none">Import from NPM</button>
-          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await openProfileModal(); })">+ HTTP Proxy</button>
+          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Loading…', async () => { await openProfileModal(); })">+ HTTP Proxy</button>
         </div>
       </div>
       <div class="mm-filterbar">
@@ -1037,7 +1037,7 @@
         </div>
         <div class="modal-footer">
           <button class="btn" onclick="closeCertModal()">Cancel</button>
-          <button class="btn btn-primary" onclick="withBusy(this, 'A guardar…', async () => { await saveCert(); })">Save Certificate</button>
+          <button class="btn btn-primary" onclick="withBusy(this, 'Saving…', async () => { await saveCert(); })">Save Certificate</button>
         </div>
       </div>
     </div>
@@ -1101,7 +1101,7 @@
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
             Invite Links
           </h3>
-          <button class="btn btn-sm btn-ghost" onclick="withBusy(this, 'A carregar…', async () => { await fetchInvites(); })">Refresh</button>
+          <button class="btn btn-sm btn-ghost" onclick="withBusy(this, 'Loading…', async () => { await fetchInvites(); })">Refresh</button>
         </div>
         <div class="card-body" style="padding:0;overflow-x:auto">
           <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -1229,7 +1229,7 @@
         </div>
         <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn btn-ghost btn-sm" onclick="closeConsentPageModal()">Cancel</button>
-          <button class="btn btn-primary btn-sm" id="consentPageSubmitBtn" onclick="withBusy(this, 'A guardar…', async () => { await submitConsentPage(); })">Create</button>
+          <button class="btn btn-primary btn-sm" id="consentPageSubmitBtn" onclick="withBusy(this, 'Saving…', async () => { await submitConsentPage(); })">Create</button>
         </div>
       </div>
     </div>
@@ -1310,7 +1310,7 @@
           <button class="btn btn-sm" id="ldapcBtnReverted" onclick="filterLdapAdoptions('reverted')">Reverted</button>
           <button class="btn btn-sm" id="ldapcBtnAll" onclick="filterLdapAdoptions('')">All</button>
           <span style="flex:1"></span>
-          <button class="btn btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await fetchLdapAdoptions(); })">Refresh</button>
+          <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchLdapAdoptions(); })">Refresh</button>
         </div>
         <div style="overflow-y:auto;flex:1">
           <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -1531,7 +1531,7 @@
             <button class="btn btn-sm" id="smtpTestBtn" onclick="testSmtpConnectionUi()">Test connection</button>
             <button class="btn btn-sm" id="smtpTestCancelBtn" onclick="cancelSmtpTest()" style="display:none;color:var(--err-text)">Cancel test</button>
             <button class="btn btn-sm" onclick="openSmtpSendTestModal()">Send test email</button>
-            <button class="btn btn-sm" onclick="withBusy(this, 'A remover…', async () => { await clearSmtpConfig(); })" id="smtpClearBtn" style="display:none;margin-left:auto;color:var(--err-text)">Remove configuration</button>
+            <button class="btn btn-sm" onclick="withBusy(this, 'Removing…', async () => { await clearSmtpConfig(); })" id="smtpClearBtn" style="display:none;margin-left:auto;color:var(--err-text)">Remove configuration</button>
           </div>
           <div id="smtpStatus" style="font-size:12.5px"></div>
         </div>
@@ -1631,7 +1631,7 @@
               Send test
             </button>
             <span style="font-size:11.5px;color:var(--text3)">Credentials are encrypted at rest</span>
-            <button class="btn btn-sm" onclick="withBusy(this, 'A remover…', async () => { await clearSmsConfig(); })" id="smsClearBtn" style="display:none;margin-left:auto;color:var(--err-text)">Remove configuration</button>
+            <button class="btn btn-sm" onclick="withBusy(this, 'Removing…', async () => { await clearSmsConfig(); })" id="smsClearBtn" style="display:none;margin-left:auto;color:var(--err-text)">Remove configuration</button>
           </div>
           <div id="smsStatus" style="font-size:12.5px"></div>
         </div>
@@ -1845,7 +1845,7 @@
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             Settings
           </button>
-          <button class="btn btn-sm btn-primary" id="npmAddHostBtn" onclick="withBusy(this, 'A carregar…', async () => { await openNpmHostModal(null); })" style="display:none">+ Proxy Host</button>
+          <button class="btn btn-sm btn-primary" id="npmAddHostBtn" onclick="withBusy(this, 'Loading…', async () => { await openNpmHostModal(null); })" style="display:none">+ Proxy Host</button>
           <button class="btn btn-sm btn-primary" id="npmAddCertBtn" onclick="openNpmCertLEModal()" style="display:none">+ Let's Encrypt</button>
           <button class="btn btn-sm" id="npmAddCustomCertBtn" onclick="openNpmCertCustomModal()" style="display:none">+ Custom</button>
         </div>
@@ -2096,10 +2096,10 @@
       <div id="npmStatus" style="margin-top:14px;font-size:12.5px"></div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-sm" onclick="withBusy(this, 'A remover…', async () => { await clearNpmConfig(); })" id="npmClearBtn" style="margin-right:auto;color:var(--err-text);display:none">Remove configuration</button>
+      <button class="btn btn-sm" onclick="withBusy(this, 'Removing…', async () => { await clearNpmConfig(); })" id="npmClearBtn" style="margin-right:auto;color:var(--err-text);display:none">Remove configuration</button>
       <button class="btn" onclick="closeNpmConfigModal()">Cancel</button>
-      <button class="btn btn-sm" onclick="withBusy(this, 'A testar…', async () => { await testNpmConnectionUi(); })">Test connection</button>
-      <button class="btn btn-primary" onclick="withBusy(this, 'A guardar…', async () => { await saveNpmConfig(true); })">Save</button>
+      <button class="btn btn-sm" onclick="withBusy(this, 'Testing…', async () => { await testNpmConnectionUi(); })">Test connection</button>
+      <button class="btn btn-primary" onclick="withBusy(this, 'Saving…', async () => { await saveNpmConfig(true); })">Save</button>
     </div>
   </div>
 </div>
@@ -2330,19 +2330,19 @@
             <div class="rf-viewer-toolbar">
               <h3 style="font-size:14px;font-weight:600;margin:0;flex:1;white-space:nowrap">Data Viewer</h3>
               <select id="rfViewerFeedSelect" onchange="rfViewerLoad(1)" style="padding:5px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
-                <option value="">— selecciona feed —</option>
+                <option value="">— select feed —</option>
               </select>
-              <input id="rfViewerSearch" type="search" placeholder="Pesquisar…" oninput="rfViewerLoad(1)" style="padding:5px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+              <input id="rfViewerSearch" type="search" placeholder="Search…" oninput="rfViewerLoad(1)" style="padding:5px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
               <select id="rfViewerLimit" onchange="rfViewerLoad(1)" style="padding:5px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
-                <option value="25">25 / pág</option>
-                <option value="50" selected>50 / pág</option>
-                <option value="100">100 / pág</option>
-                <option value="250">250 / pág</option>
+                <option value="25">25 / page</option>
+                <option value="50" selected>50 / page</option>
+                <option value="100">100 / page</option>
+                <option value="250">250 / page</option>
               </select>
               <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text2);cursor:pointer;white-space:nowrap">
                 <input class="mm-switch" type="checkbox" id="rfViewerRaw" onchange="rfViewerLoad(1)"> Raw
               </label>
-              <button class="btn btn-sm" onclick="withBusy(this, 'A actualizar…', async () => { await rfViewerRefresh(); })" id="rfViewerRefreshBtn" style="padding:4px 10px;font-size:12px;white-space:nowrap">Refresh</button>
+              <button class="btn btn-sm" onclick="withBusy(this, 'Refreshing…', async () => { await rfViewerRefresh(); })" id="rfViewerRefreshBtn" style="padding:4px 10px;font-size:12px;white-space:nowrap">Refresh</button>
             </div>
           </div>
           <div id="rfViewerMeta" style="padding:6px 16px;font-size:11.5px;color:var(--text3);border-bottom:1px solid var(--border);min-height:26px"></div>
@@ -2384,7 +2384,7 @@
           <button class="close-btn" onclick="closeGcInstancesModal()">&times;</button>
         </div>
         <div style="padding:12px 20px 10px;border-bottom:1px solid var(--border)">
-          <p style="font-size:12.5px;color:var(--text2);margin:0">Credenciais partilhadas entre feeds. Cria uma instância aqui e selecciona-a ao criar um feed.</p>
+          <p style="font-size:12.5px;color:var(--text2);margin:0">Credentials shared between feeds. Create an instance here and select it when creating a feed.</p>
         </div>
         <div class="gc-inst-table-wrap">
           <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -2398,12 +2398,12 @@
               </tr>
             </thead>
             <tbody id="gcInstanceListBody">
-              <tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">Sem instâncias ainda.</td></tr>
+              <tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">No instances yet.</td></tr>
             </tbody>
           </table>
         </div>
         <div class="modal-footer">
-          <button class="btn" onclick="closeGcInstancesModal()">Fechar</button>
+          <button class="btn" onclick="closeGcInstancesModal()">Close</button>
           <button class="btn btn-primary" onclick="openGcInstanceModal()">+ Add Instance</button>
         </div>
       </div>
@@ -2424,7 +2424,7 @@
             </div>
             <div>
               <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Label (display name)</label>
-              <input id="gcInstLabel" type="text" placeholder="uCall Produção" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+              <input id="gcInstLabel" type="text" placeholder="uCall Production" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
             </div>
           </div>
           <div>
@@ -2445,7 +2445,7 @@
         </div>
         <div class="modal-footer">
           <button class="btn" onclick="closeGcInstanceModal()">Cancel</button>
-          <button class="btn btn-primary" onclick="withBusy(this, 'A guardar…', async () => { await saveGcInstance(); })">Save Instance</button>
+          <button class="btn btn-primary" onclick="withBusy(this, 'Saving…', async () => { await saveGcInstance(); })">Save Instance</button>
         </div>
       </div>
     </div>
@@ -2475,7 +2475,7 @@
               <label class="wz-label" >API Group</label>
               <input class="wz-input" id="rfGroup" type="text" placeholder="nossa-seguro" oninput="rfCheckGroupApiKeys()" >
               <div class="mm-field-hint">Optional — namespace, e.g. nossa-seguro</div>
-              <span style="font-size:11px;color:var(--text3)">Agrupa feeds em /reports/<em>group</em>/<em>slug</em></span>
+              <span style="font-size:11px;color:var(--text3)">Groups feeds under /reports/<em>group</em>/<em>slug</em></span>
             </div>
             <div>
               <label class="wz-label" >Endpoint Slug</label>
@@ -2516,8 +2516,8 @@
             </div>
             <div>
               <label class="wz-label" >Data Type</label>
-              <input class="wz-input" id="rfDataType" type="text" placeholder='0 ou "sessions"' >
-              <div class="mm-field-hint">0 para voz, "sessions" para webchat</div>
+              <input class="wz-input" id="rfDataType" type="text" placeholder='0 or "sessions"' >
+              <div class="mm-field-hint">0 for voice, "sessions" for webchat</div>
             </div>
             <div>
               <label class="wz-label" >Owner Type *</label>
@@ -2579,9 +2579,9 @@
           <!-- Auto-refresh -->
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
             <div>
-              <label class="wz-label" >Auto-refresh (segundos)</label>
+              <label class="wz-label" >Auto-refresh (seconds)</label>
               <input class="wz-input" id="rfAutoRefresh" type="number" min="0" max="86400" value="0" >
-              <span style="font-size:11px;color:var(--text3)">0 = apenas manual</span>
+              <span style="font-size:11px;color:var(--text3)">0 = manual only</span>
               <input type="hidden" id="rfTtl" value="0">
             </div>
           </div>
@@ -2594,7 +2594,7 @@
               <button type="button" class="btn" id="rfPreviewBtn" onclick="rfFetchPreview()" style="font-size:12.5px">
                 Fetch Columns Preview
               </button>
-              <span id="rfPreviewStatus" style="font-size:12px;color:var(--text3)">Preenche as credenciais e template acima, depois clica para ver as colunas disponíveis.</span>
+              <span id="rfPreviewStatus" style="font-size:12px;color:var(--text3)">Fill in the credentials and template above, then click to see the available columns.</span>
             </div>
             <!-- Sample data table — shown after preview -->
             <div id="rfPreviewArea" style="display:none;margin-top:12px;overflow-x:auto;border:1px solid var(--border);border-radius:6px">
@@ -2627,7 +2627,7 @@
                 <thead>
                   <tr style="background:var(--surface2)">
                     <th style="padding:7px 10px;width:36px">
-                      <input class="wz-input" type="checkbox" id="rfFmSelectAll" onchange="rfFmToggleAll(this.checked)" title="Seleccionar todas">
+                      <input class="wz-input" type="checkbox" id="rfFmSelectAll" onchange="rfFmToggleAll(this.checked)" title="Select all">
                     </th>
                     <th style="padding:7px 10px;text-align:left;font-weight:600;font-size:11px;color:var(--text2);text-transform:uppercase">Source column</th>
                     <th style="padding:7px 10px;text-align:left;font-weight:600;font-size:11px;color:var(--text2);text-transform:uppercase">API name</th>
@@ -2681,7 +2681,7 @@
               <div id="rfDetailSourceFeedWrap" style="display:none">
                 <label class="wz-label" >Source feed</label>
                 <select class="wz-input" id="rfDetailSourceFeed" onchange="rfToggleMergeParent()" >
-                  <option value="">— nenhum —</option>
+                  <option value="">— none —</option>
                 </select>
                 <div class="mm-field-hint">Feed to use for detail lookup</div>
               </div>
@@ -2791,7 +2791,7 @@
           </div>
           <div class="audit-filter-actions">
             <button class="btn" onclick="resetAuditFilters()">Clear</button>
-            <button class="btn btn-primary" onclick="withBusy(this, 'A carregar…', async () => { await fetchAuditLogs(true); })">Apply</button>
+            <button class="btn btn-primary" onclick="withBusy(this, 'Loading…', async () => { await fetchAuditLogs(true); })">Apply</button>
           </div>
       </div>
 
@@ -2934,7 +2934,7 @@
           <p>Every error and warning raised by the backend — including background jobs that never touch a request. Identical failures are grouped and counted.</p>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-ghost btn-sm" onclick="withBusy(this, 'A actualizar…', async () => { await fetchErrorFeed(true); })">Refresh</button>
+          <button class="btn btn-ghost btn-sm" onclick="withBusy(this, 'Refreshing…', async () => { await fetchErrorFeed(true); })">Refresh</button>
           <button class="btn btn-sm" onclick="ackAllErrors(event)">Mark all as read</button>
           <button class="btn btn-danger btn-sm" onclick="clearAllErrors(event)">Clear feed</button>
         </div>
@@ -3132,7 +3132,7 @@
           <strong>Adopted from NPM</strong> <span id="wAdoptedInfo" style="color:var(--text2)"></span>
           <div style="font-size:11.5px;color:var(--text3);margin-top:3px">Releasing restores the original forward target in NPM.</div>
         </div>
-        <button type="button" class="btn btn-sm" onclick="withBusy(this, 'A libertar…', async () => { await releaseWebhookFromNpm(); })" style="color:var(--err-text)">Release</button>
+        <button type="button" class="btn btn-sm" onclick="withBusy(this, 'Releasing…', async () => { await releaseWebhookFromNpm(); })" style="color:var(--err-text)">Release</button>
       </div>
       <div class="form-grid" style="gap:12px">
         <div class="form-group">
@@ -3279,7 +3279,7 @@
     <div
       style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border);flex-shrink:0;background:var(--surface);border-radius:0 0 var(--radius) var(--radius)">
       <button class="btn btn-sm" onclick="closeWebhookModal()">Cancel</button>
-      <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A guardar…', async () => { await saveWebhook(); })">Save Webhook</button>
+      <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Saving…', async () => { await saveWebhook(); })">Save Webhook</button>
     </div>
   </div>
 </div>
@@ -3294,7 +3294,7 @@
     </div>
     <div id="destinationEditContent" style="padding:18px 20px;overflow-y:auto;flex:1"></div>
     <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid var(--border);flex-shrink:0">
-      <button class="btn btn-primary btn-sm" onclick="closeDestinationEditor()">Concluído</button>
+      <button class="btn btn-primary btn-sm" onclick="closeDestinationEditor()">Done</button>
     </div>
   </div>
 </div>
@@ -3431,7 +3431,7 @@
         </div>
         <div>
           <label class="wz-label" >Username (e-mail)</label>
-          <input class="wz-input" id="cnGoUsername" type="text" placeholder="user@dominio.com" >
+          <input class="wz-input" id="cnGoUsername" type="text" placeholder="user@domain.com" >
         </div>
         <div>
           <label class="wz-label" >Password</label>
@@ -3460,7 +3460,7 @@
 
       <!-- ── Webchat API (mode = webchat-api) ── -->
       <div id="cnWebchatSection" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2)">
-        <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Official GoContact Webchat API. Agent replies are <strong>pushed</strong> to Midleman — register this callback URL on the GoContact side: <code>https://&lt;midleman&gt;:&lt;porta-do-conector&gt;/gocontact/callback?token=&lt;callback&nbsp;token&gt;</code></div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Official GoContact Webchat API. Agent replies are <strong>pushed</strong> to Midleman — register this callback URL on the GoContact side: <code>https://&lt;midleman&gt;:&lt;connector-port&gt;/gocontact/callback?token=&lt;callback&nbsp;token&gt;</code></div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
           <div style="grid-column:1 / -1">
             <label class="wz-label" >Webchat API endpoint</label>
@@ -3469,7 +3469,7 @@
           </div>
           <div>
             <label class="wz-label" >Audience</label>
-            <input class="wz-input" id="cnGoAudience" type="text" placeholder="audience do token" style="background:var(--surface)">
+            <input class="wz-input" id="cnGoAudience" type="text" placeholder="token audience" style="background:var(--surface)">
           </div>
           <div>
             <label class="wz-label" >Channel UUID</label>
@@ -3527,7 +3527,7 @@
             <input class="wz-input mm-switch" id="cnAutoReplyEnabled" type="checkbox" onchange="connectorAutoReplyChanged()"> Send an automatic reply on the first customer message of each session
           </label>
           <div id="cnAutoReplySection" style="display:none;margin-top:8px">
-            <textarea class="wz-input" id="cnAutoReplyText" rows="2" maxlength="2000" placeholder="Obrigado pelo seu contacto! Em breve será atendido por um dos nossos agentes." ></textarea>
+            <textarea class="wz-input" id="cnAutoReplyText" rows="2" maxlength="2000" placeholder="Thanks for getting in touch. One of our agents will be with you shortly." ></textarea>
             <div style="display:flex;gap:12px;align-items:flex-end;margin-top:8px;flex-wrap:wrap">
               <div>
                 <label class="wz-label" >Active until</label>
@@ -3553,7 +3553,7 @@
             <input class="wz-input mm-switch" id="cnBusinessHoursEnabled" type="checkbox" onchange="connectorBusinessHoursChanged()"> Reply with a notice when customers write outside opening hours
           </label>
           <div id="cnBusinessHoursSection" style="display:none;margin-top:8px">
-            <textarea class="wz-input" id="cnBusinessHoursMessage" rows="2" maxlength="2000" placeholder="Estamos fora do horário de atendimento. Responderemos assim que voltarmos." ></textarea>
+            <textarea class="wz-input" id="cnBusinessHoursMessage" rows="2" maxlength="2000" placeholder="We are currently outside business hours. We will reply as soon as we are back." ></textarea>
             <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--text);cursor:pointer">
               <input class="wz-input mm-switch" id="cnBusinessHoursForward" type="checkbox"> Also forward the message into GoContact (agents see it when they return)
             </label>
@@ -3776,7 +3776,7 @@
             <input class="wz-input mm-switch" id="f9AutoReplyEnabled" type="checkbox" onchange="f9AutoReplyChanged()"> Send an automatic reply on the first customer message of each session
           </label>
           <div id="f9AutoReplySection" style="display:none;margin-top:10px">
-            <textarea class="wz-input" id="f9AutoReplyText" rows="2" placeholder="Obrigado pela sua mensagem! Um agente irá atendê-lo em breve." ></textarea>
+            <textarea class="wz-input" id="f9AutoReplyText" rows="2" placeholder="Thanks for your message. An agent will be with you shortly." ></textarea>
             <div style="margin-top:6px">
               <label class="wz-label" >Expires at</label>
               <input class="wz-input" id="f9AutoReplyExpires" type="datetime-local" >
@@ -3797,7 +3797,7 @@
             <input class="wz-input mm-switch" id="f9BusinessHoursEnabled" type="checkbox" onchange="f9BusinessHoursChanged()"> Reply with a notice when customers write outside opening hours
           </label>
           <div id="f9BusinessHoursSection" style="display:none;margin-top:8px">
-            <textarea class="wz-input" id="f9BusinessHoursMessage" rows="2" maxlength="2000" placeholder="Estamos fora do horário de atendimento. Responderemos assim que voltarmos." ></textarea>
+            <textarea class="wz-input" id="f9BusinessHoursMessage" rows="2" maxlength="2000" placeholder="We are currently outside business hours. We will reply as soon as we are back." ></textarea>
             <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--text);cursor:pointer">
               <input class="wz-input mm-switch" id="f9BusinessHoursForward" type="checkbox"> Also forward the message into Five9 (agents see it when they return)
             </label>
@@ -3874,7 +3874,7 @@
         </div>
         <div id="bodyEditorFieldsList" style="flex:1;overflow:auto;padding:6px 0;font-family:monospace;font-size:11px">
           <div style="padding:12px;color:var(--text3);font-size:11px;font-family:inherit">
-            Cole um Test Payload (JSON) na seção anterior para ver os campos disponíveis aqui.
+            Paste a test payload (JSON) in the previous section to see the available fields here.
           </div>
         </div>
       </div>
@@ -3922,7 +3922,7 @@
       <div style="display:flex;gap:8px;align-items:center">
         <button id="prCancelAllBtn" class="btn btn-danger"
           style="display:none;padding:4px 14px;font-size:12px"
-          onclick="prCancelAll()">Cancelar todas</button>
+          onclick="prCancelAll()">Cancel all</button>
         <button onclick="closePendingRetryModal()"
           style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
       </div>
@@ -3945,7 +3945,7 @@
       </div>
       <div class="form-section">Upstream (PBX / destination)</div>
       <div class="form-grid">
-        <div class="form-group span-2"><label>Upstream Host *</label><input class="wz-input" type="text" id="sipUpstreamHost" placeholder="192.168.1.100 or pbx.empresa.com"></div>
+        <div class="form-group span-2"><label>Upstream Host *</label><input class="wz-input" type="text" id="sipUpstreamHost" placeholder="192.168.1.100 or pbx.company.com"></div>
         <div class="form-group"><label>Upstream Port *</label><input class="wz-input" type="number" id="sipUpstreamPort" placeholder="5060" min="1" max="65535"></div>
         <div class="form-group">
           <label>Transport to upstream</label>
@@ -4099,7 +4099,7 @@
           <div class="form-grid">
             <div class="form-group span-2">
               <label>Public Host</label>
-              <input class="wz-input" type="text" id="sipPublicHost" placeholder="sip.empresa.com or 203.0.113.10">
+              <input class="wz-input" type="text" id="sipPublicHost" placeholder="sip.company.com or 203.0.113.10">
               <div class="mm-field-hint">Override the address placed in SIP Via / Record-Route headers</div>
               <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px">Only needed when this server's public IP cannot be auto-detected, or differs from the ACME domain. Leave empty to use the <code>PROXY_HOST</code> env var.</span>
             </div>
@@ -4400,7 +4400,7 @@
     </div>
     <div class="modal-footer">
       <span id="npmSelectionCount" style="font-size:12px;color:var(--text2);margin-right:auto"></span>
-      <button class="btn btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await fetchNpmProxyHosts(); })">Refresh</button>
+      <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchNpmProxyHosts(); })">Refresh</button>
       <button class="btn" onclick="closeNpmImportModal()">Close</button>
       <button class="btn btn-primary" id="npmBulkImportBtn" onclick="bulkAdoptNpmHosts()" disabled>Import selected</button>
     </div>
@@ -4458,7 +4458,7 @@
 <div class="modal-overlay" id="oauthClientUsersModal">
   <div class="modal" style="max-width:540px">
     <div class="modal-header">
-      <h3 id="oauthClientUsersTitle">Acesso ao client</h3><button class="close-btn"
+      <h3 id="oauthClientUsersTitle">Client access</h3><button class="close-btn"
         onclick="closeOauthClientUsersModal()">&times;</button>
     </div>
     <div class="modal-body">
@@ -4477,12 +4477,12 @@
             style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
             <option value="">Select user...</option>
           </select>
-          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A adicionar…', async () => { await addUserToOauthClientUI(); })" style="white-space:nowrap">Add</button>
+          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Adding…', async () => { await addUserToOauthClientUI(); })" style="white-space:nowrap">Add</button>
         </div>
         <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead>
             <tr style="background:var(--surface2);text-align:left">
-              <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Utilizador</th>
+              <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">User</th>
               <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Email</th>
               <th style="padding:8px 12px"></th>
             </tr>
@@ -4508,7 +4508,7 @@
             </select>
             <input id="oclgGroupInput" type="text" placeholder="CN, DN or * (any group)"
               style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px;font-family:'SF Mono',ui-monospace,monospace">
-            <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A adicionar…', async () => { await addLdapGroupToClientUI(); })" style="white-space:nowrap">Add</button>
+            <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Adding…', async () => { await addLdapGroupToClientUI(); })" style="white-space:nowrap">Add</button>
           </div>
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
@@ -4624,7 +4624,7 @@
           style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
           <option value="">Select proxy to assign...</option>
         </select>
-        <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A atribuir…', async () => { await assignProfileToCurrentUser(); })"
+        <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Assigning…', async () => { await assignProfileToCurrentUser(); })"
           style="white-space:nowrap">Assign</button>
       </div>
       <table class="ur-table">
@@ -4652,7 +4652,7 @@
           style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
           <option value="">Select OAuth client to assign...</option>
         </select>
-        <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A atribuir…', async () => { await assignOauthClientToCurrentUser(); })"
+        <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Assigning…', async () => { await assignOauthClientToCurrentUser(); })"
           style="white-space:nowrap">Assign</button>
       </div>
       <table class="ur-table">
@@ -4819,11 +4819,24 @@
             <label class="wz-label" for="ldapBaseDn">Base DN <span class="req">*</span></label>
             <input class="wz-input" type="text" id="ldapBaseDn" placeholder="DC=example,DC=com" autocomplete="off">
           </div>
-          <div class="form-group">
+          <div class="form-group span-2">
+            <label class="wz-label" for="ldapBindMode">Authentication</label>
+            <select class="wz-input" id="ldapBindMode" onchange="_ldapSyncBindMode()">
+              <option value="user">Each user signs in with their own credentials</option>
+              <option value="service">Service account (bind DN)</option>
+            </select>
+            <span class="mm-field-hint" id="ldapBindModeHint"></span>
+          </div>
+          <div class="form-group span-2" data-bind-mode="user">
+            <label class="wz-label" for="ldapUpnSuffix">Domain</label>
+            <input class="wz-input" type="text" id="ldapUpnSuffix" placeholder="example.com" oninput="_ldapSyncBindMode()" autocomplete="off">
+            <span class="mm-field-hint">Added to plain logins: <code>jdoe</code> signs in as <code>jdoe@<span id="ldapUpnPreview">example.com</span></code>. Logins typed as <code>jdoe@domain</code> or <code>DOMAIN\jdoe</code> are used as they are.</span>
+          </div>
+          <div class="form-group" data-bind-mode="service">
             <label class="wz-label" for="ldapBindDn">Bind DN</label>
             <input class="wz-input" type="text" id="ldapBindDn" placeholder="CN=svc-midleman,OU=…" autocomplete="off">
           </div>
-          <div class="form-group">
+          <div class="form-group" data-bind-mode="service">
             <label class="wz-label" for="ldapBindPassword">Bind password</label>
             <input class="wz-input" type="password" id="ldapBindPassword" placeholder="(optional)" autocomplete="new-password">
           </div>
@@ -4842,6 +4855,25 @@
             <span>Directory enabled</span>
           </label>
         </div>
+      </div>
+      <!-- Section: Test (edit only) — part of the form, not a floating bar -->
+      <div class="ldap-section ldap-test-section">
+        <div class="ldap-section-title">Test connection</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="wz-label" for="ldapTestLogin">Login</label>
+            <input class="wz-input" type="text" id="ldapTestLogin" placeholder="e.g. jdoe (optional)" autocomplete="off">
+          </div>
+          <div class="form-group" data-bind-mode="user">
+            <label class="wz-label" for="ldapTestPassword">Password</label>
+            <input class="wz-input" type="password" id="ldapTestPassword" placeholder="Password" autocomplete="new-password">
+          </div>
+        </div>
+        <div class="ldap-test-actions">
+          <button type="button" class="btn btn-sm" onclick="testLdap()" id="ldapTestBtn">Test connection</button>
+          <span class="mm-field-hint">Uses the saved settings. Nothing is changed.</span>
+        </div>
+        <div id="ldapTestResult" class="ldap-test-result" style="display:none"></div>
       </div>
           </section>
           <section class="wz-step wz-stack" data-step-id="mapping" data-step-title="User mapping" data-step-hint="Which attributes become username, e-mail and name">
@@ -4927,12 +4959,6 @@
       </div>
           </section>
       <input type="hidden" id="ldapEditId" value="">
-      <div id="ldapTestResult" class="ldap-test-result" style="display:none"></div>
-          <!-- Dialog-level action: try the credentials without saving. -->
-          <div class="ldap-test-row">
-            <input type="text" id="ldapTestLogin" placeholder="Login to test (optional)" autocomplete="off" class="wz-input">
-            <button type="button" class="btn" onclick="testLdap()" id="ldapTestBtn">Test connection</button>
-          </div>
         </div>
       </div>
 
@@ -4940,7 +4966,7 @@
 <div class="modal-overlay" id="confirmModal" onclick="if(event.target===this)confirmModalCancel()">
   <div class="modal" style="max-width:440px">
     <div class="modal-header">
-      <h3 id="confirmModalTitle">Confirmação</h3>
+      <h3 id="confirmModalTitle">Confirm</h3>
       <button class="close-btn" id="confirmModalCloseBtn" onclick="confirmModalCancel()">&times;</button>
     </div>
     <div class="modal-body">
@@ -4948,8 +4974,8 @@
       <p id="confirmModalDetail" style="margin:10px 0 0;color:var(--text3);font-size:13px;line-height:1.5;display:none"></p>
     </div>
     <div class="modal-footer">
-      <button class="btn" id="confirmModalCancelBtn" onclick="confirmModalCancel()">Cancelar</button>
-      <button class="btn btn-danger" id="confirmModalConfirmBtn" onclick="confirmModalAccept()">Confirmar</button>
+      <button class="btn" id="confirmModalCancelBtn" onclick="confirmModalCancel()">Cancel</button>
+      <button class="btn btn-danger" id="confirmModalConfirmBtn" onclick="confirmModalAccept()">Confirm</button>
     </div>
   </div>
 </div>
@@ -4958,15 +4984,15 @@
 <div class="modal-overlay" id="logoutModal" onclick="if(event.target===this)closeLogoutModal()">
   <div class="modal" style="max-width:420px">
     <div class="modal-header">
-      <h3>Terminar sessão</h3>
+      <h3>Sign out</h3>
       <button class="close-btn" id="logoutCloseBtn" onclick="closeLogoutModal()">&times;</button>
     </div>
     <div class="modal-body">
-      <p style="margin:0;color:var(--text2);font-size:14px;line-height:1.5">Tem a certeza que deseja terminar a sessão? Terá de iniciar sessão novamente para aceder ao painel.</p>
+      <p style="margin:0;color:var(--text2);font-size:14px;line-height:1.5">Are you sure you want to sign out? You will need to sign in again to access the dashboard.</p>
     </div>
     <div class="modal-footer">
-      <button class="btn" id="logoutCancelBtn" onclick="closeLogoutModal()">Cancelar</button>
-      <button class="btn btn-danger" id="logoutConfirmBtn" onclick="doLogout()">Terminar sessão</button>
+      <button class="btn" id="logoutCancelBtn" onclick="closeLogoutModal()">Cancel</button>
+      <button class="btn btn-danger" id="logoutConfirmBtn" onclick="doLogout()">Sign out</button>
     </div>
   </div>
 </div>

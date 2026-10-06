@@ -272,22 +272,22 @@ export function truncateSms(msg: string, maxLen = 160): string {
 }
 
 export function render2faCodeSms(code: string): string {
-    return truncateSms(`Midleman: o seu codigo de verificacao e ${code}. Valido por 5 min.`);
+    return truncateSms(`Midleman: your verification code is ${code}. Valid for 5 min.`);
 }
 export function renderPhoneVerifySms(code: string): string {
-    return truncateSms(`Midleman: codigo para confirmar este numero: ${code}. Valido por 10 min.`);
+    return truncateSms(`Midleman: code to confirm this number: ${code}. Valid for 10 min.`);
 }
 export function renderPasswordResetSms(link: string): string {
-    return truncateSms(`Midleman: reset de password — ${link} (15 min).`);
+    return truncateSms(`Midleman: password reset — ${link} (15 min).`);
 }
 export function renderWebhookAlertSms(name: string): string {
-    return truncateSms(`Midleman ALERTA: webhook '${name}' falhou apos retries.`);
+    return truncateSms(`Midleman ALERT: webhook '${name}' failed after retries.`);
 }
 export function renderAdminAlertSms(subject: string): string {
     return truncateSms(`Midleman: ${subject}`);
 }
 export function renderTestSms(): string {
-    return 'Midleman: SMS de teste — config OK.';
+    return 'Midleman: test SMS — config OK.';
 }
 
 // ─── Provider clients ────────────────────────────────────────────────────────

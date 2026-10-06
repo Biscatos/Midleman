@@ -358,9 +358,9 @@ async function fetchProfiles() {
 async function linkProfileToNpmHost(profileName, hostId, opts) {
   opts = opts || {};
   if (!opts.skipConfirm) {
-    const msg = 'Vincular "' + profileName + '" ao host NPM #' + hostId
-      + '? O NPM passará a encaminhar tráfego para o Midleman (em vez do backend directamente).';
-    if (!(await showConfirm({ title: 'Vincular ao NPM', message: msg, confirmText: 'Vincular' }))) return;
+    const msg = 'Link "' + profileName + '" to NPM host #' + hostId
+      + '? NPM will forward traffic to Midleman (instead of directly to the backend).';
+    if (!(await showConfirm({ title: 'Link to NPM', message: msg, confirmText: 'Link' }))) return;
   }
   try {
     const res = await api('/admin/npm/link-profile', {
@@ -373,30 +373,30 @@ async function linkProfileToNpmHost(profileName, hostId, opts) {
       // forward target will be replaced and any traffic relying on it will stop.
       if (res.status === 409 && data && data.mismatch && !opts.force) {
         const m = data.mismatch;
-        const detail = 'NPM #' + hostId + ' encaminha actualmente para ' + m.npm.host + ':' + m.npm.port
-          + '. Ao vincular, o NPM passa a encaminhar para o Midleman, e este profile encaminhará para '
-          + m.profile.host + ':' + m.profile.port + '. Se não forem o mesmo serviço, o tráfego que ia para '
-          + m.npm.host + ':' + m.npm.port + ' via este NPM host deixa de funcionar.';
+        const detail = 'NPM #' + hostId + ' currently forwards to ' + m.npm.host + ':' + m.npm.port
+          + '. Once linked, NPM forwards to Midleman, and this profile will forward to '
+          + m.profile.host + ':' + m.profile.port + '. If they are not the same service, traffic that went to '
+          + m.npm.host + ':' + m.npm.port + ' via this NPM host will stop working.';
         const ok = await showConfirm({
-          title: 'Forward targets não coincidem',
-          message: 'O profile e o NPM host apontam para destinos diferentes. Vincular mesmo assim?',
+          title: 'Forward targets do not match',
+          message: 'The profile and the NPM host point to different destinations. Link anyway?',
           detail,
-          confirmText: 'Vincular mesmo assim',
+          confirmText: 'Link anyway',
           danger: true,
         });
         if (!ok) return;
         return linkProfileToNpmHost(profileName, hostId, { force: true, skipConfirm: true });
       }
-      toast(data.error || 'Falha ao vincular', 'error');
+      toast(data.error || 'Failed to link', 'error');
       return;
     }
-    toast('Profile "' + profileName + '" vinculado ao NPM #' + hostId + (data.forced ? ' (forçado)' : ''));
+    toast('Profile "' + profileName + '" linked to NPM #' + hostId + (data.forced ? ' (forced)' : ''));
     await fetchProfiles();
     // If we're on the NPM page, refresh its tables too.
     try { if (typeof fetchNpmHostsTable === 'function') await fetchNpmHostsTable(); } catch { /* ignore */ }
     try { if (typeof _npmImportHostsAll !== 'undefined' && _npmImportHostsAll.length) await fetchNpmProxyHosts(); } catch { /* ignore */ }
   } catch (e) {
-    toast('Erro de rede: ' + e.message, 'error');
+    toast('Network error: ' + e.message, 'error');
   }
 }
 
@@ -405,19 +405,19 @@ async function linkProfileToNpmHost(profileName, hostId, opts) {
 // linked to any profile or webhook. Match badge highlights exact host+port matches.
 async function openLinkToNpmModal(profileName) {
   const profile = _allProfiles.find(p => p.name === profileName);
-  if (!profile) { toast('Profile não encontrado', 'error'); return; }
-  if (profile.npmProxyHostId) { toast('Profile já vinculado ao NPM #' + profile.npmProxyHostId, 'error'); return; }
+  if (!profile) { toast('Profile not found', 'error'); return; }
+  if (profile.npmProxyHostId) { toast('Profile already linked to NPM #' + profile.npmProxyHostId, 'error'); return; }
 
   // Ensure we have a fresh NPM hosts list.
   let hosts = [];
   try {
     const r = await api('/admin/npm/proxy-hosts');
-    if (!r.ok) { const d = await r.json().catch(() => ({})); toast(d.error || 'Falha ao carregar NPM hosts', 'error'); return; }
+    if (!r.ok) { const d = await r.json().catch(() => ({})); toast(d.error || 'Failed to load NPM hosts', 'error'); return; }
     const d = await r.json();
     hosts = (d.hosts || []).filter(h => !h.linkedProfile && !h.linkedWebhook);
-  } catch (e) { toast('Erro de rede: ' + e.message, 'error'); return; }
+  } catch (e) { toast('Network error: ' + e.message, 'error'); return; }
 
-  if (!hosts.length) { toast('Não há NPM hosts disponíveis para vincular.', 'error'); return; }
+  if (!hosts.length) { toast('No NPM hosts available to link.', 'error'); return; }
 
   // Compute the profile's target for match highlighting.
   let tHost = '', tPort = 0;
@@ -440,13 +440,13 @@ async function openLinkToNpmModal(profileName) {
   overlay.innerHTML =
     '<div class="modal" style="max-width:720px">' +
     '  <div class="modal-header">' +
-    '    <h3 style="margin:0">Vincular profile "' + _esc(profileName) + '" a um NPM host</h3>' +
+    '    <h3 style="margin:0">Link profile "' + _esc(profileName) + '" to an NPM host</h3>' +
     '    <button type="button" class="btn btn-sm" onclick="closeLinkToNpmModal()">&times;</button>' +
     '  </div>' +
     '  <div class="modal-body" style="max-height:60vh;overflow-y:auto">' +
     '    <div style="color:var(--text2);font-size:12.5px;margin-bottom:10px">' +
-    '      Profile encaminha para <code style="font-family:monospace">' + _esc(tHost + ':' + (tPort || '?')) + '</code>. ' +
-    '      Hosts com destino exactamente igual aparecem marcados como <strong>match</strong>.' +
+    '      Profile forwards to <code style="font-family:monospace">' + _esc(tHost + ':' + (tPort || '?')) + '</code>. ' +
+    '      Hosts with exactly the same destination are marked as <strong>match</strong>.' +
     '    </div>' +
     '    <table style="width:100%;border-collapse:collapse;font-size:13px">' +
     '      <thead><tr style="text-align:left;color:var(--text3);border-bottom:1px solid var(--border)">' +
@@ -471,13 +471,13 @@ async function openLinkToNpmModal(profileName) {
         '<td style="padding:8px;font-family:monospace;font-size:11.5px;color:var(--text2)">' + _esc(fwd) + '</td>' +
         '<td style="padding:8px">' + matchBadge + '</td>' +
         '<td style="padding:8px;text-align:right">' +
-        '  <button class="btn btn-sm btn-primary" onclick="_pickHostForLink(' + h.id + ',\'' + _esc(profileName) + '\', event)">Vincular</button>' +
+        '  <button class="btn btn-sm btn-primary" onclick="_pickHostForLink(' + h.id + ',\'' + _esc(profileName) + '\', event)">Link</button>' +
         '</td></tr>';
     }).join('') + '</tbody>' +
     '    </table>' +
     '  </div>' +
     '  <div class="modal-footer">' +
-    '    <button type="button" class="btn" onclick="closeLinkToNpmModal()">Fechar</button>' +
+    '    <button type="button" class="btn" onclick="closeLinkToNpmModal()">Close</button>' +
     '  </div>' +
     '</div>';
   document.body.appendChild(overlay);
@@ -489,7 +489,7 @@ function closeLinkToNpmModal() {
 }
 
 async function _pickHostForLink(hostId, profileName, event) {
-  await withBusy(event, 'A vincular…', async () => {
+  await withBusy(event, 'Linking…', async () => {
     await linkProfileToNpmHost(profileName, hostId);
   });
   closeLinkToNpmModal();
@@ -507,7 +507,7 @@ async function openLinkProfileToHostModal(hostId) {
   const profileCandidates = (_allProfiles || []).filter(p => !p.npmProxyHostId);
   const webhookCandidates = (_allWebhooks || []).filter(w => !w.npmProxyHostId);
   if (!profileCandidates.length && !webhookCandidates.length) {
-    toast('Não há profiles nem webhooks livres para vincular.', 'error');
+    toast('No unlinked profiles or webhooks available.', 'error');
     return;
   }
 
@@ -557,18 +557,18 @@ async function openLinkProfileToHostModal(hostId) {
   overlay.innerHTML =
     '<div class="modal" style="max-width:760px">' +
     '  <div class="modal-header">' +
-    '    <h3 style="margin:0">Vincular NPM host #' + hostId + ' a um profile ou webhook</h3>' +
+    '    <h3 style="margin:0">Link NPM host #' + hostId + ' to a profile or webhook</h3>' +
     '    <button type="button" class="btn btn-sm" onclick="closeLinkProfileToHostModal()">&times;</button>' +
     '  </div>' +
     '  <div class="modal-body" style="max-height:60vh;overflow-y:auto">' +
     '    <div style="color:var(--text2);font-size:12.5px;margin-bottom:10px">' +
-    '      NPM host encaminha para <code style="font-family:monospace">' + _esc(hostFwd) + '</code>. ' +
-    '      Entradas com destino exactamente igual aparecem como <strong>match</strong>.' +
+    '      NPM host forwards to <code style="font-family:monospace">' + _esc(hostFwd) + '</code>. ' +
+    '      Entries with exactly the same destination are marked as <strong>match</strong>.' +
     '    </div>' +
     '    <table style="width:100%;border-collapse:collapse;font-size:13px">' +
     '      <thead><tr style="text-align:left;color:var(--text3);border-bottom:1px solid var(--border)">' +
-    '        <th style="padding:6px 8px">Tipo</th>' +
-    '        <th style="padding:6px 8px">Nome</th>' +
+    '        <th style="padding:6px 8px">Type</th>' +
+    '        <th style="padding:6px 8px">Name</th>' +
     '        <th style="padding:6px 8px">Target</th>' +
     '        <th style="padding:6px 8px"></th>' +
     '        <th style="padding:6px 8px;text-align:right"></th>' +
@@ -590,13 +590,13 @@ async function openLinkProfileToHostModal(hostId) {
         '<td style="padding:8px;font-family:monospace;font-size:11.5px;color:var(--text2)">' + _esc(r.targetStr) + '</td>' +
         '<td style="padding:8px">' + matchBadge + '</td>' +
         '<td style="padding:8px;text-align:right">' +
-        '  <button class="btn btn-sm btn-primary" onclick="' + pickFn + '">Vincular</button>' +
+        '  <button class="btn btn-sm btn-primary" onclick="' + pickFn + '">Link</button>' +
         '</td></tr>';
-    }).join('') : '<tr><td colspan="5" style="padding:18px;text-align:center;color:var(--text3)">Sem entradas livres.</td></tr>') + '</tbody>' +
+    }).join('') : '<tr><td colspan="5" style="padding:18px;text-align:center;color:var(--text3)">No unlinked entries.</td></tr>') + '</tbody>' +
     '    </table>' +
     '  </div>' +
     '  <div class="modal-footer">' +
-    '    <button type="button" class="btn" onclick="closeLinkProfileToHostModal()">Fechar</button>' +
+    '    <button type="button" class="btn" onclick="closeLinkProfileToHostModal()">Close</button>' +
     '  </div>' +
     '</div>';
   document.body.appendChild(overlay);
@@ -608,14 +608,14 @@ function closeLinkProfileToHostModal() {
 }
 
 async function _pickProfileForLink(profileName, hostId, event) {
-  await withBusy(event, 'A vincular…', async () => {
+  await withBusy(event, 'Linking…', async () => {
     await linkProfileToNpmHost(profileName, hostId);
   });
   closeLinkProfileToHostModal();
 }
 
 async function _pickWebhookForLink(webhookName, hostId, event) {
-  await withBusy(event, 'A vincular…', async () => {
+  await withBusy(event, 'Linking…', async () => {
     await linkWebhookToNpmHost(webhookName, hostId);
   });
   closeLinkProfileToHostModal();
@@ -625,9 +625,9 @@ async function _pickWebhookForLink(webhookName, hostId, event) {
 async function linkWebhookToNpmHost(webhookName, hostId, opts) {
   opts = opts || {};
   if (!opts.skipConfirm) {
-    const msg = 'Vincular webhook "' + webhookName + '" ao host NPM #' + hostId
-      + '? O NPM passará a encaminhar tráfego para o webhook (em vez do destino actual).';
-    if (!(await showConfirm({ title: 'Vincular webhook ao NPM', message: msg, confirmText: 'Vincular' }))) return;
+    const msg = 'Link webhook "' + webhookName + '" to NPM host #' + hostId
+      + '? NPM will forward traffic to the webhook (instead of the current destination).';
+    if (!(await showConfirm({ title: 'Link webhook to NPM', message: msg, confirmText: 'Link' }))) return;
   }
   try {
     const res = await api('/admin/npm/link-webhook', {
@@ -638,46 +638,46 @@ async function linkWebhookToNpmHost(webhookName, hostId, opts) {
     if (!res.ok) {
       if (res.status === 409 && data && data.mismatch && !opts.force) {
         const m = data.mismatch;
-        const detail = 'NPM #' + hostId + ' encaminha actualmente para ' + m.npm.host + ':' + m.npm.port
-          + '. Ao vincular, o NPM passa a encaminhar para o webhook, cujo primeiro target é '
-          + m.webhook.host + ':' + m.webhook.port + '. Se não forem o mesmo serviço, o tráfego que ia para '
-          + m.npm.host + ':' + m.npm.port + ' via este NPM host deixa de funcionar.';
+        const detail = 'NPM #' + hostId + ' currently forwards to ' + m.npm.host + ':' + m.npm.port
+          + '. Once linked, NPM forwards to the webhook, whose first target is '
+          + m.webhook.host + ':' + m.webhook.port + '. If they are not the same service, traffic that went to '
+          + m.npm.host + ':' + m.npm.port + ' via this NPM host will stop working.';
         const ok = await showConfirm({
-          title: 'Forward targets não coincidem',
-          message: 'O webhook e o NPM host apontam para destinos diferentes. Vincular mesmo assim?',
+          title: 'Forward targets do not match',
+          message: 'The webhook and the NPM host point to different destinations. Link anyway?',
           detail,
-          confirmText: 'Vincular mesmo assim',
+          confirmText: 'Link anyway',
           danger: true,
         });
         if (!ok) return;
         return linkWebhookToNpmHost(webhookName, hostId, { force: true, skipConfirm: true });
       }
-      toast(data.error || 'Falha ao vincular', 'error');
+      toast(data.error || 'Failed to link', 'error');
       return;
     }
-    toast('Webhook "' + webhookName + '" vinculado ao NPM #' + hostId + (data.forced ? ' (forçado)' : ''));
+    toast('Webhook "' + webhookName + '" linked to NPM #' + hostId + (data.forced ? ' (forced)' : ''));
     try { await fetchWebhooks(); } catch { /* ignore */ }
     try { if (typeof fetchNpmHostsTable === 'function') await fetchNpmHostsTable(); } catch { /* ignore */ }
     try { if (typeof _npmImportHostsAll !== 'undefined' && _npmImportHostsAll.length) await fetchNpmProxyHosts(); } catch { /* ignore */ }
   } catch (e) {
-    toast('Erro de rede: ' + e.message, 'error');
+    toast('Network error: ' + e.message, 'error');
   }
 }
 
 // Modal: pick an existing NPM host to link to the given webhook.
 async function openLinkToNpmModalForWebhook(webhookName) {
   const webhook = (_allWebhooks || []).find(w => w.name === webhookName);
-  if (!webhook) { toast('Webhook não encontrado', 'error'); return; }
-  if (webhook.npmProxyHostId) { toast('Webhook já vinculado ao NPM #' + webhook.npmProxyHostId, 'error'); return; }
+  if (!webhook) { toast('Webhook not found', 'error'); return; }
+  if (webhook.npmProxyHostId) { toast('Webhook already linked to NPM #' + webhook.npmProxyHostId, 'error'); return; }
 
   let hosts = [];
   try {
     const r = await api('/admin/npm/proxy-hosts');
-    if (!r.ok) { const d = await r.json().catch(() => ({})); toast(d.error || 'Falha ao carregar NPM hosts', 'error'); return; }
+    if (!r.ok) { const d = await r.json().catch(() => ({})); toast(d.error || 'Failed to load NPM hosts', 'error'); return; }
     const d = await r.json();
     hosts = (d.hosts || []).filter(h => !h.linkedProfile && !h.linkedWebhook);
-  } catch (e) { toast('Erro de rede: ' + e.message, 'error'); return; }
-  if (!hosts.length) { toast('Não há NPM hosts disponíveis para vincular.', 'error'); return; }
+  } catch (e) { toast('Network error: ' + e.message, 'error'); return; }
+  if (!hosts.length) { toast('No NPM hosts available to link.', 'error'); return; }
 
   // First target for match highlighting.
   let tHost = '', tPort = 0;
@@ -703,13 +703,13 @@ async function openLinkToNpmModalForWebhook(webhookName) {
   overlay.innerHTML =
     '<div class="modal" style="max-width:720px">' +
     '  <div class="modal-header">' +
-    '    <h3 style="margin:0">Vincular webhook "' + _esc(webhookName) + '" a um NPM host</h3>' +
+    '    <h3 style="margin:0">Link webhook "' + _esc(webhookName) + '" to an NPM host</h3>' +
     '    <button type="button" class="btn btn-sm" onclick="closeLinkWebhookToNpmModal()">&times;</button>' +
     '  </div>' +
     '  <div class="modal-body" style="max-height:60vh;overflow-y:auto">' +
     '    <div style="color:var(--text2);font-size:12.5px;margin-bottom:10px">' +
-    '      Primeiro target do webhook: <code style="font-family:monospace">' + _esc(firstUrl || '(sem target)') + '</code>. ' +
-    '      Hosts com destino exactamente igual aparecem marcados como <strong>match</strong>.' +
+    '      First webhook target: <code style="font-family:monospace">' + _esc(firstUrl || '(no target)') + '</code>. ' +
+    '      Hosts with exactly the same destination are marked as <strong>match</strong>.' +
     '    </div>' +
     '    <table style="width:100%;border-collapse:collapse;font-size:13px">' +
     '      <thead><tr style="text-align:left;color:var(--text3);border-bottom:1px solid var(--border)">' +
@@ -734,13 +734,13 @@ async function openLinkToNpmModalForWebhook(webhookName) {
         '<td style="padding:8px;font-family:monospace;font-size:11.5px;color:var(--text2)">' + _esc(fwd) + '</td>' +
         '<td style="padding:8px">' + matchBadge + '</td>' +
         '<td style="padding:8px;text-align:right">' +
-        '  <button class="btn btn-sm btn-primary" onclick="_pickHostForWebhookLink(' + h.id + ',\'' + _esc(webhookName) + '\')">Vincular</button>' +
+        '  <button class="btn btn-sm btn-primary" onclick="_pickHostForWebhookLink(' + h.id + ',\'' + _esc(webhookName) + '\')">Link</button>' +
         '</td></tr>';
     }).join('') + '</tbody>' +
     '    </table>' +
     '  </div>' +
     '  <div class="modal-footer">' +
-    '    <button type="button" class="btn" onclick="closeLinkWebhookToNpmModal()">Fechar</button>' +
+    '    <button type="button" class="btn" onclick="closeLinkWebhookToNpmModal()">Close</button>' +
     '  </div>' +
     '</div>';
   document.body.appendChild(overlay);
@@ -805,7 +805,7 @@ function renderProfiles(profiles) {
       const first = domains[0] || ('NPM #' + match.id);
       const extra = domains.length > 1 ? ' +' + (domains.length - 1) : '';
       const tip = 'NPM host #' + match.id + (domains.length ? ' (' + domains.join(', ') + ')' : '')
-        + ' forwards to the same target as this profile. Click Link to vincular and redirect NPM → Midleman.';
+        + ' forwards to the same target as this profile. Click Link to link it and redirect NPM → Midleman.';
       const linkBtn = '<button type="button" onclick="event.stopPropagation();linkProfileToNpmHost(\'' + esc(p.name) + '\',' + match.id + ')" '
         + 'style="background:var(--accent);color:var(--on-accent);border:none;border-radius:3px;font-size:10.5px;padding:1px 7px;cursor:pointer;margin-left:6px" '
         + 'title="Link this profile to NPM host #' + match.id + ' and redirect NPM to Midleman">Link</button>';
@@ -1102,7 +1102,7 @@ async function editProfile(name) {
   try { const res = await api('/admin/profiles/' + encodeURIComponent(name)); if (!res.ok) return toast('Not found', 'error'); openProfileModal((await res.json()).profile); } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 async function deleteProfile(name) {
-  if (!(await showConfirm({ title: 'Apagar proxy', message: 'Apagar proxy "' + name + '"?', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete proxy', message: 'Delete proxy "' + name + '"?', confirmText: 'Delete' }))) return;
   try { const res = await api('/admin/profiles/' + encodeURIComponent(name), { method: 'DELETE' }); if (res.ok) { toast('Proxy deleted'); await fetchProfiles(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 function copyProxyUrl(name, port) {
@@ -1263,7 +1263,7 @@ async function saveEditProxyUser() {
     const desired = document.getElementById('npuIsAdmin').checked;
     const current = !!_allProxyUsers.find(u => u.id === _editUserId)?.isAdmin;
     if (desired !== current) {
-      if (!desired && !(await showConfirm({ title: 'Remover papel de administrador', message: 'Remover o papel de administrador deste utilizador? Perderá acesso ao dashboard.', confirmText: 'Remover' }))) return;
+      if (!desired && !(await showConfirm({ title: 'Remove admin role', message: 'Remove the admin role from this user? They will lose access to the dashboard.', confirmText: 'Remove' }))) return;
       body.isAdmin = desired;
     }
   }
@@ -1278,7 +1278,7 @@ async function saveEditProxyUser() {
 }
 
 async function deleteProxyUserAction(id, username) {
-  if (!(await showConfirm({ title: 'Apagar utilizador', message: 'Apagar utilizador "' + username + '"? Todo o acesso aos perfis será revogado.', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete user', message: 'Delete user "' + username + '"? All profile access will be revoked.', confirmText: 'Delete' }))) return;
   try {
     const res = await api('/admin/proxy-users/' + id, { method: 'DELETE' });
     if (res.ok) { toast('User deleted'); fetchProxyUsers(); } else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
@@ -1288,13 +1288,13 @@ async function deleteProxyUserAction(id, username) {
 async function toggleBlockProxyUser(id, username, block) {
   const confirmed = block
     ? await showConfirm({
-        title: 'Bloquear utilizador',
-        message: 'Bloquear "' + username + '"?',
-        detail: 'O utilizador perde imediatamente todo o acesso: proxies, OAuth e área de administração. As sessões ativas são terminadas. Pode desbloquear a qualquer momento.',
-        confirmText: 'Bloquear',
+        title: 'Block user',
+        message: 'Block "' + username + '"?',
+        detail: 'The user immediately loses all access: proxies, OAuth and the admin area. Active sessions are ended. You can unblock them at any time.',
+        confirmText: 'Block',
         danger: true,
       })
-    : await showConfirm({ title: 'Desbloquear utilizador', message: 'Desbloquear "' + username + '"? O acesso é reposto de imediato.', confirmText: 'Desbloquear' });
+    : await showConfirm({ title: 'Unblock user', message: 'Unblock "' + username + '"? Access is restored immediately.', confirmText: 'Unblock' });
   if (!confirmed) return;
   try {
     const res = await api('/admin/proxy-users/' + id, { method: 'PUT', body: JSON.stringify({ blocked: block }) });
@@ -1314,7 +1314,7 @@ async function resetProxyUserPw(id) {
 }
 
 async function disable2fa(id, username) {
-  if (!(await showConfirm({ title: 'Desativar 2FA', message: 'Desativar 2FA para "' + username + '"?', detail: 'A conta ficará protegida apenas pela palavra-passe. O utilizador será notificado por email.', confirmText: 'Desativar' }))) return;
+  if (!(await showConfirm({ title: 'Disable 2FA', message: 'Disable 2FA for "' + username + '"?', detail: 'The account will be protected by its password only. The user will be notified by email.', confirmText: 'Disable' }))) return;
   try {
     const res = await api('/admin/proxy-users/' + id, { method: 'PUT', body: JSON.stringify({ reset2fa: true }) });
     if (res.ok) { toast('2FA disabled — user notified by email'); fetchProxyUsers(); } else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
@@ -1322,7 +1322,7 @@ async function disable2fa(id, username) {
 }
 
 async function force2fa(id, username) {
-  if (!(await showConfirm({ title: 'Exigir configuração de 2FA', message: 'Exigir que "' + username + '" configure 2FA no próximo login?', detail: 'Se já tiver 2FA, será reposto e terá de o configurar novamente. O utilizador será notificado por email.', confirmText: 'Exigir', danger: false }))) return;
+  if (!(await showConfirm({ title: 'Require 2FA setup', message: 'Require "' + username + '" to set up 2FA at next sign-in?', detail: 'If 2FA is already set up, it will be reset and must be set up again. The user will be notified by email.', confirmText: 'Require', danger: false }))) return;
   try {
     const res = await api('/admin/proxy-users/' + id, { method: 'PUT', body: JSON.stringify({ force2fa: true }) });
     if (res.ok) { toast('User will be required to set up 2FA on next login'); fetchProxyUsers(); } else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
@@ -1333,7 +1333,7 @@ async function force2fa(id, username) {
 async function reset2fa(id, username) { return disable2fa(id, username); }
 
 async function sendPasswordReset(id, username) {
-  if (!(await showConfirm({ title: 'Enviar link de reposição de palavra-passe', message: 'Enviar email de reposição para "' + username + '"?', detail: 'O utilizador recebe um link único que expira em 60 minutos. A configuração de 2FA permanece inalterada.', confirmText: 'Enviar' }))) return;
+  if (!(await showConfirm({ title: 'Send password reset link', message: 'Send a password reset email to "' + username + '"?', detail: 'The user receives a one-time link that expires in 60 minutes. The 2FA setup stays unchanged.', confirmText: 'Send' }))) return;
   try {
     const res = await api('/admin/proxy-users/' + id + '/password-reset', { method: 'POST' });
     const d = await res.json().catch(() => ({}));
@@ -1428,7 +1428,7 @@ async function addLdapGroupToProfileUI() {
 
 async function removeLdapGroupFromProfileUI(ruleId) {
   if (!_profileUsersProfile) return;
-  if (!(await showConfirm({ title: 'Remover regra de grupo LDAP', message: 'Remover esta regra de grupo LDAP?', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove LDAP group rule', message: 'Remove this LDAP group rule?', confirmText: 'Remove' }))) return;
   try {
     const res = await api('/admin/profiles/' + encodeURIComponent(_profileUsersProfile) + '/ldap-groups/' + ruleId, { method: 'DELETE' });
     if (res.ok) { toast('Rule removed'); await refreshProfileLdapGroups(); }
@@ -1513,7 +1513,7 @@ async function assignUserToCurrentProfile() {
 
 async function removeUserFromProfile(userId, username) {
   if (!_profileUsersProfile) return;
-  if (!(await showConfirm({ title: 'Remover do perfil', message: 'Remover "' + username + '" deste perfil?', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove from profile', message: 'Remove "' + username + '" from this profile?', confirmText: 'Remove' }))) return;
   const btn = document.querySelector(`#pfuListBody button[onclick*="removeUserFromProfile(${userId},"]`);
   if (btn) { btn.disabled = true; btn.textContent = 'Removing...'; }
   try {
@@ -1666,7 +1666,7 @@ async function assignProfileToCurrentUser() {
 
 async function removeProfileFromCurrentUser(profileName) {
   if (!_userProfilesUserId) return;
-  if (!(await showConfirm({ title: 'Remover acesso', message: 'Remover acesso a "' + profileName + '"?', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove access', message: 'Remove access to "' + profileName + '"?', confirmText: 'Remove' }))) return;
   try {
     const res = await api('/admin/profiles/' + encodeURIComponent(profileName) + '/users/' + _userProfilesUserId, { method: 'DELETE' });
     if (res.ok) { toast('Access removed'); refreshUserResources(); fetchProxyUsers(); }
@@ -1689,7 +1689,7 @@ async function assignOauthClientToCurrentUser() {
 
 async function removeOauthClientFromCurrentUser(clientId, clientName) {
   if (!_userProfilesUserId) return;
-  if (!(await showConfirm({ title: 'Remover acesso', message: 'Remover acesso a "' + clientName + '"?', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove access', message: 'Remove access to "' + clientName + '"?', confirmText: 'Remove' }))) return;
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(clientId) + '/users/' + _userProfilesUserId, { method: 'DELETE' });
     if (res.ok) { toast('Access removed'); refreshUserResources(); }
@@ -2074,11 +2074,11 @@ async function resendInviteFromList(token) {
 
 function copyTokenLink(token) {
   const link = window.location.origin + '/invite/' + token;
-  navigator.clipboard.writeText(link).then(() => toast('Link copiado!'));
+  navigator.clipboard.writeText(link).then(() => toast('Link copied'));
 }
 
 async function revokeInvite(token) {
-  if (!(await showConfirm({ title: 'Revogar convite', message: 'Revogar este convite? O link deixará de funcionar.', confirmText: 'Revogar' }))) return;
+  if (!(await showConfirm({ title: 'Revoke invite', message: 'Revoke this invite? The link will stop working.', confirmText: 'Revoke' }))) return;
   try {
     const res = await api('/admin/invites/' + token, { method: 'DELETE' });
     if (res.ok) { toast('Invite revoked'); fetchInvites(); }
@@ -2419,7 +2419,7 @@ const smtpWiz = Wizard.mount('smtpConfigModal', {
   subtitle: 'SMTP relay used to deliver notification emails',
   saveLabel: 'Save',
   onClose: () => closeSmtpConfigModal(),
-  onSave: ev => withBusy(ev.currentTarget, 'A guardar…', () => saveSmtpConfig()),
+  onSave: ev => withBusy(ev.currentTarget, 'Saving…', () => saveSmtpConfig()),
   problems() {
     const p = {};
     const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
@@ -2434,7 +2434,7 @@ const smsWiz = Wizard.mount('smsConfigModal', {
   subtitle: 'Routing and credentials for WeSender and Twilio',
   saveLabel: 'Save',
   onClose: () => closeSmsConfigModal(),
-  onSave: ev => withBusy(ev.currentTarget, 'A guardar…', () => saveSmsConfig()),
+  onSave: ev => withBusy(ev.currentTarget, 'Saving…', () => saveSmsConfig()),
   hidden: id => id === 'prefixes' && Wizard.val('smsRouting') !== 'by-prefix',
   problems() {
     const p = {};
@@ -2927,7 +2927,7 @@ async function editConnector(name) {
 }
 
 async function deleteConnector(name) {
-  if (!(await showConfirm({ title: 'Apagar connector', message: 'Apagar connector "' + name + '" e todas as sessões ativas?', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete connector', message: 'Delete connector "' + name + '" and all active sessions?', confirmText: 'Delete' }))) return;
   try {
     const res = await api('/admin/connectors/' + encodeURIComponent(name), { method: 'DELETE' });
     if (res.ok) { toast('Deleted'); await fetchConnectors(); }
@@ -2990,7 +2990,7 @@ async function refreshConnectorSessions() {
 }
 
 async function closeConnectorChat(connector, chatId) {
-  if (!(await showConfirm({ title: 'Fechar sessão', message: 'Fechar a sessão de "' + chatId + '"? Será enviado LEAVE à GoContact.', confirmText: 'Fechar' }))) return;
+  if (!(await showConfirm({ title: 'Close session', message: 'Close the session for "' + chatId + '"? A LEAVE will be sent to GoContact.', confirmText: 'Close' }))) return;
   try {
     const res = await api('/admin/connectors/' + encodeURIComponent(connector) + '/sessions/' + encodeURIComponent(chatId), { method: 'DELETE' });
     if (res.ok) { toast('Session closed'); await refreshConnectorSessions(); }
@@ -3136,11 +3136,11 @@ function renderPendingRetryEntries() {
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;margin-bottom:10px;border:1px solid var(--border);border-radius:6px;background:var(--surface2)">
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
         <input type="checkbox" ${allSelected ? 'checked' : ''} onclick="prToggleSelectAll(this.checked)">
-        Selecionar tudo
+        Select all
       </label>
       <span style="flex:1"></span>
       <button class="btn btn-sm btn-danger" onclick="prCancelSelected()" ${selectedCount === 0 ? 'disabled' : ''}>
-        Cancelar selecionados (${selectedCount})
+        Cancel selected (${selectedCount})
       </button>
     </div>`;
 
@@ -3150,9 +3150,9 @@ function renderPendingRetryEntries() {
     const header = `
       <div style="display:flex;align-items:center;gap:8px;padding:6px 4px;margin-bottom:4px">
         <input type="checkbox" ${groupAllSelected ? 'checked' : ''} ${groupSelectable.length === 0 ? 'disabled' : ''}
-          onclick="prToggleGroup('${esc(targetUrl)}', this.checked)" title="Selecionar todas deste destinatário">
+          onclick="prToggleGroup('${esc(targetUrl)}', this.checked)" title="Select all for this recipient">
         <span style="font-family:'SF Mono',Monaco,monospace;font-size:12px;color:var(--text2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(targetUrl)}">${esc(targetUrl)}</span>
-        <span style="font-size:11px;color:var(--text3);white-space:nowrap">${entries.length} pendente(s)</span>
+        <span style="font-size:11px;color:var(--text3);white-space:nowrap">${entries.length} pending</span>
       </div>`;
 
     const items = entries.map(e => {
@@ -3226,7 +3226,7 @@ async function prRetryOne(id) {
 }
 
 async function prDismissOne(id) {
-  if (!(await showConfirm({ title: 'Cancelar nova tentativa', message: 'Cancelar esta nova tentativa pendente? A entrega será abandonada.', confirmText: 'Cancelar entrega' }))) return;
+  if (!(await showConfirm({ title: 'Cancel retry', message: 'Cancel this pending retry? The delivery will be abandoned.', confirmText: 'Cancel delivery' }))) return;
   try {
     const res = await api(`/admin/webhooks/pending-retry/${encodeURIComponent(id)}`, { method: 'DELETE' });
     if (res.ok) { await refreshPendingRetryModal(); await fetchWebhooks(); }
@@ -3238,9 +3238,9 @@ async function prCancelSelected() {
   const ids = [..._prSelected];
   if (ids.length === 0) return;
   if (!(await showConfirm({
-    title: 'Cancelar novas tentativas selecionadas',
-    message: `Cancelar ${ids.length} nova(s) tentativa(s) selecionada(s)? As entregas serão abandonadas.`,
-    confirmText: 'Cancelar selecionados',
+    title: 'Cancel selected retries',
+    message: `Cancel ${ids.length} selected retr${ids.length === 1 ? 'y' : 'ies'}? The deliveries will be abandoned.`,
+    confirmText: 'Cancel selected',
   }))) return;
   try {
     const res = await api('/admin/webhooks/pending-retry/cancel-all', {
@@ -3248,8 +3248,8 @@ async function prCancelSelected() {
       body: JSON.stringify({ webhook: _prModalWebhook || undefined, ids }),
     });
     const d = await res.json().catch(() => ({}));
-    if (res.ok) toast(`${d.removed ?? 0} nova(s) tentativa(s) cancelada(s)`);
-    else toast('Falha ao cancelar', 'error');
+    if (res.ok) toast(`${d.removed ?? 0} retr${(d.removed ?? 0) === 1 ? 'y' : 'ies'} cancelled`);
+    else toast('Failed to cancel', 'error');
   } catch (e) { toast('Error: ' + e.message, 'error'); }
   await refreshPendingRetryModal();
   await fetchWebhooks();
@@ -3259,9 +3259,9 @@ async function prCancelAll() {
   const count = _prEntries.length;
   if (!count) return;
   if (!(await showConfirm({
-    title: 'Cancelar todas as novas tentativas',
-    message: `Cancelar todas as ${count} novas tentativas pendentes${_prModalWebhook ? ' de "' + _prModalWebhook + '"' : ''}? As entregas serão abandonadas. (As que estiverem a correr neste momento serão mantidas.)`,
-    confirmText: 'Cancelar todas',
+    title: 'Cancel all retries',
+    message: `Cancel all ${count} pending retries${_prModalWebhook ? ' for "' + _prModalWebhook + '"' : ''}? The deliveries will be abandoned. (Retries currently running will be kept.)`,
+    confirmText: 'Cancel all',
   }))) return;
   const btn = document.getElementById('prCancelAllBtn');
   if (btn) btn.disabled = true;
@@ -3269,8 +3269,8 @@ async function prCancelAll() {
     const body = _prModalWebhook ? { webhook: _prModalWebhook } : {};
     const res = await api('/admin/webhooks/pending-retry/cancel-all', { method: 'POST', body: JSON.stringify(body) });
     const d = await res.json().catch(() => ({}));
-    if (res.ok) toast(`${d.removed ?? 0} nova(s) tentativa(s) cancelada(s)`);
-    else toast('Falha ao cancelar', 'error');
+    if (res.ok) toast(`${d.removed ?? 0} retr${(d.removed ?? 0) === 1 ? 'y' : 'ies'} cancelled`);
+    else toast('Failed to cancel', 'error');
   } catch (e) { toast('Error: ' + e.message, 'error'); }
   if (btn) btn.disabled = false;
   await refreshPendingRetryModal();
@@ -3465,7 +3465,7 @@ function renderBodyEditorFieldsPanel() {
     const payload = getCurrentTestPayloadObject();
     if (!payload) {
         list.innerHTML = `<div style="padding:12px;color:var(--text3);font-size:11px;font-family:inherit">
-            Cole um Test Payload (JSON) válido na seção anterior para ver os campos disponíveis aqui.
+            Paste a valid test payload (JSON) in the previous section to see the available fields here.
         </div>`;
         return;
     }
@@ -4409,7 +4409,7 @@ function openWebhookModal(webhook = null) {
   const wAuthTokenEl = document.getElementById('wAuthToken');
   wAuthTokenEl.value = '';
   wAuthTokenEl.placeholder = (webhook && webhook.hasAuthToken)
-    ? '•••••••• (configurado — deixe vazio para manter)'
+    ? '•••••••• (set — leave empty to keep)'
     : '';
   IpTagInput.setValue('wAllowedIps', webhook?.allowedIps || []);
   // Private/internal destinations are allowed by default; checkbox reflects the
@@ -4465,7 +4465,7 @@ function openWebhookModal(webhook = null) {
 
 async function releaseWebhookFromNpm() {
   if (!editingWebhook || !editingWebhook.name) return;
-  if (!(await showConfirm({ title: 'Libertar webhook', message: 'Libertar este webhook do host NPM? O NPM será restaurado para o destino de encaminhamento original.', confirmText: 'Libertar' }))) return;
+  if (!(await showConfirm({ title: 'Release webhook', message: 'Release this webhook from the NPM host? NPM will be restored to its original forward destination.', confirmText: 'Release' }))) return;
   try {
     const res = await api('/admin/webhooks/' + encodeURIComponent(editingWebhook.name) + '/npm-release', { method: 'POST' });
     const data = await res.json();
@@ -4615,7 +4615,7 @@ async function editWebhook(name) {
 }
 
 async function deleteWebhook(name) {
-  if (!(await showConfirm({ title: 'Apagar webhook', message: 'Apagar webhook "' + name + '"?', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete webhook', message: 'Delete webhook "' + name + '"?', confirmText: 'Delete' }))) return;
   try { const res = await api('/admin/webhooks/' + encodeURIComponent(name), { method: 'DELETE' }); if (res.ok) { toast('Deleted'); await fetchWebhooks(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
@@ -5205,7 +5205,7 @@ async function editSipProxy(name) {
 }
 
 async function deleteSipProxy(name) {
-  if (!(await showConfirm({ title: 'Apagar proxy TCP/UDP', message: 'Apagar proxy TCP/UDP "' + name + '"? O listener será parado imediatamente.', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete TCP/UDP proxy', message: 'Delete TCP/UDP proxy "' + name + '"? The listener will be stopped immediately.', confirmText: 'Delete' }))) return;
   try {
     const res = await api('/admin/tcpudp/' + encodeURIComponent(name), { method: 'DELETE' });
     if (res.ok) { toast('TCP/UDP proxy deleted'); await fetchSipProxies(); }
@@ -5502,7 +5502,7 @@ function _docsClipboardFallback(text, done) {
 function renderOauthClients(clients) {
   const tbody = document.getElementById('oauthClientListBody');
   if (!clients.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Sem clients registados.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No clients registered.</td></tr>';
     return;
   }
   tbody.innerHTML = clients.map(c => {
@@ -5629,7 +5629,7 @@ async function submitOauthClient() {
   if (!name) return toast('Name is required', 'error');
   if (!redirectUris.length) return toast('At least one redirect URI', 'error');
   const pkceRequired = document.getElementById('oauthClientPkceRequired').checked;
-  if (!pkceRequired && !(await showConfirm({ title: 'Desativar PKCE', message: 'Desativar PKCE para este cliente?', detail: 'Isto remove uma defesa de segurança (proteção contra interceção de auth-code). Faz isto apenas para clientes legados que não conseguem enviar um code_challenge.', confirmText: 'Desativar PKCE' }))) return;
+  if (!pkceRequired && !(await showConfirm({ title: 'Disable PKCE', message: 'Disable PKCE for this client?', detail: 'This removes a security defence (protection against auth-code interception). Only do this for legacy clients that cannot send a code_challenge.', confirmText: 'Disable PKCE' }))) return;
   try {
     const res = await api('/admin/oauth-clients', {
       method: 'POST',
@@ -5659,7 +5659,7 @@ async function submitEditOauthClient() {
   if (!name) return toast('Name is required', 'error');
   if (!redirectUris.length) return toast('At least one redirect URI', 'error');
   const urisChanged = redirectUris.join('\n') !== _editingOauthClientOriginalUris.trim();
-  if (urisChanged && !(await showConfirm({ title: 'Alterar redirect URIs', message: 'Alterar as redirect URIs irá revogar todos os refresh tokens deste cliente. Continuar?', confirmText: 'Alterar' }))) return;
+  if (urisChanged && !(await showConfirm({ title: 'Change redirect URIs', message: 'Changing the redirect URIs will revoke all refresh tokens for this client. Continue?', confirmText: 'Change' }))) return;
   const consentEnabled = document.getElementById('oauthClientConsentEnabled').checked;
   const consentPageRaw = document.getElementById('oauthClientConsentPageId').value;
   const consentPageId = consentPageRaw ? Number(consentPageRaw) : null;
@@ -5667,7 +5667,7 @@ async function submitEditOauthClient() {
     return toast('Choose a consent page or disable consent.', 'error');
   }
   const pkceRequired = document.getElementById('oauthClientPkceRequired').checked;
-  if (!pkceRequired && !(await showConfirm({ title: 'Desativar PKCE', message: 'Desativar PKCE para este cliente?', detail: 'Isto remove uma defesa de segurança (proteção contra interceção de auth-code). Faz isto apenas para clientes legados que não conseguem enviar um code_challenge.', confirmText: 'Desativar PKCE' }))) return;
+  if (!pkceRequired && !(await showConfirm({ title: 'Disable PKCE', message: 'Disable PKCE for this client?', detail: 'This removes a security defence (protection against auth-code interception). Only do this for legacy clients that cannot send a code_challenge.', confirmText: 'Disable PKCE' }))) return;
   const payload = {
     name,
     redirectUris,
@@ -5694,7 +5694,7 @@ async function submitEditOauthClient() {
 }
 
 async function deleteOauthClient(clientId, name) {
-  if (!(await showConfirm({ title: 'Apagar cliente OAuth', message: 'Apagar cliente "' + name + '"? Todos os tokens emitidos serão revogados.', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete OAuth client', message: 'Delete client "' + name + '"? All issued tokens will be revoked.', confirmText: 'Delete' }))) return;
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(clientId), { method: 'DELETE' });
     if (!res.ok) {
@@ -5748,7 +5748,7 @@ async function refreshOauthClientUsers() {
     const tbody = document.getElementById('ocuListBody');
     const users = data.users || [];
     if (!users.length) {
-      tbody.innerHTML = '<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--text3)">Nenhum utilizador na lista.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--text3)">No users in the list.</td></tr>';
     } else {
       tbody.innerHTML = users.map(u => '<tr style="border-top:1px solid var(--border)">' +
         '<td style="padding:8px 12px;font-weight:500">' + esc(u.username) + '</td>' +
@@ -5777,7 +5777,7 @@ async function addUserToOauthClientUI() {
   if (!_ocuClientId) return;
   const sel = document.getElementById('ocuAddSelect');
   const userId = sel.value;
-  if (!userId) return toast('Seleciona um utilizador', 'error');
+  if (!userId) return toast('Select a user', 'error');
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/users', {
       method: 'POST',
@@ -5785,18 +5785,18 @@ async function addUserToOauthClientUI() {
     });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
     sel.value = '';
-    toast('Utilizador adicionado');
+    toast('User added');
     await refreshOauthClientUsers();
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function removeUserFromOauthClientUI(userId, username) {
   if (!_ocuClientId) return;
-  if (!(await showConfirm({ title: 'Remover acesso', message: 'Remover "' + username + '" do acesso deste cliente?', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove access', message: 'Remove "' + username + '" from this client\'s access list?', confirmText: 'Remove' }))) return;
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/users/' + encodeURIComponent(userId), { method: 'DELETE' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
-    toast('Utilizador removido');
+    toast('User removed');
     await refreshOauthClientUsers();
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -5820,7 +5820,7 @@ async function refreshOauthClientLdapGroups() {
     const tbody = document.getElementById('oclgListBody');
     const rules = data.groups || [];
     if (!rules.length) {
-      tbody.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">Sem regras de grupo configuradas.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">No group rules configured.</td></tr>';
       return;
     }
     const dirName = id => (_oclgDirectories.find(d => d.id === id) || {}).name || ('#' + id);
@@ -5836,8 +5836,8 @@ async function addLdapGroupToClientUI() {
   if (!_ocuClientId) return;
   const ldapConfigId = Number(document.getElementById('oclgConfigSelect').value);
   const groupMatch = document.getElementById('oclgGroupInput').value.trim();
-  if (!ldapConfigId) return toast('Seleciona um directory', 'error');
-  if (!groupMatch) return toast('Indica o CN ou DN do grupo', 'error');
+  if (!ldapConfigId) return toast('Select a directory', 'error');
+  if (!groupMatch) return toast('Enter the group CN or DN', 'error');
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/ldap-groups', {
       method: 'POST',
@@ -5845,18 +5845,18 @@ async function addLdapGroupToClientUI() {
     });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
     document.getElementById('oclgGroupInput').value = '';
-    toast('Regra adicionada');
+    toast('Rule added');
     await refreshOauthClientLdapGroups();
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function removeLdapGroupFromClientUI(ruleId) {
   if (!_ocuClientId) return;
-  if (!(await showConfirm({ title: 'Remover regra de grupo', message: 'Remover esta regra de grupo? Os utilizadores que dependiam dela perderão acesso no próximo login (ou sync).', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove group rule', message: 'Remove this group rule? Users who relied on it will lose access at their next sign-in (or sync).', confirmText: 'Remove' }))) return;
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/ldap-groups/' + encodeURIComponent(ruleId), { method: 'DELETE' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
-    toast('Regra removida');
+    toast('Rule removed');
     await refreshOauthClientLdapGroups();
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -6004,7 +6004,7 @@ function cancelSmtpTest() {
 }
 
 async function clearSmtpConfig() {
-  if (!(await showConfirm({ title: 'Remover configuração SMTP', message: 'Remover toda a configuração SMTP?', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove SMTP configuration', message: 'Remove the entire SMTP configuration?', confirmText: 'Remove' }))) return;
   try {
     const res = await api('/admin/smtp', { method: 'DELETE' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return setSmtpStatus('smtpStatus', d.error || 'Error', 'err'); }
@@ -6095,7 +6095,7 @@ function renderAuditLogs(logs, total) {
   window._lastAuditLogs = logs;
   const tbody = document.getElementById('auditListBody');
   if (!logs.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Sem entradas.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No entries.</td></tr>';
   } else {
     tbody.innerHTML = logs.map(function(l, idx) {
       const when = new Date(l.createdAt).toLocaleString();
@@ -6117,7 +6117,7 @@ function renderAuditLogs(logs, total) {
   }
   const fromN = total === 0 ? 0 : _auditOffset + 1;
   const toN = Math.min(_auditOffset + logs.length, total);
-  document.getElementById('auditTotal').textContent = fromN + '–' + toN + ' de ' + total;
+  document.getElementById('auditTotal').textContent = fromN + '–' + toN + ' of ' + total;
   document.getElementById('auditPrev').disabled = _auditOffset === 0;
   document.getElementById('auditNext').disabled = _auditOffset + logs.length >= total;
 }
@@ -6180,7 +6180,7 @@ async function fetchLdapConfigs() {
 function renderLdapConfigs(configs) {
   const tbody = document.getElementById('ldapListBody');
   if (!configs.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">Sem directories configurados. Clica em <strong>Novo directory</strong> para adicionar.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No directories configured. Click <strong>New directory</strong> to add one.</td></tr>';
     return;
   }
   const scopeBadge = s => {
@@ -6227,18 +6227,36 @@ function renderLdapConfigs(configs) {
  *  ever answer "save first". */
 function _ldapSyncTestRow() {
   const editing = !!document.getElementById('ldapEditId').value;
-  const row = document.querySelector('#ldapModal .ldap-test-row');
+  const row = document.querySelector('#ldapModal .ldap-test-section');
   if (row) row.style.display = editing ? '' : 'none';
+}
+
+// 'user' bind mode needs no service account: show the domain field instead of
+// the bind DN/password, and ask for a password when testing.
+function _ldapSyncBindMode() {
+  const mode = document.getElementById('ldapBindMode').value;
+  document.querySelectorAll('#ldapModal [data-bind-mode]').forEach(el => {
+    el.style.display = el.dataset.bindMode === mode ? '' : 'none';
+  });
+  const hint = document.getElementById('ldapBindModeHint');
+  if (hint) hint.textContent = mode === 'user'
+    ? 'No service account to maintain: the person signing in opens the connection with their own login and password. Group changes are picked up at their next sign-in.'
+    : 'Midleman searches the directory with this account. If its password expires, nobody can sign in until it is updated here.';
+  const prev = document.getElementById('ldapUpnPreview');
+  if (prev) prev.textContent = (document.getElementById('ldapUpnSuffix').value.trim().replace(/^@/, '') || 'example.com');
 }
 
 function _ldapResetForm() {
   document.getElementById('ldapEditId').value = '';
+  document.getElementById('ldapBindMode').value = 'user';
+  document.getElementById('ldapUpnSuffix').value = '';
+  document.getElementById('ldapTestPassword').value = '';
   document.getElementById('ldapName').value = '';
   document.getElementById('ldapUrl').value = '';
   document.getElementById('ldapBaseDn').value = '';
   document.getElementById('ldapBindDn').value = '';
   document.getElementById('ldapBindPassword').value = '';
-  document.getElementById('ldapBindPassword').placeholder = '(opcional)';
+  document.getElementById('ldapBindPassword').placeholder = '(optional)';
   document.getElementById('ldapUserFilter').value = '';
   document.getElementById('ldapUsernameAttr').value = '';
   document.getElementById('ldapEmailAttr').value = '';
@@ -6263,6 +6281,7 @@ function _ldapResetForm() {
 function openCreateLdapModal() {
   _ldapResetForm();
   _ldapSyncTestRow();
+  _ldapSyncBindMode();
   ldapWiz.open(false, { title: 'New LDAP Directory' });
   document.getElementById('ldapSubmitBtn').textContent = 'Create';
   document.getElementById('ldapModal').classList.add('active');
@@ -6276,9 +6295,11 @@ function openEditLdapModal(id) {
   document.getElementById('ldapName').value = c.name;
   document.getElementById('ldapUrl').value = c.url;
   document.getElementById('ldapBaseDn').value = c.baseDn;
+  document.getElementById('ldapBindMode').value = c.bindMode === 'user' ? 'user' : 'service';
+  document.getElementById('ldapUpnSuffix').value = c.upnSuffix || '';
   document.getElementById('ldapBindDn').value = c.bindDn || '';
   document.getElementById('ldapBindPassword').value = '';
-  document.getElementById('ldapBindPassword').placeholder = '(deixar vazio para manter)';
+  document.getElementById('ldapBindPassword').placeholder = '(leave empty to keep)';
   document.getElementById('ldapUserFilter').value = c.userFilter;
   document.getElementById('ldapUsernameAttr').value = c.usernameAttr;
   document.getElementById('ldapEmailAttr').value = c.emailAttr;
@@ -6294,6 +6315,7 @@ function openEditLdapModal(id) {
   document.getElementById('ldapDefaultProfile').value = c.defaultProfile || '';
   document.getElementById('ldapAutoAdoptLocal').checked = !!c.autoAdoptLocal;
   _ldapSyncTestRow();
+  _ldapSyncBindMode();
   ldapWiz.open(true, { title: 'Edit Directory — ' + c.name });
   document.getElementById('ldapSubmitBtn').textContent = 'Save';
   document.getElementById('ldapModal').classList.add('active');
@@ -6312,9 +6334,12 @@ function _ldapCollectPayload(isEdit) {
   if (!url)  { toast('URL is required (ldap:// or ldaps://)', 'error'); return null; }
   if (!baseDn) { toast('Base DN is required', 'error'); return null; }
 
+  const bindMode = document.getElementById('ldapBindMode').value === 'service' ? 'service' : 'user';
   const payload = {
     name, url, baseDn,
-    bindDn: document.getElementById('ldapBindDn').value.trim(),
+    bindMode,
+    upnSuffix: document.getElementById('ldapUpnSuffix').value.trim(),
+    bindDn: bindMode === 'service' ? document.getElementById('ldapBindDn').value.trim() : '',
     userFilter: document.getElementById('ldapUserFilter').value.trim() || undefined,
     usernameAttr: document.getElementById('ldapUsernameAttr').value.trim() || undefined,
     emailAttr: document.getElementById('ldapEmailAttr').value.trim() || undefined,
@@ -6333,7 +6358,8 @@ function _ldapCollectPayload(isEdit) {
   };
   // Only send bindPassword if the user typed one (avoids overwriting on edit)
   const pw = document.getElementById('ldapBindPassword').value;
-  if (pw) payload.bindPassword = pw;
+  if (bindMode === 'user') payload.bindPassword = ''; // no stored service password in user-bind mode
+  else if (pw) payload.bindPassword = pw;
   else if (!isEdit) payload.bindPassword = ''; // explicit empty for create (anonymous bind)
   // Strip undefined so backend defaults apply on create
   Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
@@ -6354,21 +6380,21 @@ async function submitLdap() {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return toast(data.error || 'Failed', 'error');
-    toast(isEdit ? 'Directory atualizado' : 'Directory criado');
+    toast(isEdit ? 'Directory updated' : 'Directory created');
     closeLdapModal();
     fetchLdapConfigs();
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function deleteLdapConfig(id, name) {
-  if (!(await showConfirm({ title: 'Apagar diretório', message: 'Apagar diretório "' + name + '"?', detail: 'Os utilizadores LDAP já provisionados perderão a sua origem — não poderão iniciar sessão até reconfigurares o diretório.', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete directory', message: 'Delete directory "' + name + '"?', detail: 'LDAP users already provisioned will lose their source — they will not be able to sign in until you reconfigure the directory.', confirmText: 'Delete' }))) return;
   try {
     const res = await api('/admin/ldap/configs/' + encodeURIComponent(id), { method: 'DELETE' });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       return toast(data.error || 'Failed to delete', 'error');
     }
-    toast('Directory apagado');
+    toast('Directory deleted');
     fetchLdapConfigs();
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -6449,7 +6475,7 @@ async function testLdap() {
     }
     const res = await api('/admin/ldap/configs/' + encodeURIComponent(editId) + '/test', {
       method: 'POST',
-      body: JSON.stringify(sampleLogin ? { sampleLogin } : {}),
+      body: JSON.stringify(sampleLogin ? { sampleLogin, samplePassword: document.getElementById('ldapTestPassword').value || undefined } : {}),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -6554,7 +6580,7 @@ function renderLdapAdoptions(events) {
   tbody.innerHTML = events.map(e => {
     const when = e.createdAt ? new Date(e.createdAt).toLocaleString() : '—';
     const actions = e.state === 'pending'
-      ? '<button class="btn btn-sm btn-primary" onclick="confirmLdapAdoption(' + e.id + ')">Confirmar</button> ' +
+      ? '<button class="btn btn-sm btn-primary" onclick="confirmLdapAdoption(' + e.id + ')">Confirm</button> ' +
         '<button class="btn btn-sm btn-ghost" onclick="revertLdapAdoption(' + e.id + ')" style="color:var(--err-text)">Reverter</button>'
       : '<span style="color:var(--text3);font-size:11.5px">—</span>';
     return '<tr style="border-top:1px solid var(--border)">' +
@@ -6570,7 +6596,7 @@ function renderLdapAdoptions(events) {
 }
 
 async function confirmLdapAdoption(id) {
-  if (!(await showConfirm({ title: 'Confirmar adoção', message: 'Confirmar esta adoção? A conta local será permanentemente substituída pela identidade LDAP.', confirmText: 'Confirmar', danger: false }))) return;
+  if (!(await showConfirm({ title: 'Confirm adoption', message: 'Confirm this adoption? The local account will be permanently replaced by the LDAP identity.', confirmText: 'Confirm', danger: false }))) return;
   try {
     const res = await api('/admin/ldap/adoptions/' + encodeURIComponent(id) + '/confirm', { method: 'POST' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
@@ -6580,7 +6606,7 @@ async function confirmLdapAdoption(id) {
 }
 
 async function revertLdapAdoption(id) {
-  if (!(await showConfirm({ title: 'Reverter adoção', message: 'Reverter? A conta local volta ao estado anterior (utilizador, email e hash da palavra-passe originais).', detail: 'A identidade LDAP terá de ser registada manualmente noutro utilizador — as sessões e tokens serão revogados.', confirmText: 'Reverter' }))) return;
+  if (!(await showConfirm({ title: 'Revert adoption', message: 'Revert? The local account returns to its previous state (original username, email and password hash).', detail: 'The LDAP identity will have to be registered manually on another user — sessions and tokens will be revoked.', confirmText: 'Revert' }))) return;
   try {
     const res = await api('/admin/ldap/adoptions/' + encodeURIComponent(id) + '/revert', { method: 'POST' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
@@ -6724,7 +6750,7 @@ async function submitConsentPage() {
 }
 
 async function deleteConsentPage(id, name) {
-  if (!(await showConfirm({ title: 'Apagar página', message: 'Apagar página "' + name + '"?', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete page', message: 'Delete page "' + name + '"?', confirmText: 'Delete' }))) return;
   try {
     const res = await api('/admin/consent-pages/' + id, { method: 'DELETE' });
     const data = await res.json().catch(() => ({}));
@@ -7277,7 +7303,7 @@ async function saveCert() {
 }
 
 async function renewCert(id) {
-  if (!(await showConfirm({ title: 'Forçar renovação ACME', message: 'Forçar renovação ACME agora? Será feito um pedido à Let\'s Encrypt.', confirmText: 'Renovar', danger: false }))) return;
+  if (!(await showConfirm({ title: 'Force ACME renewal', message: 'Force ACME renewal now? A request will be made to Let\'s Encrypt.', confirmText: 'Renew', danger: false }))) return;
   try {
     const res = await api('/admin/certs/' + id + '/renew', { method: 'POST' });
     const d = await res.json();
@@ -7288,7 +7314,7 @@ async function renewCert(id) {
 }
 
 async function deleteCertificate(id) {
-  if (!(await showConfirm({ title: 'Apagar certificado', message: 'Apagar este certificado? Os perfis que o usam perderão TLS até serem reatribuídos.', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete certificate', message: 'Delete this certificate? Profiles using it will lose TLS until they are reassigned.', confirmText: 'Delete' }))) return;
   try {
     const res = await api('/admin/certs/' + id, { method: 'DELETE' });
     const d = await res.json();
@@ -7794,7 +7820,7 @@ async function testNpmConnectionUi() {
 }
 
 async function clearNpmConfig() {
-  if (!(await showConfirm({ title: 'Remover integração NPM', message: 'Remover a configuração de integração NPM?', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove NPM integration', message: 'Remove the NPM integration configuration?', confirmText: 'Remove' }))) return;
   try {
     const res = await api('/admin/npm', { method: 'DELETE' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return setNpmStatus('npmStatus', d.error || 'Error', 'err'); }
@@ -8051,7 +8077,7 @@ async function bulkAdoptNpmHosts() {
   const status = document.getElementById('npmImportStatus');
   status.style.color = 'var(--text2)';
   status.textContent = 'Importing ' + ids.length + ' host' + (ids.length === 1 ? '' : 's') + '…';
-  await withBusy(btn, 'A importar…', async () => {
+  await withBusy(btn, 'Importing…', async () => {
     try {
       const res = await api('/admin/npm/proxy-hosts/bulk-adopt', { method: 'POST', body: JSON.stringify(body) });
       const data = await res.json();
@@ -8084,7 +8110,7 @@ async function bulkAdoptNpmHosts() {
 }
 
 async function adoptNpmHost(id, event) {
-  return withBusy(event, 'A carregar…', async () => {
+  return withBusy(event, 'Loading…', async () => {
   try {
     const res = await api('/admin/npm/proxy-hosts/' + id + '/preview-adopt');
     const data = await res.json();
@@ -8120,8 +8146,8 @@ function openLinkedProfile(name) {
 
 async function releaseProfileFromNpm(event) {
   if (!editingProfile || !editingProfile.name) return;
-  if (!(await showConfirm({ title: 'Libertar perfil do NPM', message: 'Libertar este perfil do host NPM? O NPM será restaurado para o destino de encaminhamento original.', confirmText: 'Libertar' }))) return;
-  await withBusy(event, 'A libertar…', async () => {
+  if (!(await showConfirm({ title: 'Release profile from NPM', message: 'Release this profile from the NPM host? NPM will be restored to its original forward destination.', confirmText: 'Release' }))) return;
+  await withBusy(event, 'Releasing…', async () => {
     try {
       const res = await api('/admin/profiles/' + encodeURIComponent(editingProfile.name) + '/npm-release', { method: 'POST' });
       const data = await res.json();
@@ -8273,8 +8299,8 @@ function onNpmPageSizeChange() {
 }
 
 async function toggleNpmHost(id, enable, event) {
-  if (!enable && !(await showConfirm({ title: 'Desativar proxy host', message: 'Desativar proxy host #' + id + '? Deixará de servir pedidos até ser reativado.', confirmText: 'Desativar' }))) return;
-  await withBusy(event, enable ? 'A activar…' : 'A desactivar…', async () => {
+  if (!enable && !(await showConfirm({ title: 'Disable proxy host', message: 'Disable proxy host #' + id + '? It will stop serving requests until re-enabled.', confirmText: 'Disable' }))) return;
+  await withBusy(event, enable ? 'Enabling…' : 'Disabling…', async () => {
     try {
       const path = '/admin/npm/proxy-hosts/' + id + '/' + (enable ? 'enable' : 'disable');
       const res = await api(path, { method: 'POST' });
@@ -8289,8 +8315,8 @@ async function toggleNpmHost(id, enable, event) {
 async function deleteNpmHost(id, event) {
   const host = _npmHostsAll.find(h => h.id === id);
   const domains = host ? (host.domain_names || []).join(', ') : '#' + id;
-  if (!(await showConfirm({ title: 'Apagar proxy host', message: 'Apagar proxy host "' + domains + '"?', detail: 'Isto remove-o do NPM permanentemente. O certificado associado (se existir) não é apagado.', confirmText: 'Apagar' }))) return;
-  await withBusy(event, 'A apagar…', async () => {
+  if (!(await showConfirm({ title: 'Delete proxy host', message: 'Delete proxy host "' + domains + '"?', detail: 'This removes it from NPM permanently. The associated certificate (if any) is not deleted.', confirmText: 'Delete' }))) return;
+  await withBusy(event, 'Deleting…', async () => {
     try {
       const res = await api('/admin/npm/proxy-hosts/' + id, { method: 'DELETE' });
       const d = await res.json();
@@ -8889,7 +8915,7 @@ async function saveSmsConfig() {
 }
 
 async function clearSmsConfig() {
-  if (!(await showConfirm({ title: 'Remover configuração SMS', message: 'Remover toda a configuração SMS?', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove SMS configuration', message: 'Remove the entire SMS configuration?', confirmText: 'Remove' }))) return;
   try {
     const res = await api('/admin/sms', { method: 'DELETE' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return setSmsStatus('smsStatus', d.error || 'Error', 'err'); }
@@ -9698,7 +9724,7 @@ async function saveFive9Connector(event) {
   // Surface the offending step before the server rejects it — otherwise the
   // toast names a field sitting on a pane the user cannot see.
   if (f9Wiz.focusProblem()) return;
-  await withBusy(event, 'A guardar…', async () => { await doSaveFive9Connector(); });
+  await withBusy(event, 'Saving…', async () => { await doSaveFive9Connector(); });
 }
 async function doSaveFive9Connector() {
   try {
@@ -9787,7 +9813,7 @@ async function editFive9Connector(name) {
 }
 
 async function deleteFive9Connector(name) {
-  if (!(await showConfirm({ title: 'Apagar connector Five9', message: 'Apagar connector "' + name + '" e todas as sessões ativas?', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete Five9 connector', message: 'Delete connector "' + name + '" and all active sessions?', confirmText: 'Delete' }))) return;
   try {
     const res = await api('/admin/five9-connectors/' + encodeURIComponent(name), { method: 'DELETE' });
     if (res.ok) { toast('Deleted'); await fetchFive9Connectors(); }
@@ -9914,9 +9940,9 @@ function renderReportFeeds() {
       '<td style="padding:8px;color:var(--text2);font-size:12px">' + (st.fetchedAt ? new Date(st.fetchedAt).toLocaleString() : '<span style="color:var(--text3)">never</span>') + '</td>' +
       '<td style="padding:8px 12px;text-align:right;white-space:nowrap">' +
         '<button class="btn btn-sm" onclick="refreshReportFeed(\'' + esc(f.name) + '\')">Refresh</button> ' +
-        (docsUrl ? '<button class="btn btn-sm" title="Abrir documentação API" onclick="window.open(\'' + docsUrl + '\',\'_blank\')">Docs</button> ' : '') +
+        (docsUrl ? '<button class="btn btn-sm" title="Open API documentation" onclick="window.open(\'' + docsUrl + '\',\'_blank\')">Docs</button> ' : '') +
         '<button class="btn btn-sm" onclick="editReportFeed(\'' + esc(f.name) + '\')">Edit</button> ' +
-        (st.cached ? '<button class="btn btn-sm" title="Limpar dados em cache" onclick="clearReportFeedCache(\'' + esc(f.name) + '\')">Limpar</button> ' : '') +
+        (st.cached ? '<button class="btn btn-sm" title="Clear cached data" onclick="clearReportFeedCache(\'' + esc(f.name) + '\')">Clear</button> ' : '') +
         '<button class="btn btn-sm btn-danger" onclick="deleteReportFeed(\'' + esc(f.name) + '\')">Delete</button>' +
       '</td>' +
     '</tr>';
@@ -10103,7 +10129,7 @@ function rfPopulateSourceFeedSelect(currentValue) {
   var sel = document.getElementById('rfDetailSourceFeed');
   if (!sel) return;
   var sessionFeeds = (_allReportFeeds || []).filter(function(f) { return f.ownerType === 'webchat_sessions'; });
-  sel.innerHTML = '<option value="">— nenhum —</option>';
+  sel.innerHTML = '<option value="">— none —</option>';
   sessionFeeds.forEach(function(f) {
     var opt = document.createElement('option');
     opt.value = f.name;
@@ -10193,7 +10219,7 @@ async function saveReportFeed() {
     // Editing a legacy feed — don't touch credentials (server keeps existing ones)
   } else {
     // New feed with no instance selected
-    errEl.textContent = 'Selecciona uma GoContact Instance para o feed.';
+    errEl.textContent = 'Select a GoContact instance for the feed.';
     errEl.style.display = 'block';
     return;
   }
@@ -10245,7 +10271,7 @@ async function saveReportFeed() {
     const feedName = data.name || body.name;
     closeReportFeedModal();
     await loadReportFeeds();
-    showToast(isNew ? 'Feed criado — a ir buscar dados…' : 'Feed updated');
+    showToast(isNew ? 'Feed created — fetching data…' : 'Feed updated');
     if (isNew && feedName) {
       // Trigger first fetch immediately in background; SSE will show progress
       fetch('/admin/reports/' + encodeURIComponent(feedName) + '/refresh', { method: 'POST' }).catch(function() {});
@@ -10277,17 +10303,17 @@ async function refreshReportFeed(name) {
     const res = await fetch('/admin/reports/' + name + '/refresh', { method: 'POST' });
     const d = await res.json().catch(function() { return {}; });
     if (!res.ok) { showToast(d.error || 'Refresh failed', true); return; }
-    if (d.message === 'Already refreshing') { showToast('Feed "' + name + '" já está a ser actualizado…'); return; }
-    showToast('A ir buscar dados para "' + name + '"…');
+    if (d.message === 'Already refreshing') { showToast('Feed "' + name + '" is already refreshing…'); return; }
+    showToast('Fetching data for "' + name + '"…');
   } catch (e) { showToast(e.message, true); }
 }
 
 async function clearReportFeedCache(name) {
-  if (!confirm('Limpar todos os dados em cache do feed "' + name + '"?')) return;
+  if (!confirm('Clear all cached data for feed "' + name + '"?')) return;
   try {
     const res = await fetch('/admin/reports/' + name + '/clear-cache', { method: 'POST' });
-    if (!res.ok) { const d = await res.json().catch(function(){return {};}); showToast(d.error || 'Erro ao limpar cache', true); }
-    else { showToast('Cache do feed "' + name + '" limpo'); }
+    if (!res.ok) { const d = await res.json().catch(function(){return {};}); showToast(d.error || 'Failed to clear cache', true); }
+    else { showToast('Cache cleared for feed "' + name + '"'); }
     await loadReportFeeds();
   } catch (e) { showToast(e.message, true); await loadReportFeeds(); }
 }
@@ -10517,7 +10543,7 @@ async function rfViewerRefresh() {
     var res = await fetch('/admin/reports/' + encodeURIComponent(sel.value) + '/refresh', { method: 'POST' });
     var d = await res.json().catch(function() { return {}; });
     if (!res.ok) { showToast(d.error || 'Refresh failed', true); return; }
-    showToast('A ir buscar dados para "' + sel.value + '"…');
+    showToast('Fetching data for "' + sel.value + '"…');
   } catch(e) { showToast(e.message, true); }
 }
 
@@ -10819,7 +10845,7 @@ function rfPopulateColumnSelects(columns) {
     var txt = document.getElementById(s.txt);
     if (!sel) return;
     var current = txt ? txt.value : '';
-    sel.innerHTML = '<option value="">— não seleccionado —</option>';
+    sel.innerHTML = '<option value="">— not selected —</option>';
     columns.forEach(function(col) {
       var opt = document.createElement('option');
       opt.value = col;
@@ -10888,7 +10914,7 @@ function renderGcInstances() {
   var tbody = document.getElementById('gcInstanceListBody');
   if (!tbody) return;
   if (!_gcInstances.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="padding:32px;text-align:center;color:var(--text3)">Sem instâncias. Clica em &quot;+ Add Instance&quot;.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="padding:32px;text-align:center;color:var(--text3)">No instances. Click &quot;+ Add Instance&quot;.</td></tr>';
     return;
   }
   var truncCell = 'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
@@ -10973,14 +10999,14 @@ async function saveGcInstance() {
 }
 
 async function deleteGcInstance(name) {
-  if (!confirm('Apagar instância "' + name + '"?')) return;
+  if (!confirm('Delete instance "' + name + '"?')) return;
   try {
     var res = await fetch('/admin/gocontact/instances/' + name, { method: 'DELETE' });
     var data = await res.json();
     if (!res.ok) { showToast(data.error || 'Delete failed', true); return; }
     await loadGcInstances();
     rfPopulateInstanceDropdown();
-    showToast('Instância apagada');
+    showToast('Instance deleted');
   } catch(e) { showToast(e.message, true); }
 }
 
@@ -11049,7 +11075,7 @@ async function fetchErrorStats() {
         _errLastToastedId = s.latestId;
       } else if (s.latestId > _errLastToastedId) {
         _errLastToastedId = s.latestId;
-        toast('Novo alerta do sistema — ver System Alerts', 'error');
+        toast('New system alert — see System Alerts', 'error');
       }
     }
   } catch (e) { /* badge is best-effort; never break the dashboard over it */ }
@@ -11143,7 +11169,7 @@ function renderErrorFeed(entries, total) {
   const tbody = document.getElementById('errListBody');
   if (!tbody) return;
   if (!entries.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Nenhum erro registado.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No errors logged.</td></tr>';
   } else {
     tbody.innerHTML = entries.map(function (e, idx) {
       const sevColor = e.severity === 'error' ? 'var(--red)' : 'var(--orange)';
@@ -11166,7 +11192,7 @@ function renderErrorFeed(entries, total) {
   if (totalEl) {
     const from = total ? (_errPage - 1) * ERR_PAGE_SIZE + 1 : 0;
     const to = Math.min(_errPage * ERR_PAGE_SIZE, total);
-    totalEl.textContent = total ? (from + '–' + to + ' de ' + total) : 'Sem entradas';
+    totalEl.textContent = total ? (from + '–' + to + ' of ' + total) : 'No entries';
   }
   const prev = document.getElementById('errPrev');
   const next = document.getElementById('errNext');
@@ -11206,42 +11232,42 @@ function closeErrorDetail() {
 async function ackErrorEntry(id) {
   try {
     const res = await api('/admin/errors/ack', { method: 'POST', body: JSON.stringify({ ids: [id] }) });
-    if (!res.ok) return toast('Falha ao marcar como lido', 'error');
+    if (!res.ok) return toast('Failed to mark as read', 'error');
     await fetchErrorFeed(false);
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function ackAllErrors(ev) {
-  await withBusy(ev, 'A marcar…', async function () {
+  await withBusy(ev, 'Marking…', async function () {
     try {
       const res = await api('/admin/errors/ack', { method: 'POST', body: JSON.stringify({ ids: [] }) });
       const d = await res.json().catch(function () { return {}; });
-      if (!res.ok) return toast(d.error || 'Falha', 'error');
-      toast((d.count || 0) + ' entrada(s) marcadas como lidas');
+      if (!res.ok) return toast(d.error || 'Failed', 'error');
+      toast((d.count || 0) + ((d.count || 0) === 1 ? ' entry marked as read' : ' entries marked as read'));
       await fetchErrorFeed(true);
-    } catch (e) { toast('Erro: ' + e.message, 'error'); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
   });
 }
 
 async function clearAllErrors(ev) {
   const ok = await showConfirm({
-    title: 'Limpar feed de erros',
-    message: 'Isto apaga permanentemente todas as entradas do feed.',
-    detail: 'O histórico não é recuperável. "Mark all as read" apenas esconde as entradas, mantendo-as disponíveis no filtro "Read".',
-    confirmText: 'Apagar tudo',
-    cancelText: 'Cancelar',
+    title: 'Clear error feed',
+    message: 'This permanently deletes every entry in the feed.',
+    detail: 'The history cannot be recovered. "Mark all as read" only hides entries, keeping them available under the "Read" filter.',
+    confirmText: 'Delete all',
+    cancelText: 'Cancel',
     danger: true,
   });
   if (!ok) return;
-  await withBusy(ev, 'A limpar…', async function () {
+  await withBusy(ev, 'Clearing…', async function () {
     try {
       const res = await api('/admin/errors', { method: 'DELETE', body: JSON.stringify({ ids: [] }) });
       const d = await res.json().catch(function () { return {}; });
-      if (!res.ok) return toast(d.error || 'Falha', 'error');
-      toast((d.count || 0) + ' entrada(s) apagadas');
+      if (!res.ok) return toast(d.error || 'Failed', 'error');
+      toast((d.count || 0) + ((d.count || 0) === 1 ? ' entry deleted' : ' entries deleted'));
       _errLastToastedId = null;
       await fetchErrorFeed(true);
-    } catch (e) { toast('Erro: ' + e.message, 'error'); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
   });
 }
 

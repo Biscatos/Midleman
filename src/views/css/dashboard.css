@@ -3544,3 +3544,13 @@ body.sidebar-collapsed .sidebar-collapse-btn { width: 22px; height: 22px; border
   .docs-ep { grid-template-columns: 1fr; gap: 2px; }
 }
 .page .card.docs-section { background: var(--surface) !important; }
+
+/* ── LDAP: "Test connection" is a regular section of the Connection step ── */
+.ldap-test-section { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 4px; }
+.ldap-test-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.ldap-test-actions .mm-field-hint { margin: 0; }
+.ldap-test-section .ldap-test-result { margin-top: 12px; }
+/* Switch labels are sentence text, not field captions */
+.ldap-check.wz-label { text-transform: none !important; font: 400 12.5px var(--font-sans) !important; letter-spacing: 0 !important; color: var(--text) !important; }
+.ldap-check.wz-label .ldap-hint { color: var(--text3); }
+.wz-extra:empty { display: none; }

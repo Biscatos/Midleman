@@ -1127,7 +1127,7 @@ const server = Bun.serve({
                 const escH = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
                 const pageHtml = withTheme(readFileSync(resolve(import.meta.dir, 'views/admin-invite.html'), 'utf-8'));
                 if (!invite || invite.usedAt || new Date(invite.expiresAt) < new Date()) {
-                    const msg = !invite ? 'Link de convite não encontrado.' : invite.usedAt ? 'Este convite já foi utilizado.' : 'Este convite expirou.';
+                    const msg = !invite ? 'Invite link not found.' : invite.usedAt ? 'This invite has already been used.' : 'This invite has expired.';
                     return new Response(
                         pageHtml.replace(/\{\{TOKEN\}\}/g, '').replace(/\{\{FULL_NAME\}\}/g, '').replace(/\{\{EMAIL\}\}/g, '').replace(/\{\{NOTE\}\}/g, '').replace(/\{\{INVALID_MSG\}\}/g, escH(msg)).replace(/\{\{INVALID_DISPLAY\}\}/g, 'block').replace(/\{\{FORM_DISPLAY\}\}/g, 'none'),
                         { status: 410, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
@@ -1143,14 +1143,14 @@ const server = Bun.serve({
                 const token = url.pathname.split('/')[2];
                 const invite = getAdminInvite(token);
                 if (!invite || invite.usedAt || new Date(invite.expiresAt) < new Date()) {
-                    return jsonRes(410, { error: 'Convite inválido, expirado ou já utilizado.' });
+                    return jsonRes(410, { error: 'Invite is invalid, expired or already used.' });
                 }
                 let body: any;
                 try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
                 const username = (body.username || '').trim().toLowerCase().replace(/[^a-z0-9._\-]/g, '');
                 const password = body.password || '';
-                if (!username || username.length < 2) return jsonRes(400, { error: 'Username deve ter pelo menos 2 caracteres.' });
-                if (!password || password.length < 8) return jsonRes(400, { error: 'A password deve ter pelo menos 8 caracteres.' });
+                if (!username || username.length < 2) return jsonRes(400, { error: 'Username must be at least 2 characters.' });
+                if (!password || password.length < 8) return jsonRes(400, { error: 'Password must be at least 8 characters.' });
                 try {
                     const admin = await createAdditionalAdmin(username, password, invite.fullName, invite.email, 0);
                     consumeAdminInvite(token, admin.id);
@@ -1158,7 +1158,7 @@ const server = Bun.serve({
                     return jsonRes(200, { status: 'created', username: admin.username });
                 } catch (err: any) {
                     const msg = err?.message || String(err);
-                    if (msg.includes('UNIQUE') || msg.includes('unique')) return jsonRes(409, { error: 'Já existe uma conta com este username.' });
+                    if (msg.includes('UNIQUE') || msg.includes('unique')) return jsonRes(409, { error: 'An account with this username already exists.' });
                     return jsonRes(500, { error: msg });
                 }
             }
@@ -1176,7 +1176,7 @@ const server = Bun.serve({
                 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
                 if (!invite || invite.usedAt || new Date(invite.expiresAt) < new Date()) {
-                    const msg = !invite ? 'Link de acesso não encontrado.' : invite.usedAt ? 'Este link de acesso já foi utilizado.' : 'Este link de acesso expirou.';
+                    const msg = !invite ? 'Access link not found.' : invite.usedAt ? 'This access link has already been used.' : 'This access link has expired.';
                     const errHtml = withTheme(readFileSync(resolve(import.meta.dir, 'views/invite.html'), 'utf-8'), { favicon: false })
                         .replace(/\{\{TOKEN\}\}/g, '')
                         .replace(/\{\{LOGIN_TITLE\}\}/g, esc(loginTitle))
@@ -1220,7 +1220,7 @@ const server = Bun.serve({
                 const token = url.pathname.split('/')[2];
                 const invite = getInviteToken(token);
                 if (!invite || invite.usedAt || new Date(invite.expiresAt) < new Date()) {
-                    return jsonRes(410, { error: 'Link de acesso inválido, expirado ou já utilizado.' });
+                    return jsonRes(410, { error: 'Access link is invalid, expired or already used.' });
                 }
 
                 // Email and identity come from the invite — not from user input
@@ -1243,7 +1243,7 @@ const server = Bun.serve({
                 let body: any;
                 try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
                 const password = body.password || '';
-                if (!password || password.length < 6) return jsonRes(400, { error: 'A palavra-passe deve ter pelo menos 6 caracteres.' });
+                if (!password || password.length < 6) return jsonRes(400, { error: 'Password must be at least 6 characters.' });
 
                 try {
                     const user = await createProxyUser(derivedUsername, password, fullName, email);
@@ -1255,8 +1255,8 @@ const server = Bun.serve({
                     console.log(`✅ Proxy user "${user.username}" created via invite (${invite.profileNames.length} proxy(ies) + ${invite.oauthClientIds.length} OAuth client(s))`);
                     return jsonRes(200, { status: 'created', username: user.username, profileName: invite.profileName });
                 } catch (err: any) {
-                    if (err.message?.includes('UNIQUE')) return jsonRes(409, { error: 'Já existe uma conta com este email. Recarregue a página.' });
-                    return jsonRes(500, { error: err.message || 'Erro ao criar conta.' });
+                    if (err.message?.includes('UNIQUE')) return jsonRes(409, { error: 'An account with this email already exists. Reload the page.' });
+                    return jsonRes(500, { error: err.message || 'Failed to create account.' });
                 }
             }
 
@@ -3073,7 +3073,7 @@ const server = Bun.serve({
                     let body: any;
                     try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
                     const email = (body.email || '').trim().toLowerCase();
-                    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonRes(400, { error: 'Email inválido' });
+                    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonRes(400, { error: 'Invalid email' });
                     const fullName = (body.fullName || '').trim().slice(0, 100);
                     const note = (body.note || '').trim().slice(0, 200);
                     const expiresInHours = Math.min(Math.max(parseInt(body.expiresInHours) || 48, 1), 720);
@@ -3101,7 +3101,7 @@ const server = Bun.serve({
                 if (url.pathname.match(/^\/admin\/admins\/invite\/[^/]+$/) && req.method === 'DELETE') {
                     const token = url.pathname.split('/').pop()!;
                     const ok = revokeAdminInvite(token);
-                    if (!ok) return jsonRes(404, { error: 'Convite não encontrado ou já usado' });
+                    if (!ok) return jsonRes(404, { error: 'Invite not found or already used' });
                     return jsonRes(200, { status: 'revoked' });
                 }
 
@@ -4486,7 +4486,8 @@ const server = Bun.serve({
                     let body: any = {};
                     try { body = await req.json(); } catch { /* body optional */ }
                     const sampleLogin = typeof body?.sampleLogin === 'string' ? body.sampleLogin.trim() : undefined;
-                    const outcome = await testLdapConfig(cfg, sampleLogin || undefined);
+                    const samplePassword = typeof body?.samplePassword === 'string' && body.samplePassword ? body.samplePassword : undefined;
+                    const outcome = await testLdapConfig(cfg, sampleLogin || undefined, samplePassword);
                     const me = getAuthedAdmin(req);
                     logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'ldap.config.test', targetType: 'ldap_config', targetId: id, details: { ok: outcome.ok, hasSample: !!sampleLogin, durationMs: outcome.durationMs }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                     return jsonRes(200, outcome as unknown as Record<string, unknown>);

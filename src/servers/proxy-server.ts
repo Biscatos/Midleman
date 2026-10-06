@@ -19,7 +19,7 @@ function resolveProfileConsent(profile: ProxyProfile): { enabled: boolean; title
     const title = (page.title || '').trim();
     const body = (page.body || '').trim();
     if (!title && !body) return { enabled: false, title: '', body: '' };
-    return { enabled: true, title: title || 'Termos de utilização', body };
+    return { enabled: true, title: title || 'Terms of use', body };
 }
 import QRCode from 'qrcode';
 

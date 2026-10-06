@@ -315,7 +315,7 @@ export class Five9ApiClient {
      *  Five9 validates `message` as not-blank (eip.not.blank.message), so an empty
      *  caption is replaced by the filename. */
     async sendFileMessage(auth: Five9SessionAuth, correlationId: string, fileDownloadId: string, caption = '', filename = ''): Promise<void> {
-        const message = caption.trim() || (filename ? `📎 ${filename}` : '📎 Anexo');
+        const message = caption.trim() || (filename ? `📎 ${filename}` : '📎 Attachment');
         await this.jsonRequest(
             `${auth.apiHost}/appsvcs/rs/svc/conversations/${encodeURIComponent(correlationId)}/messages`,
             {

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sign in — Entrar</title>
+  <title>Sign in</title>
   <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='dark';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
   <!-- MM_THEME -->
   <style>
@@ -494,8 +494,10 @@
     setupBackBtn.addEventListener('click', showStep1);
     const _fl = document.getElementById('forgotLink');
     if (_fl) _fl.addEventListener('click', doForgot);
-    passwordEl.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
-    usernameEl.addEventListener('keydown', e => { if (e.key === 'Enter') passwordEl.focus(); });
+    // Enter in either field submits, exactly like clicking Continue.
+    const submitOnEnter = e => { if (e.key === 'Enter') { e.preventDefault(); if (!loginBtn.disabled) doLogin(); } };
+    passwordEl.addEventListener('keydown', submitOnEnter);
+    usernameEl.addEventListener('keydown', submitOnEnter);
     totpEl.addEventListener('keydown', e => { if (e.key === 'Enter') doTotp(); });
     setupTotpEl.addEventListener('keydown', e => { if (e.key === 'Enter') doSetup(); });
 
