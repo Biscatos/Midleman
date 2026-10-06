@@ -443,6 +443,37 @@ function shortLogin(login: string): string {
     return l;
 }
 
+/** Username Midleman already knows for an email in this directory (from an
+ *  earlier sign-in), so people can type their email even when it differs
+ *  from their account name / UPN. */
+function knownUsernameForEmail(cfgId: number, email: string): string | null {
+    try {
+        const db = getAuthDb();
+        if (!db) return null;
+        const row = db.prepare(
+            "SELECT username FROM proxy_users WHERE auth_source = 'ldap' AND ldap_config_id = $id AND lower(email) = lower($e) LIMIT 1"
+        ).get({ $id: cfgId, $e: email.trim() }) as { username?: string } | undefined;
+        return row?.username || null;
+    } catch {
+        return null;
+    }
+}
+
+/** Names to try binding with, best first, in 'user' mode.
+ *  `certain` = the name is known to belong to this person (stop after a wrong
+ *  password there, so a typo never costs more than one AD lockout attempt). */
+export function userBindCandidates(cfg: LdapConfig, login: string): { name: string; certain: boolean }[] {
+    const l = login.trim();
+    if (!l.includes('@') || l.includes('\\')) return [{ name: userBindName(cfg, l), certain: false }];
+    const out: { name: string; certain: boolean }[] = [];
+    const add = (name: string, certain: boolean) => { if (name && !out.some(c => c.name.toLowerCase() === name.toLowerCase())) out.push({ name, certain }); };
+    const known = knownUsernameForEmail(cfg.id, l);
+    if (known) add(userBindName(cfg, known), true);
+    add(l, false);                                   // the email may be the UPN itself
+    if (cfg.upnSuffix) add(`${l.split('@')[0]}@${cfg.upnSuffix}`, false); // local part as the account name
+    return out;
+}
+
 function newClient(cfg: LdapConfig): Client {
     return new Client({
         url: cfg.url,
@@ -621,23 +652,31 @@ async function authenticateWithUserBind(cfg: LdapConfig, login: string, password
         if (cfg.startTls && cfg.url.startsWith('ldap:')) {
             await client.startTLS({ rejectUnauthorized: cfg.tlsVerify });
         }
-        try {
-            await client.bind(userBindName(cfg, login), password);
-        } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            if (isInvalidCredentials(err)) return { ok: false, reason: 'invalid_credentials', detail: msg };
-            return { ok: false, reason: 'server_error', detail: 'user bind failed: ' + msg };
+        let boundAs = '';
+        let lastMsg = '';
+        for (const cand of userBindCandidates(cfg, login)) {
+            try {
+                await client.bind(cand.name, password);
+                boundAs = cand.name;
+                break;
+            } catch (err) {
+                lastMsg = err instanceof Error ? err.message : String(err);
+                if (!isInvalidCredentials(err)) return { ok: false, reason: 'server_error', detail: 'user bind failed: ' + lastMsg };
+                if (cand.certain) break; // known account: a wrong password, not a wrong name
+            }
         }
-        const filter = cfg.userFilter.replace(/\{login\}/g, escapeLdapFilter(shortLogin(login)));
+        if (!boundAs) return { ok: false, reason: 'invalid_credentials', detail: lastMsg };
+
+        const attrs = [cfg.usernameAttr, cfg.emailAttr, cfg.fullnameAttr, cfg.groupAttr, 'dn'];
+        const find = async (filter: string) => (await client.search(cfg.baseDn, { scope: 'sub', filter, attributes: attrs, sizeLimit: 2 })).searchEntries || [];
         let entries: any[];
         try {
-            const res = await client.search(cfg.baseDn, {
-                scope: 'sub',
-                filter,
-                attributes: [cfg.usernameAttr, cfg.emailAttr, cfg.fullnameAttr, cfg.groupAttr, 'dn'],
-                sizeLimit: 2,
-            });
-            entries = res.searchEntries || [];
+            entries = await find(cfg.userFilter.replace(/\{login\}/g, escapeLdapFilter(shortLogin(boundAs))));
+            if (entries.length === 0) {
+                // Signed in with an email / UPN that differs from the account name:
+                // find the entry by what was actually used.
+                entries = await find(`(|(userPrincipalName=${escapeLdapFilter(boundAs)})(mail=${escapeLdapFilter(login.trim())}))`);
+            }
         } catch (err) {
             return { ok: false, reason: 'server_error', detail: 'search failed: ' + (err instanceof Error ? err.message : String(err)) };
         }
@@ -733,14 +772,21 @@ export async function testLdapConfig(cfg: LdapConfig, sampleLogin?: string, samp
                 const ok = steps.every(s => s.ok);
                 return { ok, durationMs: Date.now() - started, steps };
             }
-            try {
-                await client.bind(userBindName(cfg, sampleLogin), samplePassword);
-                steps.push({ step: 'user_bind', ok: true, detail: 'bound as ' + userBindName(cfg, sampleLogin) });
-            } catch (err) {
-                steps.push({ step: 'user_bind', ok: false, detail: isInvalidCredentials(err) ? 'wrong login or password, or the account is locked/expired' : (err instanceof Error ? err.message : String(err)) });
+            let boundAs = '';
+            let failDetail = '';
+            for (const cand of userBindCandidates(cfg, sampleLogin)) {
+                try { await client.bind(cand.name, samplePassword); boundAs = cand.name; break; }
+                catch (err) {
+                    failDetail = isInvalidCredentials(err) ? 'wrong login or password, or the account is locked/expired' : (err instanceof Error ? err.message : String(err));
+                    if (!isInvalidCredentials(err) || cand.certain) break;
+                }
+            }
+            if (!boundAs) {
+                steps.push({ step: 'user_bind', ok: false, detail: failDetail });
                 return { ok: false, durationMs: Date.now() - started, steps };
             }
-            sampleLogin = shortLogin(sampleLogin);
+            steps.push({ step: 'user_bind', ok: true, detail: 'bound as ' + boundAs });
+            sampleLogin = shortLogin(boundAs);
         } else if (cfg.bindDn) {
             try {
                 await client.bind(cfg.bindDn, getBindPassword(cfg.id));
