@@ -110,6 +110,7 @@ async function startApp(username) {
   const topbarAvatar = document.getElementById('topbarAvatar');
   if (topbarAvatar) topbarAvatar.textContent = (loggedInUser || '?').charAt(0).toUpperCase();
   document.querySelector('.app').style.display = 'grid';
+  document.body.classList.add('app-shell'); // the content panel is the only scroller
   
   // Re-apply theme icon now that the topbar button is in the DOM
   updateThemeIcon(getThemePref());
@@ -169,12 +170,14 @@ window.addEventListener('load', async function init() {
     if (status.needsSetup) {
       document.getElementById('authSetup').classList.add('active');
       document.querySelector('.app').style.display = 'none';
+      document.body.classList.remove('app-shell');
       return;
     }
 
     if (!status.loggedIn) {
       document.getElementById('authLogin').classList.add('active');
       document.querySelector('.app').style.display = 'none';
+      document.body.classList.remove('app-shell');
       return;
     }
 
@@ -850,3 +853,37 @@ function mmStickyToolbars() {
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mmStickyToolbars);
 else mmStickyToolbars();
+
+// ─── Pagination only when there is more than one page ───────────────────────
+// Every list pager is a Prev/Next pair (ids ending in Prev / Next) that the
+// page code enables or disables. When both are disabled there is nothing to
+// page through, so the whole pager row is hidden. A button busy with a fetch
+// (aria-busy) still counts as enabled so the row never flickers.
+function mmSyncPager(prev) {
+  const next = document.getElementById(prev.id.replace(/Prev$/, 'Next'));
+  if (!next) return;
+  const off = b => b.disabled && !b.hasAttribute('aria-busy');
+  const group = prev.parentElement;
+  const row = group.parentElement && group.parentElement.children.length <= 2 ? group.parentElement : group;
+  row.style.display = off(prev) && off(next) ? 'none' : '';
+}
+function mmWatchPagers() {
+  const prevs = [...document.querySelectorAll('button[id$="Prev"]')].filter(b => document.getElementById(b.id.replace(/Prev$/, 'Next')));
+  const mo = new MutationObserver(muts => {
+    const seen = new Set();
+    for (const m of muts) {
+      const id = m.target.id.replace(/Next$/, 'Prev');
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const p = document.getElementById(id);
+      if (p) mmSyncPager(p);
+    }
+  });
+  prevs.forEach(p => {
+    mmSyncPager(p);
+    mo.observe(p, { attributes: true, attributeFilter: ['disabled', 'aria-busy'] });
+    mo.observe(document.getElementById(p.id.replace(/Prev$/, 'Next')), { attributes: true, attributeFilter: ['disabled', 'aria-busy'] });
+  });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mmWatchPagers);
+else mmWatchPagers();
