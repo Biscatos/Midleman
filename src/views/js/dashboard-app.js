@@ -813,3 +813,36 @@ function mmCopyFrom(btn) {
     : (btn.closest('.rdm-code-block, .docs-codeblock')?.querySelector('pre')?.textContent || '');
   return mmCopy(text, btn);
 }
+
+
+// ─── Sticky page toolbars ───────────────────────────────────────────────────
+// On list pages the title and the filter bar stay pinned while the table
+// scrolls: the page header and the filter bar that follows it are wrapped in
+// one sticky block (CSS: .page-sticky).
+function mmStickyToolbars() {
+  document.querySelectorAll('.page > .page-header').forEach(h => {
+    const bar = h.nextElementSibling;
+    if (!bar || !bar.classList.contains('mm-filterbar') || h.parentElement.classList.contains('page-sticky')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'page-sticky';
+    h.before(wrap);
+    wrap.append(h, bar);
+  });
+  // Table headers stick right under the toolbar: expose its height to CSS.
+  if (window.ResizeObserver) {
+    const ro = new ResizeObserver(entries => {
+      for (const en of entries) en.target.parentElement.style.setProperty('--page-sticky-h', Math.round(en.target.getBoundingClientRect().height) + 'px');
+    });
+    document.querySelectorAll('.page > .page-sticky').forEach(w => ro.observe(w));
+  }
+  const main = document.querySelector('.main');
+  if (!main) return;
+  const mark = () => {
+    const stuck = main.scrollTop > 8;
+    document.querySelectorAll('.page.active .page-sticky').forEach(w => w.classList.toggle('is-stuck', stuck));
+  };
+  main.addEventListener('scroll', mark, { passive: true });
+  mark();
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mmStickyToolbars);
+else mmStickyToolbars();

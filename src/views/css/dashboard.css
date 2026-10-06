@@ -3554,3 +3554,54 @@ body.sidebar-collapsed .sidebar-collapse-btn { width: 22px; height: 22px; border
 .ldap-check.wz-label { text-transform: none !important; font: 400 12.5px var(--font-sans) !important; letter-spacing: 0 !important; color: var(--text) !important; }
 .ldap-check.wz-label .ldap-hint { color: var(--text3); }
 .wz-extra:empty { display: none; }
+
+/* ── Sticky page toolbar: title + filters stay visible while lists scroll ── */
+.page-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  margin: -22px -24px 14px;
+  padding: 22px 24px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid transparent;
+  transition: border-color .15s;
+}
+.page-sticky .page-header { margin-bottom: 14px; }
+.page-sticky .mm-filterbar { margin-bottom: 0; }
+.page-sticky.is-stuck { border-bottom-color: var(--border); }
+@media (max-width: 720px) {
+  .page-sticky { position: static; margin: 0 0 14px; padding: 0; background: none; }
+}
+
+/* ── Sticky table headers ──
+   Page tables: the column header pins under the sticky toolbar (or the top of
+   the page when there is none). A sticky cell only works when no ancestor up to
+   the scrolling .main is itself a scroll container, so on desktop widths the
+   card body drops its horizontal scroll; narrow screens keep it (and a header
+   that scrolls with the table). Tables inside their own scroll box (modals,
+   previews) pin to the top of that box. */
+@media (min-width: 1100px) {
+  .page .card > .card-body[style*="overflow"]:has(> table) { overflow: visible !important; }
+  .page .card > .card-body:has(> table) > table > thead th {
+    position: sticky;
+    top: var(--page-sticky-h, 0px);
+    z-index: 5;
+  }
+}
+div[style*="overflow:auto"] > table > thead th,
+div[style*="overflow-y:auto"] > table > thead th,
+div[style*="max-height"] > table > thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+/* Sticky cells lose collapsed borders; draw the header's bottom hairline as a
+   1px background layer instead (no shadows). */
+.page table > thead th,
+div[style*="overflow"] > table > thead th {
+  background-color: var(--table-head) !important;
+  background-image: linear-gradient(var(--border), var(--border)) !important;
+  background-size: 100% 1px !important;
+  background-position: bottom left !important;
+  background-repeat: no-repeat !important;
+}
