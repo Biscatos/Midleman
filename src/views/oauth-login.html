@@ -51,6 +51,18 @@
     input:focus { border-color: var(--accent); }
     input::placeholder { color: var(--text3); }
     .totp-input { text-align: center; font: 500 20px var(--font-mono); letter-spacing: 10px; }
+    .otp { display: flex; justify-content: center; gap: 8px; margin-top: 6px; }
+    .otp input {
+      width: 46px; height: 54px; padding: 0; text-align: center;
+      font: 500 22px var(--font-mono); color: var(--text);
+      background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius-sm);
+      caret-color: var(--accent); transition: border-color .15s, background .15s;
+    }
+    .otp input:focus { outline: none; border-color: var(--accent); background: var(--surface); }
+    .otp input.filled { border-color: var(--accent-bdr); }
+    .otp .otp-gap { width: 6px; }
+    .otp.is-error input { border-color: var(--red-bdr); }
+    @media (max-width: 380px) { .otp { gap: 6px; } .otp input { width: 40px; height: 50px; font-size: 20px; } }
 
     button.primary, button.retry, .consent-foot button {
       width: 100%; height: var(--control-h-lg); margin-top: 20px;
@@ -128,9 +140,9 @@
 
   <div class="card mm-frame">
     <div class="handshake" aria-hidden="true">
-      <span class="app-logo"><span class="app-initials">{{CLIENT_INITIALS}}</span><img src="{{CLIENT_LOGO_URL}}" alt="" referrerpolicy="no-referrer" onerror="this.remove()"></span>
-      <svg class="handshake-line" viewBox="0 0 44 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="3 4"><path d="M2 6h40"/></svg>
       <span class="mm-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12h6.5"/><circle cx="12" cy="12" r="3.3"/><path d="M15 10.4 21.5 5.5"/><path d="M15.4 12H22"/><path d="M15 13.6 21.5 18.5"/></svg></span>
+      <svg class="handshake-line" viewBox="0 0 44 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="3 4"><path d="M2 6h40"/></svg>
+      <span class="app-logo"><span class="app-initials">{{CLIENT_INITIALS}}</span><img src="{{CLIENT_LOGO_URL}}" alt="" referrerpolicy="no-referrer" onerror="this.remove()"></span>
     </div>
     <h1 id="heading">Sign in</h1>
     <p class="ctx"><span id="ctxPrefix">to continue to</span> <strong>{{CLIENT_NAME}}</strong><span class="host">{{CLIENT_HOST}}</span></p>
@@ -517,6 +529,93 @@
         passwordEl.disabled = false;
         usernameEl.focus();
       });
+    })();
+  </script>
+  <script>
+    // One box per digit for every 6-digit code field. The original input stays
+    // (hidden) as the single source of truth, so the page logic is unchanged:
+    // boxes write its value, a cleared value clears the boxes, and a complete
+    // code submits through the input's existing Enter handler.
+    (function () {
+      function enhance(hidden) {
+        if (!hidden || hidden.dataset.otp) return;
+        hidden.dataset.otp = '1';
+        const n = 6;
+        const wrap = document.createElement('div');
+        wrap.className = 'otp';
+        wrap.setAttribute('role', 'group');
+        wrap.setAttribute('aria-label', (document.querySelector('label[for="' + hidden.id + '"]') || {}).textContent || 'Verification code');
+        const boxes = [];
+        for (let i = 0; i < n; i++) {
+          if (i === 3) { const g = document.createElement('span'); g.className = 'otp-gap'; g.setAttribute('aria-hidden', 'true'); wrap.appendChild(g); }
+          const b = document.createElement('input');
+          b.type = 'text';
+          b.inputMode = 'numeric';
+          b.autocomplete = i === 0 ? 'one-time-code' : 'off';
+          b.maxLength = n; // lets paste / OTP autofill land in one box, then spread
+          b.setAttribute('aria-label', 'Digit ' + (i + 1));
+          boxes.push(b);
+          wrap.appendChild(b);
+        }
+        hidden.style.display = 'none';
+        hidden.after(wrap);
+
+        const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+        let lastSubmitted = '';
+        const paint = (v) => boxes.forEach((b, i) => { b.value = v[i] || ''; b.classList.toggle('filled', !!v[i]); });
+        Object.defineProperty(hidden, 'value', {
+          configurable: true,
+          get() { return proto.get.call(this); },
+          set(v) {
+            proto.set.call(this, v);
+            const clean = String(v || '').replace(/\D/g, '').slice(0, n);
+            paint(clean);
+            if (!clean) { lastSubmitted = ''; wrap.classList.toggle('is-error', false); }
+          },
+        });
+        hidden.focus = () => { const k = boxes.findIndex(b => !b.value); (boxes[k < 0 ? n - 1 : k]).focus(); };
+
+        const sync = () => {
+          const v = boxes.map(b => b.value).join('');
+          proto.set.call(hidden, v);
+          boxes.forEach(b => b.classList.toggle('filled', !!b.value));
+          if (v.length === n && v !== lastSubmitted) {
+            lastSubmitted = v;
+            setTimeout(() => hidden.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })), 60);
+          }
+        };
+        const spread = (from, digits) => {
+          let i = from;
+          for (const d of digits) { if (i >= n) break; boxes[i].value = d; i++; }
+          boxes[Math.min(i, n - 1)].focus();
+          sync();
+        };
+
+        boxes.forEach((b, i) => {
+          b.addEventListener('input', () => {
+            const digits = b.value.replace(/\D/g, '');
+            if (digits.length > 1) { b.value = ''; spread(i, digits); return; }
+            b.value = digits;
+            if (digits && i < n - 1) boxes[i + 1].focus();
+            sync();
+          });
+          b.addEventListener('keydown', (e) => {
+            if (e.key === 'Backspace' && !b.value && i > 0) { boxes[i - 1].value = ''; boxes[i - 1].focus(); sync(); e.preventDefault(); }
+            else if (e.key === 'ArrowLeft' && i > 0) { boxes[i - 1].focus(); e.preventDefault(); }
+            else if (e.key === 'ArrowRight' && i < n - 1) { boxes[i + 1].focus(); e.preventDefault(); }
+            else if (e.key === 'Enter') { e.preventDefault(); hidden.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); }
+          });
+          b.addEventListener('focus', () => b.select());
+          b.addEventListener('paste', (e) => {
+            const t = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '');
+            if (!t) return;
+            e.preventDefault();
+            spread(t.length >= n ? 0 : i, t);
+          });
+        });
+        paint(String(proto.get.call(hidden) || ''));
+      }
+      ['totp', 'setupTotp'].forEach(id => enhance(document.getElementById(id)));
     })();
   </script>
 </body>
