@@ -737,60 +737,57 @@
 
     <!-- ═══ WEBHOOK DESTINATIONS (drill-in from a webhook's row) ═══ -->
     <div class="page" id="pageWebhookDestinations">
-      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
-        <div>
-          <button class="btn btn-sm" onclick="navigate('webhooks')" style="margin-bottom:10px;padding:4px 10px;font-size:12px;display:flex;align-items:center;gap:4px">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-            Back to Webhooks
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
+        <div style="min-width:0">
+          <button class="wd-back" onclick="navigate('webhooks')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            Webhooks
           </button>
           <h2 id="wdPageTitle">Destinations</h2>
           <p id="wdPageSubtitle">Fan-out destinations configured for this webhook.</p>
         </div>
-        <div style="display:flex;gap:8px;flex-shrink:0">
+        <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+          <span id="wdDirty" class="wd-dirty" style="display:none">● Unsaved changes</span>
           <button class="btn btn-sm" onclick="document.getElementById('webhookModal').style.display='flex'">Webhook settings</button>
-          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Saving…', async () => { await saveWebhook(); })">Save Webhook</button>
+          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Saving…', async () => { await saveWebhook(); })">Save webhook</button>
         </div>
       </div>
 
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-body" style="padding:12px 16px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <span style="font-size:12.5px;font-weight:600">Test Payload (optional)</span>
-            <div style="display:flex;gap:6px">
-              <button class="btn btn-sm" onclick="toggleTestPayload()" style="padding:2px 8px;font-size:11px" tabindex="-1">Show/Hide</button>
-              <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchRecentWebhookPayload(); })" style="padding:2px 8px;font-size:10px" tabindex="-1">Fetch recent request</button>
-              <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchAndMergeWebhookPayloads(); })" style="padding:2px 8px;font-size:10px" tabindex="-1" title="Analyzes the last 50 payloads and builds a unified schema of every field seen">Fetch &amp; merge (50)</button>
-            </div>
-          </div>
-          <div id="wTestPayloadContainer" style="display:none">
-            <textarea id="wTestPayload" rows="3" placeholder='{"event":"order.created", "data": {"id": 123}}'
-              style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;color:var(--text);font-family:monospace;font-size:11px;resize:vertical"
-              oninput="mergedSchemaStats=null;updateAllPreviews()"></textarea>
-            <div style="font-size:10px;color:var(--text3);margin-top:4px">Used to preview templates, filters, and field suggestions (intellisense) while editing each destination.</div>
-          </div>
+      <div class="wd-payload">
+        <div class="wd-payload-head">
+          <span class="wd-payload-title">Test payload</span>
+          <span id="wTestPayloadSource" class="mm-chip">Not set</span>
+          <span class="wd-sec-sub wd-payload-hint">Used to preview URLs, conditions and body templates.</span>
+          <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchRecentWebhookPayload(); })" tabindex="-1">Fetch recent request</button>
+          <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchAndMergeWebhookPayloads(); })" tabindex="-1" title="Analyzes the last 50 payloads and merges their fields">Merge last 50</button>
+          <button class="btn btn-sm" onclick="toggleTestPayload()" tabindex="-1">Show / hide</button>
+        </div>
+        <div id="wTestPayloadContainer" style="display:none">
+          <textarea id="wTestPayload" rows="6" placeholder='{"event":"order.created", "data": {"id": 123}}'
+            oninput="mergedSchemaStats=null;_wdSetPayloadSource(this.value.trim() ? 'Edited' : 'Not set');updateAllPreviews()"></textarea>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-body" style="padding:12px 16px 0">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <span id="wDestinationsSummary" style="font-size:12.5px;color:var(--text2);font-weight:600">No destinations configured</span>
-            <button class="btn btn-sm" onclick="addWebhookTarget(''); openDestinationEditor(webhookTargetState.length - 1)" style="padding:4px 10px;font-size:12px">+ Add destination</button>
-          </div>
+        <div class="wd-list-toolbar">
+          <span id="wdCountLine" class="wd-sec-sub">No destinations yet</span>
+          <span id="wDestinationsSummary" style="display:none">No destinations configured</span>
+          <button class="btn btn-sm wd-add-dest" onclick="addWebhookTarget(''); openDestinationEditor(webhookTargetState.length - 1)">+ Add destination</button>
         </div>
         <div class="card-body" style="padding:0;overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <table class="wd-table" style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
-              <tr style="background:var(--surface2);text-align:left">
-                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">URL</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Type</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Filter</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Retry</th>
-                <th style="padding:10px 12px"></th>
+              <tr style="text-align:left">
+                <th style="padding:8px 12px">On</th>
+                <th style="padding:8px">Destination</th>
+                <th style="padding:8px">Sends when</th>
+                <th style="padding:8px">Retry</th>
+                <th style="padding:8px">Test payload</th>
+                <th style="padding:8px 12px"></th>
               </tr>
             </thead>
             <tbody id="wDestinationsContainer">
-              <tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">No destinations.</td></tr>
+              <tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No destinations.</td></tr>
             </tbody>
           </table>
         </div>
@@ -3289,17 +3286,32 @@
 </div>
 
 <!-- Destination Edit Modal (single destination — opened from the Destinations Page) -->
-<div id="destinationEditModal"
-  style="display:none;position:fixed;inset:0;z-index:280;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
-  <div class="mm-dialog" style="max-width:720px;width:100%;max-height:90vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)">
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border);flex-shrink:0">
-      <h3 id="destinationEditTitle" style="font-size:15px;font-weight:600">Edit destination</h3>
-      <button onclick="closeDestinationEditor()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
+<div id="destinationEditModal" role="dialog" aria-modal="true" aria-labelledby="destinationEditTitle" onclick="if(event.target===this)closeDestinationEditor()">
+  <div class="wd-dialog">
+    <header class="wd-dialog-head">
+      <div style="min-width:0;flex:1">
+        <div id="destinationEditEyebrow" class="wd-eyebrow">Destination</div>
+        <h3 id="destinationEditTitle" class="wd-dialog-title">Edit destination</h3>
+      </div>
+      <label class="wd-switch-label"><input id="destinationEditEnabled" class="mm-switch" type="checkbox" checked onchange="setDestinationEnabledFromEditor(this.checked)"> Enabled</label>
+      <button type="button" class="wd-close" onclick="closeDestinationEditor()" aria-label="Close">&times;</button>
+    </header>
+    <div class="wd-dialog-body">
+      <div id="destinationEditContent" class="wd-form"></div>
+      <aside class="wd-preview" aria-label="Preview">
+        <div class="wd-preview-head">
+          <h4>Preview</h4>
+          <span id="wdPreviewSource" class="wd-sec-sub"></span>
+          <button type="button" class="wd-link-btn" onclick="editTestPayloadFromEditor()">Change</button>
+        </div>
+        <div id="destinationEditPreview" class="wd-preview-body"></div>
+      </aside>
     </div>
-    <div id="destinationEditContent" style="padding:18px 20px;overflow-y:auto;flex:1"></div>
-    <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid var(--border);flex-shrink:0">
+    <footer class="wd-dialog-foot">
+      <button type="button" class="btn btn-sm wd-btn-danger" onclick="removeDestinationFromEditor()">Delete destination</button>
+      <span class="wd-sec-sub" style="flex:1">Changes are kept on this page and saved with <strong>Save webhook</strong>.</span>
       <button class="btn btn-primary btn-sm" onclick="closeDestinationEditor()">Done</button>
-    </div>
+    </footer>
   </div>
 </div>
 

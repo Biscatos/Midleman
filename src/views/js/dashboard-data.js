@@ -327,7 +327,12 @@ async function fetchProfiles() {
     filterProfiles();
     if (_allInvites.length) renderInvites(_allInvites);
     document.getElementById('navProfileBadge').textContent = _allProfiles.length;
-    document.getElementById('ovProfileNames').textContent = _allProfiles.map(p => p.name).join(', ') || 'none';
+    // A short status line like the other stat cards — never the list of names.
+    const running = _allProfiles.filter(p => p.running).length;
+    const stopped = _allProfiles.length - running;
+    document.getElementById('ovProfileNames').textContent = _allProfiles.length === 0
+      ? 'none configured'
+      : running + ' running' + (stopped ? ' · ' + stopped + ' stopped' : '');
     // Toggle "Import from NPM" button based on integration state, and preload
     // the NPM hosts list so we can show "possible NPM" hints next to unlinked
     // profiles whose forward target matches a known NPM proxy host.
@@ -3744,7 +3749,7 @@ function updateAllPreviews() {
   let payloadObj = null;
   const tpEl = document.getElementById('wTestPayload');
   
-  if (showTestPayload && jsonStr) {
+  if (jsonStr) {
     try { payloadObj = JSON.parse(jsonStr); tpEl.style.borderColor = 'var(--accent)'; }
     catch { tpEl.style.borderColor = 'var(--red)'; }
   } else {
@@ -3754,8 +3759,8 @@ function updateAllPreviews() {
   webhookTargetState.forEach((t, i) => {
     const pUrl = document.getElementById(`previewUrl_${i}`);
     if (pUrl) {
-        if (showTestPayload && payloadObj) {
-            pUrl.textContent = 'Evaluates to: ' + renderTemplateJS(t.url, payloadObj);
+        if (payloadObj) {
+            pUrl.textContent = '→ ' + renderTemplateJS(t.url, payloadObj);
             pUrl.style.display = 'block';
         } else {
             pUrl.style.display = 'none';
@@ -3767,9 +3772,10 @@ function updateAllPreviews() {
         if (!pf) return;
         if (!(showTestPayload && payloadObj && c.path.trim())) { pf.style.display = 'none'; return; }
         const { actual, found, matches } = evaluateFilterConditionJS(c, payloadObj);
-        const sample = found ? (typeof actual === 'object' ? JSON.stringify(actual) : String(actual)) : '(path not found in test payload)';
-        pf.textContent = (matches ? '✓ matches — ' : '✗ no match — ') + `payload value: ${sample}`;
-        pf.style.color = matches ? 'var(--green)' : 'var(--red)';
+        const sample = found ? (typeof actual === 'object' ? JSON.stringify(actual) : String(actual)) : '(not in payload)';
+        pf.textContent = matches ? '✓ matches' : '✗ ' + sample;
+        pf.title = (matches ? 'Matches' : 'No match') + ' — test payload value: ' + sample;
+        pf.style.color = matches ? 'var(--green)' : 'var(--orange)';
         pf.style.display = 'block';
     });
 
@@ -3777,8 +3783,8 @@ function updateAllPreviews() {
       (t.customHeaders || []).forEach((h, hIndex) => {
           const ph = document.getElementById(`previewHeader_${i}_${hIndex}`);
           if (ph) {
-              if (showTestPayload && payloadObj && h.value) {
-                  ph.textContent = '= ' + renderTemplateJS(h.value, payloadObj);
+              if (payloadObj && h.value) {
+                  ph.textContent = '= ' + (_wdSecretHeader(h.key) ? '••••••••' : renderTemplateJS(h.value, payloadObj));
                   ph.style.display = 'inline-block';
               } else {
                   ph.style.display = 'none';
@@ -3788,7 +3794,7 @@ function updateAllPreviews() {
       
       const pBody = document.getElementById(`previewBody_${i}`);
       if (pBody) {
-          if (showTestPayload && payloadObj) {
+          if (payloadObj) {
               let outBody = renderTemplateJS(t.bodyTemplate, payloadObj);
               if (!outBody.trim()) {
                   pBody.textContent = 'Evaluates to: (Original Payload Placeholder)';
@@ -3807,7 +3813,21 @@ function updateAllPreviews() {
           }
       }
     }
+    const pv = document.getElementById(`previewVerdict_${i}`);
+    if (pv) {
+      const ev = _wdEvaluate(t, payloadObj);
+      if (!payloadObj || !ev.total) { pv.textContent = ''; }
+      else if (ev.deliver) { pv.textContent = `Test payload: would be delivered (${ev.matched} of ${ev.total} conditions match)`; pv.style.color = 'var(--green)'; }
+      else { pv.textContent = `Test payload: skipped (${ev.total - ev.matched} of ${ev.total} conditions do not match)`; pv.style.color = 'var(--orange)'; }
+    }
   });
+  if (editingDestinationIndex >= 0) {
+    const t = webhookTargetState[editingDestinationIndex];
+    const title = document.getElementById('destinationEditTitle');
+    if (t && title) title.innerHTML = (t.type === 'custom' ? `<span class="wd-method">${esc(t.method || 'POST')}</span> ` : '') + (t.url ? esc(t.url) : '<span class="wd-muted">New destination</span>');
+    renderDestinationPreview();
+  }
+  renderWebhookTargets();
 }
 
 // Tracks how often each path appeared across the merged sample. Path -> { seen, total }.
@@ -3888,6 +3908,7 @@ async function fetchAndMergeWebhookPayloads() {
         document.getElementById('wTestPayload').value = pretty;
         if (!showTestPayload) toggleTestPayload();
         else updateAllPreviews();
+        _wdSetPayloadSource(`Merged from ${parsed} payloads`);
         toast(`Merged ${parsed} payloads — ${pathCounts.size} unique fields`);
     } catch { toast('Error merging payloads', 'error'); }
 }
@@ -3907,6 +3928,8 @@ async function fetchRecentWebhookPayload() {
             document.getElementById('wTestPayload').value = bd;
             if (!showTestPayload) toggleTestPayload();
             else updateAllPreviews();
+            const when = d.requests[0].timestamp ? new Date(String(d.requests[0].timestamp).replace(' ', 'T') + 'Z') : null;
+            _wdSetPayloadSource('Last received' + (when && !isNaN(when) ? ' · ' + when.toLocaleTimeString() : ''));
             toast('Loaded payload from recent request');
         } else {
             toast('No recent webhook payload found', 'warning');
@@ -4083,39 +4106,115 @@ function updateWebhookTargetHeader(index, hIndex, field, val) {
   updateAllPreviews();
 }
 
+// ─── Destinations: shared helpers (list + editor) ───────────────────────────
+
+/** The page's test payload as an object, or null when empty / not JSON. */
+function _wdPayload() {
+  const el = document.getElementById('wTestPayload');
+  const raw = el ? el.value.trim() : '';
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+/** How a destination's conditions fare against a payload. */
+function _wdEvaluate(t, payload) {
+  const active = (t.filter || []).filter(c => c.path && c.path.trim());
+  if (!active.length) return { total: 0, matched: 0, deliver: true };
+  if (!payload) return { total: active.length, matched: 0, deliver: null };
+  const matched = active.filter(c => evaluateFilterConditionJS(c, payload).matches).length;
+  const deliver = t.filterMode === 'any' ? matched > 0 : matched === active.length;
+  return { total: active.length, matched, deliver };
+}
+
+const _WD_OP_LABEL = { eq: '=', neq: '≠', contains: 'contains', in: 'in', exists: 'exists', notExists: 'does not exist' };
+function _wdConditionText(c) {
+  const op = _WD_OP_LABEL[c.op] || c.op;
+  return c.op === 'exists' || c.op === 'notExists' ? `${c.path} ${op}` : `${c.path} ${op} ${c.value}`;
+}
+
+function _wdFmtMs(ms) {
+  if (ms < 1000) return ms + 'ms';
+  const s = ms / 1000;
+  if (s < 60) return (Number.isInteger(s) ? s : s.toFixed(1)) + 's';
+  const m = s / 60;
+  return (Number.isInteger(m) ? m : m.toFixed(1)) + 'min';
+}
+function _wdRetrySchedule(r) {
+  const max = Math.max(1, Math.min(20, +(r && r.maxRetries) || 3));
+  const base = Math.max(100, +(r && r.retryDelayMs) || 1000);
+  const exp = !r || r.backoff !== 'fixed';
+  const steps = [];
+  for (let k = 0; k < Math.min(max, 8); k++) steps.push(_wdFmtMs(exp ? base * Math.pow(2, k) : base));
+  return steps.join(' · ') + (max > 8 ? ' · …' : '') + ' → dead-letter queue';
+}
+
+const _wdSecretHeader = k => /auth|token|secret|key|password|signature/i.test(k || '');
+
+function _wdSyncDirty() {
+  const el = document.getElementById('wdDirty');
+  if (el) el.style.display = webhookFormDirty ? '' : 'none';
+}
+
+function _wdSetPayloadSource(label) {
+  const el = document.getElementById('wTestPayloadSource');
+  if (!el) return;
+  el.textContent = label;
+  el.className = 'mm-chip ' + (label === 'Not set' ? '' : 'ok');
+}
+
+// ─── Destinations list ──────────────────────────────────────────────────────
+
 function renderWebhookTargets() {
   const container = document.getElementById('wDestinationsContainer');
+  _wdSyncDirty();
+  const countEl = document.getElementById('wdCountLine');
+  const enabledN = webhookTargetState.filter(t => t.enabled !== false).length;
+  if (countEl) countEl.textContent = webhookTargetState.length
+    ? `${webhookTargetState.length} destination${webhookTargetState.length === 1 ? '' : 's'} · ${enabledN} enabled`
+    : 'No destinations yet';
   if (webhookTargetState.length === 0) {
-    container.innerHTML = '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">No destinations yet. Click "+ Add destination".</td></tr>';
+    container.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No destinations yet. Click "+ Add destination".</td></tr>';
     return;
   }
-
-  const badge = (label, accent) => `<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:${accent ? 'var(--accent-bg)' : 'var(--surface2)'};color:${accent ? 'var(--accent)' : 'var(--text3)'};border:1px solid ${accent ? 'var(--accent-bdr)' : 'var(--border)'};white-space:nowrap">${label}</span>`;
+  const payload = _wdPayload();
+  const chip = (label, kind) => `<span class="mm-chip${kind ? ' ' + kind : ''}">${label}</span>`;
 
   container.innerHTML = webhookTargetState.map((t, i) => {
-    const activeFilters = (t.filter || []).filter(c => c.path.trim());
-    const typeBadges = [
-      badge(t.type === 'custom' ? esc(t.method || 'POST') : 'Basic'),
-      t.customBody && t.bodyTemplate ? badge('Body') : '',
-    ].filter(Boolean).join(' ');
-    const retryBadges = [
-      t.retryOpen ? badge('Override') : '',
-      t.persistentRetryOpen ? badge('Persistent', true) : '',
-    ].filter(Boolean).join(' ') || '<span style="color:var(--text3);font-size:11px">Default</span>';
-
     const on = t.enabled !== false;
-    const toggle = `<label title="${on ? 'Enabled — click to pause deliveries to this destination' : 'Disabled — click to resume deliveries'}" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-right:8px;vertical-align:middle">
-        <input type="checkbox" ${on ? 'checked' : ''} onchange="toggleWebhookTargetEnabled(${i}, this.checked)" style="accent-color:var(--accent);cursor:pointer;margin:0">
-      </label>`;
+    const custom = t.type === 'custom';
+    const active = (t.filter || []).filter(c => c.path && c.path.trim());
+    const chips = [
+      chip(custom ? 'Custom request' : 'Forward as received'),
+      custom && t.customBody && t.bodyTemplate ? chip('Body template') : '',
+      custom && (t.customHeaders || []).filter(h => h.key).length ? chip(`${(t.customHeaders || []).filter(h => h.key).length} header${(t.customHeaders || []).filter(h => h.key).length === 1 ? '' : 's'}`) : '',
+      custom && t.forwardHeaders ? chip('Forwards headers') : '',
+    ].filter(Boolean).join('');
+    const when = active.length
+      ? `<div class="wd-cond">${esc(_wdConditionText(active[0]))}</div>${active.length > 1 ? `<div class="wd-sub">${t.filterMode === 'any' ? 'OR' : 'AND'} ${active.length - 1} more</div>` : ''}`
+      : '<div class="wd-cond wd-muted">Always</div><div class="wd-sub">No conditions</div>';
+    const retry = t.persistentRetryOpen ? chip('Persistent', 'warn')
+      : t.retryOpen ? chip(`Override · ${t.retry?.maxRetries ?? 3}×`, 'acc')
+      : '<span class="wd-muted">Webhook default</span>';
+    let sample;
+    if (!on) sample = '<span class="wd-muted">Paused</span>';
+    else if (!payload) sample = '<span class="wd-muted">—</span>';
+    else {
+      const ev = _wdEvaluate(t, payload);
+      sample = ev.deliver ? '<span class="wd-ok">✓ Would send</span>' : '<span class="wd-skip">Skipped</span>';
+    }
     return `
-    <tr style="border-bottom:1px solid var(--border);transition:background 0.15s;${on ? '' : 'opacity:.55'}" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
-      <td style="padding:8px 12px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'SF Mono',Monaco,monospace;color:var(--text2)" title="${esc(t.url)}">${toggle}${t.url ? esc(t.url) : '<span style="color:var(--text3)">(no URL)</span>'}${on ? '' : ' ' + badge('Paused')}</td>
-      <td style="padding:8px">${typeBadges}</td>
-      <td style="padding:8px">${activeFilters.length ? badge(`${activeFilters.length} condition${activeFilters.length === 1 ? '' : 's'}`, true) : '<span style="color:var(--text3);font-size:11px">—</span>'}</td>
-      <td style="padding:8px">${retryBadges}</td>
-      <td style="padding:8px 12px;text-align:right;white-space:nowrap">
-        <button class="btn btn-sm" onclick="openDestinationEditor(${i})" style="padding:3px 10px;font-size:11.5px">Edit</button>
-        <button onclick="removeWebhookTarget(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;padding:4px;display:inline-flex;align-items:center;border-radius:4px" onmouseenter="this.style.background='rgba(220,38,38,0.1)'" onmouseleave="this.style.background='none'" title="Remove destination">
+    <tr class="${on ? '' : 'wd-off'}">
+      <td style="padding:10px 12px;width:56px"><input type="checkbox" class="mm-switch" ${on ? 'checked' : ''} onchange="toggleWebhookTargetEnabled(${i}, this.checked)" aria-label="Destination enabled" title="${on ? 'Enabled — click to pause deliveries' : 'Paused — click to resume deliveries'}"></td>
+      <td style="padding:10px 8px;max-width:420px">
+        <div class="wd-url" title="${esc(t.url)}">${custom ? `<span class="wd-method">${esc(t.method || 'POST')}</span> ` : ''}${t.url ? esc(t.url) : '<span class="wd-muted">(no URL)</span>'}</div>
+        <div class="wd-chips">${chips}</div>
+      </td>
+      <td style="padding:10px 8px;max-width:280px">${when}</td>
+      <td style="padding:10px 8px">${retry}</td>
+      <td style="padding:10px 8px">${sample}</td>
+      <td style="padding:10px 12px;text-align:right;white-space:nowrap">
+        <button class="btn btn-sm" onclick="openDestinationEditor(${i})">Edit</button>
+        <button class="wd-icon-btn wd-danger" onclick="removeWebhookTarget(${i})" title="Remove destination" aria-label="Remove destination">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
         </button>
       </td>
@@ -4123,197 +4222,251 @@ function renderWebhookTargets() {
   }).join('');
 }
 
+// ─── Destination editor ─────────────────────────────────────────────────────
+
+function setWebhookTargetType(index, type) {
+  const t = webhookTargetState[index];
+  if (!t || t.type === type) return;
+  t.type = type;
+  webhookFormDirty = true;
+  renderDestinationEditor(index);
+}
+function setWebhookTargetBodyMode(index, template) {
+  const t = webhookTargetState[index];
+  if (!t || !!t.customBody === !!template) return;
+  t.customBody = !!template;
+  webhookFormDirty = true;
+  renderDestinationEditor(index);
+}
+function setWebhookTargetMatch(index, mode) {
+  const t = webhookTargetState[index];
+  if (!t || (t.filterMode === 'any') === (mode === 'any')) return;
+  t.filterMode = mode === 'any' ? 'any' : 'all';
+  webhookFormDirty = true;
+  renderDestinationEditor(index);
+}
+/** 'default' | 'override' | 'persistent' — the two flags stay mutually exclusive. */
+function setTargetRetryMode(index, mode) {
+  const t = webhookTargetState[index];
+  if (!t) return;
+  if (mode === 'override') {
+    if (!t.retryOpen) toggleTargetRetry(index);
+    return;
+  }
+  if (mode === 'persistent') {
+    if (!t.persistentRetryOpen) toggleTargetPersistentRetry(index);
+    return;
+  }
+  t.retryOpen = false;
+  t.persistentRetryOpen = false;
+  if (t.persistentRetry) t.persistentRetry.enabled = false;
+  webhookFormDirty = true;
+  renderDestinationEditor(index);
+}
+function setDestinationEnabledFromEditor(enabled) {
+  const i = editingDestinationIndex;
+  if (i < 0 || !webhookTargetState[i]) return;
+  webhookTargetState[i].enabled = !!enabled;
+  webhookFormDirty = true;
+  _wdSyncDirty();
+}
+async function removeDestinationFromEditor() {
+  if (editingDestinationIndex >= 0) await removeWebhookTarget(editingDestinationIndex);
+}
+/** "Change" in the preview: back to the page, test payload opened. */
+function editTestPayloadFromEditor() {
+  closeDestinationEditor();
+  if (!showTestPayload) toggleTestPayload();
+  const tp = document.getElementById('wTestPayload');
+  if (tp) { tp.focus(); tp.scrollIntoView({ block: 'center' }); }
+}
+
 function renderDestinationEditorMarkup(i) {
   const t = webhookTargetState[i];
   if (!t) return '';
+  const custom = t.type === 'custom';
+  const anyMode = t.filterMode === 'any';
+  const seg = (on, label, handler) => `<button type="button" role="radio" aria-checked="${on}" class="${on ? 'on' : ''}" onclick="${handler}">${label}</button>`;
+  const opts = (cur) => [['eq','equals'],['neq','not equals'],['contains','contains'],['in','is in (list)'],['exists','exists'],['notExists','does not exist']]
+    .map(([v, l]) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${l}</option>`).join('');
 
-  const headersHtml = (t.customHeaders || []).map((h, hIndex) => `
-      <div style="display:flex;flex-direction:column;gap:2px;margin-top:4px">
-          <div style="display:flex;gap:4px">
-            <input type="text" placeholder="Key" value="${esc(h.key)}" oninput="updateWebhookTargetHeader(${i}, ${hIndex}, 'key', this.value)" style="flex:1;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
-            <input type="text" placeholder="Value (Template Allowed)" value="${esc(h.value)}" oninput="updateWebhookTargetHeader(${i}, ${hIndex}, 'value', this.value)" style="flex:2;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
-            <button onclick="removeWebhookTargetHeader(${i}, ${hIndex})" tabindex="-1" style="background:none;border:none;color:var(--red);cursor:pointer;padding:0 4px" title="Remove Header">&times;</button>
-          </div>
-          <div id="previewHeader_${i}_${hIndex}" style="display:none;font-size:10px;color:var(--accent);margin-left:5px"></div>
-      </div>
-    `).join('');
+  const filterRows = (t.filter || []).map((c, f) => `
+      <div class="wd-cond-row">
+        <span class="wd-join">${f === 0 ? 'IF' : (anyMode ? 'OR' : 'AND')}</span>
+        <input type="text" placeholder="field, e.g. customer.tier" value="${esc(c.path)}"
+          oninput="updateWebhookTargetFilter(${i}, ${f}, 'path', this.value); renderFilterAutocomplete(this, ${i}, ${f})"
+          onfocus="renderFilterAutocomplete(this, ${i}, ${f})" onblur="setTimeout(hideFilterAutocomplete, 150)"
+          autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Field" class="wd-mono">
+        <select onchange="updateWebhookTargetFilter(${i}, ${f}, 'op', this.value)" aria-label="Operator">${opts(c.op)}</select>
+        ${(c.op !== 'exists' && c.op !== 'notExists')
+          ? `<input type="text" placeholder="${c.op === 'in' ? 'comma-separated values' : 'value'}" value="${esc(c.value)}" oninput="updateWebhookTargetFilter(${i}, ${f}, 'value', this.value)" aria-label="Value" class="wd-mono">`
+          : '<span></span>'}
+        <span id="previewFilter_${i}_${f}" class="wd-cond-eval"></span>
+        <button type="button" class="wd-icon-btn" onclick="removeWebhookTargetFilter(${i}, ${f})" title="Remove condition" aria-label="Remove condition">&times;</button>
+      </div>`).join('');
 
-  const filterHtml = (t.filter || []).map((c, fIndex) => `
-      <div style="display:flex;gap:4px;align-items:center;margin-top:4px">
-        <input type="text" placeholder="path (e.g. customer.tier)" value="${esc(c.path)}"
-          oninput="updateWebhookTargetFilter(${i}, ${fIndex}, 'path', this.value); renderFilterAutocomplete(this, ${i}, ${fIndex})"
-          onfocus="renderFilterAutocomplete(this, ${i}, ${fIndex})"
-          onblur="setTimeout(hideFilterAutocomplete, 150)"
-          autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-          style="flex:2;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
-        <select onchange="updateWebhookTargetFilter(${i}, ${fIndex}, 'op', this.value)" style="padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
-          <option value="eq" ${c.op === 'eq' ? 'selected' : ''}>equals</option>
-          <option value="neq" ${c.op === 'neq' ? 'selected' : ''}>not equals</option>
-          <option value="contains" ${c.op === 'contains' ? 'selected' : ''}>contains</option>
-          <option value="in" ${c.op === 'in' ? 'selected' : ''}>is in (list)</option>
-          <option value="exists" ${c.op === 'exists' ? 'selected' : ''}>exists</option>
-          <option value="notExists" ${c.op === 'notExists' ? 'selected' : ''}>does not exist</option>
-        </select>
-        ${(c.op !== 'exists' && c.op !== 'notExists') ? `<input type="text" placeholder="${c.op === 'in' ? 'comma-separated values' : 'value'}" value="${esc(c.value)}" oninput="updateWebhookTargetFilter(${i}, ${fIndex}, 'value', this.value)" style="flex:2;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">` : ''}
-        <button onclick="removeWebhookTargetFilter(${i}, ${fIndex})" tabindex="-1" style="background:none;border:none;color:var(--red);cursor:pointer;padding:0 4px" title="Remove condition">&times;</button>
-      </div>
-      <div id="previewFilter_${i}_${fIndex}" style="display:none;font-size:10px;margin-top:2px;margin-left:2px"></div>
-    `).join('');
+  const headerRows = (t.customHeaders || []).map((h, hI) => `
+      <div class="wd-hdr-row">
+        <input type="text" placeholder="Header" value="${esc(h.key)}" oninput="updateWebhookTargetHeader(${i}, ${hI}, 'key', this.value)" aria-label="Header name" class="wd-mono">
+        <div style="min-width:0">
+          <input type="text" placeholder="Value — templates allowed" value="${esc(h.value)}" oninput="updateWebhookTargetHeader(${i}, ${hI}, 'value', this.value)" aria-label="Header value" class="wd-mono" style="width:100%">
+          <div id="previewHeader_${i}_${hI}" class="wd-inline-preview" style="display:none"></div>
+        </div>
+        <button type="button" class="wd-icon-btn" onclick="removeWebhookTargetHeader(${i}, ${hI})" title="Remove header" aria-label="Remove header">&times;</button>
+      </div>`).join('');
+
+  const r = t.retry || {};
+  const p = t.persistentRetry || {};
+  const mode = t.persistentRetryOpen ? 'persistent' : (t.retryOpen ? 'override' : 'default');
+  const card = (m, title, sub, extraClass) => `<button type="button" role="radio" aria-checked="${mode === m}" class="wd-card${mode === m ? ' on' : ''}${extraClass ? ' ' + extraClass : ''}" onclick="setTargetRetryMode(${i}, '${m}')"><span class="wd-card-title">${title}</span><span class="wd-card-sub">${sub}</span></button>`;
+  let n = 0;
+  const num = () => String(++n).padStart(2, '0');
 
   return `
-    <div style="display:flex;flex-direction:column;gap:12px">
-      <div style="display:flex;gap:8px;align-items:center">
-        <select onchange="toggleWebhookTargetType(${i})" style="padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);font-size:12px;color:var(--text);outline:none">
-          <option value="basic" ${t.type === 'basic' ? 'selected' : ''}>Basic Forward</option>
-          <option value="custom" ${t.type === 'custom' ? 'selected' : ''}>Custom Action</option>
-        </select>
-        <button onclick="removeWebhookTarget(${i})" style="margin-left:auto;background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;display:inline-flex;align-items:center;gap:5px;padding:3px 6px;border-radius:4px" onmouseenter="this.style.background='rgba(220,38,38,0.1)'" onmouseleave="this.style.background='none'" title="Remove destination">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-          Remove destination
-        </button>
+    <section class="wd-sec">
+      <div class="wd-sec-head">
+        <span class="wd-num">${num()}</span><h4>Target</h4><span class="wd-sec-sub">Where the payload goes</span>
+        <div class="mm-seg wd-seg" role="radiogroup" aria-label="Request type">
+          ${seg(!custom, 'Forward as received', `setWebhookTargetType(${i}, 'basic')`)}${seg(custom, 'Custom request', `setWebhookTargetType(${i}, 'custom')`)}
+        </div>
       </div>
+      <label class="wd-label" for="wdUrl_${i}">${custom ? 'Method and URL' : 'URL'}</label>
+      <div class="wd-url-row">
+        ${custom ? `<select onchange="updateWebhookTargetField(${i}, 'method', this.value)" aria-label="Method" class="wd-method-select">${['POST','PUT','GET','DELETE'].map(m => `<option ${t.method === m ? 'selected' : ''}>${m}</option>`).join('')}</select>` : ''}
+        <input id="wdUrl_${i}" type="text" class="wd-mono" placeholder="https://api.example.com/orders/{{order.id}}" value="${esc(t.url)}" oninput="updateWebhookTargetField(${i}, 'url', this.value)">
+      </div>
+      <div id="previewUrl_${i}" class="wd-inline-preview" style="display:none"></div>
+    </section>
 
-      <div style="display:flex;flex-direction:column;gap:6px">
+    <section class="wd-sec">
+      <div class="wd-sec-head">
+        <span class="wd-num">${num()}</span><h4>When to send</h4><span class="wd-sec-sub">No conditions = every payload</span>
+        <span class="wd-sec-sub" style="flex:0 0 auto;margin-left:auto">Match</span>
+        <div class="mm-seg wd-seg" role="radiogroup" aria-label="Match mode" style="margin-left:0">
+          ${seg(!anyMode, 'All (AND)', `setWebhookTargetMatch(${i}, 'all')`)}${seg(anyMode, 'Any (OR)', `setWebhookTargetMatch(${i}, 'any')`)}
+        </div>
+      </div>
+      ${filterRows ? `<div class="wd-conds">${filterRows}</div>` : ''}
+      <div class="wd-cond-foot">
+        <button type="button" class="wd-add" onclick="addWebhookTargetFilter(${i})">+ Add condition</button>
+        <span id="previewVerdict_${i}" class="wd-verdict"></span>
+      </div>
+      ${(t.filter || []).length >= 2 && !anyMode ? '<div class="mm-field-hint">Two conditions on the same field with different values never both match — use Any (OR) for that.</div>' : ''}
+    </section>
+
+    ${custom ? `
+    <section class="wd-sec">
+      <div class="wd-sec-head">
+        <span class="wd-num">${num()}</span><h4>Request</h4><span class="wd-sec-sub">Headers and body sent to the target</span>
+        <label class="wd-switch-label"><input class="mm-switch" type="checkbox" ${t.forwardHeaders ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'forwardHeaders', this.checked)"> Forward incoming headers</label>
+      </div>
+      <div class="wd-hdrs">
+        <div class="wd-hdr-row wd-hdr-head"><span>Header</span><span>Value · templates allowed</span><span></span></div>
+        ${headerRows}
+        <button type="button" class="wd-add wd-add-row" onclick="addWebhookTargetHeader(${i})">+ Add header</button>
+      </div>
+      <div class="wd-body-head">
+        <span class="wd-label" style="margin:0">Body</span>
+        <div class="mm-seg wd-seg" role="radiogroup" aria-label="Body">
+          ${seg(!t.customBody, 'Forward original', `setWebhookTargetBodyMode(${i}, false)`)}${seg(!!t.customBody, 'Template', `setWebhookTargetBodyMode(${i}, true)`)}
+        </div>
+      </div>
+      ${t.customBody ? `
+        <div class="wd-code">
+          <div class="wd-code-head">
+            <span>JSON · <code>{{field.path}}</code> · fallback <code>{{a || b || "x"}}</code></span>
+            <button type="button" class="wd-link-btn" onclick="openBodyEditor(${i})">⤢ Expand</button>
+          </div>
+          <div id="aceBody_${i}" style="width:100%;min-height:110px"></div>
+        </div>
+        <label class="wd-switch-label" style="margin-top:2px"><input class="mm-switch" type="checkbox" ${t.dropEmpty ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'dropEmpty', this.checked)"> Drop null or empty fields before sending</label>
+        <div id="previewBody_${i}" style="display:none"></div>
+      ` : `<p class="wd-sec-sub" style="margin:0">The incoming body is sent unchanged.</p><div id="aceBody_${i}" style="display:none"></div><div id="previewBody_${i}" style="display:none"></div>`}
+    </section>` : ''}
+
+    <section class="wd-sec">
+      <div class="wd-sec-head">
+        <span class="wd-num">${num()}</span><h4>Retry</h4><span class="wd-sec-sub">What happens when the target fails</span>
+      </div>
+      <div class="wd-cards" role="radiogroup" aria-label="Retry policy">
+        ${card('default', 'Webhook default', "Uses the webhook's retry settings")}
+        ${card('override', 'Override', 'Own limits for this destination', 'destination-retry-override')}
+        ${card('persistent', 'Persistent', 'Never gives up — payments etc.')}
+      </div>
+      ${mode === 'override' ? `
+        <div class="wd-grid3">
+          <div><label class="wd-label" for="wdMax_${i}">Max retries${r.retryUntilSuccess ? ' (hard cap)' : ''}</label><input id="wdMax_${i}" type="number" min="1" max="20" value="${r.maxRetries ?? 3}" oninput="updateTargetRetry(${i},'maxRetries',+this.value); _wdRefreshSchedule(${i})"></div>
+          <div><label class="wd-label" for="wdDelay_${i}">Initial delay (ms)</label><input id="wdDelay_${i}" type="number" min="100" max="60000" step="100" value="${r.retryDelayMs ?? 1000}" oninput="updateTargetRetry(${i},'retryDelayMs',+this.value); _wdRefreshSchedule(${i})"></div>
+          <div><label class="wd-label" for="wdBackoff_${i}">Backoff</label><select id="wdBackoff_${i}" onchange="updateTargetRetry(${i},'backoff',this.value); _wdRefreshSchedule(${i})"><option value="exponential" ${(r.backoff ?? 'exponential') === 'exponential' ? 'selected' : ''}>Exponential</option><option value="fixed" ${r.backoff === 'fixed' ? 'selected' : ''}>Fixed</option></select></div>
+        </div>
+        <div class="wd-retry-row">
+          <label class="wd-switch-label"><input class="mm-switch" type="checkbox" ${r.retryUntilSuccess ? 'checked' : ''} onchange="updateTargetRetry(${i},'retryUntilSuccess',this.checked); renderDestinationEditor(${i})"> Retry until success (2xx)</label>
+          ${r.retryUntilSuccess ? '' : `<label class="wd-sec-sub" for="wdOn_${i}" style="flex:0 0 auto">Retry on</label><input id="wdOn_${i}" type="text" class="wd-mono" style="width:200px" value="${(r.retryOn ?? [429, 502, 503, 504]).join(', ')}" placeholder="429, 502, 503, 504" oninput="updateTargetRetry(${i},'retryOn',this.value.split(',').map(s=>parseInt(s.trim())).filter(n=>n>0))">`}
+        </div>
+        <div id="wdSchedule_${i}" class="wd-schedule">${esc(_wdRetrySchedule(r))}</div>
+      ` : ''}
+      ${mode === 'persistent' ? `
+        <div class="wd-grid2">
+          <div><label class="wd-label" for="wdRate_${i}">Max attempts per minute</label><input id="wdRate_${i}" type="number" min="1" max="60" value="${p.maxAttemptsPerMinute ?? 10}" oninput="updateTargetPersistentRetry(${i},'maxAttemptsPerMinute',+this.value)"></div>
+          <div><label class="wd-label" for="wdNotify_${i}">Notify after N failures</label><input id="wdNotify_${i}" type="number" min="1" max="10000" value="${p.notifyAfterAttempts ?? 10}" oninput="updateTargetPersistentRetry(${i},'notifyAfterAttempts',+this.value)"></div>
+        </div>
         <div>
-           <input type="text" placeholder="Target URL (e.g. https://api.com/user/{{user.id}})" value="${esc(t.url)}" oninput="updateWebhookTargetField(${i}, 'url', this.value)" style="width:100%;padding:6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
-           <div id="previewUrl_${i}" style="display:none;font-size:10px;color:var(--accent);margin-top:2px;margin-left:4px"></div>
+          <label class="wd-label" for="wdEmail_${i}">Legacy notify email (optional)</label>
+          <input id="wdEmail_${i}" type="email" value="${esc(p.notifyEmail || '')}" placeholder="alerts@example.com" oninput="updateTargetPersistentRetry(${i},'notifyEmail',this.value)" style="width:100%">
         </div>
-
-        <!-- Conditional delivery: fires when ALL (default) or ANY of the conditions match the incoming payload -->
-        <div style="border:1px solid var(--border);border-radius:4px;padding:8px;background:var(--surface)">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:2px">
-            <span style="font-size:11px;color:var(--text2);font-weight:600">Conditional delivery</span>
-            <span style="display:inline-flex;align-items:center;gap:6px;margin-left:auto">
-              ${(t.filter || []).length >= 2 ? `<label style="font-size:10px;color:var(--text3)">Match</label>
-              <select onchange="updateWebhookTargetField(${i}, 'filterMode', this.value); updateAllPreviews(); renderDestinationEditor(${i})" style="padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:10.5px;outline:none">
-                <option value="all" ${t.filterMode !== 'any' ? 'selected' : ''}>all conditions (AND)</option>
-                <option value="any" ${t.filterMode === 'any' ? 'selected' : ''}>any condition (OR)</option>
-              </select>` : ''}
-              <button onclick="addWebhookTargetFilter(${i})" class="btn" style="padding:2px 6px;font-size:10px">+ Add condition</button>
-            </span>
-          </div>
-          <div style="font-size:10px;color:var(--text3);margin-bottom:2px">No conditions = always deliver. With conditions, ${t.filterMode === 'any' ? '<b>at least one</b> of them must match' : '<b>all</b> of them must match'} the incoming payload for this destination to fire.${(t.filter || []).length >= 2 && t.filterMode !== 'any' ? ' Two conditions on the same field with different values will never both match — switch to "any condition" for that.' : ''}</div>
-          ${filterHtml}
-        </div>
-
-        ${t.type === 'custom' ? `
-          <div style="display:flex;flex-direction:column;gap:6px">
-            <div style="display:flex;align-items:center;gap:6px">
-              <select onchange="updateWebhookTargetField(${i}, 'method', this.value)" style="padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;outline:none">
-                <option value="POST" ${t.method === 'POST' ? 'selected' : ''}>POST</option>
-                <option value="PUT" ${t.method === 'PUT' ? 'selected' : ''}>PUT</option>
-                <option value="GET" ${t.method === 'GET' ? 'selected' : ''}>GET</option>
-                <option value="DELETE" ${t.method === 'DELETE' ? 'selected' : ''}>DELETE</option>
-              </select>
-              <label style="font-size:11px;color:var(--text);display:flex;align-items:center;gap:4px;margin-left:auto;cursor:pointer">
-                <input class="mm-switch" type="checkbox" ${t.forwardHeaders ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'forwardHeaders', this.checked)"> Forward incoming headers
-              </label>
-            </div>
-            
-            <div style="border:1px solid var(--border);border-radius:4px;padding:6px;background:var(--surface)">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-                <span style="font-size:11px;color:var(--text2)">Custom Headers</span>
-                <button onclick="addWebhookTargetHeader(${i})" class="btn" style="padding:2px 6px;font-size:10px">+ Add Header</button>
-              </div>
-              ${headersHtml}
-            </div>
-
-            <div style="display:flex;flex-direction:column;gap:4px">
-              <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none">
-                <input class="mm-switch" type="checkbox" ${t.customBody ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'customBody', this.checked); renderDestinationEditor(${i})" style="cursor:pointer;accent-color:var(--accent)">
-                <span style="font-weight:600">Custom Body</span>
-                <span style="color:var(--text3);font-weight:400">— leave unchecked to forward the incoming body as-is</span>
-              </label>
-              ${t.customBody ? `
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;margin-top:2px">
-                <span style="font-size:11px;color:var(--text2)">Body Template (JSON)</span>
-                <button onclick="openBodyEditor(${i})" class="btn" style="padding:2px 6px;font-size:10px;display:flex;align-items:center;gap:4px">
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
-                  Expand
-                </button>
-              </div>
-              <div id="aceBody_${i}" style="width:100%; min-height:100px; border-radius:4px; border:1px solid var(--border);"></div>
-              <div style="font-size:10px;color:var(--text3);margin-top:3px;margin-left:2px">Supports JSON + <code style="background:var(--accent-bg);padding:1px 4px;border-radius:3px;color:var(--accent);font-size:10px">{{template.vars}}</code> + fallback <code style="background:var(--accent-bg);padding:1px 4px;border-radius:3px;color:var(--accent);font-size:10px">{{a || b || "x"}}</code></div>
-              <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none;margin-top:6px">
-                <input class="mm-switch mm-switch" type="checkbox" ${t.dropEmpty ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'dropEmpty', this.checked); updateAllPreviews()" style="cursor:pointer;accent-color:var(--accent)">
-                <span>Drop null/empty fields on delivery</span>
-                <span style="color:var(--text3);font-size:10px">— remove keys whose value renders to null or "" before sending</span>
-              </label>
-              <div id="previewBody_${i}" style="display:none;font-size:10px;color:var(--accent);margin-top:2px;margin-left:4px;white-space:pre-wrap;font-family:monospace"></div>
-              ` : `<div id="aceBody_${i}" style="display:none"></div><div id="previewBody_${i}" style="display:none"></div>`}
-            </div>
-          </div>
-        ` : ''}
-
-        <!-- Per-destination retry override -->
-        <div class="destination-retry-override" style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
-          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:${t.persistentRetryOpen ? 'var(--text3)' : 'var(--text2)'};cursor:${t.persistentRetryOpen ? 'not-allowed' : 'pointer'}" onclick="${t.persistentRetryOpen ? 'return false' : `toggleTargetRetry(${i});return false`}" title="${t.persistentRetryOpen ? 'Disabled — Persistent retry is enabled below' : ''}">
-            <input class="mm-switch" type="checkbox" ${t.retryOpen ? 'checked' : ''} ${t.persistentRetryOpen ? 'disabled' : ''} onclick="event.preventDefault()">
-            Override retry for this destination${t.persistentRetryOpen ? ' <span style="color:var(--text3);font-size:10px">(disabled — using persistent retry)</span>' : ''}
-          </label>
-          ${t.retryOpen ? `
-          <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;padding:8px;background:var(--surface2);border-radius:4px;border:1px solid var(--border)">
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
-              <div>
-                <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">Max retries${t.retry?.retryUntilSuccess ? ' <span style="color:var(--orange);font-size:10px">(hard cap)</span>' : ''}</label>
-                <input type="number" min="1" max="20" value="${t.retry?.maxRetries ?? 3}" oninput="updateTargetRetry(${i},'maxRetries',+this.value)" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px;outline:none">
-              </div>
-              <div>
-                <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">Initial delay (ms)</label>
-                <input type="number" min="100" max="60000" step="100" value="${t.retry?.retryDelayMs ?? 1000}" oninput="updateTargetRetry(${i},'retryDelayMs',+this.value)" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px;outline:none">
-              </div>
-              <div>
-                <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">Backoff</label>
-                <select oninput="updateTargetRetry(${i},'backoff',this.value)" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px;outline:none">
-                  <option value="exponential" ${(t.retry?.backoff ?? 'exponential') === 'exponential' ? 'selected' : ''}>Exponential</option>
-                  <option value="fixed" ${t.retry?.backoff === 'fixed' ? 'selected' : ''}>Fixed</option>
-                </select>
-              </div>
-            </div>
-            <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer">
-              <input class="mm-switch" type="checkbox" ${t.retry?.retryUntilSuccess ? 'checked' : ''} onchange="updateTargetRetry(${i},'retryUntilSuccess',this.checked);document.getElementById('tRetryOnRow_${i}').style.display=this.checked?'none':'flex';renderDestinationEditor(${i})">
-              <strong>Retry until success (2xx)</strong>
-            </label>
-            <div id="tRetryOnRow_${i}" style="display:${t.retry?.retryUntilSuccess ? 'none' : 'flex'};align-items:center;gap:6px">
-              <label style="font-size:10px;color:var(--text3);white-space:nowrap">Retry on codes</label>
-              <input type="text" value="${(t.retry?.retryOn ?? [429,502,503,504]).join(', ')}" placeholder="429, 502, 503, 504"
-                oninput="updateTargetRetry(${i},'retryOn',this.value.split(',').map(s=>parseInt(s.trim())).filter(n=>n>0))"
-                style="flex:1;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px;outline:none">
-            </div>
-          </div>` : ''}
-        </div>
-
-        <!-- Per-destination PERSISTENT retry (never gives up) -->
-        <div class="destination-persistent-retry" style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
-          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:${t.retryOpen ? 'var(--text3)' : 'var(--text2)'};cursor:${t.retryOpen ? 'not-allowed' : 'pointer'}" onclick="${t.retryOpen ? 'return false' : `toggleTargetPersistentRetry(${i});return false`}" title="${t.retryOpen ? 'Disabled — Override retry is enabled above' : ''}">
-            <input type="checkbox" ${t.persistentRetryOpen ? 'checked' : ''} ${t.retryOpen ? 'disabled' : ''} onclick="event.preventDefault()">
-            <strong style="color:${t.retryOpen ? 'var(--text3)' : 'var(--orange)'}">Persistent retry</strong> — never give up (for payments, etc.)${t.retryOpen ? ' <span style="color:var(--text3);font-size:10px">(disabled — using bounded retry)</span>' : ''}
-          </label>
-          ${t.persistentRetryOpen ? `
-          <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;padding:8px;background:rgba(245,158,11,0.06);border-radius:4px;border:1px solid rgba(245,158,11,0.3)">
-            <div style="font-size:10px;color:var(--text3);line-height:1.5">
-              Failures keep retrying forever at the rate below. Entries are persisted across restarts. Use the Pending Retries panel to inspect or cancel.
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-              <div>
-                <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">Max attempts per minute</label>
-                <input type="number" min="1" max="60" value="${t.persistentRetry?.maxAttemptsPerMinute ?? 10}" oninput="updateTargetPersistentRetry(${i},'maxAttemptsPerMinute',+this.value)" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px;outline:none">
-              </div>
-              <div>
-                <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">Notify after N failures</label>
-                <input type="number" min="1" max="10000" value="${t.persistentRetry?.notifyAfterAttempts ?? 10}" oninput="updateTargetPersistentRetry(${i},'notifyAfterAttempts',+this.value)" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px;outline:none">
-              </div>
-            </div>
-            <div>
-              <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">Legacy notify email <span style="opacity:.7">(optional — kept for back-compat)</span></label>
-              <input type="email" value="${esc(t.persistentRetry?.notifyEmail || '')}" placeholder="alerts@example.com" oninput="updateTargetPersistentRetry(${i},'notifyEmail',this.value)" style="width:100%;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px;outline:none">
-              <p style="font-size:10.5px;color:var(--text3);margin:4px 0 0;line-height:1.5">Alerts are now routed centrally. Add a rule for <code style="background:var(--surface2);padding:1px 4px;border-radius:3px;font-size:10px">webhook.retry_exhausted</code> in <a href="#" onclick="navigate('notifications');return false" style="color:var(--accent);text-decoration:none">Notifications</a> to reach groups via email + SMS.</p>
-            </div>
-          </div>` : ''}
-        </div>
-      </div>
-    </div>
+        <div class="wd-sec-sub">Persisted across restarts; see Pending retries to inspect or cancel. Alerts go through the <a href="#" onclick="navigate('notifications');return false">webhook.retry_exhausted</a> notification rule.</div>
+      ` : ''}
+      ${mode === 'default' ? '<div class="wd-sec-sub">Failed deliveries end in the dead-letter queue, where they can be resent.</div>' : ''}
+    </section>
   `;
+}
+
+function _wdRefreshSchedule(i) {
+  const el = document.getElementById('wdSchedule_' + i);
+  if (el) el.textContent = _wdRetrySchedule(webhookTargetState[i]?.retry || {});
+}
+
+/** Right-hand preview: verdict + the request as it would be sent. */
+function renderDestinationPreview() {
+  const i = editingDestinationIndex;
+  const box = document.getElementById('destinationEditPreview');
+  if (!box || i < 0 || !webhookTargetState[i]) return;
+  const t = webhookTargetState[i];
+  const payload = _wdPayload();
+  const src = document.getElementById('wTestPayloadSource')?.textContent || 'Test payload';
+  const srcEl = document.getElementById('wdPreviewSource');
+  if (srcEl) srcEl.textContent = payload ? 'Test payload · ' + src : 'No test payload';
+  if (!payload) {
+    box.innerHTML = `<div class="wd-empty">
+        <p>Load a test payload to preview this destination: the URL, headers and body exactly as they would be sent, and whether the conditions match.</p>
+        <button type="button" class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchRecentWebhookPayload(); })">Fetch recent request</button>
+      </div>`;
+    return;
+  }
+  const custom = t.type === 'custom';
+  const ev = _wdEvaluate(t, payload);
+  const verdict = t.enabled === false
+    ? `<div class="wd-verdict-box"><span class="wd-muted">PAUSED</span><span>This destination is disabled.</span></div>`
+    : ev.deliver
+      ? `<div class="wd-verdict-box ok"><span>WOULD SEND</span><span>${ev.total ? (t.filterMode === 'any' ? `${ev.matched} of ${ev.total} conditions match.` : 'All conditions match.') : 'No conditions — every payload is sent.'}</span></div>`
+      : `<div class="wd-verdict-box skip"><span>SKIPPED</span><span>${t.filterMode === 'any' ? 'No condition matches.' : `${ev.total - ev.matched} of ${ev.total} conditions do not match.`}</span></div>`;
+  const url = renderTemplateJS(t.url || '', payload);
+  const headers = custom ? (t.customHeaders || []).filter(h => h.key).map(h => `${h.key}: ${_wdSecretHeader(h.key) ? '••••••••' : renderTemplateJS(h.value || '', payload)}`) : [];
+  if (custom && t.customBody) headers.push('Content-Type: application/json');
+  let body;
+  if (custom && t.customBody && (t.bodyTemplate || '').trim()) {
+    body = renderTemplateJS(t.bodyTemplate, payload);
+    try { let parsed = JSON.parse(body); if (t.dropEmpty) parsed = stripEmptyDeepJS(parsed); body = JSON.stringify(parsed, null, 2); } catch { /* show as rendered */ }
+  } else {
+    body = JSON.stringify(payload, null, 2);
+  }
+  box.innerHTML = `${verdict}
+    <div class="wd-req">
+      <div class="wd-req-line"><span class="wd-method">${esc(custom ? (t.method || 'POST') : 'POST')}</span> ${esc(url || '(no URL)')}</div>
+      ${headers.length ? `<pre class="wd-req-headers">${esc(headers.join('\n'))}${custom && t.forwardHeaders ? '\n<span class="wd-muted">+ incoming headers</span>' : ''}</pre>` : (custom && t.forwardHeaders ? '<pre class="wd-req-headers"><span class="wd-muted">Incoming headers are forwarded</span></pre>' : '')}
+      <pre class="wd-req-body">${esc(body)}</pre>
+    </div>
+    <p class="wd-sec-sub" style="margin:0">${custom && t.customBody ? 'Rendered from the test payload.' : 'The incoming body is forwarded as-is.'} Secret header values stay masked.</p>`;
 }
 
 function updateDestinationsSummary() {
@@ -4360,7 +4513,11 @@ function manageWebhookDestinations(name, pushHistory = true) {
 function openDestinationEditor(i) {
   editingDestinationIndex = i;
   const t = webhookTargetState[i];
-  document.getElementById('destinationEditTitle').textContent = (t && t.url) ? t.url : 'New destination';
+  const wName = document.getElementById('wName')?.value || 'new webhook';
+  const eyebrow = document.getElementById('destinationEditEyebrow');
+  if (eyebrow) eyebrow.textContent = `${wName} / Destination ${i + 1} of ${webhookTargetState.length}`;
+  const en = document.getElementById('destinationEditEnabled');
+  if (en) en.checked = !t || t.enabled !== false;
   renderDestinationEditor(i);
   document.getElementById('destinationEditModal').style.display = 'flex';
 }
@@ -4418,6 +4575,7 @@ function openWebhookModal(webhook = null) {
   document.getElementById('wTestPayload').value = savedTp;
   mergedSchemaStats = null;
   showTestPayload = !!savedTp;
+  _wdSetPayloadSource(savedTp ? 'Saved with webhook' : 'Not set');
   document.getElementById('wTestPayloadContainer').style.display = showTestPayload ? 'block' : 'none';
 
   // Populate retry config
