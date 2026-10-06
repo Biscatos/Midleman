@@ -1,7 +1,8 @@
 // Discovers the icon of an OAuth client app, the way sign-in screens of large
 // identity providers show "Sign in to continue to <app>" with the app's logo.
 //
-// Source: the origin of the client's FIRST registered redirect URI. The home
+// Source: the origin of the client's first registered redirect URI that is not
+// a local development address (localhost, 127.x, ::1 are skipped). The home
 // page HTML is read for <link rel="apple-touch-icon"> / <link rel="icon">
 // (largest declared size wins), falling back to /favicon.ico. Results are
 // cached per origin so the sign-in page never waits on the network twice.
@@ -15,6 +16,25 @@ const MAX_HTML_BYTES = 256 * 1024;
 
 const cache = new Map<string, { url: string; at: number; ok: boolean }>();
 const inflight = new Map<string, Promise<string>>();
+
+/** Development hosts never carry the app's real icon (and are not reachable
+ *  from the server anyway): localhost, *.localhost, loopback, 0.0.0.0. */
+export function isLocalHost(hostname: string): boolean {
+    const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    return h === 'localhost' || h.endsWith('.localhost') || h === '0.0.0.0' || h === '::1'
+        || /^127\./.test(h) || h === '::ffff:127.0.0.1';
+}
+
+/** The first redirect URI that points at a real host; local development URIs are skipped. */
+export function iconSourceUri(redirectUris: string[]): string | null {
+    for (const uri of redirectUris || []) {
+        try {
+            const u = new URL(uri);
+            if ((u.protocol === 'https:' || u.protocol === 'http:') && !isLocalHost(u.hostname)) return uri;
+        } catch { /* not a URL */ }
+    }
+    return null;
+}
 
 function originOf(uri: string): string | null {
     try {
@@ -102,7 +122,7 @@ function resolveOrigin(origin: string): Promise<string> {
 /** Icon URL for a client, from its first redirect URI. Waits at most `waitMs`
  *  for a first discovery (then answers with /favicon.ico and keeps discovering). */
 export async function getAppIconUrl(redirectUris: string[], waitMs = 1500): Promise<string> {
-    const origin = originOf(redirectUris[0] || '');
+    const origin = originOf(iconSourceUri(redirectUris) || '');
     if (!origin) return '';
     const fallback = origin + '/favicon.ico';
     return Promise.race([resolveOrigin(origin), new Promise<string>(r => setTimeout(() => r(fallback), waitMs))]);
@@ -110,6 +130,6 @@ export async function getAppIconUrl(redirectUris: string[], waitMs = 1500): Prom
 
 /** Warm the cache when a client is created or its redirect URIs change. */
 export function prefetchAppIcon(redirectUris: string[]): void {
-    const origin = originOf(redirectUris[0] || '');
+    const origin = originOf(iconSourceUri(redirectUris) || '');
     if (origin) { cache.delete(origin); void resolveOrigin(origin); }
 }

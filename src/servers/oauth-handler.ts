@@ -8,7 +8,7 @@
 //   - Client auth: bcrypt verify, supports client_secret_post and client_secret_basic
 //   - Implicit flow rejected (only response_type=code)
 
-import { getAppIconUrl } from '../auth/app-icon';
+import { getAppIconUrl, iconSourceUri } from '../auth/app-icon';
 import {
     getOauthClient, isRedirectUriAllowed, verifyClientSecret,
     issueAuthCode, consumeAuthCode, issueRefreshToken, rotateRefreshToken,
@@ -635,7 +635,8 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
 
     // Non-admin user flagged "Pending setup" by an admin → force TOTP enrolment now.
     // Admins are handled by the explicit isAdmin block above and must enrol via dashboard.
-    const mustEnrolTotp = !isAdmin && !cred.user.totpEnabled && (cred.user.force2faSetup || ldapTotpPolicy === 'required');
+    // An admin can exempt a user from the directory's 'required' policy (Users → Edit).
+    const mustEnrolTotp = !isAdmin && !cred.user.totpEnabled && (cred.user.force2faSetup || (ldapTotpPolicy === 'required' && !cred.user.mfaExempt));
     if (mustEnrolTotp) {
         const totp = generateTotpSecret(cred.user.username);
         const qrDataUrl = await QRCode.toDataURL(totp.otpauthUrl, { width: 200, margin: 2 }).catch(() => null);
@@ -1067,7 +1068,7 @@ export async function handleUserinfo(req: Request): Promise<Response> {
 // Supports both GET and POST per OIDC Session Management spec.
 // Parameters (query string for GET, query string or body for POST):
 //   id_token_hint         — previously issued id_token (used to identify user/client)
-//   post_logout_redirect_uri — where to redirect after logout (must match a registered redirect_uri)
+//   post_logout_redirect_uri — where to redirect after logout (same origin as a registered redirect_uri)
 //   state                 — opaque value echoed back in the redirect
 
 export function handleOauthLogout(req: Request, url: URL): Response {
@@ -1142,23 +1143,24 @@ export function handleOauthLogout(req: Request, url: URL): Response {
     if (hintClientId) client = getOauthClient(hintClientId);
     if (!client && clientIdParam) client = getOauthClient(clientIdParam);
 
-    // Where to send the browser afterwards, most specific first:
-    //   1. post_logout_redirect_uri, only if it matches the client's registered
-    //      post-logout URI or one of its redirect_uris (no open redirects);
-    //   2. the client's configured post-logout URI;
-    //   3. the origin of the client's first redirect_uri (the app's home).
+    // Where to send the browser afterwards — always derived, nothing to configure:
+    //   1. post_logout_redirect_uri sent by the app, if it is on the same origin as
+    //      one of the client's redirect URIs (keeps it a closed redirect);
+    //   2. the home (origin) of the client's first redirect URI on a real host —
+    //      localhost / 127.x development URIs are skipped when another exists.
     let target: URL | null = null;
     if (client) {
+        const origins = new Set<string>();
+        for (const u of client.redirectUris) { try { origins.add(new URL(u).origin); } catch { /* ignore */ } }
         if (postLogoutRedirectUri) {
-            const allowed = (client.postLogoutRedirectUri && postLogoutRedirectUri === client.postLogoutRedirectUri)
-                || isRedirectUriAllowed(client, postLogoutRedirectUri);
-            if (allowed) { try { target = new URL(postLogoutRedirectUri); } catch { target = null; } }
+            try {
+                const u = new URL(postLogoutRedirectUri);
+                if (origins.has(u.origin) || isRedirectUriAllowed(client, postLogoutRedirectUri)) target = u;
+            } catch { target = null; }
         }
-        if (!target && client.postLogoutRedirectUri) {
-            try { target = new URL(client.postLogoutRedirectUri); } catch { target = null; }
-        }
-        if (!target && client.redirectUris[0]) {
-            try { target = new URL(new URL(client.redirectUris[0]).origin + '/'); } catch { target = null; }
+        if (!target) {
+            const home = iconSourceUri(client.redirectUris) || client.redirectUris[0];
+            if (home) { try { target = new URL(new URL(home).origin + '/'); } catch { target = null; } }
         }
     }
 
@@ -1183,8 +1185,8 @@ export function handleOauthLogout(req: Request, url: URL): Response {
             headers: { 'Content-Type': 'application/json', 'Set-Cookie': clearCookie, 'Cache-Control': 'no-store' },
         });
     }
-    // Theme follows the user's dashboard preference / OS, like every other page.
-    const themeBoot = `<script>(function(){try{var p=localStorage.getItem('midleman_theme');if(p!=='dark'&&p!=='light')p=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.setAttribute('data-theme',p)}catch(e){}})();</script>`;
+    // Apps' OAuth pages follow the operating system theme, independent of the admin dashboard.
+    const themeBoot = `<script>(function(){try{var m=matchMedia('(prefers-color-scheme: dark)');var a=function(){document.documentElement.setAttribute('data-theme',m.matches?'dark':'light')};a();if(m.addEventListener)m.addEventListener('change',a);else if(m.addListener)m.addListener(a)}catch(e){}})();</script>`;
     const html = `<!doctype html><html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signed out</title>${themeBoot}${themeHead()}
 <style>*{box-sizing:border-box;margin:0;padding:0}body{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:32px 16px;font-family:var(--font-sans);color:var(--text)}
 .card{width:100%;max-width:400px;padding:32px;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);display:flex;flex-direction:column;align-items:center;gap:10px}

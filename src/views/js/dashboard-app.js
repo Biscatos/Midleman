@@ -827,8 +827,6 @@ function mmStickyToolbars() {
     if (h.parentElement.classList.contains('page-sticky')) return;
     const bar = h.nextElementSibling;
     const hasBar = !!bar && bar.classList.contains('mm-filterbar');
-    // Pages opt in without a filter bar with data-sticky on their header (e.g. Docs).
-    if (!hasBar && !h.hasAttribute('data-sticky')) return;
     const wrap = document.createElement('div');
     wrap.className = 'page-sticky';
     h.before(wrap);
@@ -844,6 +842,11 @@ function mmStickyToolbars() {
   }
   const main = document.querySelector('.main');
   if (!main) return;
+  // The page toolbar sticks right under the topbar: expose its height.
+  const topbar = main.querySelector('.topbar');
+  if (topbar && window.ResizeObserver) {
+    new ResizeObserver(() => main.style.setProperty('--topbar-h', topbar.offsetHeight + 'px')).observe(topbar);
+  }
   const mark = () => {
     const stuck = main.scrollTop > 8;
     document.querySelectorAll('.page.active .page-sticky').forEach(w => w.classList.toggle('is-stuck', stuck));

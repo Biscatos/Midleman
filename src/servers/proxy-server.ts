@@ -238,7 +238,9 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                         return jsonRes(403, { error: 'You do not have access to this application' });
                     }
 
-                    const require2fa = !!profile.require2fa || !!cred.user.force2faSetup || ldapTotpPolicy === 'required';
+                    // The per-user exemption lifts the directory policy only; a proxy's own
+                    // "Require 2FA" setting and an admin's forced setup still apply.
+                    const require2fa = !!profile.require2fa || !!cred.user.force2faSetup || (ldapTotpPolicy === 'required' && !cred.user.mfaExempt);
                     const totpEnabled = cred.user.totpEnabled;
 
                     // If no TOTP required and user hasn't set up TOTP, issue JWT directly
