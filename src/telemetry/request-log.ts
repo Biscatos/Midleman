@@ -65,6 +65,31 @@ CREATE INDEX IF NOT EXISTS idx_request_logs_target ON request_logs(target_name);
 CREATE INDEX IF NOT EXISTS idx_request_logs_type_id ON request_logs(type, id);
 `;
 
+// Traffic counters, kept for every request whatever the resource's log mode
+// (full / errors-only / off), so the dashboard chart still reflects real traffic
+// when rows and bodies are not stored. One row per 30-minute bucket x type x
+// resource x method x status: a few KB a day.
+const CREATE_STATS_TABLE = `
+CREATE TABLE IF NOT EXISTS request_stats (
+    bucket   TEXT NOT NULL,              -- 'YYYY-MM-DDTHH:MM' (UTC, :00 or :30)
+    type     TEXT NOT NULL,
+    resource TEXT NOT NULL DEFAULT '',   -- profile / webhook / connector name
+    method   TEXT NOT NULL,
+    status   INTEGER NOT NULL DEFAULT 0, -- 0 = no response (network error)
+    count    INTEGER NOT NULL DEFAULT 0,
+    failed   INTEGER NOT NULL DEFAULT 0, -- requests that carried an error message
+    dur_sum  REAL NOT NULL DEFAULT 0,
+    dur_n    INTEGER NOT NULL DEFAULT 0,
+    last_at  TEXT NOT NULL,              -- 'YYYY-MM-DD HH:MM:SS' (UTC) of the latest request
+    PRIMARY KEY (bucket, type, resource, method, status)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_request_stats_type_resource ON request_stats(type, resource);
+`;
+
+/** Counters outlive the logs themselves: 90 days of totals cost almost nothing. */
+const STATS_RETENTION_DAYS = 90;
+const STATS_FLUSH_MS = 5_000;
+
 const MIGRATIONS = [
     // Add target_name column for multi-target support
     `ALTER TABLE request_logs ADD COLUMN target_name TEXT`,
@@ -103,10 +128,14 @@ export function initRequestLog(cfg: Partial<RequestLogConfig> = {}): void {
         }
 
         db.exec(CREATE_INDEXES);
+        db.exec(CREATE_STATS_TABLE);
+        backfillStats();
 
         // Schedule auto-purge every hour
         void purgeOldLogs();
-        setInterval(() => { void purgeOldLogs(); }, 60 * 60 * 1000);
+        purgeOldStats();
+        setInterval(() => { void purgeOldLogs(); purgeOldStats(); }, 60 * 60 * 1000);
+        setInterval(flushStats, STATS_FLUSH_MS);
 
         console.log(`📋 Request logging: enabled (retention: ${getEffectiveRetentionDays()}d, max body: ${(config.maxBodySize / 1024).toFixed(0)}KB, default mode: ${getLogSettings().defaultMode})`);
         console.log(`   Database: ${dbPath}`);
@@ -118,6 +147,8 @@ export function initRequestLog(cfg: Partial<RequestLogConfig> = {}): void {
 
 export function shutdownRequestLog(): void {
     if (db) {
+        flushLogQueue();
+        flushStats();
         db.close();
         db = null;
     }
@@ -253,6 +284,7 @@ function isErrorEntry(entry: RequestLogEntry): boolean {
 export function logRequest(entry: RequestLogEntry): void {
     if (!db) return;
     const r = resourceOf(entry.type, entry);
+    recordStat(entry, r.name);
     const mode = resolveLogMode(r.kind, r.name);
     if (mode === 'off') return;
     if (mode === 'errors-only' && !isErrorEntry(entry)) return;
@@ -731,6 +763,99 @@ function buildPurgeWhere(opts: PurgeOptions): { where: string; params: Record<st
     return { where: conds.length ? 'WHERE ' + conds.join(' AND ') : '', params };
 }
 
+// --- Traffic counters ---------------------------------------------------------
+
+interface StatAcc { bucket: string; type: string; resource: string; method: string; status: number; count: number; failed: number; durSum: number; durN: number; lastAt: string }
+const _stats = new Map<string, StatAcc>();
+
+/** 30-minute UTC bucket label, the format the chart uses. */
+function statBucket(d: Date): string {
+    return d.toISOString().slice(0, 14) + (d.getUTCMinutes() < 30 ? '00' : '30');
+}
+
+function recordStat(entry: RequestLogEntry, resource: string | undefined): void {
+    const now = new Date();
+    const bucket = statBucket(now);
+    const status = typeof entry.resStatus === 'number' ? entry.resStatus : 0;
+    const method = entry.method || '-';
+    const res = resource || '';
+    const key = `${bucket}|${entry.type}|${res}|${method}|${status}`;
+    let acc = _stats.get(key);
+    if (!acc) {
+        acc = { bucket, type: entry.type, resource: res, method, status, count: 0, failed: 0, durSum: 0, durN: 0, lastAt: '' };
+        _stats.set(key, acc);
+    }
+    acc.count++;
+    if (entry.error) acc.failed++;
+    if (typeof entry.durationMs === 'number' && Number.isFinite(entry.durationMs)) { acc.durSum += entry.durationMs; acc.durN++; }
+    acc.lastAt = toSqliteUtc(now);
+}
+
+let _statsStmt: ReturnType<Database['prepare']> | null = null;
+
+function flushStats(): void {
+    if (!db || _stats.size === 0) return;
+    const batch = [..._stats.values()];
+    _stats.clear();
+    try {
+        if (!_statsStmt) _statsStmt = db.prepare(`
+            INSERT INTO request_stats (bucket, type, resource, method, status, count, failed, dur_sum, dur_n, last_at)
+            VALUES ($bucket, $type, $resource, $method, $status, $count, $failed, $durSum, $durN, $lastAt)
+            ON CONFLICT (bucket, type, resource, method, status) DO UPDATE SET
+                count   = count + excluded.count,
+                failed  = failed + excluded.failed,
+                dur_sum = dur_sum + excluded.dur_sum,
+                dur_n   = dur_n + excluded.dur_n,
+                last_at = MAX(last_at, excluded.last_at)
+        `);
+        const stmt = _statsStmt;
+        db.transaction(() => {
+            for (const a of batch) {
+                stmt.run({ $bucket: a.bucket, $type: a.type, $resource: a.resource, $method: a.method, $status: a.status, $count: a.count, $failed: a.failed, $durSum: a.durSum, $durN: a.durN, $lastAt: a.lastAt });
+            }
+        })();
+    } catch (err) {
+        console.error('⚠️  Failed to flush request stats:', err);
+    }
+}
+
+/** First start with counters: seed them from the last 48h of stored logs so the chart is not empty. */
+function backfillStats(): void {
+    if (!db) return;
+    try {
+        if (db.prepare('SELECT 1 FROM request_stats LIMIT 1').get()) return;
+        db.exec(`
+            INSERT INTO request_stats (bucket, type, resource, method, status, count, failed, dur_sum, dur_n, last_at)
+            SELECT strftime('%Y-%m-%dT%H:', timestamp) ||
+                       CASE WHEN CAST(strftime('%M', timestamp) AS INTEGER) < 30 THEN '00' ELSE '30' END,
+                   type,
+                   COALESCE(CASE WHEN type IN ('proxy', 'target') THEN COALESCE(profile_name, target_name) ELSE target_name END, ''),
+                   method,
+                   COALESCE(res_status, 0),
+                   COUNT(*),
+                   SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END),
+                   COALESCE(SUM(duration_ms), 0),
+                   COUNT(duration_ms),
+                   MAX(timestamp)
+            FROM request_logs
+            WHERE timestamp >= datetime('now', '-48 hours')
+            GROUP BY 1, 2, 3, 4, 5
+        `);
+    } catch (err) {
+        console.error('⚠️  Failed to backfill request stats:', err);
+    }
+}
+
+function purgeOldStats(): void {
+    if (!db) return;
+    try {
+        const cutoff = statBucket(new Date(Date.now() - STATS_RETENTION_DAYS * 86_400_000));
+        db.prepare('DELETE FROM request_stats WHERE bucket < $cutoff').run({ $cutoff: cutoff });
+    } catch (err) {
+        console.error('⚠️  Failed to purge request stats:', err);
+    }
+}
+
 /** Scheduled retention purge (hourly). */
 async function purgeOldLogs(): Promise<void> {
     if (!db || _purge.running) return;
@@ -874,12 +999,21 @@ export function getRequestLogBreakdown(): { types: { type: string; count: number
 export function getLastWebhookActivity(webhookName: string): number | null {
     if (!db) return null;
     try {
-        const row = db.prepare(
+        // Counters are kept even when the webhook's logs are off, so they are checked too.
+        let ts: string | null = null;
+        for (const acc of _stats.values()) {
+            if (acc.type === 'webhook' && acc.resource === webhookName && (!ts || acc.lastAt > ts)) ts = acc.lastAt;
+        }
+        const fromStats = db.prepare(
+            `SELECT MAX(last_at) AS ts FROM request_stats WHERE type = 'webhook' AND resource = $name`
+        ).get({ $name: webhookName }) as { ts: string | null } | undefined;
+        const fromLogs = db.prepare(
             `SELECT MAX(timestamp) AS ts FROM request_logs WHERE type = 'webhook' AND target_name = $name`
         ).get({ $name: webhookName }) as { ts: string | null } | undefined;
-        if (!row || !row.ts) return null;
-        // request_logs timestamps are stored as ISO UTC without a trailing 'Z'
-        const ms = Date.parse(row.ts + 'Z');
+        for (const t of [fromStats?.ts, fromLogs?.ts]) if (t && (!ts || t > ts)) ts = t;
+        if (!ts) return null;
+        // Both are stored as 'YYYY-MM-DD HH:MM:SS' UTC without a trailing 'Z'
+        const ms = Date.parse(ts.replace(' ', 'T') + 'Z');
         return Number.isFinite(ms) ? ms : null;
     } catch {
         return null;
@@ -897,66 +1031,51 @@ export function getRequestLogChart(): {
     if (!db) return empty;
 
     try {
-        // Time-bucketed request counts (last 24h, 30-minute buckets)
-        const rawTimeline = db.prepare(`
-            SELECT strftime('%Y-%m-%dT%H:', timestamp) ||
-                   CASE WHEN CAST(strftime('%M', timestamp) AS INTEGER) < 30 THEN '00' ELSE '30' END AS bucket,
-                   COUNT(*) as count,
-                   SUM(CASE WHEN res_status >= 500 OR error IS NOT NULL THEN 1 ELSE 0 END) as errors
-            FROM request_logs
-            WHERE timestamp >= datetime('now', '-24 hours')
-            GROUP BY bucket
-            ORDER BY bucket ASC
-        `).all() as { bucket: string; count: number; errors: number }[];
-
-        // Build a dense 48-slot grid (last 24h, 30-minute resolution, UTC) so the
-        // chart always renders consistently even when traffic is sparse.
-        const byBucket = new Map(rawTimeline.map(r => [r.bucket, r]));
+        // Built from request_stats rather than request_logs: the counters include the
+        // traffic of resources whose logs are off or errors-only.
+        flushStats();
         const now = new Date();
         const anchor = new Date(Date.UTC(
             now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
             now.getUTCHours(), now.getUTCMinutes() < 30 ? 0 : 30, 0, 0,
         ));
+        const from = statBucket(new Date(anchor.getTime() - 47 * 30 * 60 * 1000));
+        // An error is a 5xx response or a request that never got one.
+        const ERR = 'CASE WHEN status >= 500 THEN count ELSE failed END';
+
+        const rawTimeline = db.prepare(`
+            SELECT bucket, SUM(count) AS count, SUM(${ERR}) AS errors
+            FROM request_stats WHERE bucket >= $from
+            GROUP BY bucket
+        `).all({ $from: from }) as { bucket: string; count: number; errors: number }[];
+
+        // Dense 48-slot grid (last 24h, 30-minute resolution, UTC) so the chart
+        // always renders consistently even when traffic is sparse.
+        const byBucket = new Map(rawTimeline.map(r => [r.bucket, r]));
         const timeline: { bucket: string; count: number; errors: number }[] = [];
         for (let i = 47; i >= 0; i--) {
-            const t = new Date(anchor.getTime() - i * 30 * 60 * 1000);
-            const bucket =
-                t.getUTCFullYear() + '-' +
-                String(t.getUTCMonth() + 1).padStart(2, '0') + '-' +
-                String(t.getUTCDate()).padStart(2, '0') + 'T' +
-                String(t.getUTCHours()).padStart(2, '0') + ':' +
-                String(t.getUTCMinutes()).padStart(2, '0');
+            const bucket = statBucket(new Date(anchor.getTime() - i * 30 * 60 * 1000));
             const hit = byBucket.get(bucket);
             timeline.push({ bucket, count: hit?.count ?? 0, errors: hit?.errors ?? 0 });
         }
 
-        // Method breakdown
         const methods = db.prepare(`
-            SELECT method, COUNT(*) as count
-            FROM request_logs
-            WHERE timestamp >= datetime('now', '-24 hours')
-            GROUP BY method
-            ORDER BY count DESC
-        `).all() as { method: string; count: number }[];
+            SELECT method, SUM(count) AS count
+            FROM request_stats WHERE bucket >= $from
+            GROUP BY method ORDER BY count DESC
+        `).all({ $from: from }) as { method: string; count: number }[];
 
-        // Status code breakdown (individual codes)
         const statuses = db.prepare(`
-            SELECT res_status as status, COUNT(*) as count
-            FROM request_logs
-            WHERE timestamp >= datetime('now', '-24 hours')
-              AND res_status IS NOT NULL
-            GROUP BY res_status
-            ORDER BY count DESC
-            LIMIT 10
-        `).all() as { status: number; count: number }[];
+            SELECT status, SUM(count) AS count
+            FROM request_stats WHERE bucket >= $from AND status > 0
+            GROUP BY status ORDER BY count DESC LIMIT 10
+        `).all({ $from: from }) as { status: number; count: number }[];
 
-        // Average duration & error rate
         const agg = db.prepare(`
-            SELECT AVG(duration_ms) as avg_dur,
-                   SUM(CASE WHEN res_status >= 500 OR error IS NOT NULL THEN 1 ELSE 0 END) * 100.0 / MAX(COUNT(*), 1) as err_rate
-            FROM request_logs
-            WHERE timestamp >= datetime('now', '-24 hours')
-        `).get() as any;
+            SELECT SUM(dur_sum) * 1.0 / MAX(SUM(dur_n), 1) AS avg_dur,
+                   SUM(${ERR}) * 100.0 / MAX(SUM(count), 1) AS err_rate
+            FROM request_stats WHERE bucket >= $from
+        `).get({ $from: from }) as any;
 
         return {
             timeline,

@@ -1,17 +1,24 @@
   <!-- ═══ LOGIN PAGE ═══ -->
   <div class="auth-page" id="authLogin">
-    <div class="auth-topbar">
-      <div class="auth-topbar-left">
-        <img src="/logo.png" alt="Midleman">
-        <span>Midleman</span>
+    <div class="auth-split">
+    <aside class="auth-hero mm-grid-ground" aria-hidden="true">
+      <div class="auth-hero-brand"><span class="mm-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12h6.5"/><circle cx="12" cy="12" r="3.3"/><path d="M15 10.4 21.5 5.5"/><path d="M15.4 12H22"/><path d="M15 13.6 21.5 18.5"/></svg></span><span>Midleman</span></div>
+      <div class="auth-hero-body">
+        <svg class="auth-hero-flow" viewBox="0 0 360 120" fill="none" stroke-linecap="round">
+          <path d="M10 60h110" class="dim"/><path d="M10 30h70l30 30" class="dim"/><path d="M10 90h70l30-30" class="dim"/>
+          <circle cx="150" cy="60" r="26" class="hot"/><circle cx="150" cy="60" r="6" class="fill"/>
+          <path d="M176 60h80" class="hot"/><path d="M172 48l60-34h120" class="hot"/><path d="M172 72l60 34h120" class="hot"/>
+          <path d="M256 60h96" class="hot" stroke-dasharray="4 6"/>
+        </svg>
+        <h1>One gateway for proxies, webhooks and identity.</h1>
+        <p>Route traffic, fan out events, and sign users in with OAuth, LDAP and two-factor authentication — from a single control plane.</p>
+        <div class="auth-hero-tags"><span>HTTP proxy</span><span>Webhooks</span><span>OAuth / OIDC</span><span>LDAP</span><span>TCP/UDP</span></div>
       </div>
-      <div class="auth-topbar-right">
-        <a href="/health">Status</a>
-      </div>
-    </div>
+      <div class="auth-hero-foot"><span class="auth-hero-dot"></span>Control plane</div>
+    </aside>
     <main class="auth-main">
-      <div class="auth-card">
-        <div class="auth-brand"><img src="/logo.png" alt="Midleman"></div>
+      <div class="auth-card mm-frame">
+        <div class="auth-brand"><span class="mm-mark" role="img" aria-label="Midleman"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12h6.5"/><circle cx="12" cy="12" r="3.3"/><path d="M15 10.4 21.5 5.5"/><path d="M15.4 12H22"/><path d="M15 13.6 21.5 18.5"/></svg></span></div>
         <!-- Step 1: Credentials -->
         <div id="loginStep1" class="auth-step active">
           <h2>Sign In</h2>
@@ -60,5 +67,5 @@
         </div>
       </div>
     </main>
-    <footer class="auth-footer">midleman</footer>
+    </div>
   </div>

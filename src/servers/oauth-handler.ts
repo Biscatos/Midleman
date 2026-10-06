@@ -8,6 +8,7 @@
 //   - Client auth: bcrypt verify, supports client_secret_post and client_secret_basic
 //   - Implicit flow rejected (only response_type=code)
 
+import { getAppIconUrl } from '../auth/app-icon';
 import {
     getOauthClient, isRedirectUriAllowed, verifyClientSecret,
     issueAuthCode, consumeAuthCode, issueRefreshToken, rotateRefreshToken,
@@ -41,6 +42,7 @@ function reconcileLdapAllowList(userId: number, ldapConfigId: number, freshGroup
     return { revokedClients };
 }
 import { renderConsentMarkdown, escapeHtmlAttr } from '../core/consent';
+import { withTheme, themeHead, LOGO_GLYPH_SVG } from '../core/ui-theme';
 
 const SSO_COOKIE = '__midleman_sso';
 const SUPPORTED_SCOPES = new Set(['openid', 'profile', 'email', 'offline_access']);
@@ -48,6 +50,24 @@ const SUPPORTED_SCOPES = new Set(['openid', 'profile', 'email', 'offline_access'
 let loginTemplate = '';
 export function setOauthLoginTemplate(html: string): void {
     loginTemplate = html;
+}
+
+/** Up to two initials from the client's name ("CRM Chatbot" → "CC"). */
+function clientInitials(name: string): string {
+    const words = name.trim().split(/[\s_\-]+/).filter(Boolean);
+    const letters = words.length >= 2 ? words[0][0] + words[1][0] : (words[0] || '?').slice(0, 2);
+    return letters.toUpperCase();
+}
+
+/** Branding the sign-in screen shows for the requesting app — like the
+ *  "Sign in to continue to <app>" screens of large identity providers.
+ *  The logo is discovered automatically from the client's first redirect URI
+ *  (see app-icon.ts); the template removes a broken <img>, revealing the initials. */
+async function clientBranding(client: { name: string; redirectUris: string[] }, redirectUri: string) {
+    let host = '';
+    try { host = new URL(redirectUri).host; } catch { /* keep empty */ }
+    const logo = await getAppIconUrl(client.redirectUris.length ? client.redirectUris : [redirectUri]);
+    return { name: client.name, host, logo, initials: clientInitials(client.name) };
 }
 
 function getClientIp(req: Request): string {
@@ -261,7 +281,12 @@ export async function handleAuthorize(req: Request, url: URL): Promise<Response>
     // 4. Render login form
     const authRequestId = storeAuthRequest(authRequest);
     const consentEnabled = client.consentEnabled && (client.consentTitle.trim() || client.consentBody.trim());
-    const html = loginTemplate
+    const brand = await clientBranding(client, redirectUri);
+    const html = withTheme(loginTemplate)
+        .replace(/\{\{CLIENT_NAME\}\}/g, () => escapeHtmlAttr(brand.name))
+        .replace(/\{\{CLIENT_HOST\}\}/g, () => escapeHtmlAttr(brand.host))
+        .replace(/\{\{CLIENT_LOGO_URL\}\}/g, () => escapeHtmlAttr(brand.logo))
+        .replace(/\{\{CLIENT_INITIALS\}\}/g, () => escapeHtmlAttr(brand.initials))
         .replace(/\{\{AUTH_REQUEST\}\}/g, authRequestId)
         .replace(/\{\{CONSENT_ENABLED\}\}/g, consentEnabled ? '1' : '0')
         .replace(/\{\{CONSENT_TITLE\}\}/g, escapeHtmlAttr(client.consentTitle || 'Terms of use'))
@@ -496,7 +521,7 @@ export async function handleOauthLogin(req: Request): Promise<Response> {
             userAgent: req.headers.get('user-agent') || undefined,
         });
         const newId = storeAuthRequest(authReq);
-        return new Response(JSON.stringify({ error: 'access_denied', error_description: 'Não tem acesso a esta aplicação.', auth_request: newId }), {
+        return new Response(JSON.stringify({ error: 'access_denied', error_description: 'You do not have access to this application.', auth_request: newId }), {
             status: 403,
             headers: { 'Content-Type': 'application/json' },
         });
@@ -1158,9 +1183,17 @@ export function handleOauthLogout(req: Request, url: URL): Response {
             headers: { 'Content-Type': 'application/json', 'Set-Cookie': clearCookie, 'Cache-Control': 'no-store' },
         });
     }
-    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signed out</title>
-<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f6f7f9;color:#1f2937}.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:32px 36px;max-width:420px;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.06)}h1{font-size:20px;margin:0 0 8px}p{margin:0;color:#6b7280;font-size:14px}</style></head>
-<body><div class="card"><h1>You have been signed out</h1><p>You can close this window or go back to the application and sign in again.</p></div></body></html>`;
+    // Theme follows the user's dashboard preference / OS, like every other page.
+    const themeBoot = `<script>(function(){try{var p=localStorage.getItem('midleman_theme');if(p!=='dark'&&p!=='light')p=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.setAttribute('data-theme',p)}catch(e){}})();</script>`;
+    const html = `<!doctype html><html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signed out</title>${themeBoot}${themeHead()}
+<style>*{box-sizing:border-box;margin:0;padding:0}body{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:32px 16px;font-family:var(--font-sans);color:var(--text)}
+.card{width:100%;max-width:400px;padding:32px;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);display:flex;flex-direction:column;align-items:center;gap:10px}
+.ok{width:40px;height:40px;border-radius:50%;border:1px solid var(--green-bdr);color:var(--green);display:flex;align-items:center;justify-content:center;margin-bottom:4px}
+h1{font:600 22px/1.25 var(--font-display);letter-spacing:-.2px}p{font-size:13px;line-height:1.55;color:var(--text2)}
+.secured{display:flex;align-items:center;gap:8px;font:11.5px var(--font-mono);color:var(--text3)}.secured svg{width:13px;height:13px;color:var(--accent)}.secured b{font-weight:500;color:var(--text2)}</style></head>
+<body class="mm-grid-ground"><main class="card mm-frame"><span class="ok" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+<h1>You have been signed out</h1><p>Your session was closed in every application that signs in with Midleman. You can close this window, or go back to the application and sign in again.</p></main>
+<div class="secured"><span>secured by</span>${LOGO_GLYPH_SVG}<b>Midleman</b></div></body></html>`;
     return new Response(html, {
         status: 200,
         headers: { 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': clearCookie, 'Cache-Control': 'no-store' },

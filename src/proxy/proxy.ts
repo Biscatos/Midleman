@@ -583,7 +583,7 @@ async function handleProxyRequestInner(
             fetchError instanceof Error ? fetchError : new Error(String(fetchError)));
 
         // Log failed proxy request
-        if (!profile.disableLogs) logRequest({
+        logRequest({
             requestId,
             type: 'proxy',
             profileName,
@@ -675,7 +675,7 @@ async function handleProxyRequestInner(
         let html = await targetResponse.text();
         const resBodySize = html.length;
 
-        if (!profile.disableLogs) logRequest({
+        logRequest({
             requestId,
             type: 'proxy',
             profileName,
@@ -789,7 +789,7 @@ if(location.pathname===P.slice(0,-1)){_r.call(history,null,"",P+location.search+
         resCapture = await captureResponseBody(targetResponse);
     }
 
-    if (!profile.disableLogs) logRequest({
+    logRequest({
         requestId,
         type: 'proxy',
         profileName,
@@ -1098,7 +1098,7 @@ async function handleDirectProxyInner(
         endProxySpan(otelSpan, profileName, 502, durationMs,
             fetchError instanceof Error ? fetchError : new Error(String(fetchError)));
 
-        if (!profile.disableLogs) logRequest({
+        logRequest({
             requestId, type: 'proxy', profileName,
             method: req.method, path: url.pathname, targetUrl, clientIp,
             reqHeaders: headersToRecord(forwardHeaders),
@@ -1179,7 +1179,7 @@ async function handleDirectProxyInner(
         resCapture = await captureResponseBody(targetResponse);
     }
 
-    if (!profile.disableLogs) logRequest({
+    logRequest({
         requestId, type: 'proxy', profileName,
         method: req.method, path: url.pathname, targetUrl: currentUrl, clientIp,
         reqHeaders: headersToRecord(forwardHeaders),

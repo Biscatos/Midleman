@@ -293,12 +293,12 @@ async function fetchRecentRequests() {
     tbody.innerHTML = reqs.map((r, i) => {
       const ts = new Date(r.timestamp + 'Z');
       const sc = r.resStatus;
-      const statusCls = !sc ? 'color:var(--text3)' : sc < 300 ? 'color:var(--green)' : sc < 400 ? 'color:var(--blue)' : sc < 500 ? 'color:var(--orange)' : 'color:var(--red)';
+      const statusChip = !sc ? 'mm-chip' : sc < 300 ? 'mm-chip ok' : sc < 400 ? 'mm-chip acc' : sc < 500 ? 'mm-chip warn' : 'mm-chip err';
       const typeBadge = r.type === 'proxy'
-        ? '<span style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:4px;font-size:11px">proxy' + (r.profileName ? ' / ' + esc(r.profileName) : '') + '</span>'
+        ? '<span class="mm-chip acc">proxy' + (r.profileName ? ' / ' + esc(r.profileName) : '') + '</span>'
         : r.type === 'webhook'
-        ? '<span style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:4px;font-size:11px">webhook' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>'
-        : '<span style="background:var(--blue-bg);color:var(--blue);padding:2px 8px;border-radius:4px;font-size:11px">other' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>';
+        ? '<span class="mm-chip warn">webhook' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>'
+        : '<span class="mm-chip acc">other' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>';
       const methodCls = r.method === 'GET' ? 'color:var(--green)' : r.method === 'POST' ? 'color:var(--blue)' : r.method === 'DELETE' ? 'color:var(--red)' : 'color:var(--orange)';
       const flash = isNew && i === 0 ? 'animation:flash 1s ease' : '';
       return `<tr style="border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;${flash}" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''" onclick="navigate('requests');setTimeout(()=>openReqDetail(${r.id}),300)">
@@ -306,7 +306,7 @@ async function fetchRecentRequests() {
     <td style="padding:6px 8px">${typeBadge}</td>
     <td style="padding:6px 8px;font-weight:600;${methodCls}">${esc(r.method)}</td>
     <td style="padding:6px 8px;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.path)}">${esc(r.path)}</td>
-    <td style="padding:6px 8px;font-weight:600;${statusCls}">${sc || '-'}</td>
+    <td style="padding:6px 8px"><span class="${statusChip}">${sc || '-'}</span></td>
     <td style="padding:6px 8px;color:var(--text2)">${r.durationMs ? fmtMs(r.durationMs) : '-'}</td>
   </tr>`;
     }).join('');
@@ -358,9 +358,9 @@ async function fetchProfiles() {
 async function linkProfileToNpmHost(profileName, hostId, opts) {
   opts = opts || {};
   if (!opts.skipConfirm) {
-    const msg = 'Vincular "' + profileName + '" ao host NPM #' + hostId
-      + '? O NPM passará a encaminhar tráfego para o Midleman (em vez do backend directamente).';
-    if (!(await showConfirm({ title: 'Vincular ao NPM', message: msg, confirmText: 'Vincular' }))) return;
+    const msg = 'Link "' + profileName + '" to NPM host #' + hostId
+      + '? NPM will forward traffic to Midleman (instead of directly to the backend).';
+    if (!(await showConfirm({ title: 'Link to NPM', message: msg, confirmText: 'Link' }))) return;
   }
   try {
     const res = await api('/admin/npm/link-profile', {
@@ -373,30 +373,30 @@ async function linkProfileToNpmHost(profileName, hostId, opts) {
       // forward target will be replaced and any traffic relying on it will stop.
       if (res.status === 409 && data && data.mismatch && !opts.force) {
         const m = data.mismatch;
-        const detail = 'NPM #' + hostId + ' encaminha actualmente para ' + m.npm.host + ':' + m.npm.port
-          + '. Ao vincular, o NPM passa a encaminhar para o Midleman, e este profile encaminhará para '
-          + m.profile.host + ':' + m.profile.port + '. Se não forem o mesmo serviço, o tráfego que ia para '
-          + m.npm.host + ':' + m.npm.port + ' via este NPM host deixa de funcionar.';
+        const detail = 'NPM #' + hostId + ' currently forwards to ' + m.npm.host + ':' + m.npm.port
+          + '. Once linked, NPM forwards to Midleman, and this profile will forward to '
+          + m.profile.host + ':' + m.profile.port + '. If they are not the same service, traffic that went to '
+          + m.npm.host + ':' + m.npm.port + ' via this NPM host will stop working.';
         const ok = await showConfirm({
-          title: 'Forward targets não coincidem',
-          message: 'O profile e o NPM host apontam para destinos diferentes. Vincular mesmo assim?',
+          title: 'Forward targets do not match',
+          message: 'The profile and the NPM host point to different destinations. Link anyway?',
           detail,
-          confirmText: 'Vincular mesmo assim',
+          confirmText: 'Link anyway',
           danger: true,
         });
         if (!ok) return;
         return linkProfileToNpmHost(profileName, hostId, { force: true, skipConfirm: true });
       }
-      toast(data.error || 'Falha ao vincular', 'error');
+      toast(data.error || 'Failed to link', 'error');
       return;
     }
-    toast('Profile "' + profileName + '" vinculado ao NPM #' + hostId + (data.forced ? ' (forçado)' : ''));
+    toast('Profile "' + profileName + '" linked to NPM #' + hostId + (data.forced ? ' (forced)' : ''));
     await fetchProfiles();
     // If we're on the NPM page, refresh its tables too.
     try { if (typeof fetchNpmHostsTable === 'function') await fetchNpmHostsTable(); } catch { /* ignore */ }
     try { if (typeof _npmImportHostsAll !== 'undefined' && _npmImportHostsAll.length) await fetchNpmProxyHosts(); } catch { /* ignore */ }
   } catch (e) {
-    toast('Erro de rede: ' + e.message, 'error');
+    toast('Network error: ' + e.message, 'error');
   }
 }
 
@@ -405,19 +405,19 @@ async function linkProfileToNpmHost(profileName, hostId, opts) {
 // linked to any profile or webhook. Match badge highlights exact host+port matches.
 async function openLinkToNpmModal(profileName) {
   const profile = _allProfiles.find(p => p.name === profileName);
-  if (!profile) { toast('Profile não encontrado', 'error'); return; }
-  if (profile.npmProxyHostId) { toast('Profile já vinculado ao NPM #' + profile.npmProxyHostId, 'error'); return; }
+  if (!profile) { toast('Profile not found', 'error'); return; }
+  if (profile.npmProxyHostId) { toast('Profile already linked to NPM #' + profile.npmProxyHostId, 'error'); return; }
 
   // Ensure we have a fresh NPM hosts list.
   let hosts = [];
   try {
     const r = await api('/admin/npm/proxy-hosts');
-    if (!r.ok) { const d = await r.json().catch(() => ({})); toast(d.error || 'Falha ao carregar NPM hosts', 'error'); return; }
+    if (!r.ok) { const d = await r.json().catch(() => ({})); toast(d.error || 'Failed to load NPM hosts', 'error'); return; }
     const d = await r.json();
     hosts = (d.hosts || []).filter(h => !h.linkedProfile && !h.linkedWebhook);
-  } catch (e) { toast('Erro de rede: ' + e.message, 'error'); return; }
+  } catch (e) { toast('Network error: ' + e.message, 'error'); return; }
 
-  if (!hosts.length) { toast('Não há NPM hosts disponíveis para vincular.', 'error'); return; }
+  if (!hosts.length) { toast('No NPM hosts available to link.', 'error'); return; }
 
   // Compute the profile's target for match highlighting.
   let tHost = '', tPort = 0;
@@ -440,13 +440,13 @@ async function openLinkToNpmModal(profileName) {
   overlay.innerHTML =
     '<div class="modal" style="max-width:720px">' +
     '  <div class="modal-header">' +
-    '    <h3 style="margin:0">Vincular profile "' + _esc(profileName) + '" a um NPM host</h3>' +
+    '    <h3 style="margin:0">Link profile "' + _esc(profileName) + '" to an NPM host</h3>' +
     '    <button type="button" class="btn btn-sm" onclick="closeLinkToNpmModal()">&times;</button>' +
     '  </div>' +
     '  <div class="modal-body" style="max-height:60vh;overflow-y:auto">' +
     '    <div style="color:var(--text2);font-size:12.5px;margin-bottom:10px">' +
-    '      Profile encaminha para <code style="font-family:monospace">' + _esc(tHost + ':' + (tPort || '?')) + '</code>. ' +
-    '      Hosts com destino exactamente igual aparecem marcados como <strong>match</strong>.' +
+    '      Profile forwards to <code style="font-family:monospace">' + _esc(tHost + ':' + (tPort || '?')) + '</code>. ' +
+    '      Hosts with exactly the same destination are marked as <strong>match</strong>.' +
     '    </div>' +
     '    <table style="width:100%;border-collapse:collapse;font-size:13px">' +
     '      <thead><tr style="text-align:left;color:var(--text3);border-bottom:1px solid var(--border)">' +
@@ -463,21 +463,21 @@ async function openLinkToNpmModal(profileName) {
       const fwd = (h.forward_scheme || 'http') + '://' + (h.forward_host || '?') + ':' + (h.forward_port || '?');
       const domains = (h.domain_names || []).length ? h.domain_names.join(', ') : '(no domains)';
       const matchBadge = matches
-        ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 8px;border-radius:10px;font-size:11px">match</span>'
-        : '<span style="background:var(--surface2);color:var(--text3);padding:2px 8px;border-radius:10px;font-size:11px">mismatch</span>';
+        ? '<span style="background:rgba(34,197,94,0.15);color:var(--green);padding:2px 8px;border-radius:10px;font-size:11px">match</span>'
+        : '<span class="mm-chip">mismatch</span>';
       return '<tr style="border-bottom:1px solid var(--border)">' +
         '<td style="padding:8px;color:var(--text3)">#' + h.id + '</td>' +
         '<td style="padding:8px">' + _esc(domains) + '</td>' +
         '<td style="padding:8px;font-family:monospace;font-size:11.5px;color:var(--text2)">' + _esc(fwd) + '</td>' +
         '<td style="padding:8px">' + matchBadge + '</td>' +
         '<td style="padding:8px;text-align:right">' +
-        '  <button class="btn btn-sm btn-primary" onclick="_pickHostForLink(' + h.id + ',\'' + _esc(profileName) + '\', event)">Vincular</button>' +
+        '  <button class="btn btn-sm btn-primary" onclick="_pickHostForLink(' + h.id + ',\'' + _esc(profileName) + '\', event)">Link</button>' +
         '</td></tr>';
     }).join('') + '</tbody>' +
     '    </table>' +
     '  </div>' +
     '  <div class="modal-footer">' +
-    '    <button type="button" class="btn" onclick="closeLinkToNpmModal()">Fechar</button>' +
+    '    <button type="button" class="btn" onclick="closeLinkToNpmModal()">Close</button>' +
     '  </div>' +
     '</div>';
   document.body.appendChild(overlay);
@@ -489,7 +489,7 @@ function closeLinkToNpmModal() {
 }
 
 async function _pickHostForLink(hostId, profileName, event) {
-  await withBusy(event, 'A vincular…', async () => {
+  await withBusy(event, 'Linking…', async () => {
     await linkProfileToNpmHost(profileName, hostId);
   });
   closeLinkToNpmModal();
@@ -507,7 +507,7 @@ async function openLinkProfileToHostModal(hostId) {
   const profileCandidates = (_allProfiles || []).filter(p => !p.npmProxyHostId);
   const webhookCandidates = (_allWebhooks || []).filter(w => !w.npmProxyHostId);
   if (!profileCandidates.length && !webhookCandidates.length) {
-    toast('Não há profiles nem webhooks livres para vincular.', 'error');
+    toast('No unlinked profiles or webhooks available.', 'error');
     return;
   }
 
@@ -557,18 +557,18 @@ async function openLinkProfileToHostModal(hostId) {
   overlay.innerHTML =
     '<div class="modal" style="max-width:760px">' +
     '  <div class="modal-header">' +
-    '    <h3 style="margin:0">Vincular NPM host #' + hostId + ' a um profile ou webhook</h3>' +
+    '    <h3 style="margin:0">Link NPM host #' + hostId + ' to a profile or webhook</h3>' +
     '    <button type="button" class="btn btn-sm" onclick="closeLinkProfileToHostModal()">&times;</button>' +
     '  </div>' +
     '  <div class="modal-body" style="max-height:60vh;overflow-y:auto">' +
     '    <div style="color:var(--text2);font-size:12.5px;margin-bottom:10px">' +
-    '      NPM host encaminha para <code style="font-family:monospace">' + _esc(hostFwd) + '</code>. ' +
-    '      Entradas com destino exactamente igual aparecem como <strong>match</strong>.' +
+    '      NPM host forwards to <code style="font-family:monospace">' + _esc(hostFwd) + '</code>. ' +
+    '      Entries with exactly the same destination are marked as <strong>match</strong>.' +
     '    </div>' +
     '    <table style="width:100%;border-collapse:collapse;font-size:13px">' +
     '      <thead><tr style="text-align:left;color:var(--text3);border-bottom:1px solid var(--border)">' +
-    '        <th style="padding:6px 8px">Tipo</th>' +
-    '        <th style="padding:6px 8px">Nome</th>' +
+    '        <th style="padding:6px 8px">Type</th>' +
+    '        <th style="padding:6px 8px">Name</th>' +
     '        <th style="padding:6px 8px">Target</th>' +
     '        <th style="padding:6px 8px"></th>' +
     '        <th style="padding:6px 8px;text-align:right"></th>' +
@@ -576,11 +576,11 @@ async function openLinkProfileToHostModal(hostId) {
     '      <tbody>' + (rows.length ? rows.map(r => {
       const matches = nHost && r.tgt.h === nHost && r.tgt.p === nPort;
       const matchBadge = matches
-        ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 8px;border-radius:10px;font-size:11px">match</span>'
-        : '<span style="background:var(--surface2);color:var(--text3);padding:2px 8px;border-radius:10px;font-size:11px">mismatch</span>';
+        ? '<span style="background:rgba(34,197,94,0.15);color:var(--green);padding:2px 8px;border-radius:10px;font-size:11px">match</span>'
+        : '<span class="mm-chip">mismatch</span>';
       const kindBadge = r.kind === 'profile'
-        ? '<span style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:10px;font-size:11px">Profile</span>'
-        : '<span style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:10px;font-size:11px">Webhook</span>';
+        ? '<span class="mm-chip acc">Profile</span>'
+        : '<span class="mm-chip warn">Webhook</span>';
       const pickFn = r.kind === 'profile'
         ? '_pickProfileForLink(\'' + _esc(r.name) + '\',' + hostId + ', event)'
         : '_pickWebhookForLink(\'' + _esc(r.name) + '\',' + hostId + ', event)';
@@ -590,13 +590,13 @@ async function openLinkProfileToHostModal(hostId) {
         '<td style="padding:8px;font-family:monospace;font-size:11.5px;color:var(--text2)">' + _esc(r.targetStr) + '</td>' +
         '<td style="padding:8px">' + matchBadge + '</td>' +
         '<td style="padding:8px;text-align:right">' +
-        '  <button class="btn btn-sm btn-primary" onclick="' + pickFn + '">Vincular</button>' +
+        '  <button class="btn btn-sm btn-primary" onclick="' + pickFn + '">Link</button>' +
         '</td></tr>';
-    }).join('') : '<tr><td colspan="5" style="padding:18px;text-align:center;color:var(--text3)">Sem entradas livres.</td></tr>') + '</tbody>' +
+    }).join('') : '<tr><td colspan="5" style="padding:18px;text-align:center;color:var(--text3)">No unlinked entries.</td></tr>') + '</tbody>' +
     '    </table>' +
     '  </div>' +
     '  <div class="modal-footer">' +
-    '    <button type="button" class="btn" onclick="closeLinkProfileToHostModal()">Fechar</button>' +
+    '    <button type="button" class="btn" onclick="closeLinkProfileToHostModal()">Close</button>' +
     '  </div>' +
     '</div>';
   document.body.appendChild(overlay);
@@ -608,14 +608,14 @@ function closeLinkProfileToHostModal() {
 }
 
 async function _pickProfileForLink(profileName, hostId, event) {
-  await withBusy(event, 'A vincular…', async () => {
+  await withBusy(event, 'Linking…', async () => {
     await linkProfileToNpmHost(profileName, hostId);
   });
   closeLinkProfileToHostModal();
 }
 
 async function _pickWebhookForLink(webhookName, hostId, event) {
-  await withBusy(event, 'A vincular…', async () => {
+  await withBusy(event, 'Linking…', async () => {
     await linkWebhookToNpmHost(webhookName, hostId);
   });
   closeLinkProfileToHostModal();
@@ -625,9 +625,9 @@ async function _pickWebhookForLink(webhookName, hostId, event) {
 async function linkWebhookToNpmHost(webhookName, hostId, opts) {
   opts = opts || {};
   if (!opts.skipConfirm) {
-    const msg = 'Vincular webhook "' + webhookName + '" ao host NPM #' + hostId
-      + '? O NPM passará a encaminhar tráfego para o webhook (em vez do destino actual).';
-    if (!(await showConfirm({ title: 'Vincular webhook ao NPM', message: msg, confirmText: 'Vincular' }))) return;
+    const msg = 'Link webhook "' + webhookName + '" to NPM host #' + hostId
+      + '? NPM will forward traffic to the webhook (instead of the current destination).';
+    if (!(await showConfirm({ title: 'Link webhook to NPM', message: msg, confirmText: 'Link' }))) return;
   }
   try {
     const res = await api('/admin/npm/link-webhook', {
@@ -638,46 +638,46 @@ async function linkWebhookToNpmHost(webhookName, hostId, opts) {
     if (!res.ok) {
       if (res.status === 409 && data && data.mismatch && !opts.force) {
         const m = data.mismatch;
-        const detail = 'NPM #' + hostId + ' encaminha actualmente para ' + m.npm.host + ':' + m.npm.port
-          + '. Ao vincular, o NPM passa a encaminhar para o webhook, cujo primeiro target é '
-          + m.webhook.host + ':' + m.webhook.port + '. Se não forem o mesmo serviço, o tráfego que ia para '
-          + m.npm.host + ':' + m.npm.port + ' via este NPM host deixa de funcionar.';
+        const detail = 'NPM #' + hostId + ' currently forwards to ' + m.npm.host + ':' + m.npm.port
+          + '. Once linked, NPM forwards to the webhook, whose first target is '
+          + m.webhook.host + ':' + m.webhook.port + '. If they are not the same service, traffic that went to '
+          + m.npm.host + ':' + m.npm.port + ' via this NPM host will stop working.';
         const ok = await showConfirm({
-          title: 'Forward targets não coincidem',
-          message: 'O webhook e o NPM host apontam para destinos diferentes. Vincular mesmo assim?',
+          title: 'Forward targets do not match',
+          message: 'The webhook and the NPM host point to different destinations. Link anyway?',
           detail,
-          confirmText: 'Vincular mesmo assim',
+          confirmText: 'Link anyway',
           danger: true,
         });
         if (!ok) return;
         return linkWebhookToNpmHost(webhookName, hostId, { force: true, skipConfirm: true });
       }
-      toast(data.error || 'Falha ao vincular', 'error');
+      toast(data.error || 'Failed to link', 'error');
       return;
     }
-    toast('Webhook "' + webhookName + '" vinculado ao NPM #' + hostId + (data.forced ? ' (forçado)' : ''));
+    toast('Webhook "' + webhookName + '" linked to NPM #' + hostId + (data.forced ? ' (forced)' : ''));
     try { await fetchWebhooks(); } catch { /* ignore */ }
     try { if (typeof fetchNpmHostsTable === 'function') await fetchNpmHostsTable(); } catch { /* ignore */ }
     try { if (typeof _npmImportHostsAll !== 'undefined' && _npmImportHostsAll.length) await fetchNpmProxyHosts(); } catch { /* ignore */ }
   } catch (e) {
-    toast('Erro de rede: ' + e.message, 'error');
+    toast('Network error: ' + e.message, 'error');
   }
 }
 
 // Modal: pick an existing NPM host to link to the given webhook.
 async function openLinkToNpmModalForWebhook(webhookName) {
   const webhook = (_allWebhooks || []).find(w => w.name === webhookName);
-  if (!webhook) { toast('Webhook não encontrado', 'error'); return; }
-  if (webhook.npmProxyHostId) { toast('Webhook já vinculado ao NPM #' + webhook.npmProxyHostId, 'error'); return; }
+  if (!webhook) { toast('Webhook not found', 'error'); return; }
+  if (webhook.npmProxyHostId) { toast('Webhook already linked to NPM #' + webhook.npmProxyHostId, 'error'); return; }
 
   let hosts = [];
   try {
     const r = await api('/admin/npm/proxy-hosts');
-    if (!r.ok) { const d = await r.json().catch(() => ({})); toast(d.error || 'Falha ao carregar NPM hosts', 'error'); return; }
+    if (!r.ok) { const d = await r.json().catch(() => ({})); toast(d.error || 'Failed to load NPM hosts', 'error'); return; }
     const d = await r.json();
     hosts = (d.hosts || []).filter(h => !h.linkedProfile && !h.linkedWebhook);
-  } catch (e) { toast('Erro de rede: ' + e.message, 'error'); return; }
-  if (!hosts.length) { toast('Não há NPM hosts disponíveis para vincular.', 'error'); return; }
+  } catch (e) { toast('Network error: ' + e.message, 'error'); return; }
+  if (!hosts.length) { toast('No NPM hosts available to link.', 'error'); return; }
 
   // First target for match highlighting.
   let tHost = '', tPort = 0;
@@ -703,13 +703,13 @@ async function openLinkToNpmModalForWebhook(webhookName) {
   overlay.innerHTML =
     '<div class="modal" style="max-width:720px">' +
     '  <div class="modal-header">' +
-    '    <h3 style="margin:0">Vincular webhook "' + _esc(webhookName) + '" a um NPM host</h3>' +
+    '    <h3 style="margin:0">Link webhook "' + _esc(webhookName) + '" to an NPM host</h3>' +
     '    <button type="button" class="btn btn-sm" onclick="closeLinkWebhookToNpmModal()">&times;</button>' +
     '  </div>' +
     '  <div class="modal-body" style="max-height:60vh;overflow-y:auto">' +
     '    <div style="color:var(--text2);font-size:12.5px;margin-bottom:10px">' +
-    '      Primeiro target do webhook: <code style="font-family:monospace">' + _esc(firstUrl || '(sem target)') + '</code>. ' +
-    '      Hosts com destino exactamente igual aparecem marcados como <strong>match</strong>.' +
+    '      First webhook target: <code style="font-family:monospace">' + _esc(firstUrl || '(no target)') + '</code>. ' +
+    '      Hosts with exactly the same destination are marked as <strong>match</strong>.' +
     '    </div>' +
     '    <table style="width:100%;border-collapse:collapse;font-size:13px">' +
     '      <thead><tr style="text-align:left;color:var(--text3);border-bottom:1px solid var(--border)">' +
@@ -726,21 +726,21 @@ async function openLinkToNpmModalForWebhook(webhookName) {
       const fwd = (h.forward_scheme || 'http') + '://' + (h.forward_host || '?') + ':' + (h.forward_port || '?');
       const domains = (h.domain_names || []).length ? h.domain_names.join(', ') : '(no domains)';
       const matchBadge = matches
-        ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 8px;border-radius:10px;font-size:11px">match</span>'
-        : '<span style="background:var(--surface2);color:var(--text3);padding:2px 8px;border-radius:10px;font-size:11px">mismatch</span>';
+        ? '<span style="background:rgba(34,197,94,0.15);color:var(--green);padding:2px 8px;border-radius:10px;font-size:11px">match</span>'
+        : '<span class="mm-chip">mismatch</span>';
       return '<tr style="border-bottom:1px solid var(--border)">' +
         '<td style="padding:8px;color:var(--text3)">#' + h.id + '</td>' +
         '<td style="padding:8px">' + _esc(domains) + '</td>' +
         '<td style="padding:8px;font-family:monospace;font-size:11.5px;color:var(--text2)">' + _esc(fwd) + '</td>' +
         '<td style="padding:8px">' + matchBadge + '</td>' +
         '<td style="padding:8px;text-align:right">' +
-        '  <button class="btn btn-sm btn-primary" onclick="_pickHostForWebhookLink(' + h.id + ',\'' + _esc(webhookName) + '\')">Vincular</button>' +
+        '  <button class="btn btn-sm btn-primary" onclick="_pickHostForWebhookLink(' + h.id + ',\'' + _esc(webhookName) + '\')">Link</button>' +
         '</td></tr>';
     }).join('') + '</tbody>' +
     '    </table>' +
     '  </div>' +
     '  <div class="modal-footer">' +
-    '    <button type="button" class="btn" onclick="closeLinkWebhookToNpmModal()">Fechar</button>' +
+    '    <button type="button" class="btn" onclick="closeLinkWebhookToNpmModal()">Close</button>' +
     '  </div>' +
     '</div>';
   document.body.appendChild(overlay);
@@ -796,8 +796,8 @@ function renderProfiles(profiles) {
   if (profiles.length === 0) { c.innerHTML = '<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">No proxies yet. Click "+ New Proxy".</td></tr>'; return; }
   c.innerHTML = profiles.map(p => {
     const statusBadge = p.running
-      ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px">Running</span>'
-      : '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>';
+      ? '<span class="mm-chip ok">Running</span>'
+      : '<span class="mm-chip err">Stopped</span>';
     const npmHint = (() => {
       const match = _findPossibleNpmHostForProfile(p);
       if (!match) return '';
@@ -805,11 +805,11 @@ function renderProfiles(profiles) {
       const first = domains[0] || ('NPM #' + match.id);
       const extra = domains.length > 1 ? ' +' + (domains.length - 1) : '';
       const tip = 'NPM host #' + match.id + (domains.length ? ' (' + domains.join(', ') + ')' : '')
-        + ' forwards to the same target as this profile. Click Link to vincular and redirect NPM → Midleman.';
+        + ' forwards to the same target as this profile. Click Link to link it and redirect NPM → Midleman.';
       const linkBtn = '<button type="button" onclick="event.stopPropagation();linkProfileToNpmHost(\'' + esc(p.name) + '\',' + match.id + ')" '
-        + 'style="background:var(--accent);color:#fff;border:none;border-radius:3px;font-size:10.5px;padding:1px 7px;cursor:pointer;margin-left:6px" '
+        + 'style="background:var(--accent);color:var(--on-accent);border:none;border-radius:3px;font-size:10.5px;padding:1px 7px;cursor:pointer;margin-left:6px" '
         + 'title="Link this profile to NPM host #' + match.id + ' and redirect NPM to Midleman">Link</button>';
-      return '<span style="background:var(--surface2);color:var(--text2);padding:2px 4px 2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help;display:inline-flex;align-items:center" title="' + esc(tip) + '">Possible NPM: ' + esc(first) + esc(extra) + linkBtn + '</span>';
+      return '<span class="mm-chip" style="margin-left:4px;cursor:help;display:inline-flex;align-items:center" title="' + esc(tip) + '">Possible NPM: ' + esc(first) + esc(extra) + linkBtn + '</span>';
     })();
     const npmBadge = (() => {
       if (!p.npmProxyHostId) return npmHint;
@@ -824,10 +824,10 @@ function renderProfiles(profiles) {
       const inner = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shown}</span>`;
       if (hosts.length === 0) {
-        return `<span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle" title="${tip}">${inner}</span>`;
+        return `<span class="mm-chip acc" style="margin-left:4px;cursor:help;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle" title="${tip}">${inner}</span>`;
       }
       const href = 'https://' + hosts[0].replace(/^\*\./, 'www.');
-      return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle;text-decoration:none;transition:background 0.15s" onmouseover="this.style.background='rgba(0,120,212,0.22)'" onmouseout="this.style.background='rgba(0,120,212,0.12)'" title="${tip}">${inner}</a>`;
+      return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="background:var(--accent-bg);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle;text-decoration:none;transition:background 0.15s" onmouseover="this.style.background='var(--accent-bdr)'" onmouseout="this.style.background='var(--accent-bg)'" title="${tip}">${inner}</a>`;
     })();
     const hasAuth = p.authHeader;
     const authVal = hasAuth
@@ -837,16 +837,16 @@ function renderProfiles(profiles) {
     const accessBadge = authMode === 'login'
       ? '<span style="background:var(--blue-bg,rgba(59,130,246,0.1));color:var(--blue,#60a5fa);padding:2px 8px;border-radius:4px;font-size:11px">Login</span>'
       : authMode === 'accessKey'
-      ? '<span style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:4px;font-size:11px">Key</span>'
+      ? '<span class="mm-chip warn">Key</span>'
       : '<span style="color:var(--text3)">Public</span>';
     const ipBadge = (p.allowedIps && p.allowedIps.length)
-      ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px" title="${esc(p.allowedIps.join(', '))}">IP restricted</span>`
+      ? `<span class="mm-chip" style="margin-left:4px" title="${esc(p.allowedIps.join(', '))}">IP restricted</span>`
       : '';
     const rateLimitBadge = (p.rateLimit && p.rateLimit.requestsPerMinute)
-      ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px" title="${p.rateLimit.requestsPerMinute} req/min${p.rateLimit.perIp ? ' per IP' : ' shared'}">${p.rateLimit.requestsPerMinute}/min${p.rateLimit.perIp ? ' /IP' : ''}</span>`
+      ? `<span class="mm-chip" style="margin-left:4px" title="${p.rateLimit.requestsPerMinute} req/min${p.rateLimit.perIp ? ' per IP' : ' shared'}">${p.rateLimit.requestsPerMinute}/min${p.rateLimit.perIp ? ' /IP' : ''}</span>`
       : '';
     const corsBadge = (p.cors && p.cors.enabled)
-      ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px" title="${esc((p.cors.allowedOrigins || []).join(', '))}">CORS</span>`
+      ? `<span class="mm-chip" style="margin-left:4px" title="${esc((p.cors.allowedOrigins || []).join(', '))}">CORS</span>`
       : '';
     const blockedVal = p.blockedExtensions?.length
       ? `<span style="color:var(--red)">${esc(p.blockedExtensions.join(', '))}</span>`
@@ -883,6 +883,7 @@ async function openProfileModal(profile = null) {
   toggleUpstreamAuthSection();
   document.getElementById('pAccessKey').value = profile ? (profile.accessKey || '') : '';
   document.getElementById('pAuthMode').value = profile ? (profile.authMode || 'none') : 'none';
+  if (typeof mmSyncSeg === 'function') mmSyncSeg('pAuthMode');
   document.getElementById('pRequire2fa').checked = profile ? !!profile.require2fa : false;
   document.getElementById('pIsWebApp').checked = profile ? !!profile.isWebApp : false;
   document.getElementById('pLogMode').value = profile ? (profile.logMode || (profile.disableLogs ? 'off' : '')) : '';
@@ -1101,13 +1102,13 @@ async function editProfile(name) {
   try { const res = await api('/admin/profiles/' + encodeURIComponent(name)); if (!res.ok) return toast('Not found', 'error'); openProfileModal((await res.json()).profile); } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 async function deleteProfile(name) {
-  if (!(await showConfirm({ title: 'Apagar proxy', message: 'Apagar proxy "' + name + '"?', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete proxy', message: 'Delete proxy "' + name + '"?', confirmText: 'Delete' }))) return;
   try { const res = await api('/admin/profiles/' + encodeURIComponent(name), { method: 'DELETE' }); if (res.ok) { toast('Proxy deleted'); await fetchProfiles(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 function copyProxyUrl(name, port) {
   if (!port || port <= 0) { toast('No port assigned for "' + name + '"', 'error'); return; }
   const url = location.protocol + '//' + location.hostname + ':' + port + '/';
-  navigator.clipboard.writeText(url).then(() => toast('Copied: ' + url)).catch(() => prompt('Copy:', url));
+  mmCopy(url, null, 'Copied: ' + url);
 }
 async function copyProfileCredential(name) {
   try {
@@ -1116,7 +1117,7 @@ async function copyProfileCredential(name) {
     const { profile } = await res.json();
     const key = profile.accessKey;
     if (!key) return toast('No access key set', 'error');
-    navigator.clipboard.writeText(key).then(() => toast('Access key copied')).catch(() => prompt('Copy:', key));
+    mmCopy(key, null, 'Access key copied');
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
@@ -1166,17 +1167,9 @@ function filterProxyUsersByRole() {
 
 function _roleBadge(u) {
   const parts = [];
-  if (u.blocked) {
-    parts.push('<span style="display:inline-block;background:rgba(225,112,85,.12);color:var(--red);border:1px solid rgba(225,112,85,.3);border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em" title="Blocked accounts cannot sign in anywhere">BLOCKED</span>');
-  }
-  if (u.isAdmin) {
-    parts.push('<span style="display:inline-block;background:rgba(59,130,246,.15);color:#2563eb;border:1px solid rgba(59,130,246,.3);border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em">ADMIN</span>');
-  } else {
-    parts.push('<span style="display:inline-block;background:rgba(148,163,184,.15);color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em">USER</span>');
-  }
-  if (u.authSource === 'ldap') {
-    parts.push('<span style="display:inline-block;background:rgba(168,85,247,.12);color:#a855f7;border:1px solid rgba(168,85,247,.25);border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em" title="Account synced from LDAP">LDAP</span>');
-  }
+  if (u.blocked) parts.push('<span class="mm-chip err" title="Blocked accounts cannot sign in anywhere">Blocked</span>');
+  parts.push(u.isAdmin ? '<span class="mm-chip acc">Admin</span>' : '<span class="mm-chip">User</span>');
+  if (u.authSource === 'ldap') parts.push('<span class="mm-chip" title="Account synced from LDAP">LDAP</span>');
   return parts.join(' ');
 }
 
@@ -1270,7 +1263,7 @@ async function saveEditProxyUser() {
     const desired = document.getElementById('npuIsAdmin').checked;
     const current = !!_allProxyUsers.find(u => u.id === _editUserId)?.isAdmin;
     if (desired !== current) {
-      if (!desired && !(await showConfirm({ title: 'Remover papel de administrador', message: 'Remover o papel de administrador deste utilizador? Perderá acesso ao dashboard.', confirmText: 'Remover' }))) return;
+      if (!desired && !(await showConfirm({ title: 'Remove admin role', message: 'Remove the admin role from this user? They will lose access to the dashboard.', confirmText: 'Remove' }))) return;
       body.isAdmin = desired;
     }
   }
@@ -1285,7 +1278,7 @@ async function saveEditProxyUser() {
 }
 
 async function deleteProxyUserAction(id, username) {
-  if (!(await showConfirm({ title: 'Apagar utilizador', message: 'Apagar utilizador "' + username + '"? Todo o acesso aos perfis será revogado.', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete user', message: 'Delete user "' + username + '"? All profile access will be revoked.', confirmText: 'Delete' }))) return;
   try {
     const res = await api('/admin/proxy-users/' + id, { method: 'DELETE' });
     if (res.ok) { toast('User deleted'); fetchProxyUsers(); } else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
@@ -1295,13 +1288,13 @@ async function deleteProxyUserAction(id, username) {
 async function toggleBlockProxyUser(id, username, block) {
   const confirmed = block
     ? await showConfirm({
-        title: 'Bloquear utilizador',
-        message: 'Bloquear "' + username + '"?',
-        detail: 'O utilizador perde imediatamente todo o acesso: proxies, OAuth e área de administração. As sessões ativas são terminadas. Pode desbloquear a qualquer momento.',
-        confirmText: 'Bloquear',
+        title: 'Block user',
+        message: 'Block "' + username + '"?',
+        detail: 'The user immediately loses all access: proxies, OAuth and the admin area. Active sessions are ended. You can unblock them at any time.',
+        confirmText: 'Block',
         danger: true,
       })
-    : await showConfirm({ title: 'Desbloquear utilizador', message: 'Desbloquear "' + username + '"? O acesso é reposto de imediato.', confirmText: 'Desbloquear' });
+    : await showConfirm({ title: 'Unblock user', message: 'Unblock "' + username + '"? Access is restored immediately.', confirmText: 'Unblock' });
   if (!confirmed) return;
   try {
     const res = await api('/admin/proxy-users/' + id, { method: 'PUT', body: JSON.stringify({ blocked: block }) });
@@ -1321,7 +1314,7 @@ async function resetProxyUserPw(id) {
 }
 
 async function disable2fa(id, username) {
-  if (!(await showConfirm({ title: 'Desativar 2FA', message: 'Desativar 2FA para "' + username + '"?', detail: 'A conta ficará protegida apenas pela palavra-passe. O utilizador será notificado por email.', confirmText: 'Desativar' }))) return;
+  if (!(await showConfirm({ title: 'Disable 2FA', message: 'Disable 2FA for "' + username + '"?', detail: 'The account will be protected by its password only. The user will be notified by email.', confirmText: 'Disable' }))) return;
   try {
     const res = await api('/admin/proxy-users/' + id, { method: 'PUT', body: JSON.stringify({ reset2fa: true }) });
     if (res.ok) { toast('2FA disabled — user notified by email'); fetchProxyUsers(); } else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
@@ -1329,7 +1322,7 @@ async function disable2fa(id, username) {
 }
 
 async function force2fa(id, username) {
-  if (!(await showConfirm({ title: 'Exigir configuração de 2FA', message: 'Exigir que "' + username + '" configure 2FA no próximo login?', detail: 'Se já tiver 2FA, será reposto e terá de o configurar novamente. O utilizador será notificado por email.', confirmText: 'Exigir', danger: false }))) return;
+  if (!(await showConfirm({ title: 'Require 2FA setup', message: 'Require "' + username + '" to set up 2FA at next sign-in?', detail: 'If 2FA is already set up, it will be reset and must be set up again. The user will be notified by email.', confirmText: 'Require', danger: false }))) return;
   try {
     const res = await api('/admin/proxy-users/' + id, { method: 'PUT', body: JSON.stringify({ force2fa: true }) });
     if (res.ok) { toast('User will be required to set up 2FA on next login'); fetchProxyUsers(); } else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
@@ -1340,7 +1333,7 @@ async function force2fa(id, username) {
 async function reset2fa(id, username) { return disable2fa(id, username); }
 
 async function sendPasswordReset(id, username) {
-  if (!(await showConfirm({ title: 'Enviar link de reposição de palavra-passe', message: 'Enviar email de reposição para "' + username + '"?', detail: 'O utilizador recebe um link único que expira em 60 minutos. A configuração de 2FA permanece inalterada.', confirmText: 'Enviar' }))) return;
+  if (!(await showConfirm({ title: 'Send password reset link', message: 'Send a password reset email to "' + username + '"?', detail: 'The user receives a one-time link that expires in 60 minutes. The 2FA setup stays unchanged.', confirmText: 'Send' }))) return;
   try {
     const res = await api('/admin/proxy-users/' + id + '/password-reset', { method: 'POST' });
     const d = await res.json().catch(() => ({}));
@@ -1435,7 +1428,7 @@ async function addLdapGroupToProfileUI() {
 
 async function removeLdapGroupFromProfileUI(ruleId) {
   if (!_profileUsersProfile) return;
-  if (!(await showConfirm({ title: 'Remover regra de grupo LDAP', message: 'Remover esta regra de grupo LDAP?', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove LDAP group rule', message: 'Remove this LDAP group rule?', confirmText: 'Remove' }))) return;
   try {
     const res = await api('/admin/profiles/' + encodeURIComponent(_profileUsersProfile) + '/ldap-groups/' + ruleId, { method: 'DELETE' });
     if (res.ok) { toast('Rule removed'); await refreshProfileLdapGroups(); }
@@ -1520,7 +1513,7 @@ async function assignUserToCurrentProfile() {
 
 async function removeUserFromProfile(userId, username) {
   if (!_profileUsersProfile) return;
-  if (!(await showConfirm({ title: 'Remover do perfil', message: 'Remover "' + username + '" deste perfil?', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove from profile', message: 'Remove "' + username + '" from this profile?', confirmText: 'Remove' }))) return;
   const btn = document.querySelector(`#pfuListBody button[onclick*="removeUserFromProfile(${userId},"]`);
   if (btn) { btn.disabled = true; btn.textContent = 'Removing...'; }
   try {
@@ -1566,7 +1559,7 @@ function closeUserProfilesModal() { closeUserResourcesModal(); }
 function _sourceBadge(source) {
   const pill = (label, bg, color, border, title) =>
     '<span title="' + esc(title || '') + '" style="display:inline-block;background:' + bg + ';color:' + color + ';border:1px solid ' + border + ';border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em">' + label + '</span>';
-  if (source === 'direct') return pill('DIRECT', 'var(--accent-bg)', 'var(--accent)', 'rgba(0,120,212,0.25)', 'Assigned directly to this user');
+  if (source === 'direct') return pill('DIRECT', 'var(--accent-bg)', 'var(--accent)', 'var(--accent-bdr)', 'Assigned directly to this user');
   if (source === 'ldap_group') return pill('LDAP GROUP', 'rgba(168,85,247,.12)', '#a855f7', 'rgba(168,85,247,.25)', 'Granted by LDAP group membership');
   if (source === 'open') return pill('OPEN', 'var(--surface2)', 'var(--text3)', 'var(--border)', 'Allow-list disabled — open to all users');
   return '<span style="color:var(--text3)">—</span>';
@@ -1673,7 +1666,7 @@ async function assignProfileToCurrentUser() {
 
 async function removeProfileFromCurrentUser(profileName) {
   if (!_userProfilesUserId) return;
-  if (!(await showConfirm({ title: 'Remover acesso', message: 'Remover acesso a "' + profileName + '"?', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove access', message: 'Remove access to "' + profileName + '"?', confirmText: 'Remove' }))) return;
   try {
     const res = await api('/admin/profiles/' + encodeURIComponent(profileName) + '/users/' + _userProfilesUserId, { method: 'DELETE' });
     if (res.ok) { toast('Access removed'); refreshUserResources(); fetchProxyUsers(); }
@@ -1696,7 +1689,7 @@ async function assignOauthClientToCurrentUser() {
 
 async function removeOauthClientFromCurrentUser(clientId, clientName) {
   if (!_userProfilesUserId) return;
-  if (!(await showConfirm({ title: 'Remover acesso', message: 'Remover acesso a "' + clientName + '"?', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove access', message: 'Remove access to "' + clientName + '"?', confirmText: 'Remove' }))) return;
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(clientId) + '/users/' + _userProfilesUserId, { method: 'DELETE' });
     if (res.ok) { toast('Access removed'); refreshUserResources(); }
@@ -1964,12 +1957,7 @@ async function generateInvite() {
 
 function copyInviteLink() {
   const inp = document.getElementById('inviteLinkInput');
-  navigator.clipboard.writeText(inp.value).then(() => {
-    const btn = document.getElementById('copyInviteBtn');
-    const orig = btn.textContent;
-    btn.textContent = 'Copied!'; btn.style.background = 'var(--green)';
-    setTimeout(() => { btn.textContent = orig; btn.style.background = ''; }, 2000);
-  });
+  mmCopy(inp.value, document.getElementById('copyInviteBtn'));
 }
 
 async function fetchInvites() {
@@ -2016,12 +2004,12 @@ function renderInvites(invites) {
     const profileNames = inv.profileNames && inv.profileNames.length ? inv.profileNames : (inv.profileName ? [inv.profileName] : []);
     const oauthIds = inv.oauthClientIds || [];
     const proxyChips = profileNames.map(p =>
-      `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--surface2);border:1px solid var(--border);padding:1px 7px;border-radius:10px;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text)">
+      `<span class="mm-chip" style="display:inline-flex;align-items:center;gap:4px">
          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
          ${esc(_inviteProfileLabel(p))}
        </span>`).join('');
     const oauthChips = oauthIds.map(c =>
-      `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--accent-bg);border:1px solid rgba(0,120,212,0.3);color:var(--accent);padding:1px 7px;border-radius:10px;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
+      `<span class="mm-chip acc" style="display:inline-flex;align-items:center;gap:4px">
          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
          ${esc(_inviteOauthLabel(c))}
        </span>`).join('');
@@ -2081,11 +2069,11 @@ async function resendInviteFromList(token) {
 
 function copyTokenLink(token) {
   const link = window.location.origin + '/invite/' + token;
-  navigator.clipboard.writeText(link).then(() => toast('Link copiado!'));
+  mmCopy(link, null, 'Link copied');
 }
 
 async function revokeInvite(token) {
-  if (!(await showConfirm({ title: 'Revogar convite', message: 'Revogar este convite? O link deixará de funcionar.', confirmText: 'Revogar' }))) return;
+  if (!(await showConfirm({ title: 'Revoke invite', message: 'Revoke this invite? The link will stop working.', confirmText: 'Revoke' }))) return;
   try {
     const res = await api('/admin/invites/' + token, { method: 'DELETE' });
     if (res.ok) { toast('Invite revoked'); fetchInvites(); }
@@ -2159,13 +2147,13 @@ function renderWebhooks(webhooks) {
   if (webhooks.length === 0) { c.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No webhooks yet. Click "+ New Webhook".</td></tr>'; return; }
   c.innerHTML = webhooks.map(w => {
     const statusBadge = w.running
-      ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px">Running</span>'
-      : '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>';
+      ? '<span class="mm-chip ok">Running</span>'
+      : '<span class="mm-chip err">Stopped</span>';
     const authBadge = w.hasAuth
       ? '<span style="color:var(--green)">Enabled</span>'
       : '<span style="color:var(--text3)">Public</span>';
     const wIpBadge = (w.allowedIps && w.allowedIps.length)
-      ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 6px;border-radius:4px;font-size:11px;margin-left:4px" title="${esc(w.allowedIps.join(', '))}">IP restricted</span>`
+      ? `<span class="mm-chip" style="margin-left:4px" title="${esc(w.allowedIps.join(', '))}">IP restricted</span>`
       : '';
     const numTargets = w.targets.length;
     const numPaused = w.targets.filter(t => typeof t === 'object' && t && t.enabled === false).length;
@@ -2189,10 +2177,10 @@ function renderWebhooks(webhooks) {
       const inner = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shown}</span>`;
       if (hosts.length === 0) {
-        return `<span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle" title="${tip}">${inner}</span>`;
+        return `<span class="mm-chip acc" style="margin-left:4px;cursor:help;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle" title="${tip}">${inner}</span>`;
       }
       const href = 'https://' + hosts[0].replace(/^\*\./, 'www.');
-      return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle;text-decoration:none;transition:background 0.15s" onmouseover="this.style.background='rgba(0,120,212,0.22)'" onmouseout="this.style.background='rgba(0,120,212,0.12)'" title="${tip}">${inner}</a>`;
+      return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="background:var(--accent-bg);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle;text-decoration:none;transition:background 0.15s" onmouseover="this.style.background='var(--accent-bdr)'" onmouseout="this.style.background='var(--accent-bg)'" title="${tip}">${inner}</a>`;
     })();
     return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
   <td style="padding:8px 12px;font-weight:600">${esc(w.name)}</td>
@@ -2234,10 +2222,10 @@ function renderConnectors(connectors) {
   if (connectors.length === 0) { c.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No connectors yet. Click "+ New Connector".</td></tr>'; return; }
   c.innerHTML = connectors.map(cn => {
     const statusBadge = cn.running
-      ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px">Running</span>'
+      ? '<span class="mm-chip ok">Running</span>'
       : (cn.enabled
-        ? '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>'
-        : '<span style="background:var(--surface2);color:var(--text3);padding:2px 8px;border-radius:4px;font-size:11px">Disabled</span>');
+        ? '<span class="mm-chip err">Stopped</span>'
+        : '<span class="mm-chip">Disabled</span>');
     const replies = [
       cn.directReply ? (cn.channel === 'smooch' ? 'Smooch' : cn.channel === 'meta-whatsapp' ? 'Meta' : 'Direct') : null,
       (cn.webhookTargets && cn.webhookTargets.length)
@@ -2426,7 +2414,7 @@ const smtpWiz = Wizard.mount('smtpConfigModal', {
   subtitle: 'SMTP relay used to deliver notification emails',
   saveLabel: 'Save',
   onClose: () => closeSmtpConfigModal(),
-  onSave: ev => withBusy(ev.currentTarget, 'A guardar…', () => saveSmtpConfig()),
+  onSave: ev => withBusy(ev.currentTarget, 'Saving…', () => saveSmtpConfig()),
   problems() {
     const p = {};
     const flag = (step, msg) => { if (!p[step]) p[step] = msg; };
@@ -2441,7 +2429,7 @@ const smsWiz = Wizard.mount('smsConfigModal', {
   subtitle: 'Routing and credentials for WeSender and Twilio',
   saveLabel: 'Save',
   onClose: () => closeSmsConfigModal(),
-  onSave: ev => withBusy(ev.currentTarget, 'A guardar…', () => saveSmsConfig()),
+  onSave: ev => withBusy(ev.currentTarget, 'Saving…', () => saveSmsConfig()),
   hidden: id => id === 'prefixes' && Wizard.val('smsRouting') !== 'by-prefix',
   problems() {
     const p = {};
@@ -2934,7 +2922,7 @@ async function editConnector(name) {
 }
 
 async function deleteConnector(name) {
-  if (!(await showConfirm({ title: 'Apagar connector', message: 'Apagar connector "' + name + '" e todas as sessões ativas?', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete connector', message: 'Delete connector "' + name + '" and all active sessions?', confirmText: 'Delete' }))) return;
   try {
     const res = await api('/admin/connectors/' + encodeURIComponent(name), { method: 'DELETE' });
     if (res.ok) { toast('Deleted'); await fetchConnectors(); }
@@ -2954,8 +2942,10 @@ function switchConnectorsTab(tab) {
   document.getElementById('tabPaneGoContact').style.display = isGC ? '' : 'none';
   document.getElementById('tabPaneFive9').style.display = isGC ? 'none' : '';
   document.getElementById('tabBtnGoContact').style.borderBottomColor = isGC ? 'var(--accent)' : 'transparent';
+  document.getElementById('tabBtnGoContact').classList.toggle('on', !!(isGC));
   document.getElementById('tabBtnGoContact').style.color = isGC ? 'var(--text)' : 'var(--text3)';
   document.getElementById('tabBtnFive9').style.borderBottomColor = isGC ? 'transparent' : 'var(--accent)';
+  document.getElementById('tabBtnFive9').classList.toggle('on', !(isGC));
   document.getElementById('tabBtnFive9').style.color = isGC ? 'var(--text3)' : 'var(--text)';
   document.getElementById('btnNewGoContact').style.display = isGC ? '' : 'none';
   document.getElementById('btnNewFive9').style.display = isGC ? 'none' : '';
@@ -2995,7 +2985,7 @@ async function refreshConnectorSessions() {
 }
 
 async function closeConnectorChat(connector, chatId) {
-  if (!(await showConfirm({ title: 'Fechar sessão', message: 'Fechar a sessão de "' + chatId + '"? Será enviado LEAVE à GoContact.', confirmText: 'Fechar' }))) return;
+  if (!(await showConfirm({ title: 'Close session', message: 'Close the session for "' + chatId + '"? A LEAVE will be sent to GoContact.', confirmText: 'Close' }))) return;
   try {
     const res = await api('/admin/connectors/' + encodeURIComponent(connector) + '/sessions/' + encodeURIComponent(chatId), { method: 'DELETE' });
     if (res.ok) { toast('Session closed'); await refreshConnectorSessions(); }
@@ -3141,11 +3131,11 @@ function renderPendingRetryEntries() {
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;margin-bottom:10px;border:1px solid var(--border);border-radius:6px;background:var(--surface2)">
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
         <input type="checkbox" ${allSelected ? 'checked' : ''} onclick="prToggleSelectAll(this.checked)">
-        Selecionar tudo
+        Select all
       </label>
       <span style="flex:1"></span>
       <button class="btn btn-sm btn-danger" onclick="prCancelSelected()" ${selectedCount === 0 ? 'disabled' : ''}>
-        Cancelar selecionados (${selectedCount})
+        Cancel selected (${selectedCount})
       </button>
     </div>`;
 
@@ -3155,15 +3145,15 @@ function renderPendingRetryEntries() {
     const header = `
       <div style="display:flex;align-items:center;gap:8px;padding:6px 4px;margin-bottom:4px">
         <input type="checkbox" ${groupAllSelected ? 'checked' : ''} ${groupSelectable.length === 0 ? 'disabled' : ''}
-          onclick="prToggleGroup('${esc(targetUrl)}', this.checked)" title="Selecionar todas deste destinatário">
+          onclick="prToggleGroup('${esc(targetUrl)}', this.checked)" title="Select all for this recipient">
         <span style="font-family:'SF Mono',Monaco,monospace;font-size:12px;color:var(--text2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(targetUrl)}">${esc(targetUrl)}</span>
-        <span style="font-size:11px;color:var(--text3);white-space:nowrap">${entries.length} pendente(s)</span>
+        <span style="font-size:11px;color:var(--text3);white-space:nowrap">${entries.length} pending</span>
       </div>`;
 
     const items = entries.map(e => {
       const nextIn = Math.max(0, e.nextAttemptAt - Date.now());
       const nextLabel = e.running ? 'running…' : (nextIn < 1000 ? 'now' : `in ${Math.ceil(nextIn / 1000)}s`);
-      const notifyBadge = e.notified ? '<span style="background:var(--orange-bg);color:var(--orange);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px">notified</span>' : '';
+      const notifyBadge = e.notified ? '<span class="mm-chip warn" style="margin-left:4px">notified</span>' : '';
       const checked = _prSelected.has(e.id) ? 'checked' : '';
       return `
       <div id="pr-${esc(e.id)}" style="display:flex;gap:10px;border:1px solid rgba(245,158,11,0.3);border-radius:6px;padding:10px 14px;margin-bottom:8px;background:rgba(245,158,11,0.06)">
@@ -3231,7 +3221,7 @@ async function prRetryOne(id) {
 }
 
 async function prDismissOne(id) {
-  if (!(await showConfirm({ title: 'Cancelar nova tentativa', message: 'Cancelar esta nova tentativa pendente? A entrega será abandonada.', confirmText: 'Cancelar entrega' }))) return;
+  if (!(await showConfirm({ title: 'Cancel retry', message: 'Cancel this pending retry? The delivery will be abandoned.', confirmText: 'Cancel delivery' }))) return;
   try {
     const res = await api(`/admin/webhooks/pending-retry/${encodeURIComponent(id)}`, { method: 'DELETE' });
     if (res.ok) { await refreshPendingRetryModal(); await fetchWebhooks(); }
@@ -3243,9 +3233,9 @@ async function prCancelSelected() {
   const ids = [..._prSelected];
   if (ids.length === 0) return;
   if (!(await showConfirm({
-    title: 'Cancelar novas tentativas selecionadas',
-    message: `Cancelar ${ids.length} nova(s) tentativa(s) selecionada(s)? As entregas serão abandonadas.`,
-    confirmText: 'Cancelar selecionados',
+    title: 'Cancel selected retries',
+    message: `Cancel ${ids.length} selected retr${ids.length === 1 ? 'y' : 'ies'}? The deliveries will be abandoned.`,
+    confirmText: 'Cancel selected',
   }))) return;
   try {
     const res = await api('/admin/webhooks/pending-retry/cancel-all', {
@@ -3253,8 +3243,8 @@ async function prCancelSelected() {
       body: JSON.stringify({ webhook: _prModalWebhook || undefined, ids }),
     });
     const d = await res.json().catch(() => ({}));
-    if (res.ok) toast(`${d.removed ?? 0} nova(s) tentativa(s) cancelada(s)`);
-    else toast('Falha ao cancelar', 'error');
+    if (res.ok) toast(`${d.removed ?? 0} retr${(d.removed ?? 0) === 1 ? 'y' : 'ies'} cancelled`);
+    else toast('Failed to cancel', 'error');
   } catch (e) { toast('Error: ' + e.message, 'error'); }
   await refreshPendingRetryModal();
   await fetchWebhooks();
@@ -3264,9 +3254,9 @@ async function prCancelAll() {
   const count = _prEntries.length;
   if (!count) return;
   if (!(await showConfirm({
-    title: 'Cancelar todas as novas tentativas',
-    message: `Cancelar todas as ${count} novas tentativas pendentes${_prModalWebhook ? ' de "' + _prModalWebhook + '"' : ''}? As entregas serão abandonadas. (As que estiverem a correr neste momento serão mantidas.)`,
-    confirmText: 'Cancelar todas',
+    title: 'Cancel all retries',
+    message: `Cancel all ${count} pending retries${_prModalWebhook ? ' for "' + _prModalWebhook + '"' : ''}? The deliveries will be abandoned. (Retries currently running will be kept.)`,
+    confirmText: 'Cancel all',
   }))) return;
   const btn = document.getElementById('prCancelAllBtn');
   if (btn) btn.disabled = true;
@@ -3274,8 +3264,8 @@ async function prCancelAll() {
     const body = _prModalWebhook ? { webhook: _prModalWebhook } : {};
     const res = await api('/admin/webhooks/pending-retry/cancel-all', { method: 'POST', body: JSON.stringify(body) });
     const d = await res.json().catch(() => ({}));
-    if (res.ok) toast(`${d.removed ?? 0} nova(s) tentativa(s) cancelada(s)`);
-    else toast('Falha ao cancelar', 'error');
+    if (res.ok) toast(`${d.removed ?? 0} retr${(d.removed ?? 0) === 1 ? 'y' : 'ies'} cancelled`);
+    else toast('Failed to cancel', 'error');
   } catch (e) { toast('Error: ' + e.message, 'error'); }
   if (btn) btn.disabled = false;
   await refreshPendingRetryModal();
@@ -3470,7 +3460,7 @@ function renderBodyEditorFieldsPanel() {
     const payload = getCurrentTestPayloadObject();
     if (!payload) {
         list.innerHTML = `<div style="padding:12px;color:var(--text3);font-size:11px;font-family:inherit">
-            Cole um Test Payload (JSON) válido na seção anterior para ver os campos disponíveis aqui.
+            Paste a valid test payload (JSON) in the previous section to see the available fields here.
         </div>`;
         return;
     }
@@ -3480,7 +3470,7 @@ function renderBodyEditorFieldsPanel() {
         return;
     }
     const colorFor = (kind) => {
-        if (kind === 'string') return 'var(--green, #4ade80)';
+        if (kind === 'string') return 'var(--green)';
         if (kind === 'number') return 'var(--accent, #3b82f6)';
         if (kind === 'boolean') return 'var(--orange, #fb923c)';
         if (kind === 'object' || kind === 'array') return 'var(--text3)';
@@ -3497,7 +3487,7 @@ function renderBodyEditorFieldsPanel() {
             const seen = stats.counts.get(key);
             if (seen !== undefined) {
                 const pct = Math.round((seen / stats.total) * 100);
-                const color = pct === 100 ? 'var(--green, #4ade80)' : (pct >= 50 ? 'var(--orange, #fb923c)' : 'var(--red, #f87171)');
+                const color = pct === 100 ? 'var(--green)' : (pct >= 50 ? 'var(--orange, #fb923c)' : 'var(--red, #f87171)');
                 freqBadge = `<span title="Present in ${seen} of ${stats.total} sampled payloads" style="color:${color};font-size:10px;flex-shrink:0">${pct}%</span>`;
             } else {
                 freqBadge = `<span title="Not seen in sampled payloads (synthesised)" style="color:var(--text3);font-size:10px;flex-shrink:0">—</span>`;
@@ -3521,7 +3511,7 @@ function renderBodyEditorFieldsPanel() {
 }
 
 function filterFieldColorFor(kind) {
-    if (kind === 'string') return 'var(--green, #4ade80)';
+    if (kind === 'string') return 'var(--green)';
     if (kind === 'number') return 'var(--accent, #3b82f6)';
     if (kind === 'boolean') return 'var(--orange, #fb923c)';
     if (kind === 'object' || kind === 'array') return 'var(--text3)';
@@ -3651,7 +3641,7 @@ function closeBodyEditor() {
 function setBodyEditorStatus(msg, kind) {
     const el = document.getElementById('bodyEditorStatus');
     if (!el) return;
-    const colors = { ok: 'var(--green, #4ade80)', err: 'var(--red, #f87171)', info: 'var(--text3)' };
+    const colors = { ok: 'var(--green)', err: 'var(--red, #f87171)', info: 'var(--text3)' };
     el.style.color = colors[kind] || colors.info;
     el.textContent = msg || '';
 }
@@ -3779,7 +3769,7 @@ function updateAllPreviews() {
         const { actual, found, matches } = evaluateFilterConditionJS(c, payloadObj);
         const sample = found ? (typeof actual === 'object' ? JSON.stringify(actual) : String(actual)) : '(path not found in test payload)';
         pf.textContent = (matches ? '✓ matches — ' : '✗ no match — ') + `payload value: ${sample}`;
-        pf.style.color = matches ? 'var(--green, #4ade80)' : 'var(--red)';
+        pf.style.color = matches ? 'var(--green)' : 'var(--red)';
         pf.style.display = 'block';
     });
 
@@ -4100,7 +4090,7 @@ function renderWebhookTargets() {
     return;
   }
 
-  const badge = (label, accent) => `<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:${accent ? 'rgba(0,120,212,0.12)' : 'var(--surface2)'};color:${accent ? 'var(--accent)' : 'var(--text3)'};border:1px solid ${accent ? 'rgba(0,120,212,0.3)' : 'var(--border)'};white-space:nowrap">${label}</span>`;
+  const badge = (label, accent) => `<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:${accent ? 'var(--accent-bg)' : 'var(--surface2)'};color:${accent ? 'var(--accent)' : 'var(--text3)'};border:1px solid ${accent ? 'var(--accent-bdr)' : 'var(--border)'};white-space:nowrap">${label}</span>`;
 
   container.innerHTML = webhookTargetState.map((t, i) => {
     const activeFilters = (t.filter || []).filter(c => c.path.trim());
@@ -4216,7 +4206,7 @@ function renderDestinationEditorMarkup(i) {
                 <option value="DELETE" ${t.method === 'DELETE' ? 'selected' : ''}>DELETE</option>
               </select>
               <label style="font-size:11px;color:var(--text);display:flex;align-items:center;gap:4px;margin-left:auto;cursor:pointer">
-                <input type="checkbox" ${t.forwardHeaders ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'forwardHeaders', this.checked)"> Forward incoming headers
+                <input class="mm-switch" type="checkbox" ${t.forwardHeaders ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'forwardHeaders', this.checked)"> Forward incoming headers
               </label>
             </div>
             
@@ -4230,7 +4220,7 @@ function renderDestinationEditorMarkup(i) {
 
             <div style="display:flex;flex-direction:column;gap:4px">
               <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none">
-                <input type="checkbox" ${t.customBody ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'customBody', this.checked); renderDestinationEditor(${i})" style="cursor:pointer;accent-color:var(--accent)">
+                <input class="mm-switch" type="checkbox" ${t.customBody ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'customBody', this.checked); renderDestinationEditor(${i})" style="cursor:pointer;accent-color:var(--accent)">
                 <span style="font-weight:600">Custom Body</span>
                 <span style="color:var(--text3);font-weight:400">— leave unchecked to forward the incoming body as-is</span>
               </label>
@@ -4243,9 +4233,9 @@ function renderDestinationEditorMarkup(i) {
                 </button>
               </div>
               <div id="aceBody_${i}" style="width:100%; min-height:100px; border-radius:4px; border:1px solid var(--border);"></div>
-              <div style="font-size:10px;color:var(--text3);margin-top:3px;margin-left:2px">Supports JSON + <code style="background:rgba(0,120,212,0.15);padding:1px 4px;border-radius:3px;color:var(--accent);font-size:10px">{{template.vars}}</code> + fallback <code style="background:rgba(0,120,212,0.15);padding:1px 4px;border-radius:3px;color:var(--accent);font-size:10px">{{a || b || "x"}}</code></div>
+              <div style="font-size:10px;color:var(--text3);margin-top:3px;margin-left:2px">Supports JSON + <code style="background:var(--accent-bg);padding:1px 4px;border-radius:3px;color:var(--accent);font-size:10px">{{template.vars}}</code> + fallback <code style="background:var(--accent-bg);padding:1px 4px;border-radius:3px;color:var(--accent);font-size:10px">{{a || b || "x"}}</code></div>
               <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none;margin-top:6px">
-                <input type="checkbox" ${t.dropEmpty ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'dropEmpty', this.checked); updateAllPreviews()" style="cursor:pointer;accent-color:var(--accent)">
+                <input class="mm-switch mm-switch" type="checkbox" ${t.dropEmpty ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'dropEmpty', this.checked); updateAllPreviews()" style="cursor:pointer;accent-color:var(--accent)">
                 <span>Drop null/empty fields on delivery</span>
                 <span style="color:var(--text3);font-size:10px">— remove keys whose value renders to null or "" before sending</span>
               </label>
@@ -4258,7 +4248,7 @@ function renderDestinationEditorMarkup(i) {
         <!-- Per-destination retry override -->
         <div class="destination-retry-override" style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
           <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:${t.persistentRetryOpen ? 'var(--text3)' : 'var(--text2)'};cursor:${t.persistentRetryOpen ? 'not-allowed' : 'pointer'}" onclick="${t.persistentRetryOpen ? 'return false' : `toggleTargetRetry(${i});return false`}" title="${t.persistentRetryOpen ? 'Disabled — Persistent retry is enabled below' : ''}">
-            <input type="checkbox" ${t.retryOpen ? 'checked' : ''} ${t.persistentRetryOpen ? 'disabled' : ''} onclick="event.preventDefault()">
+            <input class="mm-switch" type="checkbox" ${t.retryOpen ? 'checked' : ''} ${t.persistentRetryOpen ? 'disabled' : ''} onclick="event.preventDefault()">
             Override retry for this destination${t.persistentRetryOpen ? ' <span style="color:var(--text3);font-size:10px">(disabled — using persistent retry)</span>' : ''}
           </label>
           ${t.retryOpen ? `
@@ -4281,7 +4271,7 @@ function renderDestinationEditorMarkup(i) {
               </div>
             </div>
             <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer">
-              <input type="checkbox" ${t.retry?.retryUntilSuccess ? 'checked' : ''} onchange="updateTargetRetry(${i},'retryUntilSuccess',this.checked);document.getElementById('tRetryOnRow_${i}').style.display=this.checked?'none':'flex';renderDestinationEditor(${i})">
+              <input class="mm-switch" type="checkbox" ${t.retry?.retryUntilSuccess ? 'checked' : ''} onchange="updateTargetRetry(${i},'retryUntilSuccess',this.checked);document.getElementById('tRetryOnRow_${i}').style.display=this.checked?'none':'flex';renderDestinationEditor(${i})">
               <strong>Retry until success (2xx)</strong>
             </label>
             <div id="tRetryOnRow_${i}" style="display:${t.retry?.retryUntilSuccess ? 'none' : 'flex'};align-items:center;gap:6px">
@@ -4414,7 +4404,7 @@ function openWebhookModal(webhook = null) {
   const wAuthTokenEl = document.getElementById('wAuthToken');
   wAuthTokenEl.value = '';
   wAuthTokenEl.placeholder = (webhook && webhook.hasAuthToken)
-    ? '•••••••• (configurado — deixe vazio para manter)'
+    ? '•••••••• (set — leave empty to keep)'
     : '';
   IpTagInput.setValue('wAllowedIps', webhook?.allowedIps || []);
   // Private/internal destinations are allowed by default; checkbox reflects the
@@ -4470,7 +4460,7 @@ function openWebhookModal(webhook = null) {
 
 async function releaseWebhookFromNpm() {
   if (!editingWebhook || !editingWebhook.name) return;
-  if (!(await showConfirm({ title: 'Libertar webhook', message: 'Libertar este webhook do host NPM? O NPM será restaurado para o destino de encaminhamento original.', confirmText: 'Libertar' }))) return;
+  if (!(await showConfirm({ title: 'Release webhook', message: 'Release this webhook from the NPM host? NPM will be restored to its original forward destination.', confirmText: 'Release' }))) return;
   try {
     const res = await api('/admin/webhooks/' + encodeURIComponent(editingWebhook.name) + '/npm-release', { method: 'POST' });
     const data = await res.json();
@@ -4620,7 +4610,7 @@ async function editWebhook(name) {
 }
 
 async function deleteWebhook(name) {
-  if (!(await showConfirm({ title: 'Apagar webhook', message: 'Apagar webhook "' + name + '"?', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete webhook', message: 'Delete webhook "' + name + '"?', confirmText: 'Delete' }))) return;
   try { const res = await api('/admin/webhooks/' + encodeURIComponent(name), { method: 'DELETE' }); if (res.ok) { toast('Deleted'); await fetchWebhooks(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
@@ -4682,7 +4672,7 @@ function renderRequestLogs() {
   else {
     tbody.innerHTML = requests.map(r => {
       const ts = new Date(r.timestamp + 'Z'); const sc = r.resStatus;
-      const statusCls = !sc ? 'color:var(--text3)' : sc < 300 ? 'color:var(--green)' : sc < 400 ? 'color:var(--blue)' : sc < 500 ? 'color:var(--orange)' : 'color:var(--red)';
+      const statusChip = !sc ? 'mm-chip' : sc < 300 ? 'mm-chip ok' : sc < 400 ? 'mm-chip acc' : sc < 500 ? 'mm-chip warn' : 'mm-chip err';
       const typeBadge = r.type === 'proxy'
         ? '<span class="rdm-badge" style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:4px;font-size:11px">proxy' + (r.profileName ? ' / ' + esc(r.profileName) : '') + '</span>'
         : r.type === 'webhook'
@@ -4695,7 +4685,7 @@ function renderRequestLogs() {
   <td style="padding:8px">${typeBadge}</td>
   <td style="padding:8px;font-weight:600;${methodCls}">${esc(r.method)}</td>
   <td style="padding:8px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.path)}">${esc(r.path)}</td>
-  <td style="padding:8px;font-weight:600;${statusCls}">${sc || (r.error ? 'ERR' : '-')}</td>
+  <td style="padding:8px"><span class="${r.error && !sc ? 'mm-chip err' : statusChip}">${sc || (r.error ? 'ERR' : '-')}</span></td>
   <td style="padding:8px;color:var(--text2)">${r.durationMs ? fmtMs(r.durationMs) : '-'}</td>
   <td style="padding:8px;color:var(--text3);font-size:12px">${sz > 0 ? fmtBytes(sz) : '-'}</td>
   <td style="padding:8px 12px"><span style="color:var(--accent2);font-size:12px">View</span></td>
@@ -4712,7 +4702,9 @@ function reqLogNextPage() { if (rlData && rlPage < rlData.totalPages) { rlPage++
 // ─── Request Detail ──────────────────────────────────────────────────────────
 async function openReqDetail(id) {
   const modal = document.getElementById('reqDetailModal');
-  modal.style.display = 'block';
+  modal.style.display = 'flex';
+  let fs = false; try { fs = localStorage.getItem(RDM_FS_KEY) === '1'; } catch { fs = false; }
+  _applyReqDetailFullscreen(fs);
   document.getElementById('reqDetailContent').innerHTML = '<div class="rdm-loading"><div class="rdm-spinner"></div><span>Loading request details\u2026</span></div>';
   try {
     const res = await api('/admin/requests/' + id);
@@ -4721,6 +4713,29 @@ async function openReqDetail(id) {
   } catch (e) { document.getElementById('reqDetailContent').innerHTML = '<div class="rdm-error">Error: ' + esc(e.message) + '</div>'; }
 }
 function closeReqDetail() { document.getElementById('reqDetailModal').style.display = 'none'; }
+
+// Full-screen view of the request detail; the choice is remembered per browser.
+const RDM_FS_KEY = 'midleman_rdm_fullscreen';
+function _applyReqDetailFullscreen(on) {
+  const m = document.getElementById('reqDetailModal');
+  const btn = document.getElementById('reqDetailFsBtn');
+  if (!m) return;
+  m.classList.toggle('is-fullscreen', on);
+  if (btn) {
+    btn.title = on ? 'Exit full screen' : 'Full screen';
+    btn.setAttribute('aria-label', btn.title);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+}
+function toggleReqDetailFullscreen() {
+  const on = !document.getElementById('reqDetailModal').classList.contains('is-fullscreen');
+  _applyReqDetailFullscreen(on);
+  try { localStorage.setItem(RDM_FS_KEY, on ? '1' : '0'); } catch { /* storage unavailable */ }
+}
+document.addEventListener('keydown', (e) => {
+  const m = document.getElementById('reqDetailModal');
+  if (e.key === 'Escape' && m && m.style.display !== 'none' && !document.querySelector('#confirmModal.active')) closeReqDetail();
+});
 
 async function resendRequest(id, btn) {
   if (!confirm('Re-send this request to the upstream now?\n\nThe upstream will process it again. A new entry is written to the request log.')) return;
@@ -4795,11 +4810,11 @@ function renderReqDetail(d) {
   <div class="rdm-meta-item"><div><div class="rdm-meta-lbl">Client IP</div><div class="rdm-meta-val" style="font-family:'SF Mono',ui-monospace,monospace">${esc(d.clientIp || 'unknown')}</div></div></div>
   <div class="rdm-meta-item rdm-meta-wide">
     <div style="min-width:0;flex:1"><div class="rdm-meta-lbl">Request ID</div><div class="rdm-meta-val rdm-mono-val" title="${esc(d.requestId)}">${esc(d.requestId)}</div></div>
-    <button class="rdm-copy-btn" onclick="navigator.clipboard.writeText('${esc(d.requestId)}').then(()=>toast('Copied ID'))" title="Copy ID">Copy</button>
+    <button class="rdm-copy-btn" data-copy="${esc(d.requestId)}" onclick="mmCopyFrom(this)" title="Copy ID">Copy</button>
   </div>
   <div class="rdm-meta-item rdm-meta-wide">
     <div style="min-width:0;flex:1"><div class="rdm-meta-lbl">Target URL</div><div class="rdm-meta-val rdm-mono-val" title="${esc(d.targetUrl)}">${esc(d.targetUrl)}</div></div>
-    <button class="rdm-copy-btn" onclick="navigator.clipboard.writeText('${esc(d.targetUrl)}').then(()=>toast('Copied URL'))" title="Copy URL">Copy</button>
+    <button class="rdm-copy-btn" data-copy="${esc(d.targetUrl)}" onclick="mmCopyFrom(this)" title="Copy URL">Copy</button>
   </div>
 </div>
 ${d.error ? `<div class="rdm-error-banner"><div><div style="font-weight:600;margin-bottom:2px">Error</div><div>${esc(d.error)}</div></div></div>` : ''}
@@ -4820,13 +4835,13 @@ ${d.error ? `<div class="rdm-error-banner"><div><div style="font-weight:600;marg
     <div class="rdm-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
       <span class="rdm-section-chevron">&#9660;</span><span class="rdm-section-title">Headers</span><span class="rdm-section-count">${reqHCount}</span>
     </div>
-    <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="rdmCopyCode(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(reqH)}</pre></div></div>
+    <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="mmCopyFrom(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(reqH)}</pre></div></div>
   </div>
   <div class="rdm-section">
     <div class="rdm-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
       <span class="rdm-section-chevron">&#9660;</span><span class="rdm-section-title">Body</span><span class="rdm-section-count">${fmtBytes(d.reqBodySize || 0)}</span>
     </div>
-    <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="rdmCopyCode(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(fmtBody(d.reqBody))}</pre></div></div>
+    <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="mmCopyFrom(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(fmtBody(d.reqBody))}</pre></div></div>
   </div>
 </div>
 <div id="rdmResPanel" class="rdm-tab-panel">
@@ -4834,13 +4849,13 @@ ${d.error ? `<div class="rdm-error-banner"><div><div style="font-weight:600;marg
     <div class="rdm-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
       <span class="rdm-section-chevron">&#9660;</span><span class="rdm-section-title">Headers</span><span class="rdm-section-count">${resHCount}</span>
     </div>
-    <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="rdmCopyCode(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(resH)}</pre></div></div>
+    <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="mmCopyFrom(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(resH)}</pre></div></div>
   </div>
   <div class="rdm-section">
     <div class="rdm-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
       <span class="rdm-section-chevron">&#9660;</span><span class="rdm-section-title">Body</span><span class="rdm-section-count">${fmtBytes(d.resBodySize || 0)}</span>
     </div>
-    <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="rdmCopyCode(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(fmtBody(d.resBody))}</pre></div></div>
+    <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="mmCopyFrom(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(fmtBody(d.resBody))}</pre></div></div>
   </div>
 </div>
 ${d.attempts && d.attempts.length > 1 ? `
@@ -4861,9 +4876,9 @@ ${d.attempts && d.attempts.length > 1 ? `
           const st = a.status;
           const stText = a.statusText ? ' ' + esc(a.statusText) : '';
           const statusHtml = !st
-            ? '<span style="color:var(--red);font-weight:600">Network err</span>'
-            : st < 300 ? `<span style="color:var(--green);font-weight:600">${st}${stText}</span>`
-            : `<span style="color:var(--red);font-weight:600">${st}${stText}</span>`;
+            ? '<span class="mm-chip err">Network err</span>'
+            : st < 300 ? `<span class="mm-chip ok">${st}${stText}</span>`
+            : `<span class="mm-chip err">${st}${stText}</span>`;
           return `<tr style="border-bottom:1px solid var(--border)">
             <td style="padding:10px 16px;color:var(--text2);font-weight:600">${a.attempt}</td>
             <td style="padding:10px 16px">${statusHtml}</td>
@@ -4925,8 +4940,8 @@ async function loadFanoutDeliveries(reqId) {
       const ts = new Date(f.timestamp + 'Z').toLocaleTimeString();
       const st = f.resStatus;
       const stText = f.resStatusText ? ' ' + esc(f.resStatusText) : '';
-      const statusHtml = !st ? '<span style="color:var(--text3)">Err</span>' : st < 300 ? `<span style="color:var(--green);font-weight:600">${st}${stText}</span>` : `<span style="color:var(--red);font-weight:600">${st}${stText}</span>`;
-      const attemptBadge = f.attemptCount && f.attemptCount > 1 ? ` <span style="background:var(--orange-bg);color:var(--orange);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px" title="${f.attemptCount} attempts">${f.attemptCount}×</span>` : '';
+      const statusHtml = !st ? '<span class="mm-chip err">Err</span>' : st < 300 ? `<span class="mm-chip ok">${st}${stText}</span>` : `<span class="mm-chip err">${st}${stText}</span>`;
+      const attemptBadge = f.attemptCount && f.attemptCount > 1 ? ` <span class="mm-chip warn" style="margin-left:4px" title="${f.attemptCount} attempts">${f.attemptCount}×</span>` : '';
       const pending = pendingByTarget[f.targetUrl];
       const dlq = dlqByTarget[f.targetUrl];
       let retryBtn = '';
@@ -4935,7 +4950,7 @@ async function loadFanoutDeliveries(reqId) {
         extraBadge = ` <span style="background:rgba(245,158,11,0.18);color:var(--orange);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px" title="Persistent retry — ${pending.attempts} attempts so far">🔄 ${pending.attempts}</span>`;
         retryBtn = `<button class="btn btn-sm" onclick="fanoutRetryPending('${esc(pending.id)}',this,'${esc(reqId)}')" style="font-size:11px;padding:3px 8px;margin-right:4px" title="Force an immediate retry attempt">Retry now</button>`;
       } else if (dlq) {
-        extraBadge = ` <span style="background:var(--red-bg);color:var(--red);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px" title="In DLQ">DLQ</span>`;
+        extraBadge = ` <span class="mm-chip err" style="margin-left:4px" title="In DLQ">DLQ</span>`;
         retryBtn = `<button class="btn btn-sm" onclick="fanoutRetryDlq('${esc(dlq.id)}',this,'${esc(reqId)}')" style="font-size:11px;padding:3px 8px;margin-right:4px" title="Retry from the dead-letter queue">Retry</button>`;
       }
       return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
@@ -4979,10 +4994,7 @@ function rdmSwitchTab(btn, panelId) {
   document.getElementById(panelId).classList.add('active');
 }
 
-function rdmCopyCode(btn) {
-  const pre = btn.parentElement.querySelector('pre');
-  navigator.clipboard.writeText(pre.textContent).then(() => toast('Copied to clipboard'));
-}
+function rdmCopyCode(btn) { return mmCopyFrom(btn); }
 
 function rdmSyntaxHL(str) {
   if (!str || str === '(empty)') return '<span style="color:var(--text3);font-style:italic">(empty)</span>';
@@ -5027,7 +5039,7 @@ function renderTcpUdpProxies(list) {
       <td style="padding:10px 8px;font-size:12px">${dot}</td>
       <td style="padding:10px 8px">${listeners}</td>
       <td style="padding:10px 8px;font-family:monospace">${esc(p.upstreamHost)}:${p.upstreamPort}</td>
-      <td style="padding:10px 8px"><span style="background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:1px 6px;font-size:11px;text-transform:uppercase">${esc(p.upstreamTransport)}</span></td>
+      <td style="padding:10px 8px"><span class="mm-chip" style="text-transform:uppercase">${esc(p.upstreamTransport)}</span></td>
       <td style="padding:10px 12px;text-align:right">
         <button onclick="restartSipProxy('${esc(p.name)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px">Restart</button>
         <button onclick="editSipProxy('${esc(p.name)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px">Edit</button>
@@ -5210,7 +5222,7 @@ async function editSipProxy(name) {
 }
 
 async function deleteSipProxy(name) {
-  if (!(await showConfirm({ title: 'Apagar proxy TCP/UDP', message: 'Apagar proxy TCP/UDP "' + name + '"? O listener será parado imediatamente.', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete TCP/UDP proxy', message: 'Delete TCP/UDP proxy "' + name + '"? The listener will be stopped immediately.', confirmText: 'Delete' }))) return;
   try {
     const res = await api('/admin/tcpudp/' + encodeURIComponent(name), { method: 'DELETE' });
     if (res.ok) { toast('TCP/UDP proxy deleted'); await fetchSipProxies(); }
@@ -5240,27 +5252,253 @@ async function fetchOauthClients() {
     document.getElementById('oauthClientListBody').innerHTML =
       '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
   }
-  renderOauthEndpoints();
 }
 
-function renderOauthEndpoints() {
-  const origin = window.location.protocol + '//' + window.location.hostname;
-  const note = ' <span style="color:var(--text3)">(replace with the public issuer)</span>';
-  const set = (id, path) => {
-    const el = document.getElementById(id);
-    if (el) el.innerHTML = esc(origin + ':JWKS_PORT' + path) + note;
-  };
-  set('oeDiscovery', '/.well-known/openid-configuration');
-  set('oeAuth',      '/oauth/authorize');
-  set('oeToken',     '/oauth/token');
-  set('oeUserinfo',  '/oauth/userinfo');
-  set('oeJwks',      '/.well-known/jwks.json');
+// ─── Docs page ──────────────────────────────────────────────────────────────
+// Static reference lives in partials/_docs.html; this fills the live values
+// (OIDC endpoints, report port, OAuth clients), adds copy buttons to code
+// blocks, the search filter, and "Copy for AI" prompts built from the DOM.
+let _docsInfo = null;
+let _docsClients = [];
+async function renderDocs() {
+  _docsWireNav();
+  _docsEnhanceCode();
+  try {
+    if (!_docsInfo) {
+      const res = await api('/admin/docs/info');
+      if (res.ok) _docsInfo = await res.json();
+    }
+  } catch { /* keep placeholders */ }
+  try {
+    const res = await api('/admin/oauth-clients');
+    if (res.ok) _docsClients = (await res.json()).clients || [];
+  } catch { /* no client list */ }
+  _docsFillOidc();
+  _docsFillClients();
 }
+
+function _docsFillOidc() {
+  const info = _docsInfo;
+  if (!info) return;
+  const state = document.getElementById('docsOidcState');
+  const note = document.getElementById('docsOidcNote');
+  const box = document.getElementById('docsOidcEndpoints');
+  if (info.oidcEnabled && info.oidc) {
+    const d = Object.assign({}, info.oidc, { discovery: (info.oidc.issuer || '') + '/.well-known/openid-configuration' });
+    box.querySelectorAll('code[data-ep]').forEach(el => {
+      const v = d[el.dataset.ep] || '';
+      el.textContent = v || '—';
+      el.title = v ? 'Click to copy' : '';
+      el.onclick = v ? () => _docsClipboard(v, 'Copied') : null;
+    });
+    if (state) { state.textContent = 'Enabled · port ' + info.jwksPort; state.className = 'mm-chip ok'; }
+    if (note) note.innerHTML = info.oidc.issuer
+      ? 'Issuer from <code>JWT_ISSUER</code>. The OIDC server listens on port <code>' + esc(String(info.jwksPort)) + '</code>, published behind the reverse proxy at the issuer URL.'
+      : '<code>JWT_ISSUER</code> is not set, so the URLs above are relative. Set it to the public HTTPS URL of the OIDC server.';
+  } else {
+    if (state) { state.textContent = 'Disabled'; state.className = 'mm-chip warn'; }
+    if (note) note.innerHTML = 'The OIDC server is off. Set <code>JWKS_PORT</code> (and <code>JWT_ISSUER</code> to its public URL) and restart Midleman.';
+  }
+  const rp = document.getElementById('docsReportPort');
+  if (rp) rp.textContent = info.reportPort ? 'port ' + info.reportPort : '—';
+}
+
+function _docsFillClients() {
+  const sel = document.getElementById('docsOidcClient');
+  if (!sel) return;
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">Generic (no client)</option>' + _docsClients
+    .slice().sort((a, b) => (a.name || '').localeCompare(b.name || '', 'en', { sensitivity: 'base' }))
+    .map(c => `<option value="${esc(c.clientId)}">${esc(c.name || c.clientId)}</option>`).join('');
+  if (keep && _docsClients.some(c => c.clientId === keep)) sel.value = keep;
+  if (window.mmSelectSync) window.mmSelectSync(sel);
+  docsRenderClient();
+}
+
+function _docsSelectedClient() {
+  const id = document.getElementById('docsOidcClient')?.value;
+  return id ? _docsClients.find(c => c.clientId === id) || null : null;
+}
+
+function docsRenderClient() {
+  const info = document.getElementById('docsOidcClientInfo');
+  if (!info) return;
+  const c = _docsSelectedClient();
+  info.innerHTML = c
+    ? 'client_id <code>' + esc(c.clientId) + '</code> · ' + c.redirectUris.length + ' redirect URI' + (c.redirectUris.length === 1 ? '' : 's') + ' · PKCE ' + (c.pkceRequired ? 'required' : 'off')
+    : 'Pick a client to include its client_id and redirect URIs in the copied prompt.';
+}
+
+// Open the Docs page at a section (used by the "→ Docs" pointers on other pages).
+function docsGo(section) {
+  navigate('docs');
+  requestAnimationFrame(() => document.getElementById('docs-' + section)?.scrollIntoView({ block: 'start' }));
+}
+
+// Section links scroll inside the page and the current section is highlighted.
+let _docsNavWired = false;
+function _docsWireNav() {
+  if (_docsNavWired) return;
+  _docsNavWired = true;
+  const nav = document.querySelector('.docs-nav');
+  if (!nav) return;
+  nav.addEventListener('click', (e) => {
+    const a = e.target.closest('a[data-docs]');
+    if (!a) return;
+    e.preventDefault();
+    document.getElementById('docs-' + a.dataset.docs)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  });
+  const links = [...nav.querySelectorAll('a[data-docs]')];
+  const io = new IntersectionObserver((entries) => {
+    for (const en of entries) {
+      if (!en.isIntersecting) continue;
+      const id = en.target.id.replace(/^docs-/, '');
+      links.forEach(l => l.classList.toggle('active', l.dataset.docs === id));
+    }
+  }, { rootMargin: '-15% 0px -70% 0px' });
+  document.querySelectorAll('.docs-section').forEach(sec => io.observe(sec));
+}
+
+// Every code block gets a header with its label and a copy button.
+function _docsEnhanceCode() {
+  document.querySelectorAll('#pageDocs pre.docs-code:not([data-enhanced])').forEach(pre => {
+    pre.dataset.enhanced = '1';
+    const wrap = document.createElement('div');
+    wrap.className = 'docs-codeblock';
+    const head = document.createElement('div');
+    head.className = 'docs-codehead docs-noai';
+    const label = document.createElement('span');
+    label.textContent = pre.dataset.label || 'Example';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'docs-copy';
+    btn.textContent = 'Copy';
+    btn.onclick = () => mmCopyFrom(btn);
+    head.append(label, btn);
+    pre.before(wrap);
+    wrap.append(head, pre);
+  });
+}
+
+// Search: hides sections (and their nav links) that do not contain the text.
+function docsFilter(q) {
+  const term = (q || '').trim().toLowerCase();
+  let shown = 0;
+  document.querySelectorAll('#pageDocs .docs-section').forEach(sec => {
+    const hit = !term || sec.textContent.toLowerCase().includes(term);
+    sec.hidden = !hit;
+    if (hit) shown++;
+    const link = document.querySelector(`.docs-nav a[data-docs="${sec.id.replace(/^docs-/, '')}"]`);
+    if (link) link.hidden = !hit;
+    if (term && hit) sec.querySelectorAll('details.docs-details').forEach(d => {
+      if (d.textContent.toLowerCase().includes(term)) d.open = true;
+    });
+  });
+  document.querySelectorAll('.docs-nav-group').forEach(g => {
+    let n = g.nextElementSibling, any = false;
+    while (n && !n.classList.contains('docs-nav-group')) { if (n.matches('a') && !n.hidden) any = true; n = n.nextElementSibling; }
+    g.hidden = !any;
+  });
+  const empty = document.getElementById('docsEmpty');
+  if (empty) empty.hidden = shown > 0;
+}
+
+// ── Copy for AI ──
+// Converts a docs section to Markdown (live values included) and wraps it in a
+// prompt an AI assistant can act on directly.
+function _docsMd(node) {
+  if (node.nodeType === 3) return node.nodeValue.replace(/\s+/g, ' ');
+  if (node.nodeType !== 1) return '';
+  const el = node;
+  if (el.hidden || el.classList.contains('docs-noai') || /^(BUTTON|SELECT|INPUT|SCRIPT|STYLE|SVG)$/i.test(el.tagName)) return '';
+  const kids = () => [...el.childNodes].map(_docsMd).join('');
+  switch (el.tagName) {
+    case 'PRE': return '\n\n```\n' + el.textContent.replace(/\n+$/, '') + '\n```\n\n';
+    case 'CODE': return '`' + el.textContent + '`';
+    case 'STRONG': case 'B': return '**' + kids().trim() + '**';
+    case 'EM': case 'I': return '*' + kids().trim() + '*';
+    case 'H3': return '\n\n## ' + el.textContent.trim() + '\n\n';
+    case 'H4': return '\n\n### ' + el.textContent.trim() + '\n\n';
+    case 'P': return '\n\n' + kids().trim() + '\n\n';
+    case 'LI': return '\n- ' + kids().trim();
+    case 'UL': case 'OL': return '\n' + kids() + '\n\n';
+    case 'TR': {
+      const cells = [...el.children].map(td => [...td.childNodes].map(_docsMd).join('').trim());
+      return '\n- **' + cells[0].replace(/\*\*/g, '') + '**: ' + cells.slice(1).join(' ');
+    }
+    case 'TABLE': return '\n' + kids() + '\n\n';
+    case 'SUMMARY': return '\n\n### ' + kids().trim() + '\n\n';
+    case 'DIV':
+      if (el.classList.contains('docs-codeblock')) {
+        const pre = el.querySelector('pre');
+        return '\n\n' + (pre?.dataset.label ? '*' + pre.dataset.label + '*\n' : '') + _docsMd(pre);
+      }
+      if (el.classList.contains('docs-ep')) {
+        const name = el.querySelector('.docs-ep-name')?.textContent.trim();
+        const m = el.querySelector('.docs-method')?.textContent.trim();
+        return '\n- **' + name + '**' + (m ? ' (' + m + ')' : '') + ': `' + el.querySelector('code')?.textContent.trim() + '`';
+      }
+      if (el.classList.contains('docs-eyebrow')) return '';
+      return kids();
+    default: return kids();
+  }
+}
+
+function _docsSectionMd(sec) {
+  return _docsMd(sec).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function _docsContextMd() {
+  const lines = ['## Facts about this Midleman instance', ''];
+  const info = _docsInfo;
+  if (info?.oidcEnabled && info.oidc?.issuer) lines.push('- OIDC issuer: `' + info.oidc.issuer + '`', '- OIDC discovery: `' + info.oidc.issuer + '/.well-known/openid-configuration`');
+  else lines.push('- OIDC: ' + (info?.oidcEnabled ? 'enabled, issuer URL not configured (<issuer>)' : 'not enabled on this instance'));
+  if (info?.reportPort) lines.push('- Report API port: `' + info.reportPort + '`');
+  lines.push('- Dashboard origin: `' + location.origin + '`');
+  return lines.join('\n');
+}
+
+function _docsClientMd() {
+  const c = _docsSelectedClient();
+  if (!c) return '## OAuth client\n\n- client_id: <client_id>\n- client_secret: <client_secret — shown once at creation; keep it in a secret store>\n- redirect URI: <must exactly match one registered on the client>';
+  return ['## OAuth client: ' + c.name, '',
+    '- client_id: `' + c.clientId + '`',
+    '- client_secret: <client_secret — shown once at creation; keep it in a secret store>',
+    '- registered redirect URIs (exact match):', ...c.redirectUris.map(u => '  - `' + u + '`'),
+    '- PKCE: ' + (c.pkceRequired ? 'required (S256)' : 'not required for this client'),
+    c.postLogoutRedirectUri ? '- post-logout redirect: `' + c.postLogoutRedirectUri + '`' : '- post-logout redirect: origin of the first redirect URI unless post_logout_redirect_uri is sent',
+  ].join('\n');
+}
+
+function docsCopyForAI(section) {
+  const secs = section
+    ? [document.getElementById('docs-' + section)].filter(Boolean)
+    : [...document.querySelectorAll('#pageDocs .docs-section')];
+  if (!secs.length) return;
+  const task = secs.length === 1 ? (secs[0].dataset.aiTask || '') : 'Use this reference to help me integrate my application with Midleman. Ask me which part I need before writing code, and ask for anything marked <…>.';
+  const parts = [
+    '# Midleman integration — ' + (secs.length === 1 ? secs[0].querySelector('h3').textContent.trim() : 'reference'),
+    '',
+    'You are helping me integrate an application with Midleman (an API gateway, webhook fan-out and OAuth/OIDC provider). Use only the facts below; do not invent endpoints or parameters. Values in <angle brackets> are placeholders I must provide.',
+    '',
+    '## Task',
+    '',
+    task,
+    '',
+    _docsContextMd(),
+  ];
+  if (section === 'oidc' || !section) parts.push('', _docsClientMd());
+  parts.push('', '---', '');
+  secs.forEach(s => parts.push(_docsSectionMd(s), ''));
+  _docsClipboard(parts.join('\n').trim() + '\n', 'Copied — paste it into your AI assistant');
+}
+
+function _docsClipboard(text, msg, el) { return mmCopy(text, el, el ? undefined : msg); }
 
 function renderOauthClients(clients) {
   const tbody = document.getElementById('oauthClientListBody');
   if (!clients.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Sem clients registados.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No clients registered.</td></tr>';
     return;
   }
   tbody.innerHTML = clients.map(c => {
@@ -5306,6 +5544,7 @@ function _populateConsentPageDropdown(selectId, selectedId) {
 function _resetOauthClientForm() {
   document.getElementById('oauthClientName').value = '';
   document.getElementById('oauthClientUris').value = '';
+  document.getElementById('oauthClientPostLogoutUri').value = '';
   document.getElementById('oauthClientPkceRequired').checked = true;
   document.getElementById('oauthClientConsentEnabled').checked = false;
   _populateConsentPageDropdown('oauthClientConsentPageId', null);
@@ -5331,6 +5570,7 @@ async function openCreateOauthClientModal() {
   document.getElementById('oauthClientSubmitBtn').onclick = submitOauthClient;
   document.getElementById('oauthClientCancelBtn').textContent = 'Cancel';
   document.getElementById('oauthClientModalTitle').textContent = 'New OAuth Client';
+  if (typeof updateOauthClientLogoPreview === 'function') updateOauthClientLogoPreview();
   document.getElementById('oauthClientModal').style.display = 'flex';
 }
 
@@ -5366,6 +5606,7 @@ async function openEditOauthClientModal(clientId) {
     document.getElementById('oauthClientSubmitBtn').onclick = submitEditOauthClient;
     document.getElementById('oauthClientCancelBtn').textContent = 'Cancel';
     document.getElementById('oauthClientModalTitle').textContent = 'Edit — ' + (client.name || clientId);
+    if (typeof updateOauthClientLogoPreview === 'function') updateOauthClientLogoPreview();
     document.getElementById('oauthClientModal').style.display = 'flex';
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -5384,7 +5625,7 @@ async function submitOauthClient() {
   if (!name) return toast('Name is required', 'error');
   if (!redirectUris.length) return toast('At least one redirect URI', 'error');
   const pkceRequired = document.getElementById('oauthClientPkceRequired').checked;
-  if (!pkceRequired && !(await showConfirm({ title: 'Desativar PKCE', message: 'Desativar PKCE para este cliente?', detail: 'Isto remove uma defesa de segurança (proteção contra interceção de auth-code). Faz isto apenas para clientes legados que não conseguem enviar um code_challenge.', confirmText: 'Desativar PKCE' }))) return;
+  if (!pkceRequired && !(await showConfirm({ title: 'Disable PKCE', message: 'Disable PKCE for this client?', detail: 'This removes a security defence (protection against auth-code interception). Only do this for legacy clients that cannot send a code_challenge.', confirmText: 'Disable PKCE' }))) return;
   try {
     const res = await api('/admin/oauth-clients', {
       method: 'POST',
@@ -5414,7 +5655,7 @@ async function submitEditOauthClient() {
   if (!name) return toast('Name is required', 'error');
   if (!redirectUris.length) return toast('At least one redirect URI', 'error');
   const urisChanged = redirectUris.join('\n') !== _editingOauthClientOriginalUris.trim();
-  if (urisChanged && !(await showConfirm({ title: 'Alterar redirect URIs', message: 'Alterar as redirect URIs irá revogar todos os refresh tokens deste cliente. Continuar?', confirmText: 'Alterar' }))) return;
+  if (urisChanged && !(await showConfirm({ title: 'Change redirect URIs', message: 'Changing the redirect URIs will revoke all refresh tokens for this client. Continue?', confirmText: 'Change' }))) return;
   const consentEnabled = document.getElementById('oauthClientConsentEnabled').checked;
   const consentPageRaw = document.getElementById('oauthClientConsentPageId').value;
   const consentPageId = consentPageRaw ? Number(consentPageRaw) : null;
@@ -5422,7 +5663,7 @@ async function submitEditOauthClient() {
     return toast('Choose a consent page or disable consent.', 'error');
   }
   const pkceRequired = document.getElementById('oauthClientPkceRequired').checked;
-  if (!pkceRequired && !(await showConfirm({ title: 'Desativar PKCE', message: 'Desativar PKCE para este cliente?', detail: 'Isto remove uma defesa de segurança (proteção contra interceção de auth-code). Faz isto apenas para clientes legados que não conseguem enviar um code_challenge.', confirmText: 'Desativar PKCE' }))) return;
+  if (!pkceRequired && !(await showConfirm({ title: 'Disable PKCE', message: 'Disable PKCE for this client?', detail: 'This removes a security defence (protection against auth-code interception). Only do this for legacy clients that cannot send a code_challenge.', confirmText: 'Disable PKCE' }))) return;
   const payload = {
     name,
     redirectUris,
@@ -5449,7 +5690,7 @@ async function submitEditOauthClient() {
 }
 
 async function deleteOauthClient(clientId, name) {
-  if (!(await showConfirm({ title: 'Apagar cliente OAuth', message: 'Apagar cliente "' + name + '"? Todos os tokens emitidos serão revogados.', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete OAuth client', message: 'Delete client "' + name + '"? All issued tokens will be revoked.', confirmText: 'Delete' }))) return;
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(clientId), { method: 'DELETE' });
     if (!res.ok) {
@@ -5503,7 +5744,7 @@ async function refreshOauthClientUsers() {
     const tbody = document.getElementById('ocuListBody');
     const users = data.users || [];
     if (!users.length) {
-      tbody.innerHTML = '<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--text3)">Nenhum utilizador na lista.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--text3)">No users in the list.</td></tr>';
     } else {
       tbody.innerHTML = users.map(u => '<tr style="border-top:1px solid var(--border)">' +
         '<td style="padding:8px 12px;font-weight:500">' + esc(u.username) + '</td>' +
@@ -5532,7 +5773,7 @@ async function addUserToOauthClientUI() {
   if (!_ocuClientId) return;
   const sel = document.getElementById('ocuAddSelect');
   const userId = sel.value;
-  if (!userId) return toast('Seleciona um utilizador', 'error');
+  if (!userId) return toast('Select a user', 'error');
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/users', {
       method: 'POST',
@@ -5540,18 +5781,18 @@ async function addUserToOauthClientUI() {
     });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
     sel.value = '';
-    toast('Utilizador adicionado');
+    toast('User added');
     await refreshOauthClientUsers();
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function removeUserFromOauthClientUI(userId, username) {
   if (!_ocuClientId) return;
-  if (!(await showConfirm({ title: 'Remover acesso', message: 'Remover "' + username + '" do acesso deste cliente?', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove access', message: 'Remove "' + username + '" from this client\'s access list?', confirmText: 'Remove' }))) return;
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/users/' + encodeURIComponent(userId), { method: 'DELETE' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
-    toast('Utilizador removido');
+    toast('User removed');
     await refreshOauthClientUsers();
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -5575,7 +5816,7 @@ async function refreshOauthClientLdapGroups() {
     const tbody = document.getElementById('oclgListBody');
     const rules = data.groups || [];
     if (!rules.length) {
-      tbody.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">Sem regras de grupo configuradas.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="3" style="padding:18px;text-align:center;color:var(--text3)">No group rules configured.</td></tr>';
       return;
     }
     const dirName = id => (_oclgDirectories.find(d => d.id === id) || {}).name || ('#' + id);
@@ -5591,8 +5832,8 @@ async function addLdapGroupToClientUI() {
   if (!_ocuClientId) return;
   const ldapConfigId = Number(document.getElementById('oclgConfigSelect').value);
   const groupMatch = document.getElementById('oclgGroupInput').value.trim();
-  if (!ldapConfigId) return toast('Seleciona um directory', 'error');
-  if (!groupMatch) return toast('Indica o CN ou DN do grupo', 'error');
+  if (!ldapConfigId) return toast('Select a directory', 'error');
+  if (!groupMatch) return toast('Enter the group CN or DN', 'error');
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/ldap-groups', {
       method: 'POST',
@@ -5600,18 +5841,18 @@ async function addLdapGroupToClientUI() {
     });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
     document.getElementById('oclgGroupInput').value = '';
-    toast('Regra adicionada');
+    toast('Rule added');
     await refreshOauthClientLdapGroups();
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function removeLdapGroupFromClientUI(ruleId) {
   if (!_ocuClientId) return;
-  if (!(await showConfirm({ title: 'Remover regra de grupo', message: 'Remover esta regra de grupo? Os utilizadores que dependiam dela perderão acesso no próximo login (ou sync).', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove group rule', message: 'Remove this group rule? Users who relied on it will lose access at their next sign-in (or sync).', confirmText: 'Remove' }))) return;
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(_ocuClientId) + '/ldap-groups/' + encodeURIComponent(ruleId), { method: 'DELETE' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
-    toast('Regra removida');
+    toast('Rule removed');
     await refreshOauthClientLdapGroups();
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -5759,7 +6000,7 @@ function cancelSmtpTest() {
 }
 
 async function clearSmtpConfig() {
-  if (!(await showConfirm({ title: 'Remover configuração SMTP', message: 'Remover toda a configuração SMTP?', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove SMTP configuration', message: 'Remove the entire SMTP configuration?', confirmText: 'Remove' }))) return;
   try {
     const res = await api('/admin/smtp', { method: 'DELETE' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return setSmtpStatus('smtpStatus', d.error || 'Error', 'err'); }
@@ -5850,7 +6091,7 @@ function renderAuditLogs(logs, total) {
   window._lastAuditLogs = logs;
   const tbody = document.getElementById('auditListBody');
   if (!logs.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Sem entradas.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No entries.</td></tr>';
   } else {
     tbody.innerHTML = logs.map(function(l, idx) {
       const when = new Date(l.createdAt).toLocaleString();
@@ -5872,7 +6113,7 @@ function renderAuditLogs(logs, total) {
   }
   const fromN = total === 0 ? 0 : _auditOffset + 1;
   const toN = Math.min(_auditOffset + logs.length, total);
-  document.getElementById('auditTotal').textContent = fromN + '–' + toN + ' de ' + total;
+  document.getElementById('auditTotal').textContent = fromN + '–' + toN + ' of ' + total;
   document.getElementById('auditPrev').disabled = _auditOffset === 0;
   document.getElementById('auditNext').disabled = _auditOffset + logs.length >= total;
 }
@@ -5935,7 +6176,7 @@ async function fetchLdapConfigs() {
 function renderLdapConfigs(configs) {
   const tbody = document.getElementById('ldapListBody');
   if (!configs.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">Sem directories configurados. Clica em <strong>Novo directory</strong> para adicionar.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No directories configured. Click <strong>New directory</strong> to add one.</td></tr>';
     return;
   }
   const scopeBadge = s => {
@@ -5949,7 +6190,7 @@ function renderLdapConfigs(configs) {
   };
   const totpBadge = p => {
     const map = {
-      required: ['Required',  '#dc2626'],
+      required: ['Required',  'var(--red)'],
       optional: ['Optional',  'var(--text2)'],
       disabled: ['Disabled',  'var(--text3)'],
     };
@@ -5982,18 +6223,36 @@ function renderLdapConfigs(configs) {
  *  ever answer "save first". */
 function _ldapSyncTestRow() {
   const editing = !!document.getElementById('ldapEditId').value;
-  const row = document.querySelector('#ldapModal .ldap-test-row');
+  const row = document.querySelector('#ldapModal .ldap-test-section');
   if (row) row.style.display = editing ? '' : 'none';
+}
+
+// 'user' bind mode needs no service account: show the domain field instead of
+// the bind DN/password, and ask for a password when testing.
+function _ldapSyncBindMode() {
+  const mode = document.getElementById('ldapBindMode').value;
+  document.querySelectorAll('#ldapModal [data-bind-mode]').forEach(el => {
+    el.style.display = el.dataset.bindMode === mode ? '' : 'none';
+  });
+  const hint = document.getElementById('ldapBindModeHint');
+  if (hint) hint.textContent = mode === 'user'
+    ? 'No service account to maintain: the person signing in opens the connection with their own login and password. Group changes are picked up at their next sign-in.'
+    : 'Midleman searches the directory with this account. If its password expires, nobody can sign in until it is updated here.';
+  const prev = document.getElementById('ldapUpnPreview');
+  if (prev) prev.textContent = (document.getElementById('ldapUpnSuffix').value.trim().replace(/^@/, '') || 'example.com');
 }
 
 function _ldapResetForm() {
   document.getElementById('ldapEditId').value = '';
+  document.getElementById('ldapBindMode').value = 'user';
+  document.getElementById('ldapUpnSuffix').value = '';
+  document.getElementById('ldapTestPassword').value = '';
   document.getElementById('ldapName').value = '';
   document.getElementById('ldapUrl').value = '';
   document.getElementById('ldapBaseDn').value = '';
   document.getElementById('ldapBindDn').value = '';
   document.getElementById('ldapBindPassword').value = '';
-  document.getElementById('ldapBindPassword').placeholder = '(opcional)';
+  document.getElementById('ldapBindPassword').placeholder = '(optional)';
   document.getElementById('ldapUserFilter').value = '';
   document.getElementById('ldapUsernameAttr').value = '';
   document.getElementById('ldapEmailAttr').value = '';
@@ -6018,6 +6277,7 @@ function _ldapResetForm() {
 function openCreateLdapModal() {
   _ldapResetForm();
   _ldapSyncTestRow();
+  _ldapSyncBindMode();
   ldapWiz.open(false, { title: 'New LDAP Directory' });
   document.getElementById('ldapSubmitBtn').textContent = 'Create';
   document.getElementById('ldapModal').classList.add('active');
@@ -6031,9 +6291,11 @@ function openEditLdapModal(id) {
   document.getElementById('ldapName').value = c.name;
   document.getElementById('ldapUrl').value = c.url;
   document.getElementById('ldapBaseDn').value = c.baseDn;
+  document.getElementById('ldapBindMode').value = c.bindMode === 'user' ? 'user' : 'service';
+  document.getElementById('ldapUpnSuffix').value = c.upnSuffix || '';
   document.getElementById('ldapBindDn').value = c.bindDn || '';
   document.getElementById('ldapBindPassword').value = '';
-  document.getElementById('ldapBindPassword').placeholder = '(deixar vazio para manter)';
+  document.getElementById('ldapBindPassword').placeholder = '(leave empty to keep)';
   document.getElementById('ldapUserFilter').value = c.userFilter;
   document.getElementById('ldapUsernameAttr').value = c.usernameAttr;
   document.getElementById('ldapEmailAttr').value = c.emailAttr;
@@ -6049,6 +6311,7 @@ function openEditLdapModal(id) {
   document.getElementById('ldapDefaultProfile').value = c.defaultProfile || '';
   document.getElementById('ldapAutoAdoptLocal').checked = !!c.autoAdoptLocal;
   _ldapSyncTestRow();
+  _ldapSyncBindMode();
   ldapWiz.open(true, { title: 'Edit Directory — ' + c.name });
   document.getElementById('ldapSubmitBtn').textContent = 'Save';
   document.getElementById('ldapModal').classList.add('active');
@@ -6067,9 +6330,12 @@ function _ldapCollectPayload(isEdit) {
   if (!url)  { toast('URL is required (ldap:// or ldaps://)', 'error'); return null; }
   if (!baseDn) { toast('Base DN is required', 'error'); return null; }
 
+  const bindMode = document.getElementById('ldapBindMode').value === 'service' ? 'service' : 'user';
   const payload = {
     name, url, baseDn,
-    bindDn: document.getElementById('ldapBindDn').value.trim(),
+    bindMode,
+    upnSuffix: document.getElementById('ldapUpnSuffix').value.trim(),
+    bindDn: bindMode === 'service' ? document.getElementById('ldapBindDn').value.trim() : '',
     userFilter: document.getElementById('ldapUserFilter').value.trim() || undefined,
     usernameAttr: document.getElementById('ldapUsernameAttr').value.trim() || undefined,
     emailAttr: document.getElementById('ldapEmailAttr').value.trim() || undefined,
@@ -6088,7 +6354,8 @@ function _ldapCollectPayload(isEdit) {
   };
   // Only send bindPassword if the user typed one (avoids overwriting on edit)
   const pw = document.getElementById('ldapBindPassword').value;
-  if (pw) payload.bindPassword = pw;
+  if (bindMode === 'user') payload.bindPassword = ''; // no stored service password in user-bind mode
+  else if (pw) payload.bindPassword = pw;
   else if (!isEdit) payload.bindPassword = ''; // explicit empty for create (anonymous bind)
   // Strip undefined so backend defaults apply on create
   Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
@@ -6109,21 +6376,21 @@ async function submitLdap() {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return toast(data.error || 'Failed', 'error');
-    toast(isEdit ? 'Directory atualizado' : 'Directory criado');
+    toast(isEdit ? 'Directory updated' : 'Directory created');
     closeLdapModal();
     fetchLdapConfigs();
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function deleteLdapConfig(id, name) {
-  if (!(await showConfirm({ title: 'Apagar diretório', message: 'Apagar diretório "' + name + '"?', detail: 'Os utilizadores LDAP já provisionados perderão a sua origem — não poderão iniciar sessão até reconfigurares o diretório.', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete directory', message: 'Delete directory "' + name + '"?', detail: 'LDAP users already provisioned will lose their source — they will not be able to sign in until you reconfigure the directory.', confirmText: 'Delete' }))) return;
   try {
     const res = await api('/admin/ldap/configs/' + encodeURIComponent(id), { method: 'DELETE' });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       return toast(data.error || 'Failed to delete', 'error');
     }
-    toast('Directory apagado');
+    toast('Directory deleted');
     fetchLdapConfigs();
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -6204,7 +6471,7 @@ async function testLdap() {
     }
     const res = await api('/admin/ldap/configs/' + encodeURIComponent(editId) + '/test', {
       method: 'POST',
-      body: JSON.stringify(sampleLogin ? { sampleLogin } : {}),
+      body: JSON.stringify(sampleLogin ? { sampleLogin, samplePassword: document.getElementById('ldapTestPassword').value || undefined } : {}),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -6309,7 +6576,7 @@ function renderLdapAdoptions(events) {
   tbody.innerHTML = events.map(e => {
     const when = e.createdAt ? new Date(e.createdAt).toLocaleString() : '—';
     const actions = e.state === 'pending'
-      ? '<button class="btn btn-sm btn-primary" onclick="confirmLdapAdoption(' + e.id + ')">Confirmar</button> ' +
+      ? '<button class="btn btn-sm btn-primary" onclick="confirmLdapAdoption(' + e.id + ')">Confirm</button> ' +
         '<button class="btn btn-sm btn-ghost" onclick="revertLdapAdoption(' + e.id + ')" style="color:var(--err-text)">Reverter</button>'
       : '<span style="color:var(--text3);font-size:11.5px">—</span>';
     return '<tr style="border-top:1px solid var(--border)">' +
@@ -6325,7 +6592,7 @@ function renderLdapAdoptions(events) {
 }
 
 async function confirmLdapAdoption(id) {
-  if (!(await showConfirm({ title: 'Confirmar adoção', message: 'Confirmar esta adoção? A conta local será permanentemente substituída pela identidade LDAP.', confirmText: 'Confirmar', danger: false }))) return;
+  if (!(await showConfirm({ title: 'Confirm adoption', message: 'Confirm this adoption? The local account will be permanently replaced by the LDAP identity.', confirmText: 'Confirm', danger: false }))) return;
   try {
     const res = await api('/admin/ldap/adoptions/' + encodeURIComponent(id) + '/confirm', { method: 'POST' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
@@ -6335,7 +6602,7 @@ async function confirmLdapAdoption(id) {
 }
 
 async function revertLdapAdoption(id) {
-  if (!(await showConfirm({ title: 'Reverter adoção', message: 'Reverter? A conta local volta ao estado anterior (utilizador, email e hash da palavra-passe originais).', detail: 'A identidade LDAP terá de ser registada manualmente noutro utilizador — as sessões e tokens serão revogados.', confirmText: 'Reverter' }))) return;
+  if (!(await showConfirm({ title: 'Revert adoption', message: 'Revert? The local account returns to its previous state (original username, email and password hash).', detail: 'The LDAP identity will have to be registered manually on another user — sessions and tokens will be revoked.', confirmText: 'Revert' }))) return;
   try {
     const res = await api('/admin/ldap/adoptions/' + encodeURIComponent(id) + '/revert', { method: 'POST' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return toast(d.error || 'Failed', 'error'); }
@@ -6479,7 +6746,7 @@ async function submitConsentPage() {
 }
 
 async function deleteConsentPage(id, name) {
-  if (!(await showConfirm({ title: 'Apagar página', message: 'Apagar página "' + name + '"?', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete page', message: 'Delete page "' + name + '"?', confirmText: 'Delete' }))) return;
   try {
     const res = await api('/admin/consent-pages/' + id, { method: 'DELETE' });
     const data = await res.json().catch(() => ({}));
@@ -6572,7 +6839,7 @@ async function fetchSipLogs() {
 
 function renderSipLogRow(r) {
   const time = r.timestamp ? r.timestamp.replace('T', ' ').replace('Z', '') : '';
-  const dirColor = r.direction === 'in' ? '#3b82f6' : '#10b981';
+  const dirColor = r.direction === 'in' ? '#3b82f6' : 'var(--green)';
   const dirLabel = r.direction === 'in' ? '◀ IN' : 'OUT ▶';
   const methodOrStatus = r.is_request
     ? '<span style="font-weight:600">' + esc(r.method || '?') + '</span>'
@@ -6594,9 +6861,9 @@ function renderSipLogRow(r) {
 
 function statusColor(s) {
   if (!s) return 'var(--text)';
-  if (s >= 200 && s < 300) return '#10b981';
-  if (s >= 300 && s < 400) return '#f59e0b';
-  if (s >= 400) return '#ef4444';
+  if (s >= 200 && s < 300) return 'var(--green)';
+  if (s >= 300 && s < 400) return 'var(--orange)';
+  if (s >= 400) return 'var(--red)';
   return 'var(--text)';
 }
 
@@ -6682,6 +6949,7 @@ function switchTcpUdpTab(tab) {
   if (!btns.proxies || !btns.logs || !btns.certs) return;
   const setActive = (btn, on) => {
     btn.style.borderBottomColor = on ? 'var(--accent)' : 'transparent';
+    btn.classList.toggle('on', !!(on));
     btn.style.color = on ? 'var(--text)' : 'var(--text3)';
   };
   for (const k of Object.keys(panes)) {
@@ -6713,16 +6981,20 @@ function switchTcpUdpLogTab(tab) {
     msgPane.style.display = '';
     conPane.style.display = 'none';
     msgBtn.style.borderBottomColor = 'var(--accent)';
+    msgBtn.classList.add('on');
     msgBtn.style.color = 'var(--text)';
     conBtn.style.borderBottomColor = 'transparent';
+    conBtn.classList.remove('on');
     conBtn.style.color = 'var(--text3)';
     fetchSipLogs();
   } else {
     msgPane.style.display = 'none';
     conPane.style.display = '';
     msgBtn.style.borderBottomColor = 'transparent';
+    msgBtn.classList.remove('on');
     msgBtn.style.color = 'var(--text3)';
     conBtn.style.borderBottomColor = 'var(--accent)';
+    conBtn.classList.add('on');
     conBtn.style.color = 'var(--text)';
     populateConnProfileFilter();
     fetchConnLogs();
@@ -6791,8 +7063,8 @@ async function fetchConnLogs() {
 
 function renderConnLogRow(r) {
   const opened = r.opened_at ? r.opened_at.replace('T', ' ').replace('Z', '') : '';
-  const closeColor = (r.close_reason || '').startsWith('error:') ? '#ef4444'
-    : r.close_reason === 'rejected' ? '#f59e0b' : 'var(--text3)';
+  const closeColor = (r.close_reason || '').startsWith('error:') ? 'var(--red)'
+    : r.close_reason === 'rejected' ? 'var(--orange)' : 'var(--text3)';
   const dur = r.duration_ms != null ? humanDuration(r.duration_ms) : '';
   return '<tr style="border-top:1px solid var(--border)">'
     + '<td style="padding:8px 12px;font-family:monospace;font-size:12px;white-space:nowrap">' + esc(opened) + '</td>'
@@ -6850,7 +7122,7 @@ async function fetchCerts() {
 }
 
 function renderCertRow(c) {
-  const statusColors = { active: '#10b981', pending: '#f59e0b', expired: '#ef4444', error: '#ef4444' };
+  const statusColors = { active: 'var(--green)', pending: 'var(--orange)', expired: 'var(--red)', error: 'var(--red)' };
   const statusDot = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + (statusColors[c.status] || 'var(--text3)') + ';margin-right:6px;vertical-align:middle"></span>';
   const expiry = c.notAfter ? new Date(c.notAfter).toISOString().slice(0, 10) : '—';
   const daysLeft = c.notAfter ? Math.floor((new Date(c.notAfter).getTime() - Date.now()) / (24 * 3600 * 1000)) : null;
@@ -6858,17 +7130,17 @@ function renderCertRow(c) {
     ? expiry + ' <span style="color:var(--text3);font-size:11px">(' + (daysLeft >= 0 ? daysLeft + 'd left' : Math.abs(daysLeft) + 'd ago') + ')</span>'
     : expiry;
   const usedBy = (c.usedBy || []).length
-    ? (c.usedBy || []).map(u => '<span style="background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:1px 6px;font-size:11px;margin-right:3px">' + esc(u) + '</span>').join('')
+    ? (c.usedBy || []).map(u => '<span class="mm-chip" style="margin-right:3px">' + esc(u) + '</span>').join('')
     : '<span style="color:var(--text3);font-size:11px;font-style:italic">unused</span>';
   const renewBtn = c.source === 'acme'
     ? '<button onclick="renewCert(' + c.id + ')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px">Renew</button>'
     : '';
   const errorBadge = c.lastError
-    ? ' <span title="' + esc(c.lastError) + '" style="color:#ef4444;cursor:help">⚠</span>'
+    ? ' <span title="' + esc(c.lastError) + '" style="color:var(--red);cursor:help">⚠</span>'
     : '';
   return '<tr style="border-bottom:1px solid var(--border)">'
     + '<td style="padding:10px 12px;font-weight:600;font-family:monospace">' + esc(c.domain) + '</td>'
-    + '<td style="padding:10px 8px"><span style="background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:1px 6px;font-size:11px">' + esc(c.source) + '</span></td>'
+    + '<td style="padding:10px 8px"><span class="mm-chip">' + esc(c.source) + '</span></td>'
     + '<td style="padding:10px 8px;font-size:12px;text-transform:capitalize">' + statusDot + esc(c.status) + errorBadge + '</td>'
     + '<td style="padding:10px 8px;font-family:monospace;font-size:12px">' + expiryLabel + '</td>'
     + '<td style="padding:10px 8px">' + usedBy + '</td>'
@@ -6978,10 +7250,12 @@ function switchCertTab(source) {
     const pane = document.getElementById(panes[k]);
     if (k === source) {
       btn.style.borderBottomColor = 'var(--accent)';
+      btn.classList.add('on');
       btn.style.color = 'var(--text)';
       pane.style.display = '';
     } else {
       btn.style.borderBottomColor = 'transparent';
+      btn.classList.remove('on');
       btn.style.color = 'var(--text3)';
       pane.style.display = 'none';
     }
@@ -7025,7 +7299,7 @@ async function saveCert() {
 }
 
 async function renewCert(id) {
-  if (!(await showConfirm({ title: 'Forçar renovação ACME', message: 'Forçar renovação ACME agora? Será feito um pedido à Let\'s Encrypt.', confirmText: 'Renovar', danger: false }))) return;
+  if (!(await showConfirm({ title: 'Force ACME renewal', message: 'Force ACME renewal now? A request will be made to Let\'s Encrypt.', confirmText: 'Renew', danger: false }))) return;
   try {
     const res = await api('/admin/certs/' + id + '/renew', { method: 'POST' });
     const d = await res.json();
@@ -7036,7 +7310,7 @@ async function renewCert(id) {
 }
 
 async function deleteCertificate(id) {
-  if (!(await showConfirm({ title: 'Apagar certificado', message: 'Apagar este certificado? Os perfis que o usam perderão TLS até serem reatribuídos.', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete certificate', message: 'Delete this certificate? Profiles using it will lose TLS until they are reassigned.', confirmText: 'Delete' }))) return;
   try {
     const res = await api('/admin/certs/' + id, { method: 'DELETE' });
     const d = await res.json();
@@ -7087,7 +7361,7 @@ function _updateNpmPageVisibility(cfg, certVolumeMounted) {
       pill.style.display = '';
       pill.textContent = '● Connected';
       pill.style.background = 'rgba(34,197,94,0.15)';
-      pill.style.color = '#22c55e';
+      pill.style.color = 'var(--green)';
     } else if (cfg.enabled) {
       pill.style.display = '';
       pill.textContent = '● Pending';
@@ -7164,6 +7438,7 @@ function switchNpmSubpage(sub) {
   document.querySelectorAll('.npm-subpage-tab').forEach(b => {
     const active = b.getAttribute('data-subpage') === sub;
     b.style.borderBottomColor = active ? 'var(--accent)' : 'transparent';
+    b.classList.toggle('on', !!(active));
     b.style.color = active ? 'var(--text)' : 'var(--text2)';
     b.style.fontWeight = active ? '500' : '';
   });
@@ -7208,8 +7483,8 @@ function _certExpiryInfo(expiresOn) {
   const text = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   let color, suffix = '';
   if (diffMs < 0) { color = 'var(--err-text)'; suffix = ' (expired)'; }
-  else if (diffMs < 30 * dayMs) { color = '#f59e0b'; suffix = ` (in ${Math.ceil(diffMs / dayMs)}d)`; }
-  else { color = '#22c55e'; }
+  else if (diffMs < 30 * dayMs) { color = 'var(--orange)'; suffix = ` (in ${Math.ceil(diffMs / dayMs)}d)`; }
+  else { color = 'var(--green)'; }
   return { text: text + suffix, color, sortKey: t };
 }
 
@@ -7285,7 +7560,7 @@ function renderNpmCertsTable() {
     const domains = (c.domain_names || []).join(', ') || '—';
     const usedBy = _npmCertsHostUsage[c.id] || [];
     const usedTag = usedBy.length
-      ? ' <span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 7px;border-radius:10px;font-size:11px" title="' + _esc(usedBy.join(' | ')) + '">In use × ' + usedBy.length + '</span>'
+      ? ' <span class="mm-chip acc" title="' + _esc(usedBy.join(' | ')) + '">In use × ' + usedBy.length + '</span>'
       : '';
     const renewBtn = c.provider === 'letsencrypt'
       ? '<button type="button" class="btn btn-sm" onclick="renewNpmCert(' + c.id + ')" title="Renew certificate">Renew</button> '
@@ -7541,7 +7816,7 @@ async function testNpmConnectionUi() {
 }
 
 async function clearNpmConfig() {
-  if (!(await showConfirm({ title: 'Remover integração NPM', message: 'Remover a configuração de integração NPM?', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove NPM integration', message: 'Remove the NPM integration configuration?', confirmText: 'Remove' }))) return;
   try {
     const res = await api('/admin/npm', { method: 'DELETE' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return setNpmStatus('npmStatus', d.error || 'Error', 'err'); }
@@ -7700,13 +7975,13 @@ function renderNpmImportTable() {
       : '<input type="checkbox" class="npm-import-cb" data-host-id="' + h.id + '" onchange="updateNpmSelectionCount()">';
     let badge, action;
     if (h.linkedProfile) {
-      badge = '<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:10px;font-size:11px">Linked → profile "' + _esc(h.linkedProfile) + '"</span>';
+      badge = '<span class="mm-chip">Linked → profile "' + _esc(h.linkedProfile) + '"</span>';
       action = '<a href="javascript:void(0)" onclick="openLinkedProfile(\'' + _esc(h.linkedProfile) + '\')" style="color:var(--accent);font-size:12px">Open</a>';
     } else if (h.linkedWebhook) {
-      badge = '<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:10px;font-size:11px">Linked → webhook "' + _esc(h.linkedWebhook) + '"</span>';
+      badge = '<span class="mm-chip">Linked → webhook "' + _esc(h.linkedWebhook) + '"</span>';
       action = '<a href="javascript:void(0)" onclick="openLinkedWebhook(\'' + _esc(h.linkedWebhook) + '\')" style="color:var(--accent);font-size:12px">Open</a>';
     } else {
-      badge = '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 8px;border-radius:10px;font-size:11px">Available</span>';
+      badge = '<span style="background:rgba(34,197,94,0.15);color:var(--green);padding:2px 8px;border-radius:10px;font-size:11px">Available</span>';
       action = '<div style="display:inline-flex;gap:6px">'
         + '<button class="btn btn-sm" onclick="adoptNpmHost(' + h.id + ', event)" title="Adopt as proxy with custom settings">Customize…</button>'
         + '<button class="btn btn-sm" onclick="closeNpmImportModal();openLinkProfileToHostModal(' + h.id + ')" title="Link to an existing Midleman profile">Link…</button>'
@@ -7798,7 +8073,7 @@ async function bulkAdoptNpmHosts() {
   const status = document.getElementById('npmImportStatus');
   status.style.color = 'var(--text2)';
   status.textContent = 'Importing ' + ids.length + ' host' + (ids.length === 1 ? '' : 's') + '…';
-  await withBusy(btn, 'A importar…', async () => {
+  await withBusy(btn, 'Importing…', async () => {
     try {
       const res = await api('/admin/npm/proxy-hosts/bulk-adopt', { method: 'POST', body: JSON.stringify(body) });
       const data = await res.json();
@@ -7831,7 +8106,7 @@ async function bulkAdoptNpmHosts() {
 }
 
 async function adoptNpmHost(id, event) {
-  return withBusy(event, 'A carregar…', async () => {
+  return withBusy(event, 'Loading…', async () => {
   try {
     const res = await api('/admin/npm/proxy-hosts/' + id + '/preview-adopt');
     const data = await res.json();
@@ -7867,8 +8142,8 @@ function openLinkedProfile(name) {
 
 async function releaseProfileFromNpm(event) {
   if (!editingProfile || !editingProfile.name) return;
-  if (!(await showConfirm({ title: 'Libertar perfil do NPM', message: 'Libertar este perfil do host NPM? O NPM será restaurado para o destino de encaminhamento original.', confirmText: 'Libertar' }))) return;
-  await withBusy(event, 'A libertar…', async () => {
+  if (!(await showConfirm({ title: 'Release profile from NPM', message: 'Release this profile from the NPM host? NPM will be restored to its original forward destination.', confirmText: 'Release' }))) return;
+  await withBusy(event, 'Releasing…', async () => {
     try {
       const res = await api('/admin/profiles/' + encodeURIComponent(editingProfile.name) + '/npm-release', { method: 'POST' });
       const data = await res.json();
@@ -7974,13 +8249,13 @@ function renderNpmHostsTable() {
       : '(no domains)';
     const fwd = (h.forward_scheme || 'http') + '://' + (h.forward_host || '?') + ':' + (h.forward_port || '?');
     const sslBadge = (h.certificate_id && Number(h.certificate_id) > 0)
-      ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 7px;border-radius:10px;font-size:11px">SSL</span>'
+      ? '<span style="background:rgba(34,197,94,0.15);color:var(--green);padding:2px 7px;border-radius:10px;font-size:11px">SSL</span>'
       : '<span style="color:var(--text3);font-size:11px">—</span>';
     const enabledBadge = h.enabled
-      ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 7px;border-radius:10px;font-size:11px">Enabled</span>'
-      : '<span style="background:var(--surface2);color:var(--text2);padding:2px 7px;border-radius:10px;font-size:11px">Disabled</span>';
+      ? '<span style="background:rgba(34,197,94,0.15);color:var(--green);padding:2px 7px;border-radius:10px;font-size:11px">Enabled</span>'
+      : '<span class="mm-chip">Disabled</span>';
     const linkedTag = h.linkedProfile
-      ? ' <span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 7px;border-radius:10px;font-size:11px">Linked → ' + _esc(h.linkedProfile) + '</span>'
+      ? ' <span class="mm-chip acc">Linked → ' + _esc(h.linkedProfile) + '</span>'
       : '';
     const isLinked = !!h.linkedProfile;
     const toggleAction = h.enabled
@@ -8020,8 +8295,8 @@ function onNpmPageSizeChange() {
 }
 
 async function toggleNpmHost(id, enable, event) {
-  if (!enable && !(await showConfirm({ title: 'Desativar proxy host', message: 'Desativar proxy host #' + id + '? Deixará de servir pedidos até ser reativado.', confirmText: 'Desativar' }))) return;
-  await withBusy(event, enable ? 'A activar…' : 'A desactivar…', async () => {
+  if (!enable && !(await showConfirm({ title: 'Disable proxy host', message: 'Disable proxy host #' + id + '? It will stop serving requests until re-enabled.', confirmText: 'Disable' }))) return;
+  await withBusy(event, enable ? 'Enabling…' : 'Disabling…', async () => {
     try {
       const path = '/admin/npm/proxy-hosts/' + id + '/' + (enable ? 'enable' : 'disable');
       const res = await api(path, { method: 'POST' });
@@ -8036,8 +8311,8 @@ async function toggleNpmHost(id, enable, event) {
 async function deleteNpmHost(id, event) {
   const host = _npmHostsAll.find(h => h.id === id);
   const domains = host ? (host.domain_names || []).join(', ') : '#' + id;
-  if (!(await showConfirm({ title: 'Apagar proxy host', message: 'Apagar proxy host "' + domains + '"?', detail: 'Isto remove-o do NPM permanentemente. O certificado associado (se existir) não é apagado.', confirmText: 'Apagar' }))) return;
-  await withBusy(event, 'A apagar…', async () => {
+  if (!(await showConfirm({ title: 'Delete proxy host', message: 'Delete proxy host "' + domains + '"?', detail: 'This removes it from NPM permanently. The associated certificate (if any) is not deleted.', confirmText: 'Delete' }))) return;
+  await withBusy(event, 'Deleting…', async () => {
     try {
       const res = await api('/admin/npm/proxy-hosts/' + id, { method: 'DELETE' });
       const d = await res.json();
@@ -8053,6 +8328,7 @@ function switchNpmHostTab(tab) {
   document.querySelectorAll('.npm-host-tab').forEach(btn => {
     const active = btn.getAttribute('data-tab') === tab;
     btn.style.borderBottomColor = active ? 'var(--accent)' : 'transparent';
+    btn.classList.toggle('on', !!(active));
     btn.style.color = active ? 'var(--text)' : 'var(--text2)';
     btn.style.fontWeight = active ? '500' : '400';
   });
@@ -8635,7 +8911,7 @@ async function saveSmsConfig() {
 }
 
 async function clearSmsConfig() {
-  if (!(await showConfirm({ title: 'Remover configuração SMS', message: 'Remover toda a configuração SMS?', confirmText: 'Remover' }))) return;
+  if (!(await showConfirm({ title: 'Remove SMS configuration', message: 'Remove the entire SMS configuration?', confirmText: 'Remove' }))) return;
   try {
     const res = await api('/admin/sms', { method: 'DELETE' });
     if (!res.ok) { const d = await res.json().catch(() => ({})); return setSmsStatus('smsStatus', d.error || 'Error', 'err'); }
@@ -8702,6 +8978,7 @@ function switchNotifTab(tab) {
   document.querySelectorAll('.notif-tab').forEach(b => {
     const active = b.getAttribute('data-tab') === tab;
     b.style.borderBottomColor = active ? 'var(--accent)' : 'transparent';
+    b.classList.toggle('on', !!(active));
     b.style.color = active ? 'var(--text)' : 'var(--text2)';
     b.style.fontWeight = active ? '500' : '400';
   });
@@ -8959,6 +9236,7 @@ function switchNotifMemberTab(tab) {
   document.querySelectorAll('.notif-member-tab').forEach(b => {
     const active = b.getAttribute('data-tab') === tab;
     b.style.borderBottomColor = active ? 'var(--accent)' : 'transparent';
+    b.classList.toggle('on', !!(active));
     b.style.color = active ? 'var(--text)' : 'var(--text2)';
     b.style.fontWeight = active ? '500' : '400';
   });
@@ -9284,10 +9562,10 @@ function renderFive9Connectors(connectors) {
   }
   c.innerHTML = connectors.map(cn => {
     const statusBadge = cn.running
-      ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px">Running</span>'
+      ? '<span class="mm-chip ok">Running</span>'
       : (cn.enabled !== false
-        ? '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>'
-        : '<span style="background:var(--surface2);color:var(--text3);padding:2px 8px;border-radius:4px;font-size:11px">Disabled</span>');
+        ? '<span class="mm-chip err">Stopped</span>'
+        : '<span class="mm-chip">Disabled</span>');
     const replies = [
       cn.directReply ? (cn.channel === 'smooch' ? 'Smooch' : cn.channel === 'meta-whatsapp' ? 'Meta' : 'Direct') : null,
       (cn.webhookTargets && cn.webhookTargets.length)
@@ -9442,7 +9720,7 @@ async function saveFive9Connector(event) {
   // Surface the offending step before the server rejects it — otherwise the
   // toast names a field sitting on a pane the user cannot see.
   if (f9Wiz.focusProblem()) return;
-  await withBusy(event, 'A guardar…', async () => { await doSaveFive9Connector(); });
+  await withBusy(event, 'Saving…', async () => { await doSaveFive9Connector(); });
 }
 async function doSaveFive9Connector() {
   try {
@@ -9531,7 +9809,7 @@ async function editFive9Connector(name) {
 }
 
 async function deleteFive9Connector(name) {
-  if (!(await showConfirm({ title: 'Apagar connector Five9', message: 'Apagar connector "' + name + '" e todas as sessões ativas?', confirmText: 'Apagar' }))) return;
+  if (!(await showConfirm({ title: 'Delete Five9 connector', message: 'Delete connector "' + name + '" and all active sessions?', confirmText: 'Delete' }))) return;
   try {
     const res = await api('/admin/five9-connectors/' + encodeURIComponent(name), { method: 'DELETE' });
     if (res.ok) { toast('Deleted'); await fetchFive9Connectors(); }
@@ -9636,10 +9914,10 @@ function renderReportFeeds() {
       ? 'Last ' + f.dateRange.days + ' days'
       : ((f.dateRange && f.dateRange.startDate) || '') + ' → ' + ((f.dateRange && f.dateRange.endDate) || '');
     const refreshBadge = st.refreshing
-      ? ' <span style="background:var(--surface2);color:var(--accent);font-size:10px;padding:1px 6px;border-radius:8px">refreshing…</span>'
+      ? ' <span class="mm-chip">refreshing…</span>'
       : '';
     const groupBadge = (f.group && f.slug)
-      ? ' <span style="font-size:10px;font-weight:400;color:var(--accent);background:var(--surface2);padding:1px 5px;border-radius:4px;border:1px solid var(--border)">' + esc(f.group) + '/' + esc(f.slug) + '</span>'
+      ? ' <span class="mm-chip">' + esc(f.group) + '/' + esc(f.slug) + '</span>'
       : '';
     // Docs URL: group-scoped if group is set, always points to report API port (8444)
     var reportBase = window.location.protocol + '//' + window.location.hostname + ':' + (window.REPORT_PORT || 8444);
@@ -9650,7 +9928,7 @@ function renderReportFeeds() {
         : reportBase + '/reports/docs?apiKey=' + encodeURIComponent(f.apiKeys[0]);
     }
     return '<tr data-feed-row="' + esc(f.name) + '" style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background=\'var(--surface2)\'" onmouseleave="this.style.background=\'\'">' +
-      '<td style="padding:8px 12px;font-weight:600">' + esc(f.name) + groupBadge + (f.instanceName ? ' <span style="font-size:10px;font-weight:400;color:var(--text3);background:var(--surface2);padding:1px 5px;border-radius:4px;border:1px solid var(--border)">' + esc(f.instanceName) + '</span>' : '') + '</td>' +
+      '<td style="padding:8px 12px;font-weight:600">' + esc(f.name) + groupBadge + (f.instanceName ? ' <span class="mm-chip">' + esc(f.instanceName) + '</span>' : '') + '</td>' +
       '<td style="padding:8px;font-family:\'SF Mono\',Monaco,monospace;color:var(--text2)">' + esc(f.templateId) + '</td>' +
       '<td style="padding:8px;color:var(--text2)">' + esc(f.ownerType) + ' <span style="color:var(--text3)">(' + (f.ownerIds || []).length + ')</span></td>' +
       '<td style="padding:8px;color:var(--text2);font-size:12px">' + esc(dateStr) + '</td>' +
@@ -9658,9 +9936,9 @@ function renderReportFeeds() {
       '<td style="padding:8px;color:var(--text2);font-size:12px">' + (st.fetchedAt ? new Date(st.fetchedAt).toLocaleString() : '<span style="color:var(--text3)">never</span>') + '</td>' +
       '<td style="padding:8px 12px;text-align:right;white-space:nowrap">' +
         '<button class="btn btn-sm" onclick="refreshReportFeed(\'' + esc(f.name) + '\')">Refresh</button> ' +
-        (docsUrl ? '<button class="btn btn-sm" title="Abrir documentação API" onclick="window.open(\'' + docsUrl + '\',\'_blank\')">Docs</button> ' : '') +
+        (docsUrl ? '<button class="btn btn-sm" title="Open API documentation" onclick="window.open(\'' + docsUrl + '\',\'_blank\')">Docs</button> ' : '') +
         '<button class="btn btn-sm" onclick="editReportFeed(\'' + esc(f.name) + '\')">Edit</button> ' +
-        (st.cached ? '<button class="btn btn-sm" title="Limpar dados em cache" onclick="clearReportFeedCache(\'' + esc(f.name) + '\')">Limpar</button> ' : '') +
+        (st.cached ? '<button class="btn btn-sm" title="Clear cached data" onclick="clearReportFeedCache(\'' + esc(f.name) + '\')">Clear</button> ' : '') +
         '<button class="btn btn-sm btn-danger" onclick="deleteReportFeed(\'' + esc(f.name) + '\')">Delete</button>' +
       '</td>' +
     '</tr>';
@@ -9847,7 +10125,7 @@ function rfPopulateSourceFeedSelect(currentValue) {
   var sel = document.getElementById('rfDetailSourceFeed');
   if (!sel) return;
   var sessionFeeds = (_allReportFeeds || []).filter(function(f) { return f.ownerType === 'webchat_sessions'; });
-  sel.innerHTML = '<option value="">— nenhum —</option>';
+  sel.innerHTML = '<option value="">— none —</option>';
   sessionFeeds.forEach(function(f) {
     var opt = document.createElement('option');
     opt.value = f.name;
@@ -9937,7 +10215,7 @@ async function saveReportFeed() {
     // Editing a legacy feed — don't touch credentials (server keeps existing ones)
   } else {
     // New feed with no instance selected
-    errEl.textContent = 'Selecciona uma GoContact Instance para o feed.';
+    errEl.textContent = 'Select a GoContact instance for the feed.';
     errEl.style.display = 'block';
     return;
   }
@@ -9989,7 +10267,7 @@ async function saveReportFeed() {
     const feedName = data.name || body.name;
     closeReportFeedModal();
     await loadReportFeeds();
-    showToast(isNew ? 'Feed criado — a ir buscar dados…' : 'Feed updated');
+    showToast(isNew ? 'Feed created — fetching data…' : 'Feed updated');
     if (isNew && feedName) {
       // Trigger first fetch immediately in background; SSE will show progress
       fetch('/admin/reports/' + encodeURIComponent(feedName) + '/refresh', { method: 'POST' }).catch(function() {});
@@ -10021,17 +10299,17 @@ async function refreshReportFeed(name) {
     const res = await fetch('/admin/reports/' + name + '/refresh', { method: 'POST' });
     const d = await res.json().catch(function() { return {}; });
     if (!res.ok) { showToast(d.error || 'Refresh failed', true); return; }
-    if (d.message === 'Already refreshing') { showToast('Feed "' + name + '" já está a ser actualizado…'); return; }
-    showToast('A ir buscar dados para "' + name + '"…');
+    if (d.message === 'Already refreshing') { showToast('Feed "' + name + '" is already refreshing…'); return; }
+    showToast('Fetching data for "' + name + '"…');
   } catch (e) { showToast(e.message, true); }
 }
 
 async function clearReportFeedCache(name) {
-  if (!confirm('Limpar todos os dados em cache do feed "' + name + '"?')) return;
+  if (!confirm('Clear all cached data for feed "' + name + '"?')) return;
   try {
     const res = await fetch('/admin/reports/' + name + '/clear-cache', { method: 'POST' });
-    if (!res.ok) { const d = await res.json().catch(function(){return {};}); showToast(d.error || 'Erro ao limpar cache', true); }
-    else { showToast('Cache do feed "' + name + '" limpo'); }
+    if (!res.ok) { const d = await res.json().catch(function(){return {};}); showToast(d.error || 'Failed to clear cache', true); }
+    else { showToast('Cache cleared for feed "' + name + '"'); }
     await loadReportFeeds();
   } catch (e) { showToast(e.message, true); await loadReportFeeds(); }
 }
@@ -10052,12 +10330,12 @@ function rfStartSse() {
   }
 
   _rfSse.onopen = function() {
-    dot.style.background = '#22c55e';
+    dot.style.background = 'var(--green)';
     dot.title = 'SSE connected';
   };
 
   _rfSse.onerror = function() {
-    dot.style.background = '#ef4444';
+    dot.style.background = 'var(--red)';
     dot.title = 'SSE disconnected — retrying…';
   };
 
@@ -10112,7 +10390,7 @@ function rfStartSse() {
 function rfLogAppend(type, msg) {
   var log = document.getElementById('rfActivityLog');
   if (!log) return;
-  var colors = { start: '#60a5fa', done: '#4ade80', error: '#f87171', info: 'var(--text3)' };
+  var colors = { start: '#60a5fa', done: 'var(--green)', error: '#f87171', info: 'var(--text3)' };
   var icons  = { start: '⟳', done: '✓', error: '✗', info: '·' };
   var now = new Date().toLocaleTimeString('en-GB', { hour12: false });
   var line = document.createElement('div');
@@ -10261,7 +10539,7 @@ async function rfViewerRefresh() {
     var res = await fetch('/admin/reports/' + encodeURIComponent(sel.value) + '/refresh', { method: 'POST' });
     var d = await res.json().catch(function() { return {}; });
     if (!res.ok) { showToast(d.error || 'Refresh failed', true); return; }
-    showToast('A ir buscar dados para "' + sel.value + '"…');
+    showToast('Fetching data for "' + sel.value + '"…');
   } catch(e) { showToast(e.message, true); }
 }
 
@@ -10336,7 +10614,7 @@ async function rfFetchPreview() {
       if (cacheRes.ok && cacheData.columns && cacheData.columns.length > 0) {
         _rfPreviewColumns = cacheData.columns;
         status.textContent = _rfPreviewColumns.length + ' columns (from cache — ' + cacheData.total + ' total rows).';
-        status.style.color = 'var(--green,#4ade80)';
+        status.style.color = 'var(--green)';
         rfRenderPreviewTable(cacheData.columns, cacheData.rows || []);
         rfBuildFieldMapVisual(cacheData.columns, cacheData.rows || []);
         rfPopulateColumnSelects(rfGetVisualProjectedColumns());
@@ -10374,7 +10652,7 @@ async function rfFetchPreview() {
 
     _rfPreviewColumns = data.columns || [];
     status.textContent = _rfPreviewColumns.length + ' columns, ' + data.totalRows + ' rows in report.';
-    status.style.color = 'var(--green,#4ade80)';
+    status.style.color = 'var(--green)';
 
     rfRenderPreviewTable(data.columns, data.sampleRows);
     rfBuildFieldMapVisual(data.columns, data.sampleRows || []);
@@ -10563,7 +10841,7 @@ function rfPopulateColumnSelects(columns) {
     var txt = document.getElementById(s.txt);
     if (!sel) return;
     var current = txt ? txt.value : '';
-    sel.innerHTML = '<option value="">— não seleccionado —</option>';
+    sel.innerHTML = '<option value="">— not selected —</option>';
     columns.forEach(function(col) {
       var opt = document.createElement('option');
       opt.value = col;
@@ -10632,7 +10910,7 @@ function renderGcInstances() {
   var tbody = document.getElementById('gcInstanceListBody');
   if (!tbody) return;
   if (!_gcInstances.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="padding:32px;text-align:center;color:var(--text3)">Sem instâncias. Clica em &quot;+ Add Instance&quot;.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="padding:32px;text-align:center;color:var(--text3)">No instances. Click &quot;+ Add Instance&quot;.</td></tr>';
     return;
   }
   var truncCell = 'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
@@ -10717,14 +10995,14 @@ async function saveGcInstance() {
 }
 
 async function deleteGcInstance(name) {
-  if (!confirm('Apagar instância "' + name + '"?')) return;
+  if (!confirm('Delete instance "' + name + '"?')) return;
   try {
     var res = await fetch('/admin/gocontact/instances/' + name, { method: 'DELETE' });
     var data = await res.json();
     if (!res.ok) { showToast(data.error || 'Delete failed', true); return; }
     await loadGcInstances();
     rfPopulateInstanceDropdown();
-    showToast('Instância apagada');
+    showToast('Instance deleted');
   } catch(e) { showToast(e.message, true); }
 }
 
@@ -10793,7 +11071,7 @@ async function fetchErrorStats() {
         _errLastToastedId = s.latestId;
       } else if (s.latestId > _errLastToastedId) {
         _errLastToastedId = s.latestId;
-        toast('Novo alerta do sistema — ver System Alerts', 'error');
+        toast('New system alert — see System Alerts', 'error');
       }
     }
   } catch (e) { /* badge is best-effort; never break the dashboard over it */ }
@@ -10887,10 +11165,10 @@ function renderErrorFeed(entries, total) {
   const tbody = document.getElementById('errListBody');
   if (!tbody) return;
   if (!entries.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Nenhum erro registado.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No errors logged.</td></tr>';
   } else {
     tbody.innerHTML = entries.map(function (e, idx) {
-      const sevColor = e.severity === 'error' ? '#ef4444' : '#f59e0b';
+      const sevColor = e.severity === 'error' ? 'var(--red)' : 'var(--orange)';
       const dim = e.acknowledged ? 'opacity:0.55;' : '';
       const msg = e.message.length > 160 ? e.message.slice(0, 160) + '…' : e.message;
       return '<tr style="border-top:1px solid var(--border);' + dim + '">' +
@@ -10910,7 +11188,7 @@ function renderErrorFeed(entries, total) {
   if (totalEl) {
     const from = total ? (_errPage - 1) * ERR_PAGE_SIZE + 1 : 0;
     const to = Math.min(_errPage * ERR_PAGE_SIZE, total);
-    totalEl.textContent = total ? (from + '–' + to + ' de ' + total) : 'Sem entradas';
+    totalEl.textContent = total ? (from + '–' + to + ' of ' + total) : 'No entries';
   }
   const prev = document.getElementById('errPrev');
   const next = document.getElementById('errNext');
@@ -10950,42 +11228,42 @@ function closeErrorDetail() {
 async function ackErrorEntry(id) {
   try {
     const res = await api('/admin/errors/ack', { method: 'POST', body: JSON.stringify({ ids: [id] }) });
-    if (!res.ok) return toast('Falha ao marcar como lido', 'error');
+    if (!res.ok) return toast('Failed to mark as read', 'error');
     await fetchErrorFeed(false);
-  } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function ackAllErrors(ev) {
-  await withBusy(ev, 'A marcar…', async function () {
+  await withBusy(ev, 'Marking…', async function () {
     try {
       const res = await api('/admin/errors/ack', { method: 'POST', body: JSON.stringify({ ids: [] }) });
       const d = await res.json().catch(function () { return {}; });
-      if (!res.ok) return toast(d.error || 'Falha', 'error');
-      toast((d.count || 0) + ' entrada(s) marcadas como lidas');
+      if (!res.ok) return toast(d.error || 'Failed', 'error');
+      toast((d.count || 0) + ((d.count || 0) === 1 ? ' entry marked as read' : ' entries marked as read'));
       await fetchErrorFeed(true);
-    } catch (e) { toast('Erro: ' + e.message, 'error'); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
   });
 }
 
 async function clearAllErrors(ev) {
   const ok = await showConfirm({
-    title: 'Limpar feed de erros',
-    message: 'Isto apaga permanentemente todas as entradas do feed.',
-    detail: 'O histórico não é recuperável. "Mark all as read" apenas esconde as entradas, mantendo-as disponíveis no filtro "Read".',
-    confirmText: 'Apagar tudo',
-    cancelText: 'Cancelar',
+    title: 'Clear error feed',
+    message: 'This permanently deletes every entry in the feed.',
+    detail: 'The history cannot be recovered. "Mark all as read" only hides entries, keeping them available under the "Read" filter.',
+    confirmText: 'Delete all',
+    cancelText: 'Cancel',
     danger: true,
   });
   if (!ok) return;
-  await withBusy(ev, 'A limpar…', async function () {
+  await withBusy(ev, 'Clearing…', async function () {
     try {
       const res = await api('/admin/errors', { method: 'DELETE', body: JSON.stringify({ ids: [] }) });
       const d = await res.json().catch(function () { return {}; });
-      if (!res.ok) return toast(d.error || 'Falha', 'error');
-      toast((d.count || 0) + ' entrada(s) apagadas');
+      if (!res.ok) return toast(d.error || 'Failed', 'error');
+      toast((d.count || 0) + ((d.count || 0) === 1 ? ' entry deleted' : ' entries deleted'));
       _errLastToastedId = null;
       await fetchErrorFeed(true);
-    } catch (e) { toast('Erro: ' + e.message, 'error'); }
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
   });
 }
 
@@ -11068,3 +11346,76 @@ async function compactLogsNow(ev) {
     fetchLogSettings();
   });
 }
+
+
+// Live preview of the sign-in logo in the OAuth client modal. The logo is never
+// set by hand: the server discovers it from the first redirect URI's site
+// (apple-touch-icon / icon links, else /favicon.ico), like the sign-in page.
+let _oauthLogoTimer = 0, _oauthLogoSeq = 0;
+function updateOauthClientLogoPreview() {
+  const box = document.getElementById('oauthClientLogoPreview');
+  const src = document.getElementById('oauthClientLogoSource');
+  if (!box) return;
+  const name = (document.getElementById('oauthClientName')?.value || '').trim();
+  const words = name.split(/[\s_\-]+/).filter(Boolean);
+  const initials = (words.length >= 2 ? words[0][0] + words[1][0] : (words[0] || '?').slice(0, 2)).toUpperCase();
+  const first = (document.getElementById('oauthClientUris')?.value || '').split(/\r?\n/).map(x => x.trim()).find(Boolean) || '';
+  let origin = '';
+  try { origin = first ? new URL(first).origin : ''; } catch { origin = ''; }
+  if (src) src.textContent = origin ? 'Detected from ' + origin : 'Add a redirect URI to detect the app logo.';
+  if (!box.querySelector('img')) box.textContent = initials;
+  clearTimeout(_oauthLogoTimer);
+  if (!origin) { box.textContent = initials; return; }
+  const seq = ++_oauthLogoSeq;
+  _oauthLogoTimer = setTimeout(async () => {
+    try {
+      const res = await api('/admin/oauth-clients/app-icon?uri=' + encodeURIComponent(first));
+      const data = await res.json();
+      if (seq !== _oauthLogoSeq) return;
+      box.textContent = initials;
+      if (!/^https?:\/\//i.test(data.iconUrl || '')) return;
+      const img = document.createElement('img');
+      img.alt = '';
+      img.referrerPolicy = 'no-referrer';
+      img.style.cssText = 'width:100%;height:100%;object-fit:contain;padding:6px;background:var(--surface)';
+      img.onload = () => { if (seq === _oauthLogoSeq) { box.textContent = ''; box.appendChild(img); } };
+      img.src = data.iconUrl;
+    } catch { if (seq === _oauthLogoSeq) box.textContent = initials; }
+  }, 400);
+}
+
+
+// ─── Segmented controls backed by a real <select> ───────────────────────────
+// Markup: <div class="mm-seg" data-seg-for="selectId"><button data-value=…>…</div>
+// The hidden <select> stays the source of truth (forms, Wizard.val, onchange
+// handlers keep working); the buttons only set it and dispatch "change".
+function mmSyncSeg(selectId) {
+  const sel = document.getElementById(selectId);
+  const seg = document.querySelector(`.mm-seg[data-seg-for="${selectId}"]`);
+  if (!sel || !seg) return;
+  seg.querySelectorAll('button[data-value]').forEach(b => {
+    const on = b.dataset.value === sel.value;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', on ? 'true' : 'false');
+    b.tabIndex = on ? 0 : -1;
+  });
+}
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest && e.target.closest('.mm-seg[data-seg-for] button[data-value]');
+  if (!btn) return;
+  const id = btn.closest('.mm-seg').dataset.segFor;
+  const sel = document.getElementById(id);
+  if (!sel || sel.value === btn.dataset.value) return;
+  sel.value = btn.dataset.value;
+  sel.dispatchEvent(new Event('change', { bubbles: true }));
+  mmSyncSeg(id);
+});
+document.addEventListener('keydown', (e) => {
+  const btn = e.target.closest && e.target.closest('.mm-seg[data-seg-for] button[data-value]');
+  if (!btn || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+  const all = [...btn.parentElement.querySelectorAll('button[data-value]')];
+  const next = all[(all.indexOf(btn) + (e.key === 'ArrowRight' ? 1 : all.length - 1)) % all.length];
+  next.focus(); next.click(); e.preventDefault();
+});
+document.addEventListener('change', (e) => { if (e.target && e.target.id) mmSyncSeg(e.target.id); });
+document.querySelectorAll('.mm-seg[data-seg-for]').forEach(seg => mmSyncSeg(seg.dataset.segFor));

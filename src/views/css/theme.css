@@ -1,0 +1,165 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Midleman design tokens — single source of truth
+   ───────────────────────────────────────────────────────────────────────────
+   Loaded by the dashboard (<link>) and inlined into every standalone page
+   (OAuth, proxy login, invites, password reset, errors) at serve time via
+   `{{THEME_CSS}}`, because those pages are served from servers that do not
+   expose /dashboard/css/.
+
+   Rules of the system:
+   • Flat: no shadows anywhere. Depth comes from 1 px borders, the accent
+     corner brackets (.mm-frame) and colour.
+   • One accent per theme (#41A5EE blue; a deeper shade on light for legible text) + three state colours.
+   • Space Grotesk for display, IBM Plex Sans for UI, JetBrains Mono for data.
+   • Variable names are the historical ones used throughout dashboard.css,
+     _app.html and dashboard-data.js — do not rename, only re-value.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Space Grotesk', 'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-lg: 10px;
+  --panel-radius: 14px;
+  --control-h: 32px;
+  --control-h-lg: 40px;
+  --grid-size: 32px;
+  --transition: 0.16s cubic-bezier(0.4, 0, 0.2, 1);
+  --shadow: none;
+}
+
+/* ─── Dark (default) ─────────────────────────────────────────────────────── */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0B0E14;          /* page ground */
+  --bg2: #0B0E14;
+  --grid-line: #111622;   /* background grid */
+  --surface: #0D1118;     /* panels, cards, sidebar */
+  --surface2: #121722;    /* hover, table head, inputs */
+  --surface3: #182030;
+  --border: #1C2330;
+  --border2: #243041;
+  --table-bg: #0E151F;     /* table cards: a faint primary tint, between page and panel */
+  --table-head: #13202F;
+  --text: #E6EAF2;
+  --text2: #9AA4B8;
+  --text3: #7E889F;       /* ≥4.5:1 on --bg and --surface */
+
+  --accent: #41A5EE;
+  --accent2: #8CCBF5;     /* hover / emphasis */
+  --accent-bg: rgba(65, 165, 238, 0.10);
+  --accent-bdr: #1D4566;
+  --accent-sel: #0F1A27;  /* selected row / active nav ground */
+  --accent-sel-bdr: #1E3A55;
+  --on-accent: #06131F;   /* text on an --accent fill */
+
+  --green: #5DE3A8;  --green-bg: rgba(93, 227, 168, 0.10);  --green-bdr: #1F4D3B;
+  --orange: #F2C14E; --orange-bg: rgba(242, 193, 78, 0.10); --orange-bdr: #5A4A1C;
+  --red: #FF6B6B;    --red-bg: rgba(255, 107, 107, 0.10);   --red-bdr: #5A2626;
+  --blue: #7AA7FF;   --blue-bg: rgba(122, 167, 255, 0.10);  --blue-bdr: #26375A;
+  --on-danger: #06141B;
+
+  /* Aliases referenced by older inline styles */
+  --primary: var(--accent);
+  --ok-text: var(--green);   --ok-bg: var(--green-bg);   --ok-bdr: var(--green-bdr);
+  --warn-text: var(--orange); --warning: var(--orange); --warning-bg: var(--orange-bg);
+  --err-text: var(--red);
+
+  --code-bg: #0B0E14;
+  --topbar-bg: rgba(11, 14, 20, 0.86);
+  --overlay: rgba(5, 8, 12, 0.74);
+  --focus: var(--accent);
+}
+
+/* ─── Light ──────────────────────────────────────────────────────────────── */
+[data-theme="light"] {
+  color-scheme: light;
+  /* Soft light: cards are an off-white step above the page, never pure white. */
+  --bg: #DCE1E7;
+  --bg2: #E4E8ED;
+  --grid-line: #D3D9E0;
+  --surface: #E4E8ED;
+  --surface2: #DAE0E6;
+  --surface3: #D2D9E0;
+  --border: #CBD2DB;
+  --border2: #BCC5D0;
+  --table-bg: #DFE6EE;
+  --table-head: #D1DCE8;
+  --text: #1E293B;
+  --text2: #475569;
+  --text3: #556070;
+
+  --accent: #2A8BD4;
+  --accent2: #1E6FAE;
+  --accent-bg: rgba(42, 139, 212, 0.10);
+  --accent-bdr: #A9CDEB;
+  --accent-sel: #D0E1F0;
+  --accent-sel-bdr: #9CC4E6;
+  --on-accent: #FFFFFF;
+
+  --green: #047857;  --green-bg: rgba(4, 120, 87, 0.08);   --green-bdr: #A7DFC6;
+  --orange: #B45309; --orange-bg: rgba(180, 83, 9, 0.08);  --orange-bdr: #F1D29A;
+  --red: #B91C1C;    --red-bg: rgba(185, 28, 28, 0.07);    --red-bdr: #F3B4B4;
+  --blue: #1D4ED8;   --blue-bg: rgba(29, 78, 216, 0.07);   --blue-bdr: #BFD0F5;
+  --on-danger: #FFFFFF;
+
+  --code-bg: #DDE2E8;
+  --topbar-bg: rgba(220, 225, 231, 0.9);
+  --overlay: rgba(15, 23, 42, 0.38);
+  --focus: var(--accent);
+}
+
+/* ─── Shared primitives (prefixed .mm-, safe on any page) ─────────────────── */
+
+/* Ground with the faint technical grid */
+.mm-grid-ground {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: var(--grid-size) var(--grid-size);
+}
+
+/* Accent corner brackets — the system's only "elevation" cue */
+.mm-frame { position: relative; }
+.mm-frame::before,
+.mm-frame::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: var(--accent);
+  border-style: solid;
+  pointer-events: none;
+}
+.mm-frame::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; border-top-left-radius: inherit; }
+.mm-frame::after { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; border-bottom-right-radius: inherit; }
+.mm-frame.mm-frame--danger::before,
+.mm-frame.mm-frame--danger::after { border-color: var(--red); }
+
+/* Logo mark: square with the in → node → fan-out glyph. Size with font-size. */
+.mm-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2em;
+  height: 2em;
+  border: 1px solid var(--accent);
+  border-radius: 0.45em;
+  color: var(--accent);
+}
+.mm-mark svg { width: 1.15em; height: 1.15em; }
+
+.mm-mono { font-family: var(--font-mono); }
+.mm-display { font-family: var(--font-display); }
+
+/* Visible focus without shadows */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}

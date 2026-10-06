@@ -4,61 +4,66 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="icon" type="image/png" href="/logo.png">
   <title>{{STATUS}} — Midleman</title>
-  <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='system';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
+  <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='dark';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
+  <!-- MM_THEME -->
   <style>
-    :root,
-    [data-theme="dark"] {
-      --bg: #0f1117;
-      --text: #e4e6f0;
-      --text2: #8b8fa7;
-      --text3: #5d6180;
-      --accent: #2899f5;
-      --rule: #2e3148;
-    }
-
-    [data-theme="light"] {
-      --bg: #ffffff;
-      --text: #18181b;
-      --text2: #52525b;
-      --text3: #a1a1aa;
-      --accent: #0064b3;
-      --rule: #e4e4e7;
-    }
-
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: var(--bg);
+      font-family: var(--font-sans);
       color: var(--text);
       min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 32px;
+      padding: 32px 16px;
       -webkit-font-smoothing: antialiased;
     }
 
-    main {
-      max-width: 420px;
+    .card {
       width: 100%;
+      max-width: 440px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 28px 28px 24px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 12px;
+      margin-bottom: 28px;
+    }
+
+    .brand-name {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--text);
+      letter-spacing: -0.01em;
     }
 
     .code {
-      font-family: 'SF Mono', ui-monospace, 'Menlo', Consolas, monospace;
-      font-size: 13px;
-      color: var(--text3);
-      letter-spacing: 0.06em;
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 56px;
+      line-height: 1;
+      letter-spacing: -0.03em;
+      color: var(--red);
+      font-variant-numeric: tabular-nums;
       margin-bottom: 14px;
     }
 
     h1 {
-      font-size: 22px;
+      font-family: var(--font-display);
+      font-size: 20px;
       font-weight: 600;
-      letter-spacing: -0.2px;
-      margin-bottom: 10px;
+      letter-spacing: -0.01em;
+      line-height: 1.3;
+      margin-bottom: 8px;
     }
 
     p {
@@ -66,35 +71,59 @@
       color: var(--text2);
       line-height: 1.6;
       margin-bottom: 24px;
+      overflow-wrap: anywhere;
     }
 
     p a {
       color: var(--accent);
       text-decoration: none;
     }
-    p a:hover { text-decoration: underline; }
+    p a:hover { color: var(--accent2); text-decoration: underline; }
 
     .links {
-      padding-top: 18px;
-      border-top: 1px solid var(--rule);
       display: flex;
-      gap: 20px;
-      font-size: 13px;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
     }
 
     .links a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: var(--control-h);
+      padding: 0 14px;
+      font-size: 13px;
+      font-weight: 500;
       color: var(--text2);
+      background: transparent;
+      border: 1px solid var(--border2);
+      border-radius: var(--radius-sm);
       text-decoration: none;
-      transition: color .15s;
+      transition: color var(--transition), border-color var(--transition);
     }
 
-    .links a:hover { color: var(--text); }
+    .links a:hover {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
+    @media (max-width: 420px) {
+      .card { padding: 22px 18px 18px; }
+      .code { font-size: 44px; }
+      .links a { flex: 1; }
+    }
   </style>
 </head>
 
-<body>
-  <main>
-    <div class="code">{{STATUS_CODE}} · {{TITLE}}</div>
+<body class="mm-grid-ground">
+  <main class="card mm-frame mm-frame--danger">
+    <div class="brand">
+      <span class="mm-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12h6.5"/><circle cx="12" cy="12" r="3.3"/><path d="M15 10.4 21.5 5.5"/><path d="M15.4 12H22"/><path d="M15 13.6 21.5 18.5"/></svg></span>
+      <span class="brand-name">Midleman</span>
+    </div>
+    <div class="code">{{STATUS_CODE}}</div>
     <h1>{{TITLE}}</h1>
     <p>{{MESSAGE}}</p>
     <div class="links">

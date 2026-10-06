@@ -1,17 +1,20 @@
 // ─── Chart Rendering ──────────────────────────────────────────────────────────
 
 function getThemeColors() {
-  const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+  // Read the live theme tokens (theme.css) so charts always match the UI and
+  // follow the light/dark switch without a second palette to keep in sync.
+  const cs = getComputedStyle(document.documentElement);
+  const v = (name, fallback) => (cs.getPropertyValue(name) || '').trim() || fallback;
   return {
-    accent: '#0078d4',
-    accentFade: isDark ? 'rgba(0, 120, 212, 0.10)' : 'rgba(0, 120, 212, 0.06)',
-    red: isDark ? '#e17055' : '#d35400',
-    green: isDark ? '#00b894' : '#00a17d',
-    blue: isDark ? '#74b9ff' : '#2e86de',
-    orange: isDark ? '#fdcb6e' : '#c8980a',
-    grid: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
-    label: isDark ? '#5d6180' : '#9096a9',
-    text: isDark ? '#8b8fa7' : '#6b7185',
+    accent: v('--accent', '#41A5EE'),
+    accentFade: v('--accent-bg', 'rgba(65,165,238,0.10)'),
+    red: v('--red', '#FF6B6B'),
+    green: v('--green', '#5DE3A8'),
+    blue: v('--blue', '#7AA7FF'),
+    orange: v('--orange', '#F2C14E'),
+    grid: v('--border', '#1C2330'),
+    label: v('--text3', '#7E889F'),
+    text: v('--text2', '#9AA4B8'),
   };
 }
 

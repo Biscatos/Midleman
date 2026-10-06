@@ -4,8 +4,8 @@
     <!-- Brand + collapse toggle -->
     <div class="sidebar-header">
       <a class="sidebar-brand" href="/dashboard">
-        <img src="/logo.png" alt="Midleman">
-        <span class="sidebar-brand-name"><span>Mid</span>leman</span>
+        <span class="mm-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12h6.5"/><circle cx="12" cy="12" r="3.3"/><path d="M15 10.4 21.5 5.5"/><path d="M15.4 12H22"/><path d="M15 13.6 21.5 18.5"/></svg></span>
+        <span class="sidebar-brand-name">Midleman</span>
       </a>
       <button class="sidebar-collapse-btn" onclick="toggleSidebar()" id="sidebarCollapseBtn" aria-label="Toggle sidebar">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
@@ -38,6 +38,13 @@
         <span class="sidebar-link-label">Users</span>
         <span class="sidebar-badge" id="navProxyUserBadge">0</span>
       </button>
+      <button class="sidebar-link" data-page="ldap" data-tooltip="LDAP directories" onclick="navigate('ldap')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3 4.5 6v5.5c0 4.5 3.2 8.4 7.5 9.5 4.3-1.1 7.5-5 7.5-9.5V6L12 3z"/><path d="m8.8 12 2.2 2.2 4.2-4.4"/>
+        </svg>
+        <span class="sidebar-link-label">LDAP</span>
+        <span class="sidebar-badge" id="navLdapBadge" title="Enabled directories">0</span>
+      </button>
 
       <div class="sidebar-section-label">Resources</div>
       <button class="sidebar-link" data-page="profiles" data-tooltip="Http Proxies" onclick="navigate('profiles')">
@@ -54,8 +61,7 @@
       </button>
       <button class="sidebar-link" data-page="npm" data-tooltip="Nginx Proxy Manager" onclick="navigate('npm')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 4v16"/><path d="M20 4v16"/>
-          <path d="M8 12h7"/><path d="M12.5 8.5 16 12l-3.5 3.5"/>
+          <circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9s1.3-6.4 3.8-9z"/>
         </svg>
         <span class="sidebar-link-label">Nginx Proxy Manager</span>
         <span class="sidebar-badge" id="navNpmBadge" style="display:none">!</span>
@@ -80,17 +86,7 @@
         <span class="sidebar-badge" id="navWebhookBadge">0</span>
       </button>
 
-      <div class="sidebar-section-label sidebar-section-label--master">Settings</div>
-      <div class="sidebar-section-label sidebar-section-label--sub">Integrations</div>
-      <button class="sidebar-link" data-page="ldap" data-tooltip="LDAP directories" onclick="navigate('ldap')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/>
-        </svg>
-        <span class="sidebar-link-label">LDAP</span>
-        <span class="sidebar-badge" id="navLdapBadge" title="Enabled directories">0</span>
-      </button>
-
-      <div class="sidebar-section-label sidebar-section-label--sub">System</div>
+      <div class="sidebar-section-label">Settings</div>
       <button class="sidebar-link" data-page="notifications" data-tooltip="Notification groups & rules" onclick="navigate('notifications')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
@@ -127,6 +123,12 @@
         </svg>
         <span class="sidebar-link-label">Log Storage</span>
         <span class="sidebar-badge" id="navLogSizeBadge" title="Request log database size">0 MB</span>
+      </button>
+      <button class="sidebar-link" data-page="docs" data-tooltip="Docs" onclick="navigate('docs')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19.5V5a2 2 0 0 1 2-2h13v15H6.5A2.5 2.5 0 0 0 4 20.5 2.5 2.5 0 0 0 6.5 23H19v-5"/><path d="M8 7h7"/><path d="M8 11h5"/>
+        </svg>
+        <span class="sidebar-link-label">Docs</span>
       </button>
 
       <!-- Extensions: features kept out of the main navigation (still reachable by URL hash). -->
@@ -213,10 +215,6 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
           <span id="themeBtnLabel">Light</span>
         </button>
-        <div class="topbar-user">
-          <div class="topbar-avatar" id="topbarAvatar">M</div>
-          <span class="topbar-username" id="topbarUser">—</span>
-        </div>
       </div>
     </header>
 
@@ -342,17 +340,16 @@
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px">
-            <input type="checkbox" id="rlAutoRefresh" checked style="accent-color:var(--accent)"> Auto-refresh
+            <input class="mm-switch" type="checkbox" id="rlAutoRefresh" checked style=""> Auto-refresh
           </label>
-          <button class="btn btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await fetchRequestLogs(); })">Refresh</button>
+          <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchRequestLogs(); })">Refresh</button>
         </div>
       </div>
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-body" style="padding:12px 16px">
+      <div class="mm-filterbar">
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-            <input type="text" id="rlSearch" placeholder="Search path, URL, request ID..."
+            <label class="mm-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="text" id="rlSearch" placeholder="Search path, URL, request ID..."
               style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
-              onkeydown="if(event.key==='Enter')fetchRequestLogs()">
+              onkeydown="if(event.key==='Enter')fetchRequestLogs()"></label>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);user-select:none;cursor:pointer;white-space:nowrap"
                    title="Also match request/response body — slower (full scan).">
               <input type="checkbox" id="rlSearchBody" onchange="fetchRequestLogs()"> Search body
@@ -392,9 +389,9 @@
               <option value="500">500</option>
               <option value="502">502</option>
             </select>
-            <button class="btn btn-sm btn-primary" onclick="withBusy(this, 'A carregar…', async () => { await fetchRequestLogs(); })">Filter</button>
+            <button class="btn btn-sm btn-primary" onclick="withBusy(this, 'Loading…', async () => { await fetchRequestLogs(); })">Filter</button>
           </div>
-        </div>
+        
       </div>
       <div class="card">
         <div class="card-body" style="padding:0;overflow-x:auto">
@@ -431,15 +428,15 @@
         style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--text2)">
         <span id="reqLogInfo"></span>
         <div style="display:flex;gap:6px">
-          <button class="btn btn-sm" id="rlPrev" onclick="withBusy(this, 'A carregar…', async () => { await reqLogPrevPage(); })" disabled>Prev</button>
-          <button class="btn btn-sm" id="rlNext" onclick="withBusy(this, 'A carregar…', async () => { await reqLogNextPage(); })" disabled>Next</button>
+          <button class="btn btn-sm" id="rlPrev" onclick="withBusy(this, 'Loading…', async () => { await reqLogPrevPage(); })" disabled>Prev</button>
+          <button class="btn btn-sm" id="rlNext" onclick="withBusy(this, 'Loading…', async () => { await reqLogNextPage(); })" disabled>Next</button>
         </div>
       </div>
     </div>
 
     <!-- Request Detail Modal -->
-    <div id="reqDetailModal"
-      style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);overflow-y:auto">
+    <div id="reqDetailModal" role="dialog" aria-modal="true" aria-labelledby="reqDetailTitle" onclick="if(event.target===this)closeReqDetail()"
+      style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(6px)">
       <div class="rdm-panel">
         <div class="rdm-header">
           <div class="rdm-header-left">
@@ -447,7 +444,11 @@
           </div>
           <div style="display:flex;align-items:center;gap:8px">
             <span id="reqDetailActions"></span>
-            <button onclick="closeReqDetail()" class="rdm-close">&times;</button>
+            <button type="button" onclick="toggleReqDetailFullscreen()" class="rdm-close rdm-fs-btn" id="reqDetailFsBtn" title="Full screen" aria-label="Full screen" aria-pressed="false">
+              <svg class="rdm-fs-enter" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+              <svg class="rdm-fs-exit" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></svg>
+            </button>
+            <button type="button" onclick="closeReqDetail()" class="rdm-close" title="Close" aria-label="Close">&times;</button>
           </div>
         </div>
         <div id="reqDetailContent" class="rdm-body"></div>
@@ -457,9 +458,9 @@
     <!-- ═══ TCP/UDP (Proxies + Logs) ═══ -->
     <div class="page" id="pageTcpudp">
       <div style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:16px">
-        <button id="tabBtnTcpProxies" class="btn btn-sm" style="border-radius:0;border:none;border-bottom:2px solid var(--accent);background:none;color:var(--text);padding:8px 16px;cursor:pointer" onclick="switchTcpUdpTab('proxies')">Proxies</button>
-        <button id="tabBtnTcpLogs" class="btn btn-sm" style="border-radius:0;border:none;border-bottom:2px solid transparent;background:none;color:var(--text3);padding:8px 16px;cursor:pointer" onclick="switchTcpUdpTab('logs')">Logs</button>
-        <button id="tabBtnTcpCerts" class="btn btn-sm" style="border-radius:0;border:none;border-bottom:2px solid transparent;background:none;color:var(--text3);padding:8px 16px;cursor:pointer" onclick="switchTcpUdpTab('certs')">Certificates <span id="tabTcpCertsBadge" style="margin-left:6px;background:var(--surface3);color:var(--text2);font-size:10px;padding:1px 6px;border-radius:8px">0</span></button>
+        <button id="tabBtnTcpProxies" class="btn btn-sm mm-tab on" style="border-radius:0;border:none;border-bottom:2px solid var(--accent);background:none;color:var(--text);padding:8px 16px;cursor:pointer" onclick="switchTcpUdpTab('proxies')">Proxies</button>
+        <button id="tabBtnTcpLogs" class="btn btn-sm mm-tab" style="border-radius:0;border:none;border-bottom:2px solid transparent;background:none;color:var(--text3);padding:8px 16px;cursor:pointer" onclick="switchTcpUdpTab('logs')">Logs</button>
+        <button id="tabBtnTcpCerts" class="btn btn-sm mm-tab" style="border-radius:0;border:none;border-bottom:2px solid transparent;background:none;color:var(--text3);padding:8px 16px;cursor:pointer" onclick="switchTcpUdpTab('certs')">Certificates <span id="tabTcpCertsBadge" style="margin-left:6px;background:var(--surface3);color:var(--text2);font-size:10px;padding:1px 6px;border-radius:8px">0</span></button>
       </div>
 
       <!-- Tab: Proxies -->
@@ -470,7 +471,7 @@
             <p>Stream-level proxies (TCP, UDP, TLS). Used for SIP/VoIP and other non-HTTP protocols. Each profile can listen on multiple transports and forward to a single upstream.</p>
           </div>
           <div style="display:flex;gap:8px">
-            <button class="btn btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await fetchSipProxies(); })">Reload</button>
+            <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchSipProxies(); })">Reload</button>
             <button class="btn btn-primary btn-sm" onclick="openSipModal()">+ TCP/UDP Proxy</button>
           </div>
         </div>
@@ -505,18 +506,17 @@
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px">
-            <input type="checkbox" id="slAutoRefresh" checked style="accent-color:var(--accent)"> Auto-refresh
+            <input class="mm-switch" type="checkbox" id="slAutoRefresh" checked style=""> Auto-refresh
           </label>
           <button class="btn btn-sm" onclick="refreshTcpUdpLogTab()">Refresh</button>
         </div>
       </div>
       <div style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:16px">
-        <button id="tabBtnSipMessages" class="btn btn-sm" style="border-radius:0;border:none;border-bottom:2px solid var(--accent);background:none;color:var(--text);padding:8px 16px;cursor:pointer" onclick="switchTcpUdpLogTab('messages')">Messages</button>
-        <button id="tabBtnSipConns" class="btn btn-sm" style="border-radius:0;border:none;border-bottom:2px solid transparent;background:none;color:var(--text3);padding:8px 16px;cursor:pointer" onclick="switchTcpUdpLogTab('conns')">Connections</button>
+        <button id="tabBtnSipMessages" class="btn btn-sm mm-tab on" style="border-radius:0;border:none;border-bottom:2px solid var(--accent);background:none;color:var(--text);padding:8px 16px;cursor:pointer" onclick="switchTcpUdpLogTab('messages')">Messages</button>
+        <button id="tabBtnSipConns" class="btn btn-sm mm-tab" style="border-radius:0;border:none;border-bottom:2px solid transparent;background:none;color:var(--text3);padding:8px 16px;cursor:pointer" onclick="switchTcpUdpLogTab('conns')">Connections</button>
       </div>
       <div id="tabPaneSipConns" style="display:none">
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-body" style="padding:12px 16px">
+        <div class="mm-filterbar">
             <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
               <select id="clProfile" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px" onchange="fetchConnLogs()">
                 <option value="">All profiles</option>
@@ -526,10 +526,10 @@
                 <option value="tcp">TCP</option>
                 <option value="tls">TLS</option>
               </select>
-              <button class="btn btn-sm btn-primary" onclick="withBusy(this, 'A carregar…', async () => { await fetchConnLogs(); })">Filter</button>
+              <button class="btn btn-sm btn-primary" onclick="withBusy(this, 'Loading…', async () => { await fetchConnLogs(); })">Filter</button>
             </div>
-          </div>
-        </div>
+          
+      </div>
         <div class="card">
           <div class="card-body" style="padding:0;overflow-x:auto">
             <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -554,18 +554,17 @@
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--text2)">
           <span id="connLogInfo"></span>
           <div style="display:flex;gap:6px">
-            <button class="btn btn-sm" id="clPrev" onclick="withBusy(this, 'A carregar…', async () => { await connLogPrevPage(); })" disabled>Prev</button>
-            <button class="btn btn-sm" id="clNext" onclick="withBusy(this, 'A carregar…', async () => { await connLogNextPage(); })" disabled>Next</button>
+            <button class="btn btn-sm" id="clPrev" onclick="withBusy(this, 'Loading…', async () => { await connLogPrevPage(); })" disabled>Prev</button>
+            <button class="btn btn-sm" id="clNext" onclick="withBusy(this, 'Loading…', async () => { await connLogNextPage(); })" disabled>Next</button>
           </div>
         </div>
       </div>
       <div id="tabPaneSipMessages">
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-body" style="padding:12px 16px">
+      <div class="mm-filterbar">
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-            <input type="text" id="slCallId" placeholder="Filter by Call-ID..."
+            <label class="mm-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="text" id="slCallId" placeholder="Filter by Call-ID..."
               style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
-              onkeydown="if(event.key==='Enter')fetchSipLogs()">
+              onkeydown="if(event.key==='Enter')fetchSipLogs()"></label>
             <select id="slProfile"
               style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
               onchange="fetchSipLogs()">
@@ -601,9 +600,9 @@
               <option value="SUBSCRIBE">SUBSCRIBE</option>
               <option value="MESSAGE">MESSAGE</option>
             </select>
-            <button class="btn btn-sm btn-primary" onclick="withBusy(this, 'A carregar…', async () => { await fetchSipLogs(); })">Filter</button>
+            <button class="btn btn-sm btn-primary" onclick="withBusy(this, 'Loading…', async () => { await fetchSipLogs(); })">Filter</button>
           </div>
-        </div>
+        
       </div>
       <div class="card">
         <div class="card-body" style="padding:0;overflow-x:auto">
@@ -631,8 +630,8 @@
         style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--text2)">
         <span id="sipLogInfo"></span>
         <div style="display:flex;gap:6px">
-          <button class="btn btn-sm" id="slPrev" onclick="withBusy(this, 'A carregar…', async () => { await sipLogPrevPage(); })" disabled>Prev</button>
-          <button class="btn btn-sm" id="slNext" onclick="withBusy(this, 'A carregar…', async () => { await sipLogNextPage(); })" disabled>Next</button>
+          <button class="btn btn-sm" id="slPrev" onclick="withBusy(this, 'Loading…', async () => { await sipLogPrevPage(); })" disabled>Prev</button>
+          <button class="btn btn-sm" id="slNext" onclick="withBusy(this, 'Loading…', async () => { await sipLogNextPage(); })" disabled>Next</button>
         </div>
       </div>
       </div> <!-- /tabPaneSipMessages -->
@@ -646,7 +645,7 @@
             <p>Central TLS certificate store used by TCP/UDP proxies. Add via upload, Let's Encrypt, or self-signed. ACME certs auto-renew 30 days before expiry; affected proxies hot-reload without restart.</p>
           </div>
           <div style="display:flex;gap:8px">
-            <button class="btn btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await fetchCerts(); })">Reload</button>
+            <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchCerts(); })">Reload</button>
             <button class="btn btn-primary btn-sm" onclick="openCertModal()">+ New Certificate</button>
           </div>
         </div>
@@ -674,7 +673,7 @@
 
     <!-- SIP Detail Modal -->
     <div id="sipDetailModal"
-      style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);overflow-y:auto">
+      style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(6px);overflow-y:auto">
       <div class="rdm-panel">
         <div class="rdm-header">
           <div class="rdm-header-left">
@@ -697,14 +696,13 @@
         </div>
         <button class="btn btn-primary btn-sm" onclick="openWebhookModal()">+ New Webhook</button>
       </div>
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-body" style="padding:12px 16px">
+      <div class="mm-filterbar">
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-            <input type="text" id="webhookSearch" placeholder="Search name..."
+            <label class="mm-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="text" id="webhookSearch" placeholder="Search name..."
               style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
-              oninput="filterWebhooks()">
+              oninput="filterWebhooks()"></label>
           </div>
-        </div>
+        
       </div>
       <div class="card">
         <div class="card-body" style="padding:0;overflow-x:auto">
@@ -750,7 +748,7 @@
         </div>
         <div style="display:flex;gap:8px;flex-shrink:0">
           <button class="btn btn-sm" onclick="document.getElementById('webhookModal').style.display='flex'">Webhook settings</button>
-          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A guardar…', async () => { await saveWebhook(); })">Save Webhook</button>
+          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Saving…', async () => { await saveWebhook(); })">Save Webhook</button>
         </div>
       </div>
 
@@ -760,8 +758,8 @@
             <span style="font-size:12.5px;font-weight:600">Test Payload (optional)</span>
             <div style="display:flex;gap:6px">
               <button class="btn btn-sm" onclick="toggleTestPayload()" style="padding:2px 8px;font-size:11px" tabindex="-1">Show/Hide</button>
-              <button class="btn btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await fetchRecentWebhookPayload(); })" style="padding:2px 8px;font-size:10px" tabindex="-1">Fetch recent request</button>
-              <button class="btn btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await fetchAndMergeWebhookPayloads(); })" style="padding:2px 8px;font-size:10px" tabindex="-1" title="Analyzes the last 50 payloads and builds a unified schema of every field seen">Fetch &amp; merge (50)</button>
+              <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchRecentWebhookPayload(); })" style="padding:2px 8px;font-size:10px" tabindex="-1">Fetch recent request</button>
+              <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchAndMergeWebhookPayloads(); })" style="padding:2px 8px;font-size:10px" tabindex="-1" title="Analyzes the last 50 payloads and builds a unified schema of every field seen">Fetch &amp; merge (50)</button>
             </div>
           </div>
           <div id="wTestPayloadContainer" style="display:none">
@@ -814,8 +812,8 @@
 
       <!-- Tab bar -->
       <div style="display:flex;border-bottom:1px solid var(--border);margin-bottom:16px">
-        <button id="tabBtnGoContact" class="btn btn-sm" style="border-radius:0;border:none;border-bottom:2px solid var(--accent);background:none;color:var(--text);padding:8px 16px;cursor:pointer" onclick="switchConnectorsTab('gocontact')">GoContact <span id="tabGoContactCount" style="margin-left:6px;background:var(--surface2);color:var(--text2);font-size:10px;padding:1px 6px;border-radius:8px">0</span></button>
-        <button id="tabBtnFive9" class="btn btn-sm" style="border-radius:0;border:none;border-bottom:2px solid transparent;background:none;color:var(--text3);padding:8px 16px;cursor:pointer" onclick="switchConnectorsTab('five9')">Five9 <span id="tabFive9Count" style="margin-left:6px;background:var(--surface2);color:var(--text2);font-size:10px;padding:1px 6px;border-radius:8px">0</span></button>
+        <button id="tabBtnGoContact" class="btn btn-sm mm-tab on" style="border-radius:0;border:none;border-bottom:2px solid var(--accent);background:none;color:var(--text);padding:8px 16px;cursor:pointer" onclick="switchConnectorsTab('gocontact')">GoContact <span id="tabGoContactCount" class="mm-chip" style="margin-left:6px">0</span></button>
+        <button id="tabBtnFive9" class="btn btn-sm mm-tab" style="border-radius:0;border:none;border-bottom:2px solid transparent;background:none;color:var(--text3);padding:8px 16px;cursor:pointer" onclick="switchConnectorsTab('five9')">Five9 <span id="tabFive9Count" class="mm-chip" style="margin-left:6px">0</span></button>
       </div>
 
       <!-- Tab: GoContact -->
@@ -841,98 +839,7 @@
           </div>
         </div>
 
-        <!-- GoContact integration guide -->
-        <div class="card" style="margin-top:16px">
-          <div class="card-header"><h3 style="font-size:14px;font-weight:600">Guia de integração — GoContact</h3></div>
-          <div class="card-body" style="font-size:12.5px;color:var(--text2);line-height:1.6">
-            <p style="margin-top:0">Um conector liga um canal digital (WhatsApp&nbsp;Meta, Smooch/Sunshine, ou JSON genérico) a uma sessão de webchat GoContact, e devolve as respostas do agente. <strong>Modo GoContact</strong>: <code>poll</code> (API tradicional do plugin + polling) ou <code>webchat-api</code> (Webchat API oficial; respostas empurradas para um callback). O <strong>canal</strong> (Meta/Smooch/generic) é independente do modo. A <strong>porta</strong> de cada conector está na tabela acima — substitui <code>&lt;host&gt;:&lt;porta&gt;</code> pela porta real (exposta via o teu proxy).</p>
-
-            <details style="border-top:1px solid var(--border);padding:8px 0">
-              <summary style="cursor:pointer;font-weight:600;color:var(--text)">Canal <code>generic</code> — entrada (n8n / o teu sistema → Midleman)</summary>
-              <p>POST para a porta do conector em qualquer path. Auth: se definiste um <em>Verify Token</em>, envia-o em <code>?token=</code> ou no header <code>X-Forward-Token</code>.</p>
-              <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">POST http://&lt;host&gt;:&lt;porta&gt;/?token=SEGREDO
-Content-Type: application/json
-
-# texto simples:
-{ "chatId": "244939609354", "name": "João", "text": "Olá" }
-
-# com ficheiro (o Midleman descarrega e injeta no contact center):
-{ "chatId": "244939609354", "name": "João",
-  "file": { "url": "https://.../foto.jpg", "filename": "foto.jpg", "mimetype": "image/jpeg" } }
-
-# várias mensagens de uma vez:
-{ "messages": [ { "chatId": "c1", "text": "oi" }, { "chatId": "c2", "text": "olá" } ] }
-
-# resposta:
-{ "status": "accepted", "messages": 1, "requestId": "..." }</pre>
-              <p style="margin-bottom:0;color:var(--text3)">Aliases aceites: <code>chatId</code>=<code>idChat</code>/<code>from</code> · <code>name</code>=<code>displayName</code> · <code>text</code>=<code>message</code>/<code>mensagem</code>. Cada mensagem precisa de <code>text</code> ou <code>file</code>. No n8n usa o nó <em>HTTP Request</em> com método POST e body JSON para este endpoint.</p>
-            </details>
-
-            <details style="border-top:1px solid var(--border);padding:8px 0">
-              <summary style="cursor:pointer;font-weight:600;color:var(--text)">Respostas do agente (Midleman → o teu sistema / cliente)</summary>
-              <p>Para receberes as respostas do agente, ativa <strong>Direct reply</strong> (Meta/Smooch — entrega direta ao cliente) <em>e/ou</em> configura <strong>Webhook Targets</strong> (o Midleman faz POST do evento). No canal <code>generic</code> só há webhooks (sem direct reply).</p>
-              <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">POST &lt;o-teu-webhook&gt;
-X-Connector: nome-do-conector
-
-{
-  "connector": "nome-do-conector",
-  "channel": "generic",
-  "event": "agent_message",          // ou "agent_joined" | "chat_closed"
-  "chatId": "cliente-244939609354",
-  "displayName": "João",
-  "message": {
-    "uuid": "id-unico", "text": "Em que posso ajudar?",
-    "timestamp": 1781700000000, "agentName": "Maria",
-    "userType": "AGENT",
-    "file": null                      // ou { url, filename, mimetype, size }
-  }
-}
-# chat_closed → message:null + "reason": "agent"|"admin"|"expired"</pre>
-              <p style="margin-bottom:0;color:var(--text3)">Responde <code>2xx</code> para confirmar. <code>agent_message</code> é <em>at-least-once</em> (repete em falha) → <strong>deduplica por <code>message.uuid</code></strong>. <code>chat_closed</code>: 3 tentativas, depois DLQ.</p>
-            </details>
-
-            <details style="border-top:1px solid var(--border);padding:8px 0">
-              <summary style="cursor:pointer;font-weight:600;color:var(--text)">Meta WhatsApp / Smooch</summary>
-              <p>Aponta o webhook do provedor para a porta do conector. <strong>Meta</strong>: usa o <em>Verify Token</em> no handshake (<code>hub.challenge</code>) e aceita o envelope completo, o <code>value</code> "nu", ou um array deles. <strong>Smooch</strong>: valida por <code>X-Smooch-Signature</code> (webhook secret). Vários conectores podem partilhar o mesmo feed Meta — cada um filtra pelo seu <em>Phone Number Filter</em> (<code>phone_number_id</code>).</p>
-              <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55"># Callback URL a registar na Meta/Smooch:
-https://&lt;host&gt;:&lt;porta&gt;/?token=VERIFY_TOKEN</pre>
-            </details>
-
-            <details style="border-top:1px solid var(--border);padding:8px 0">
-              <summary style="cursor:pointer;font-weight:600;color:var(--text)">Modo <code>webchat-api</code> (push) — callback &amp; URLs</summary>
-              <p>A GoContact <strong>empurra</strong> as respostas do agente para o Midleman. Regista este URL no painel da GoContact (o <em>Callback token</em> protege o endpoint):</p>
-              <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55"># Callback (agente → Midleman):
-https://&lt;host&gt;:&lt;porta&gt;/gocontact/callback?token=CALLBACK_TOKEN</pre>
-              <p style="margin-bottom:0;color:var(--text3)"><strong>API Base URL</strong> (<code>eu.ds.gocontact.com</code>) faz toda a API (auth, conversas, mensagens). <strong>Base URL</strong> (a instância, ex. <code>gotaag.ucall.co.ao</code>) serve <em>só os anexos</em> em webchat-api — opcional, só preciso se houver ficheiros. Os <code>loginFields</code> (nome/telefone do cliente) são detetados automaticamente; podes forçar o mapeamento em <em>Login field mapping</em>.</p>
-            </details>
-
-            <details style="border-top:1px solid var(--border);padding:8px 0">
-              <summary style="cursor:pointer;font-weight:600;color:var(--text)">Handover bot → humano (transferir com histórico)</summary>
-              <p>Quando o teu chatbot quer passar o cliente a um agente humano, cria a conversa na GoContact <strong>já com o histórico</strong>. Só em modo <code>webchat-api</code>. Auth = igual ao inbound (verify token).</p>
-              <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">POST http://&lt;host&gt;:&lt;porta&gt;/handover?token=SEGREDO
-Content-Type: application/json
-
-{
-  "chatId": "cliente-244939609354",
-  "name": "João",
-  "phoneNumberId": "879847985208219",   // routing das respostas na Meta
-  "history": [
-    { "from": "client", "text": "Quero falar com um humano", "timestamp": 1781700000000 },
-    { "from": "bot",    "text": "Claro, vou transferir-te.",  "timestamp": 1781700001000 }
-  ]
-}
-
-# resposta:
-{ "status": "ok", "conversationUuid": "…", "contactId": "…", "historyCount": 2 }</pre>
-              <p style="margin-bottom:0;color:var(--text3)"><code>from: "bot"</code> → marcado como BOT; o resto → CLIENT (o agente vê os dois lados). Máx 100 mensagens (fica com as mais recentes), só texto. Depois disto, as mensagens do cliente reutilizam a sessão e as respostas saem pelo provedor configurado.</p>
-            </details>
-
-            <details style="border-top:1px solid var(--border);padding:8px 0">
-              <summary style="cursor:pointer;font-weight:600;color:var(--text)">Anexos (por modo)</summary>
-              <p style="margin-bottom:0"><strong>poll</strong>: qualquer tipo de ficheiro é enviado para o storage da instância GoContact. <strong>webchat-api</strong>: a API só aceita <code>jpg/png/pdf</code> no upload do cliente — outros tipos (áudio/vídeo) não são suportados pela API. Os anexos do agente (nos dois modos) são servidos pela instância: <code>&lt;Base&nbsp;URL&gt;/storage/webchat-attachments/…</code>.</p>
-            </details>
-          </div>
-        </div>
+        <p class="docs-pointer">Integration guide: <a href="#" onclick="docsGo('gocontact');return false">Docs → GoContact connector</a>.</p>
       </div>
 
       <!-- Tab: Five9 -->
@@ -958,79 +865,7 @@ Content-Type: application/json
           </div>
         </div>
 
-        <!-- Five9 integration guide -->
-        <div class="card" style="margin-top:16px">
-          <div class="card-header"><h3 style="font-size:14px;font-weight:600">Guia de integração — Five9</h3></div>
-          <div class="card-body" style="font-size:12.5px;color:var(--text2);line-height:1.6">
-            <p style="margin-top:0">Um conector Five9 liga um canal digital a uma conversa Five9 Digital Engagement. O Midleman cria a conversa automaticamente na primeira mensagem (auth anónima por conversa) e reutiliza-a até expirar. Respostas do agente chegam via callback Five9 e são enviadas de volta ao cliente.</p>
-
-            <details style="border-top:1px solid var(--border);padding:8px 0">
-              <summary style="cursor:pointer;font-weight:600;color:var(--text)">Canal <code>generic</code> — entrada (n8n / o teu sistema → Midleman)</summary>
-              <p>POST para a porta do conector em qualquer path. Auth: se definiste um <em>Verify Token</em>, envia-o em <code>?token=</code> ou no header <code>X-Forward-Token</code>.</p>
-              <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">POST http://&lt;host&gt;:&lt;porta&gt;/?token=SEGREDO
-Content-Type: application/json
-
-# texto simples:
-{ "chatId": "244939609354", "name": "João", "text": "Olá" }
-
-# com ficheiro (o Midleman descarrega e faz upload para a Five9):
-{ "chatId": "244939609354", "name": "João",
-  "file": { "url": "https://.../foto.jpg", "filename": "foto.jpg", "mimetype": "image/jpeg" } }
-
-# várias mensagens de uma vez:
-{ "messages": [ { "chatId": "c1", "text": "oi" }, { "chatId": "c2", "text": "olá" } ] }
-
-# resposta:
-{ "status": "accepted", "messages": 1, "requestId": "..." }</pre>
-              <p style="margin-bottom:0;color:var(--text3)">Aliases aceites: <code>chatId</code>=<code>idChat</code>/<code>from</code> · <code>name</code>=<code>displayName</code> · <code>text</code>=<code>message</code>/<code>mensagem</code>. Cada mensagem precisa de <code>text</code> ou <code>file</code>. No n8n usa o nó <em>HTTP Request</em> com método POST e body JSON para este endpoint.</p>
-            </details>
-
-            <details style="border-top:1px solid var(--border);padding:8px 0">
-              <summary style="cursor:pointer;font-weight:600;color:var(--text)">Ciclo de sessão e handover bot → humano</summary>
-              <p>O Midleman gere automaticamente o ciclo de vida da conversa Five9:</p>
-              <ul style="margin:4px 0 8px 16px;padding:0">
-                <li><strong>1ª mensagem</strong> de um <code>chatId</code> → Midleman autentica anonimamente, cria uma conversa Five9 e usa o <code>text</code> dessa mensagem como <em>question</em> (o que o agente vê ao abrir o ticket).</li>
-                <li><strong>Mensagens seguintes</strong> do mesmo <code>chatId</code> → reutilizam a sessão existente sem criar nova conversa.</li>
-                <li><strong>Sessão expirada ou terminada</strong> (agente fecha ou TTL atingido) → a próxima mensagem cria uma nova conversa automaticamente.</li>
-              </ul>
-              <p>Para fazer handover de um bot para um agente humano, o bot envia simplesmente a <strong>primeira mensagem</strong> com o resumo da conversa como texto. Não existe endpoint separado — é o mesmo POST de sempre:</p>
-              <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">POST http://&lt;host&gt;:&lt;porta&gt;/?token=SEGREDO
-Content-Type: application/json
-
-# O bot envia o resumo como primeira mensagem do cliente:
-{ "chatId": "244939609354", "name": "João Silva",
-  "text": "Cliente quer cancelar contrato nº 12345. Identidade já confirmada pelo bot." }
-
-# → Five9 cria a conversa com esse texto como question.
-# → O agente vê o contexto completo ao aceitar o ticket.
-# → Mensagens seguintes do mesmo chatId chegam ao mesmo agente.</pre>
-              <p style="margin-bottom:0;color:var(--text3)">O <code>chatId</code> é a chave da sessão — enquanto a sessão estiver activa, todo o tráfego desse <code>chatId</code> vai para a mesma conversa Five9.</p>
-            </details>
-
-            <details style="border-top:1px solid var(--border);padding:8px 0">
-              <summary style="cursor:pointer;font-weight:600;color:var(--text)">Callback Five9 — registo e eventos</summary>
-              <p>A Five9 envia as respostas do agente para o <strong>Callback URL</strong> configurado no conector. O Midleman valida o token, identifica a sessão pelo <code>correlationId</code> e faz fan-out para os teus webhook targets e/ou para o cliente via Meta/Smooch.</p>
-              <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55"># URL a registar na Five9 (qualquer path é aceite — o Midleman ignora-o):
-https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
-
-# Evento que o Midleman envia ao teu webhook target:
-{
-  "connector": "nome", "channel": "generic",
-  "event": "agent_message",       // ou "agent_joined" | "chat_closed"
-  "chatId": "244939609354", "displayName": "João Silva",
-  "message": {
-    "uuid": "dedup-id", "text": "Olá! Como posso ajudar?",
-    "timestamp": 1234567890000, "agentName": "Maria",
-    "userType": "AGENT",
-    "file": null                  // ou { url, filename, mimetype, size }
-  }
-}
-# chat_closed → message: null, "reason": "agent" | "expired"</pre>
-              <p style="margin-bottom:0;color:var(--text3)">Responde <code>2xx</code> para confirmar. Deduplica por <code>message.uuid</code> — a Five9 pode reenviar o mesmo evento.</p>
-            </details>
-
-          </div>
-        </div>
+        <p class="docs-pointer">Integration guide: <a href="#" onclick="docsGo('five9');return false">Docs → Five9 connector</a>.</p>
       </div>
     </div>
 
@@ -1043,17 +878,16 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
             clients.</p>
         </div>
         <div style="display:flex;gap:8px">
-          <button class="btn btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await reloadProfiles(); })">Reload</button>
+          <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await reloadProfiles(); })">Reload</button>
           <button class="btn btn-sm" onclick="openNpmImportModal()" id="npmImportBtn" style="display:none">Import from NPM</button>
-          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await openProfileModal(); })">+ HTTP Proxy</button>
+          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Loading…', async () => { await openProfileModal(); })">+ HTTP Proxy</button>
         </div>
       </div>
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-body" style="padding:12px 16px">
+      <div class="mm-filterbar">
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-            <input type="text" id="profileSearch" placeholder="Search name, URL..."
+            <label class="mm-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="text" id="profileSearch" placeholder="Search name, URL..."
               style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
-              oninput="filterProfiles()">
+              oninput="filterProfiles()"></label>
             <select id="profileAuthFilter"
               style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
               onchange="filterProfiles()">
@@ -1069,7 +903,7 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
               <option value="public">Public</option>
             </select>
           </div>
-        </div>
+        
       </div>
       <div class="card">
         <div class="card-body" style="padding:0;overflow-x:auto">
@@ -1115,15 +949,16 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
           <div id="certModalError" style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;padding:8px 12px;border-radius:6px;font-size:13px;margin-bottom:12px"></div>
 
           <div style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:16px">
-            <button type="button" id="certTabUpload" class="btn btn-sm" style="border-radius:0;border:none;border-bottom:2px solid var(--accent);background:none;color:var(--text);padding:8px 16px;cursor:pointer" onclick="switchCertTab('upload')">Upload PEM</button>
-            <button type="button" id="certTabAcme" class="btn btn-sm" style="border-radius:0;border:none;border-bottom:2px solid transparent;background:none;color:var(--text3);padding:8px 16px;cursor:pointer" onclick="switchCertTab('acme')">Let's Encrypt</button>
-            <button type="button" id="certTabSelfSigned" class="btn btn-sm" style="border-radius:0;border:none;border-bottom:2px solid transparent;background:none;color:var(--text3);padding:8px 16px;cursor:pointer" onclick="switchCertTab('self-signed')">Self-signed</button>
+            <button type="button" id="certTabUpload" class="btn btn-sm mm-tab on" style="border-radius:0;border:none;border-bottom:2px solid var(--accent);background:none;color:var(--text);padding:8px 16px;cursor:pointer" onclick="switchCertTab('upload')">Upload PEM</button>
+            <button type="button" id="certTabAcme" class="btn btn-sm mm-tab" style="border-radius:0;border:none;border-bottom:2px solid transparent;background:none;color:var(--text3);padding:8px 16px;cursor:pointer" onclick="switchCertTab('acme')">Let's Encrypt</button>
+            <button type="button" id="certTabSelfSigned" class="btn btn-sm mm-tab" style="border-radius:0;border:none;border-bottom:2px solid transparent;background:none;color:var(--text3);padding:8px 16px;cursor:pointer" onclick="switchCertTab('self-signed')">Self-signed</button>
           </div>
 
           <div class="form-grid">
             <div class="form-group span-2">
-              <label>Domain (FQDN) <span style="color:var(--text3);font-weight:400;font-size:11px">— must match the cert's CN/SAN</span></label>
+              <label>Domain (FQDN)</label>
               <input type="text" id="certDomain" placeholder="sip.example.com" autocomplete="off">
+              <div class="mm-field-hint">Must match the cert's CN/SAN</div>
             </div>
           </div>
 
@@ -1173,12 +1008,13 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
           <div id="certPaneAcme" style="display:none">
             <div class="form-grid">
               <div class="form-group span-2">
-                <label>Email <span style="color:var(--text3);font-weight:400;font-size:11px">— used for Let's Encrypt account + expiry alerts</span></label>
+                <label>Email</label>
                 <input type="email" id="certAcmeEmail" placeholder="admin@example.com" autocomplete="off">
+                <div class="mm-field-hint">Used for Let's Encrypt account + expiry alerts</div>
               </div>
               <div class="form-group span-2">
                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
-                  <input type="checkbox" id="certAcmeStaging" style="accent-color:var(--accent)">
+                  <input class="mm-switch" type="checkbox" id="certAcmeStaging" style="">
                   <span>Use Let's Encrypt staging (testing only)</span>
                 </label>
                 <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px;margin-left:24px">
@@ -1205,7 +1041,7 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
         </div>
         <div class="modal-footer">
           <button class="btn" onclick="closeCertModal()">Cancel</button>
-          <button class="btn btn-primary" onclick="withBusy(this, 'A guardar…', async () => { await saveCert(); })">Save Certificate</button>
+          <button class="btn btn-primary" onclick="withBusy(this, 'Saving…', async () => { await saveCert(); })">Save Certificate</button>
         </div>
       </div>
     </div>
@@ -1226,8 +1062,7 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
       </div>
 
       <!-- Role filter -->
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-body" style="padding:12px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <div class="mm-filterbar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <span style="font-size:12.5px;color:var(--text2)">Filter:</span>
           <select id="userRoleFilter" onchange="filterProxyUsersByRole()"
             style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px;min-width:140px">
@@ -1238,7 +1073,6 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
             <option value="local">Local only</option>
           </select>
           <span id="userRoleFilterCount" style="font-size:12px;color:var(--text3);margin-left:auto"></span>
-        </div>
       </div>
 
       <!-- Users Table -->
@@ -1271,7 +1105,7 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
             Invite Links
           </h3>
-          <button class="btn btn-sm btn-ghost" onclick="withBusy(this, 'A carregar…', async () => { await fetchInvites(); })">Refresh</button>
+          <button class="btn btn-sm btn-ghost" onclick="withBusy(this, 'Loading…', async () => { await fetchInvites(); })">Refresh</button>
         </div>
         <div class="card-body" style="padding:0;overflow-x:auto">
           <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -1327,105 +1161,10 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-header">
-          <h3>OIDC Endpoints</h3>
-        </div>
-        <div class="card-body">
-          <p style="font-size:12.5px;color:var(--text2);margin-bottom:10px">
-            Configure in Supabase as a Custom OAuth provider using these URLs (replace with your public domain — JWKS_PORT behind Nginx):
-          </p>
-          <div id="oauthEndpoints" style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:12px;line-height:1.8;color:var(--text2)">
-            <div><span style="color:var(--text3)">Discovery:</span> <span id="oeDiscovery">—</span></div>
-            <div><span style="color:var(--text3)">Authorization:</span> <span id="oeAuth">—</span></div>
-            <div><span style="color:var(--text3)">Token:</span> <span id="oeToken">—</span></div>
-            <div><span style="color:var(--text3)">Userinfo:</span> <span id="oeUserinfo">—</span></div>
-            <div><span style="color:var(--text3)">JWKS:</span> <span id="oeJwks">—</span></div>
-          </div>
-
-          <details style="margin-top:14px">
-            <summary style="cursor:pointer;font-size:12px;color:var(--text2);user-select:none;padding:6px 0;list-style:none;display:flex;align-items:center;gap:6px">
-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition:transform .15s"><polyline points="9 18 15 12 9 6"/></svg>
-              Response payloads
-            </summary>
-            <style>details[open] > summary > svg { transform: rotate(90deg); }</style>
-
-            <div style="display:flex;flex-direction:column;gap:12px;margin-top:10px">
-              <div>
-                <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">POST /oauth/token <span style="text-transform:none;letter-spacing:0;color:var(--text3)">— after the authorization-code exchange</span></div>
-                <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">{
-  "access_token": "&lt;JWT&gt;",
-  "id_token":     "&lt;JWT&gt;",
-  "token_type":   "Bearer",
-  "expires_in":   86400,
-  "scope":        "openid profile email",
-  "refresh_token": "&lt;opaque&gt;"
-}</pre>
-                <p style="font-size:11px;color:var(--text3);margin-top:6px;line-height:1.5">
-                  <code style="background:var(--surface2);padding:1px 6px;border-radius:4px">access_token</code> and <code style="background:var(--surface2);padding:1px 6px;border-radius:4px">id_token</code> carry the same RS256 JWT — verify via the JWKS endpoint above.
-                </p>
-              </div>
-
-              <div>
-                <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">JWT claims <span style="text-transform:none;letter-spacing:0;color:var(--text3)">— decoded payload of access_token / id_token</span></div>
-                <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">{
-  "iss":   "&lt;JWT_ISSUER&gt;",
-  "sub":   "&lt;uuid-v5 derived from midleman_uid&gt;",
-  "aud":   "&lt;oauth_client_id&gt;",
-  "iat":   1730000000,
-  "exp":   1730086400,
-  "midleman_uid":        42,
-  "preferred_username":  "jdoe",
-
-  // included when "email" scope is granted
-  "email":          "jdoe@example.com",
-  "email_verified": true,
-
-  // included when "profile" scope is granted
-  "name": "John Doe",
-
-  // included when the authorize request had a nonce
-  "nonce": "&lt;client-supplied&gt;"
-}</pre>
-              </div>
-
-              <div>
-                <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">GET /oauth/userinfo <span style="text-transform:none;letter-spacing:0;color:var(--text3)">— with <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:10.5px">Authorization: Bearer &lt;access_token&gt;</code></span></div>
-                <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">{
-  "sub":                "&lt;uuid&gt;",
-  "preferred_username": "jdoe",
-  "email":              "jdoe@example.com",
-  "email_verified":     true,
-  "name":               "John Doe",
-  "midleman_uid":       42
-}</pre>
-              </div>
-
-              <div>
-                <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Refresh: POST /oauth/token <span style="text-transform:none;letter-spacing:0;color:var(--text3)">— <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:10.5px">grant_type=refresh_token</code></span></div>
-                <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">{
-  "access_token":  "&lt;new JWT&gt;",
-  "id_token":      "&lt;new JWT&gt;",
-  "token_type":    "Bearer",
-  "expires_in":    86400,
-  "scope":         "openid profile email",
-  "refresh_token": "&lt;rotated opaque&gt;"
-}</pre>
-                <p style="font-size:11px;color:var(--text3);margin-top:6px;line-height:1.5">Refresh tokens are single-use and rotate on every call. The previous token is invalidated.</p>
-              </div>
-
-              <div>
-                <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Errors <span style="text-transform:none;letter-spacing:0;color:var(--text3)">— RFC 6749 §5.2 shape</span></div>
-                <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55">{
-  "error":             "invalid_grant",
-  "error_description": "Authorization code expired or already used"
-}</pre>
-              </div>
-            </div>
-          </details>
-        </div>
-      </div>
+      <p class="docs-pointer">OIDC endpoints, client settings and token payloads are in <a href="#" onclick="docsGo('oidc');return false">Docs → OAuth &amp; OIDC</a>.</p>
     </div>
+
+<!-- INJECT_DOCS -->
 
     <!-- ═══ CONSENT PAGES ═══ -->
     <div class="page" id="pageConsentpages">
@@ -1461,8 +1200,8 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
     </div>
 
     <!-- Consent page editor modal -->
-    <div id="consentPageModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
-      <div style="max-width:760px;width:100%;max-height:92vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+    <div id="consentPageModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div class="mm-dialog" style="max-width:760px;width:100%;max-height:92vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
         <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
           <h3 style="margin:0;font-size:15px" id="consentPageModalTitle">New page</h3>
           <button onclick="closeConsentPageModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">&times;</button>
@@ -1494,7 +1233,7 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
         </div>
         <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn btn-ghost btn-sm" onclick="closeConsentPageModal()">Cancel</button>
-          <button class="btn btn-primary btn-sm" id="consentPageSubmitBtn" onclick="withBusy(this, 'A guardar…', async () => { await submitConsentPage(); })">Create</button>
+          <button class="btn btn-primary btn-sm" id="consentPageSubmitBtn" onclick="withBusy(this, 'Saving…', async () => { await submitConsentPage(); })">Create</button>
         </div>
       </div>
     </div>
@@ -1559,8 +1298,8 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
     </div>
 
     <!-- ═══ LDAP CONFLICTS MODAL ═══ -->
-    <div id="ldapConflictsModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
-      <div style="max-width:1100px;width:100%;max-height:92vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+    <div id="ldapConflictsModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div class="mm-dialog" style="max-width:1100px;width:100%;max-height:92vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
         <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
           <div>
             <h3 style="margin:0 0 4px;font-size:16px">LDAP Conflicts</h3>
@@ -1575,7 +1314,7 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
           <button class="btn btn-sm" id="ldapcBtnReverted" onclick="filterLdapAdoptions('reverted')">Reverted</button>
           <button class="btn btn-sm" id="ldapcBtnAll" onclick="filterLdapAdoptions('')">All</button>
           <span style="flex:1"></span>
-          <button class="btn btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await fetchLdapAdoptions(); })">Refresh</button>
+          <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchLdapAdoptions(); })">Refresh</button>
         </div>
         <div style="overflow-y:auto;flex:1">
           <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -1599,8 +1338,8 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
 
     <!-- ═══ EMAIL / SMTP ═══ -->
     <!-- ═══ SMTP SEND TEST MODAL ═══ -->
-    <div id="smtpSendTestModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
-      <div style="max-width:440px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+    <div id="smtpSendTestModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div class="mm-dialog" style="max-width:440px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
         <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
           <div><h3 style="margin:0;font-size:16px">Send test email</h3><p style="margin:4px 0 0;font-size:12.5px;color:var(--text2)">Sends a message using the saved configuration.</p></div>
           <button onclick="closeSmtpSendTestModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">&times;</button>
@@ -1755,7 +1494,7 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
               </div>
               <div class="form-group span-2">
                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                  <input class="wz-input" id="smtpAllowInvalid" type="checkbox" style="cursor:pointer;accent-color:var(--accent)">
+                  <input class="wz-input mm-switch" id="smtpAllowInvalid" type="checkbox" style="cursor:pointer;">
                   <span>Accept self-signed certificates</span>
                 </label>
               </div>
@@ -1796,7 +1535,7 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
             <button class="btn btn-sm" id="smtpTestBtn" onclick="testSmtpConnectionUi()">Test connection</button>
             <button class="btn btn-sm" id="smtpTestCancelBtn" onclick="cancelSmtpTest()" style="display:none;color:var(--err-text)">Cancel test</button>
             <button class="btn btn-sm" onclick="openSmtpSendTestModal()">Send test email</button>
-            <button class="btn btn-sm" onclick="withBusy(this, 'A remover…', async () => { await clearSmtpConfig(); })" id="smtpClearBtn" style="display:none;margin-left:auto;color:var(--err-text)">Remove configuration</button>
+            <button class="btn btn-sm" onclick="withBusy(this, 'Removing…', async () => { await clearSmtpConfig(); })" id="smtpClearBtn" style="display:none;margin-left:auto;color:var(--err-text)">Remove configuration</button>
           </div>
           <div id="smtpStatus" style="font-size:12.5px"></div>
         </div>
@@ -1809,7 +1548,7 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
             <div class="form-grid">
               <div class="form-group span-2">
                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                  <input class="wz-input" id="smsEnabled" type="checkbox" style="cursor:pointer;accent-color:var(--accent)">
+                  <input class="wz-input mm-switch" id="smsEnabled" type="checkbox" style="cursor:pointer;">
                   <span>Enable SMS delivery</span>
                 </label>
               </div>
@@ -1856,13 +1595,14 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:22px" id="smsWeBadges"></div>
             <div class="form-grid">
               <div class="form-group">
-                <label>Api Key <span style="color:var(--text3);font-weight:400">(secret)</span></label>
+                <label>Api Key</label>
                 <input class="wz-input" id="smsWeApiKey" type="password" autocomplete="new-password" placeholder="(unchanged)" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
+                <div class="mm-field-hint">Secret</div>
                 <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px" id="smsWeKeyHint">Leave empty to keep the current key.</span>
               </div>
               <div class="form-group">
                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                  <input class="wz-input" id="smsWeCEspeciais" type="checkbox" style="cursor:pointer;accent-color:var(--accent)">
+                  <input class="wz-input mm-switch" id="smsWeCEspeciais" type="checkbox" style="cursor:pointer;">
                   <span>Allow special characters <span style="color:var(--text3)">(CEspeciais)</span></span>
                 </label>
               </div>
@@ -1876,8 +1616,9 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
                 <input class="wz-input" id="smsTwSid" type="text" autocomplete="off" placeholder="ACxxxxxxxxxxxxxxxx" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
               </div>
               <div class="form-group">
-                <label>Auth Token <span style="color:var(--text3);font-weight:400">(secret)</span></label>
+                <label>Auth Token</label>
                 <input class="wz-input" id="smsTwToken" type="password" autocomplete="new-password" placeholder="(unchanged)" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
+                <div class="mm-field-hint">Secret</div>
                 <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px" id="smsTwTokenHint">Leave empty to keep the current token.</span>
               </div>
               <div class="form-group span-2">
@@ -1894,7 +1635,7 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
               Send test
             </button>
             <span style="font-size:11.5px;color:var(--text3)">Credentials are encrypted at rest</span>
-            <button class="btn btn-sm" onclick="withBusy(this, 'A remover…', async () => { await clearSmsConfig(); })" id="smsClearBtn" style="display:none;margin-left:auto;color:var(--err-text)">Remove configuration</button>
+            <button class="btn btn-sm" onclick="withBusy(this, 'Removing…', async () => { await clearSmsConfig(); })" id="smsClearBtn" style="display:none;margin-left:auto;color:var(--err-text)">Remove configuration</button>
           </div>
           <div id="smsStatus" style="font-size:12.5px"></div>
         </div>
@@ -1903,8 +1644,8 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
     </div>
 
     <!-- ═══ NOTIF GROUP MODAL ═══ -->
-    <div id="notifGroupModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
-      <div style="max-width:560px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+    <div id="notifGroupModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div class="mm-dialog" style="max-width:560px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
         <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
           <div>
             <h3 style="margin:0;font-size:16px" id="notifGroupModalTitle">New group</h3>
@@ -1931,8 +1672,8 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
     </div>
 
     <!-- ═══ NOTIF ADD MEMBER MODAL ═══ -->
-    <div id="notifMemberModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
-      <div style="max-width:640px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column;max-height:90vh">
+    <div id="notifMemberModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div class="mm-dialog" style="max-width:640px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column;max-height:90vh">
         <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
           <div>
             <h3 style="margin:0;font-size:16px">Add recipients</h3>
@@ -1991,8 +1732,8 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
     </div>
 
     <!-- ═══ NOTIF RULE MODAL ═══ -->
-    <div id="notifRuleModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
-      <div style="max-width:560px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+    <div id="notifRuleModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div class="mm-dialog" style="max-width:560px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
         <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
           <div>
             <h3 style="margin:0;font-size:16px" id="notifRuleModalTitle">New rule</h3>
@@ -2055,7 +1796,7 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
             <p style="font-size:11px;color:var(--text3);margin-top:6px">Default: <code style="background:var(--surface2);padding:1px 4px;border-radius:3px">info</code>/<code style="background:var(--surface2);padding:1px 4px;border-radius:3px">warning</code> → email · <code style="background:var(--surface2);padding:1px 4px;border-radius:3px">critical</code> → email + SMS.</p>
           </div>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);cursor:pointer">
-            <input id="notifRuleEnabled" type="checkbox" checked> Enabled
+            <input class="mm-switch" id="notifRuleEnabled" type="checkbox" checked> Enabled
           </label>
           <div id="notifRuleStatus" style="font-size:12.5px"></div>
         </div>
@@ -2068,8 +1809,8 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
 
     <!-- ═══ SMS (WeSender / Twilio) ═══ -->
     <!-- ═══ SMS SEND TEST MODAL ═══ -->
-    <div id="smsSendTestModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
-      <div style="max-width:440px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+    <div id="smsSendTestModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div class="mm-dialog" style="max-width:440px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
         <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
           <div><h3 style="margin:0;font-size:16px">Send test SMS</h3><p style="margin:4px 0 0;font-size:12.5px;color:var(--text2)">Uses the saved configuration. The destination is normalized to E.164.</p></div>
           <button onclick="closeSmsSendTestModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">&times;</button>
@@ -2108,7 +1849,7 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             Settings
           </button>
-          <button class="btn btn-sm btn-primary" id="npmAddHostBtn" onclick="withBusy(this, 'A carregar…', async () => { await openNpmHostModal(null); })" style="display:none">+ Proxy Host</button>
+          <button class="btn btn-sm btn-primary" id="npmAddHostBtn" onclick="withBusy(this, 'Loading…', async () => { await openNpmHostModal(null); })" style="display:none">+ Proxy Host</button>
           <button class="btn btn-sm btn-primary" id="npmAddCertBtn" onclick="openNpmCertLEModal()" style="display:none">+ Let's Encrypt</button>
           <button class="btn btn-sm" id="npmAddCustomCertBtn" onclick="openNpmCertCustomModal()" style="display:none">+ Custom</button>
         </div>
@@ -2133,8 +1874,8 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
       <!-- ── Sub-page: Proxy Hosts ── -->
       <div class="npm-subpage" data-subpage="proxy-hosts">
       <!-- ── Hosts table (visible when connected) ── -->
-      <div class="card" id="npmHostsCard" style="margin-top:18px;display:none">
-        <div class="card-body" style="padding:14px 16px;border-bottom:1px solid var(--border)">
+      <div id="npmHostsCard" style="margin-top:18px;display:none">
+<div class="mm-filterbar">
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
             <div style="flex:1;min-width:220px;position:relative">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -2151,7 +1892,8 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
             </select>
             <span id="npmHostsCount" style="font-size:12px;color:var(--text2)"></span>
           </div>
-        </div>
+</div>
+<div class="card">
         <div style="overflow:auto">
           <table style="width:100%;border-collapse:collapse;font-size:12.5px">
             <thead style="background:var(--surface)">
@@ -2186,13 +1928,14 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
           </div>
         </div>
       </div>
+</div>
       </div>
       <!-- ── /Sub-page: Proxy Hosts ── -->
 
       <!-- ── Sub-page: Certificates ── -->
       <div class="npm-subpage" data-subpage="certificates" style="display:none">
-        <div class="card" id="npmCertsCard" style="margin-top:18px;display:none">
-          <div class="card-body" style="padding:14px 16px;border-bottom:1px solid var(--border)">
+        <div id="npmCertsCard" style="margin-top:18px;display:none">
+<div class="mm-filterbar">
             <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
               <div style="flex:1;min-width:220px;position:relative">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -2207,7 +1950,8 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
               </select>
               <span id="npmCertsCount" style="font-size:12px;color:var(--text2)"></span>
             </div>
-          </div>
+</div>
+<div class="card">
           <div style="overflow:auto">
             <table style="width:100%;border-collapse:collapse;font-size:12.5px">
               <thead style="background:var(--surface)">
@@ -2226,6 +1970,7 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
             </table>
           </div>
         </div>
+</div>
 
         <div class="card" style="margin-top:18px" id="npmVolumeCard">
           <div class="card-header"><h3>Shared Let's Encrypt volume</h3></div>
@@ -2259,7 +2004,7 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
         </div>
         <div class="form-group span-2">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input type="checkbox" id="leDnsChallenge" style="cursor:pointer;accent-color:var(--accent)">
+            <input class="mm-switch" type="checkbox" id="leDnsChallenge" style="cursor:pointer;">
             <span>Use DNS Challenge</span>
           </label>
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Requires a DNS provider configured in the NPM instance.</span>
@@ -2349,16 +2094,16 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
       </div>
       <div style="margin-top:14px">
         <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text2)">
-          <input id="npmEnabled" type="checkbox"> Enable integration (sync profiles with NPM on save)
+          <input class="mm-switch" id="npmEnabled" type="checkbox"> Enable integration (sync profiles with NPM on save)
         </label>
       </div>
       <div id="npmStatus" style="margin-top:14px;font-size:12.5px"></div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-sm" onclick="withBusy(this, 'A remover…', async () => { await clearNpmConfig(); })" id="npmClearBtn" style="margin-right:auto;color:var(--err-text);display:none">Remove configuration</button>
+      <button class="btn btn-sm" onclick="withBusy(this, 'Removing…', async () => { await clearNpmConfig(); })" id="npmClearBtn" style="margin-right:auto;color:var(--err-text);display:none">Remove configuration</button>
       <button class="btn" onclick="closeNpmConfigModal()">Cancel</button>
-      <button class="btn btn-sm" onclick="withBusy(this, 'A testar…', async () => { await testNpmConnectionUi(); })">Test connection</button>
-      <button class="btn btn-primary" onclick="withBusy(this, 'A guardar…', async () => { await saveNpmConfig(true); })">Save</button>
+      <button class="btn btn-sm" onclick="withBusy(this, 'Testing…', async () => { await testNpmConnectionUi(); })">Test connection</button>
+      <button class="btn btn-primary" onclick="withBusy(this, 'Saving…', async () => { await saveNpmConfig(true); })">Save</button>
     </div>
   </div>
 </div>
@@ -2405,19 +2150,19 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
         <div class="form-grid">
           <div class="form-group">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="nhCacheAssets" style="cursor:pointer;accent-color:var(--accent)">
+              <input class="mm-switch" type="checkbox" id="nhCacheAssets" style="cursor:pointer;">
               <span>Cache Assets</span>
             </label>
           </div>
           <div class="form-group">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="nhBlockExploits" style="cursor:pointer;accent-color:var(--accent)" checked>
+              <input class="mm-switch" type="checkbox" id="nhBlockExploits" style="cursor:pointer;" checked>
               <span>Block Common Exploits</span>
             </label>
           </div>
           <div class="form-group">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="nhWebsocket" style="cursor:pointer;accent-color:var(--accent)">
+              <input class="mm-switch" type="checkbox" id="nhWebsocket" style="cursor:pointer;">
               <span>Websockets Support</span>
             </label>
           </div>
@@ -2449,31 +2194,31 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
               <span style="font-size:12.5px">I agree to the <a href="https://letsencrypt.org/repository/" target="_blank" rel="noopener" style="color:var(--accent)">Let's Encrypt Terms of Service</a></span>
             </label>
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px">
-              <input type="checkbox" id="nhCertDns" style="cursor:pointer;accent-color:var(--accent)">
+              <input class="mm-switch" type="checkbox" id="nhCertDns" style="cursor:pointer;">
               <span style="font-size:12.5px">Use DNS Challenge (requires DNS provider setup in NPM)</span>
             </label>
           </div>
           <div class="form-group">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="nhSslForced" style="cursor:pointer;accent-color:var(--accent)">
+              <input class="mm-switch" type="checkbox" id="nhSslForced" style="cursor:pointer;">
               <span>Force SSL</span>
             </label>
           </div>
           <div class="form-group">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="nhHttp2" style="cursor:pointer;accent-color:var(--accent)">
+              <input class="mm-switch" type="checkbox" id="nhHttp2" style="cursor:pointer;">
               <span>HTTP/2 Support</span>
             </label>
           </div>
           <div class="form-group">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="nhHsts" style="cursor:pointer;accent-color:var(--accent)">
+              <input class="mm-switch" type="checkbox" id="nhHsts" style="cursor:pointer;">
               <span>HSTS Enabled</span>
             </label>
           </div>
           <div class="form-group">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="nhHstsSub" style="cursor:pointer;accent-color:var(--accent)">
+              <input class="mm-switch" type="checkbox" id="nhHstsSub" style="cursor:pointer;">
               <span>HSTS Sub-domains</span>
             </label>
           </div>
@@ -2589,19 +2334,19 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
             <div class="rf-viewer-toolbar">
               <h3 style="font-size:14px;font-weight:600;margin:0;flex:1;white-space:nowrap">Data Viewer</h3>
               <select id="rfViewerFeedSelect" onchange="rfViewerLoad(1)" style="padding:5px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
-                <option value="">— selecciona feed —</option>
+                <option value="">— select feed —</option>
               </select>
-              <input id="rfViewerSearch" type="search" placeholder="Pesquisar…" oninput="rfViewerLoad(1)" style="padding:5px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+              <input id="rfViewerSearch" type="search" placeholder="Search…" oninput="rfViewerLoad(1)" style="padding:5px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
               <select id="rfViewerLimit" onchange="rfViewerLoad(1)" style="padding:5px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
-                <option value="25">25 / pág</option>
-                <option value="50" selected>50 / pág</option>
-                <option value="100">100 / pág</option>
-                <option value="250">250 / pág</option>
+                <option value="25">25 / page</option>
+                <option value="50" selected>50 / page</option>
+                <option value="100">100 / page</option>
+                <option value="250">250 / page</option>
               </select>
               <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text2);cursor:pointer;white-space:nowrap">
-                <input type="checkbox" id="rfViewerRaw" onchange="rfViewerLoad(1)"> Raw
+                <input class="mm-switch" type="checkbox" id="rfViewerRaw" onchange="rfViewerLoad(1)"> Raw
               </label>
-              <button class="btn btn-sm" onclick="withBusy(this, 'A actualizar…', async () => { await rfViewerRefresh(); })" id="rfViewerRefreshBtn" style="padding:4px 10px;font-size:12px;white-space:nowrap">Refresh</button>
+              <button class="btn btn-sm" onclick="withBusy(this, 'Refreshing…', async () => { await rfViewerRefresh(); })" id="rfViewerRefreshBtn" style="padding:4px 10px;font-size:12px;white-space:nowrap">Refresh</button>
             </div>
           </div>
           <div id="rfViewerMeta" style="padding:6px 16px;font-size:11.5px;color:var(--text3);border-bottom:1px solid var(--border);min-height:26px"></div>
@@ -2631,37 +2376,7 @@ https://&lt;host&gt;:&lt;porta-conector&gt;/qualquer-path?token=CALLBACK_TOKEN
 
       </div>
 
-      <!-- API usage guide -->
-      <div class="card" style="margin-top:16px">
-        <div class="card-header"><h3 style="font-size:14px;font-weight:600">Consumer API</h3></div>
-        <div class="card-body" style="font-size:12.5px;color:var(--text2);line-height:1.6">
-          <p style="margin-top:0">Authenticate with an API Key via header <code>X-API-Key</code>, <code>Authorization: Bearer &lt;key&gt;</code> or query param <code>?apiKey=&lt;key&gt;</code>.</p>
-          <pre style="font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text2);margin:0;overflow-x:auto;line-height:1.55"># Flat route (feed sem grupo)
-GET /reports/:name
-X-API-Key: &lt;your-api-key&gt;
-
-# Grouped route (feed com group + slug)
-GET /reports/:group/:slug
-X-API-Key: &lt;your-api-key&gt;
-
-# Detail (requer detail.idField configurado)
-GET /reports/:group/:slug/:id
-GET /reports/:name/:id
-
-# Streaming áudio
-GET /reports/:group/:slug/:id/audio
-
-# Filtros — exact-match
-GET /reports/:group/:slug?agentName=João
-# Filtros — operadores tipados (?campo__op=valor)
-GET /reports/:group/:slug?startDate__gte=2026-01-01&amp;startDate__lte=2026-01-31
-GET /reports/:group/:slug?talkTime__gte=60&amp;direction__contains=inbound
-
-# Swagger/OpenAPI
-GET /reports/docs?apiKey=&lt;key&gt;          ← global
-GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
-        </div>
-      </div>
+      <p class="docs-pointer">Consumer API (auth, routes, filters, Swagger): <a href="#" onclick="docsGo('reports');return false">Docs → Report feeds API</a>.</p>
     </div>
 
     <!-- ===== Report Feed Modal ===== -->
@@ -2673,7 +2388,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           <button class="close-btn" onclick="closeGcInstancesModal()">&times;</button>
         </div>
         <div style="padding:12px 20px 10px;border-bottom:1px solid var(--border)">
-          <p style="font-size:12.5px;color:var(--text2);margin:0">Credenciais partilhadas entre feeds. Cria uma instância aqui e selecciona-a ao criar um feed.</p>
+          <p style="font-size:12.5px;color:var(--text2);margin:0">Credentials shared between feeds. Create an instance here and select it when creating a feed.</p>
         </div>
         <div class="gc-inst-table-wrap">
           <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -2687,12 +2402,12 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
               </tr>
             </thead>
             <tbody id="gcInstanceListBody">
-              <tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">Sem instâncias ainda.</td></tr>
+              <tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text3)">No instances yet.</td></tr>
             </tbody>
           </table>
         </div>
         <div class="modal-footer">
-          <button class="btn" onclick="closeGcInstancesModal()">Fechar</button>
+          <button class="btn" onclick="closeGcInstancesModal()">Close</button>
           <button class="btn btn-primary" onclick="openGcInstanceModal()">+ Add Instance</button>
         </div>
       </div>
@@ -2713,7 +2428,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
             </div>
             <div>
               <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px">Label (display name)</label>
-              <input id="gcInstLabel" type="text" placeholder="uCall Produção" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
+              <input id="gcInstLabel" type="text" placeholder="uCall Production" style="width:100%;padding:7px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">
             </div>
           </div>
           <div>
@@ -2734,7 +2449,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
         <div class="modal-footer">
           <button class="btn" onclick="closeGcInstanceModal()">Cancel</button>
-          <button class="btn btn-primary" onclick="withBusy(this, 'A guardar…', async () => { await saveGcInstance(); })">Save Instance</button>
+          <button class="btn btn-primary" onclick="withBusy(this, 'Saving…', async () => { await saveGcInstance(); })">Save Instance</button>
         </div>
       </div>
     </div>
@@ -2761,23 +2476,25 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           <!-- API Group + Slug (optional namespace routing) -->
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
             <div>
-              <label class="wz-label" >API Group <span style="color:var(--text3)">(optional — namespace, e.g. nossa-seguro)</span></label>
+              <label class="wz-label" >API Group</label>
               <input class="wz-input" id="rfGroup" type="text" placeholder="nossa-seguro" oninput="rfCheckGroupApiKeys()" >
-              <span style="font-size:11px;color:var(--text3)">Agrupa feeds em /reports/<em>group</em>/<em>slug</em></span>
+              <div class="mm-field-hint">Optional — namespace, e.g. nossa-seguro</div>
+              <span style="font-size:11px;color:var(--text3)">Groups feeds under /reports/<em>group</em>/<em>slug</em></span>
             </div>
             <div>
-              <label class="wz-label" >Endpoint Slug <span style="color:var(--text3)">(required when group is set)</span></label>
+              <label class="wz-label" >Endpoint Slug</label>
               <input class="wz-input" id="rfSlug" type="text" placeholder="voice" >
+              <div class="mm-field-hint">Required when group is set</div>
               <span style="font-size:11px;color:var(--text3)">ex: voice, webchat, ticket, callback</span>
             </div>
           </div>
           <div id="rfGroupApiKeyHint" style="display:none;padding:8px 12px;background:var(--surface2);border:1px solid #f59e0b44;border-radius:6px;font-size:12px;color:var(--text2)">
-            <strong style="color:#f59e0b">⚠ Group has different API keys</strong> — for clients to use a single API key across all group routes, every feed in the group should share the same key.
+            <strong style="color:var(--orange)">⚠ Group has different API keys</strong> — for clients to use a single API key across all group routes, every feed in the group should share the same key.
           </div>
 
           <!-- Aviso para feeds legados com credenciais inline -->
           <div id="rfLegacyCredWarning" style="display:none;padding:10px 12px;background:var(--surface2);border:1px solid #f59e0b44;border-radius:6px;font-size:12px;color:var(--text2)">
-            <strong style="color:#f59e0b">⚠ Feed with inline credentials (legacy)</strong> — this feed has credentials stored directly. Select an instance above to migrate, or leave blank to keep the existing credentials.
+            <strong style="color:var(--orange)">⚠ Feed with inline credentials (legacy)</strong> — this feed has credentials stored directly. Select an instance above to migrate, or leave blank to keep the existing credentials.
           </div>
 
           <!-- Campos ocultos mantidos para compatibilidade com feeds legados (não visíveis ao utilizador) -->
@@ -2787,8 +2504,9 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
 
           <!-- API Keys -->
           <div>
-            <label class="wz-label" >API Keys * <span style="color:var(--text3)">(one per line — grant access to consumers)</span></label>
+            <label class="wz-label" >API Keys *</label>
             <textarea class="wz-input" id="rfApiKeys" rows="3" placeholder="key-abc123&#10;key-xyz789" oninput="rfCheckGroupApiKeys()" style="font-family:'SF Mono',Monaco,monospace;resize:vertical"></textarea>
+            <div class="mm-field-hint">One per line — grant access to consumers</div>
             <button type="button" onclick="rfGenerateApiKey()" class="btn btn-sm" style="margin-top:4px">Generate key</button>
           </div>
 
@@ -2801,8 +2519,9 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
               <input class="wz-input" id="rfTemplateId" type="text" placeholder="1092" >
             </div>
             <div>
-              <label class="wz-label" >Data Type <span style="color:var(--text3)">(0 para voz, "sessions" para webchat)</span></label>
-              <input class="wz-input" id="rfDataType" type="text" placeholder='0 ou "sessions"' >
+              <label class="wz-label" >Data Type</label>
+              <input class="wz-input" id="rfDataType" type="text" placeholder='0 or "sessions"' >
+              <div class="mm-field-hint">0 for voice, "sessions" for webchat</div>
             </div>
             <div>
               <label class="wz-label" >Owner Type *</label>
@@ -2864,9 +2583,9 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           <!-- Auto-refresh -->
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
             <div>
-              <label class="wz-label" >Auto-refresh (segundos)</label>
+              <label class="wz-label" >Auto-refresh (seconds)</label>
               <input class="wz-input" id="rfAutoRefresh" type="number" min="0" max="86400" value="0" >
-              <span style="font-size:11px;color:var(--text3)">0 = apenas manual</span>
+              <span style="font-size:11px;color:var(--text3)">0 = manual only</span>
               <input type="hidden" id="rfTtl" value="0">
             </div>
           </div>
@@ -2879,7 +2598,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
               <button type="button" class="btn" id="rfPreviewBtn" onclick="rfFetchPreview()" style="font-size:12.5px">
                 Fetch Columns Preview
               </button>
-              <span id="rfPreviewStatus" style="font-size:12px;color:var(--text3)">Preenche as credenciais e template acima, depois clica para ver as colunas disponíveis.</span>
+              <span id="rfPreviewStatus" style="font-size:12px;color:var(--text3)">Fill in the credentials and template above, then click to see the available columns.</span>
             </div>
             <!-- Sample data table — shown after preview -->
             <div id="rfPreviewArea" style="display:none;margin-top:12px;overflow-x:auto;border:1px solid var(--border);border-radius:6px">
@@ -2912,7 +2631,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
                 <thead>
                   <tr style="background:var(--surface2)">
                     <th style="padding:7px 10px;width:36px">
-                      <input class="wz-input" type="checkbox" id="rfFmSelectAll" onchange="rfFmToggleAll(this.checked)" title="Seleccionar todas">
+                      <input class="wz-input" type="checkbox" id="rfFmSelectAll" onchange="rfFmToggleAll(this.checked)" title="Select all">
                     </th>
                     <th style="padding:7px 10px;text-align:left;font-weight:600;font-size:11px;color:var(--text2);text-transform:uppercase">Source column</th>
                     <th style="padding:7px 10px;text-align:left;font-weight:600;font-size:11px;color:var(--text2);text-transform:uppercase">API name</th>
@@ -2940,7 +2659,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           <!-- Detail route -->
           <div style="border-top:1px solid var(--border);padding-top:12px">
             <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-bottom:8px">
-              <input class="wz-input" type="checkbox" id="rfDetailEnabled" onchange="rfToggleDetail()">
+              <input class="wz-input mm-switch" type="checkbox" id="rfDetailEnabled" onchange="rfToggleDetail()">
               Enable detail route <span style="color:var(--text3);font-size:12px">(GET /reports/:name/:id)</span>
             </label>
             <div id="rfDetailFields" style="display:none;display:flex;flex-direction:column;gap:10px">
@@ -2964,18 +2683,20 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
                 </div>
               </div>
               <div id="rfDetailSourceFeedWrap" style="display:none">
-                <label class="wz-label" >Source feed <span style="color:var(--text3)">(feed to use for detail lookup)</span></label>
+                <label class="wz-label" >Source feed</label>
                 <select class="wz-input" id="rfDetailSourceFeed" onchange="rfToggleMergeParent()" >
-                  <option value="">— nenhum —</option>
+                  <option value="">— none —</option>
                 </select>
+                <div class="mm-field-hint">Feed to use for detail lookup</div>
               </div>
               <div id="rfDetailSourceIdFieldWrap" style="display:none">
-                <label class="wz-label" >Source feed ID field <span style="color:var(--text3)">(projected field in the source feed used to join — leave blank to use the ID field above)</span></label>
+                <label class="wz-label" >Source feed ID field</label>
                 <input class="wz-input" id="rfDetailSourceIdField" type="text" placeholder="e.g. chatId, sessionId" >
+                <div class="mm-field-hint">Projected field in the source feed used to join — leave blank to use the ID field above</div>
               </div>
               <div id="rfMergeParentWrap" style="display:none">
                 <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
-                  <input class="wz-input" type="checkbox" id="rfMergeParent">
+                  <input class="wz-input mm-switch" type="checkbox" id="rfMergeParent">
                   Include source feed row as <code>summary</code>
                   <span style="color:var(--text3);font-size:11px">(/:id returns <code>rows</code> from this feed + <code>summary</code> from source feed)</span>
                 </label>
@@ -2986,18 +2707,20 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           <!-- Audio -->
           <div style="border-top:1px solid var(--border);padding-top:12px">
             <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-bottom:8px">
-              <input class="wz-input" type="checkbox" id="rfAudioEnabled" onchange="rfToggleAudio()">
+              <input class="wz-input mm-switch" type="checkbox" id="rfAudioEnabled" onchange="rfToggleAudio()">
               Enable audio streaming <span style="color:var(--text3);font-size:12px">(GET /reports/:name/:id/audio)</span>
             </label>
             <div id="rfAudioFields" style="display:none;display:flex;flex-direction:column;gap:10px">
               <div>
-                <label class="wz-label" >Audio address field <span style="color:var(--text3)">(column with the audio file path, e.g. CallRecordAddress)</span></label>
+                <label class="wz-label" >Audio address field</label>
                 <select class="wz-input" id="rfAudioFieldSelect" style="display:none"></select>
+                <div class="mm-field-hint">Column with the audio file path, e.g. CallRecordAddress</div>
                 <input class="wz-input" id="rfAudioField" type="text" placeholder="CallRecordAddress" >
               </div>
               <div>
-                <label class="wz-label" >Audio ID field <span style="color:var(--text3)">(optional — column for ID lookup; defaults to detail.idField)</span></label>
+                <label class="wz-label" >Audio ID field</label>
                 <select class="wz-input" id="rfAudioIdFieldSelect" style="display:none"></select>
+                <div class="mm-field-hint">Optional — column for ID lookup; defaults to detail.idField</div>
                 <input class="wz-input" id="rfAudioIdField" type="text" placeholder="CallUUID" >
               </div>
             </div>
@@ -3014,8 +2737,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         <p>History of administrative actions — who did what, when, and from where.</p>
       </div>
 
-      <div class="card audit-filters" style="margin-bottom:16px">
-        <div class="card-body">
+      <div class="mm-filterbar">
           <div class="audit-filter-grid">
             <div class="form-group">
               <label for="auditFilterActor">Actor</label>
@@ -3073,9 +2795,8 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           </div>
           <div class="audit-filter-actions">
             <button class="btn" onclick="resetAuditFilters()">Clear</button>
-            <button class="btn btn-primary" onclick="withBusy(this, 'A carregar…', async () => { await fetchAuditLogs(true); })">Apply</button>
+            <button class="btn btn-primary" onclick="withBusy(this, 'Loading…', async () => { await fetchAuditLogs(true); })">Apply</button>
           </div>
-        </div>
       </div>
 
       <div class="card">
@@ -3217,7 +2938,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           <p>Every error and warning raised by the backend — including background jobs that never touch a request. Identical failures are grouped and counted.</p>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-ghost btn-sm" onclick="withBusy(this, 'A actualizar…', async () => { await fetchErrorFeed(true); })">Refresh</button>
+          <button class="btn btn-ghost btn-sm" onclick="withBusy(this, 'Refreshing…', async () => { await fetchErrorFeed(true); })">Refresh</button>
           <button class="btn btn-sm" onclick="ackAllErrors(event)">Mark all as read</button>
           <button class="btn btn-danger btn-sm" onclick="clearAllErrors(event)">Clear feed</button>
         </div>
@@ -3226,11 +2947,11 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       <div class="stats-grid ls-stats">
         <div class="stat-card">
           <div class="stat-label">Open errors</div>
-          <div class="stat-value" id="errStatErrors" style="color:#ef4444">0</div>
+          <div class="stat-value" id="errStatErrors" style="color:var(--red)">0</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Open warnings</div>
-          <div class="stat-value" id="errStatWarnings" style="color:#f59e0b">0</div>
+          <div class="stat-value" id="errStatWarnings" style="color:var(--orange)">0</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Last error</div>
@@ -3242,8 +2963,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
       </div>
 
-      <div class="card ls-card" style="margin-bottom:16px">
-        <div class="card-body ls-form">
+      <div class="mm-filterbar">
           <div class="audit-filter-grid">
             <div class="form-group">
               <label for="errFilterState">State</label>
@@ -3272,7 +2992,6 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
               <input type="text" id="errFilterSearch" placeholder="message or stack" onkeydown="if(event.key==='Enter')fetchErrorFeed(true)">
             </div>
           </div>
-        </div>
       </div>
 
       <div class="card">
@@ -3309,8 +3028,8 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
 </div><!-- /.app -->
 
 <!-- Audit detail modal -->
-<div id="auditDetailModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
-  <div style="max-width:560px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+<div id="auditDetailModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+  <div class="mm-dialog" style="max-width:560px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
     <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
       <h3 style="margin:0;font-size:15px">Audit entry</h3>
       <button onclick="closeAuditDetail()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">&times;</button>
@@ -3320,8 +3039,8 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
 </div>
 
 <!-- Backend error detail modal -->
-<div id="errDetailModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
-  <div style="max-width:720px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+<div id="errDetailModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+  <div class="mm-dialog" style="max-width:720px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
     <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
       <h3 style="margin:0;font-size:15px">Backend error</h3>
       <button onclick="closeErrorDetail()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">&times;</button>
@@ -3331,8 +3050,8 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
 </div>
 
 <!-- OAuth Client Modal -->
-<div id="oauthClientModal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
-  <div style="max-width:560px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+<div id="oauthClientModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+  <div class="mm-dialog" style="max-width:560px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
     <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
       <h3 style="margin:0;font-size:15px" id="oauthClientModalTitle">New OAuth Client</h3>
       <button class="btn-icon" onclick="closeOauthClientModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">&times;</button>
@@ -3345,7 +3064,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
         <div class="form-group">
           <label class="form-label">Redirect URIs (one per line)</label>
-          <textarea id="oauthClientUris" class="form-input" rows="3" placeholder="https://xxxx.supabase.co/auth/v1/callback" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px;resize:vertical"></textarea>
+          <textarea id="oauthClientUris" class="form-input" rows="3" oninput="updateOauthClientLogoPreview()" placeholder="https://xxxx.supabase.co/auth/v1/callback" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px;resize:vertical"></textarea>
           <p style="font-size:11.5px;color:var(--text3);margin-top:6px">HTTPS required (except http://localhost for dev). Exact match — no wildcards.</p>
         </div>
         <div class="form-group">
@@ -3353,17 +3072,25 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           <input type="text" id="oauthClientPostLogoutUri" class="form-input" placeholder="https://app.example.com/login" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px">
           <p style="font-size:11.5px;color:var(--text3);margin-top:6px">Where <code>/oauth/logout?client_id=…</code> sends the browser after signing out. Leave empty to use the origin of the first redirect URI.</p>
         </div>
+        <div class="form-group">
+          <label class="form-label">App logo</label>
+          <div style="display:flex;gap:10px;align-items:center">
+            <span id="oauthClientLogoPreview" aria-hidden="true" style="width:40px;height:40px;flex-shrink:0;border:1px solid var(--border2);border-radius:10px;background:var(--surface2);display:flex;align-items:center;justify-content:center;overflow:hidden;font:600 13px var(--font-display);color:var(--text)"></span>
+            <span id="oauthClientLogoSource" style="font-size:12px;color:var(--text3)">Add a redirect URI to detect the app logo.</span>
+          </div>
+          <p class="mm-field-hint">Detected automatically from the site of the first redirect URI and shown on the sign-in screen. Falls back to the app initials.</p>
+        </div>
         <div id="oauthClientUrisChangeWarning" style="display:none;background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.25);color:#ca8a04;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:14px">
           Changing redirect URIs revokes every refresh token for this client — apps will have to re-authenticate.
         </div>
         <div class="form-group" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:8px">
-            <input type="checkbox" id="oauthClientPkceRequired" checked>
+            <input class="mm-switch" type="checkbox" id="oauthClientPkceRequired" checked>
             <span>Require PKCE (recommended)</span>
           </label>
           <p style="font-size:11.5px;color:var(--text3);margin:0 0 12px 24px">Forces clients to send <code>code_challenge</code> (S256). Disable only for legacy apps that cannot send one — it removes a defense against auth-code interception.</p>
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:8px">
-            <input type="checkbox" id="oauthClientConsentEnabled" onchange="toggleOauthClientConsentFields()">
+            <input class="mm-switch" type="checkbox" id="oauthClientConsentEnabled" onchange="toggleOauthClientConsentFields()">
             <span>Show consent page before sign-in</span>
           </label>
           <div id="oauthClientConsentFields" style="display:none">
@@ -3376,7 +3103,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
       </div>
       <div id="oauthClientSecret" style="display:none">
-        <div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);color:#4ade80;padding:10px 14px;border-radius:6px;font-size:12.5px;margin-bottom:14px">
+        <div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);color:var(--green);padding:10px 14px;border-radius:6px;font-size:12.5px;margin-bottom:14px">
           Client created. <strong>Save the secret now</strong> — it will not be shown again.
         </div>
         <label class="form-label" style="margin-top:0">client_id</label>
@@ -3394,7 +3121,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
 
 <!-- Webhook Modal -->
 <div id="webhookModal"
-  style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;padding:24px 16px">
+  style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;padding:24px 16px">
   <div
     style="max-width:900px;width:100%;max-height:92vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)">
     <div
@@ -3404,12 +3131,12 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
     </div>
     <div style="padding:20px;overflow-y:auto;flex:1">
-      <div id="wAdoptedBanner" style="display:none;background:rgba(0,120,212,0.08);border:1px solid rgba(0,120,212,0.35);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:14px;font-size:12.5px;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap">
+      <div id="wAdoptedBanner" style="display:none;background:var(--accent-bg);border:1px solid var(--accent-bdr);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:14px;font-size:12.5px;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap">
         <div>
           <strong>Adopted from NPM</strong> <span id="wAdoptedInfo" style="color:var(--text2)"></span>
           <div style="font-size:11.5px;color:var(--text3);margin-top:3px">Releasing restores the original forward target in NPM.</div>
         </div>
-        <button type="button" class="btn btn-sm" onclick="withBusy(this, 'A libertar…', async () => { await releaseWebhookFromNpm(); })" style="color:var(--err-text)">Release</button>
+        <button type="button" class="btn btn-sm" onclick="withBusy(this, 'Releasing…', async () => { await releaseWebhookFromNpm(); })" style="color:var(--err-text)">Release</button>
       </div>
       <div class="form-grid" style="gap:12px">
         <div class="form-group">
@@ -3458,7 +3185,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
         <!-- Outbound destination policy (SSRF) -->
         <div class="form-group span-2">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none"><input type="checkbox"
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none"><input class="mm-switch" type="checkbox"
               id="wAllowPrivateTargets" style="cursor:pointer">Allow destinations on private/internal networks <span
               style="color:var(--text3);font-weight:400;font-size:11px">— on by default. Loopback &amp; cloud-metadata
               (169.254.169.254) stay blocked unless listed below.</span></label>
@@ -3474,7 +3201,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
             <label
               style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface2);cursor:pointer;user-select:none"
               onclick="toggleRetrySection()">
-              <input type="checkbox" id="wRetryEnabled" onclick="event.stopPropagation();toggleRetrySection()"
+              <input class="mm-switch" type="checkbox" id="wRetryEnabled" onclick="event.stopPropagation();toggleRetrySection()"
                 style="cursor:pointer">
               <span style="font-size:13px;font-weight:600">Default Retry</span>
               <span style="font-size:11px;color:var(--text3);font-weight:400">applies to all destinations unless
@@ -3504,7 +3231,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
               </div>
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"
                 title="Retry on ANY non-2xx response, not just the codes below">
-                <input type="checkbox" id="wRetryUntilSuccess"
+                <input class="mm-switch" type="checkbox" id="wRetryUntilSuccess"
                   onchange="document.getElementById('wRetryOnRow').style.display=this.checked?'none':'flex';document.getElementById('wRetryMaxCapHint').style.display=this.checked?'inline':'none'">
                 <strong>Retry until success (2xx)</strong>
                 <span style="color:var(--text3);font-size:11px">— ignores the status code list below, retries on any
@@ -3525,7 +3252,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
             <label
               style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface2);cursor:pointer;user-select:none"
               onclick="toggleSilenceSection()">
-              <input type="checkbox" id="wSilenceEnabled" onclick="event.stopPropagation();toggleSilenceSection()"
+              <input class="mm-switch" type="checkbox" id="wSilenceEnabled" onclick="event.stopPropagation();toggleSilenceSection()"
                 style="cursor:pointer">
               <span style="font-size:13px;font-weight:600">Silence alert</span>
               <span style="font-size:11px;color:var(--text3);font-weight:400">email me if no payload arrives for N minutes</span>
@@ -3538,9 +3265,10 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
                     style="width:100%;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
                 </div>
                 <div>
-                  <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Legacy notify email <span style="color:var(--text3)">(optional)</span></label>
+                  <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Legacy notify email</label>
                   <input type="email" id="wSilenceEmail" placeholder="(leave empty to use central rules only)"
                     style="width:100%;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
+                  <div class="mm-field-hint">Optional</div>
                 </div>
               </div>
               <div style="font-size:10px;color:var(--text3);line-height:1.5">
@@ -3555,22 +3283,22 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
     <div
       style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border);flex-shrink:0;background:var(--surface);border-radius:0 0 var(--radius) var(--radius)">
       <button class="btn btn-sm" onclick="closeWebhookModal()">Cancel</button>
-      <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A guardar…', async () => { await saveWebhook(); })">Save Webhook</button>
+      <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Saving…', async () => { await saveWebhook(); })">Save Webhook</button>
     </div>
   </div>
 </div>
 
 <!-- Destination Edit Modal (single destination — opened from the Destinations Page) -->
 <div id="destinationEditModal"
-  style="display:none;position:fixed;inset:0;z-index:280;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
-  <div style="max-width:720px;width:100%;max-height:90vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)">
+  style="display:none;position:fixed;inset:0;z-index:280;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+  <div class="mm-dialog" style="max-width:720px;width:100%;max-height:90vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border);flex-shrink:0">
       <h3 id="destinationEditTitle" style="font-size:15px;font-weight:600">Edit destination</h3>
       <button onclick="closeDestinationEditor()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
     </div>
     <div id="destinationEditContent" style="padding:18px 20px;overflow-y:auto;flex:1"></div>
     <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid var(--border);flex-shrink:0">
-      <button class="btn btn-primary btn-sm" onclick="closeDestinationEditor()">Concluído</button>
+      <button class="btn btn-primary btn-sm" onclick="closeDestinationEditor()">Done</button>
     </div>
   </div>
 </div>
@@ -3581,7 +3309,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
 
 <!-- Connector Modal -->
 <div id="connectorModal"
-  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;overflow-y:auto;align-items:center;justify-content:center;padding:24px">
+  style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:1000;overflow-y:auto;align-items:center;justify-content:center;padding:24px">
   <div class="wz-shell">
 <section class="wz-step" data-step="0" data-step-id="basics" data-step-title="Basics" data-step-hint="Name, channel and inbound security">
       <!-- ── General ── -->
@@ -3600,12 +3328,13 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           </select>
         </div>
         <div>
-          <label class="wz-label" >Port <span style="color:var(--text3)">(0 = auto)</span></label>
+          <label class="wz-label" >Port</label>
           <input class="wz-input" id="cnPort" type="number" placeholder="0" >
+          <div class="mm-field-hint">0 = auto</div>
         </div>
-        <div style="display:flex;align-items:flex-end;padding-bottom:7px">
+        <div class="mm-switch-cell">
           <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer">
-            <input class="wz-input" id="cnEnabled" type="checkbox" checked> Enabled
+            <input class="wz-input mm-switch" id="cnEnabled" type="checkbox" checked> Enabled
           </label>
         </div>
         <div class="form-group">
@@ -3630,8 +3359,9 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           </div>
         </div>
         <div>
-          <label class="wz-label" >Allowed IPs <span style="color:var(--text3)">(comma separated, blank = unrestricted)</span></label>
+          <label class="wz-label" >Allowed IPs</label>
           <input class="wz-input" id="cnAllowedIps" type="text" placeholder="157.240.0.0/16, 31.13.24.0/21" >
+          <div class="mm-field-hint">Comma separated, blank = unrestricted</div>
         </div>
       </div>
 
@@ -3641,12 +3371,14 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       <div id="cnProviderHeader" style="display:none;margin-top:18px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Channel Provider</div>
       <!-- Meta -->
       <div id="cnMetaSection" style="display:none;margin-top:8px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2)">
-        <label class="wz-label" >Meta Access Token <span style="color:var(--text3)">(blank keeps current)</span></label>
+        <label class="wz-label" >Meta Access Token</label>
         <input class="wz-input" id="cnMetaToken" type="password" autocomplete="new-password" style="background:var(--surface)">
+        <div class="mm-field-hint">Blank keeps current</div>
         <div style="margin-top:6px;font-size:11px;color:var(--text3)">The business phone number is detected automatically from each inbound payload (metadata.phone_number_id) — replies go out via the same number the customer wrote to. The token also downloads inbound WhatsApp media; without it, attachments are skipped.</div>
         <div style="margin-top:10px">
-          <label class="wz-label" >Phone Number Filter <span style="color:var(--text3)">(optional — comma-separated phone_number_ids; only these are processed. Use when several connectors, one per brand/queue, share the same inbound feed.)</span></label>
+          <label class="wz-label" >Phone Number Filter</label>
           <input class="wz-input" id="cnPhoneFilter" type="text" placeholder="879847985208219, 946854641852538" style="background:var(--surface)">
+          <div class="mm-field-hint">Optional — comma-separated phone_number_ids; only these are processed. Use when several connectors, one per brand/queue, share the same inbound feed.</div>
         </div>
       </div>
       <!-- Smooch -->
@@ -3657,24 +3389,28 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
             <input class="wz-input" id="cnSmoochAppId" type="text" placeholder="5f...d3e" style="background:var(--surface)">
           </div>
           <div>
-            <label class="wz-label" >Base URL <span style="color:var(--text3)">(blank = api.smooch.io)</span></label>
+            <label class="wz-label" >Base URL</label>
             <input class="wz-input" id="cnSmoochBaseUrl" type="text" placeholder="https://api.smooch.io · or https://{sub}.zendesk.com/sc" style="background:var(--surface)">
+            <div class="mm-field-hint">Blank = api.smooch.io</div>
           </div>
           <div>
             <label class="wz-label" >API Key ID</label>
             <input class="wz-input" id="cnSmoochKeyId" type="text" placeholder="app_..." style="background:var(--surface)">
           </div>
           <div>
-            <label class="wz-label" >API Key Secret <span style="color:var(--text3)">(blank keeps current)</span></label>
+            <label class="wz-label" >API Key Secret</label>
             <input class="wz-input" id="cnSmoochKeySecret" type="password" autocomplete="new-password" style="background:var(--surface)">
+            <div class="mm-field-hint">Blank keeps current</div>
           </div>
           <div>
-            <label class="wz-label" >Bearer Token <span style="color:var(--text3)">(alt. to key id/secret — blank keeps current)</span></label>
+            <label class="wz-label" >Bearer Token</label>
             <input class="wz-input" id="cnSmoochBearer" type="password" autocomplete="new-password" style="background:var(--surface)">
+            <div class="mm-field-hint">Alt. to key id/secret — blank keeps current</div>
           </div>
           <div>
-            <label class="wz-label" >Webhook Secret <span style="color:var(--text3)">(X-Smooch-Signature — blank keeps current)</span></label>
+            <label class="wz-label" >Webhook Secret</label>
             <input class="wz-input" id="cnSmoochWebhookSecret" type="password" autocomplete="new-password" style="background:var(--surface)">
+            <div class="mm-field-hint">X-Smooch-Signature — blank keeps current</div>
           </div>
         </div>
         <div style="margin-top:8px;font-size:11px;color:var(--text3)">Basic auth (Key ID + Secret, scope "app") is recommended — non-expiring. The Webhook Secret verifies inbound <code>X-Smooch-Signature</code> (HMAC-SHA256); alternatively use the Verify Token above.</div>
@@ -3693,24 +3429,28 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           </select>
         </div>
         <div style="grid-column:1 / -1">
-          <label class="wz-label" >Base URL <span style="color:var(--text3)">(instance — plugin API in poll · only serves attachments in Webchat API)</span></label>
+          <label class="wz-label" >Base URL</label>
           <input class="wz-input" id="cnGoBaseUrl" type="text" placeholder="https://gotaag.ucall.co.ao/" >
+          <div class="mm-field-hint">Instance — plugin API in poll · only serves attachments in Webchat API</div>
         </div>
         <div>
           <label class="wz-label" >Username (e-mail)</label>
-          <input class="wz-input" id="cnGoUsername" type="text" placeholder="user@dominio.com" >
+          <input class="wz-input" id="cnGoUsername" type="text" placeholder="user@domain.com" >
         </div>
         <div>
-          <label class="wz-label" >Password <span style="color:var(--text3)">(blank keeps current)</span></label>
+          <label class="wz-label" >Password</label>
           <input class="wz-input" id="cnGoPassword" type="password" autocomplete="new-password" >
+          <div class="mm-field-hint">Blank keeps current</div>
         </div>
         <div id="cnGoHashKeyWrap" class="cn-poll-field">
-          <label class="wz-label" >Webchat Hash Key <span style="color:var(--text3)">(embed script: _hashkey)</span></label>
+          <label class="wz-label" >Webchat Hash Key</label>
           <input class="wz-input" id="cnGoHashKey" type="text" placeholder="38cdbe9e9d0d..." >
+          <div class="mm-field-hint">Embed script: _hashkey</div>
         </div>
         <div id="cnGoDomainUuidWrap" class="cn-poll-field">
-          <label class="wz-label" >Domain UUID <span style="color:var(--text3)">(embed script: _domain — optional)</span></label>
+          <label class="wz-label" >Domain UUID</label>
           <input class="wz-input" id="cnGoDomainUuid" type="text" placeholder="e1b0c3d8-5d74-4719-9404-..." >
+          <div class="mm-field-hint">Embed script: _domain — optional</div>
         </div>
         <div class="cn-poll-field">
           <label class="wz-label" >Fast poll interval (ms) <span style="color:var(--text3)" title="Active chats are polled at this rate; idle ones back off automatically up to 8× (max 60s) and snap back on activity.">ⓘ adaptive</span></label>
@@ -3724,27 +3464,30 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
 
       <!-- ── Webchat API (mode = webchat-api) ── -->
       <div id="cnWebchatSection" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2)">
-        <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Official GoContact Webchat API. Agent replies are <strong>pushed</strong> to Midleman — register this callback URL on the GoContact side: <code>https://&lt;midleman&gt;:&lt;porta-do-conector&gt;/gocontact/callback?token=&lt;callback&nbsp;token&gt;</code></div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Official GoContact Webchat API. Agent replies are <strong>pushed</strong> to Midleman — register this callback URL on the GoContact side: <code>https://&lt;midleman&gt;:&lt;connector-port&gt;/gocontact/callback?token=&lt;callback&nbsp;token&gt;</code></div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
           <div style="grid-column:1 / -1">
-            <label class="wz-label" >Webchat API endpoint <span style="color:var(--text3)">(sending — default https://eu.ds.gocontact.com)</span></label>
+            <label class="wz-label" >Webchat API endpoint</label>
             <input class="wz-input" id="cnGoApiBaseUrl" type="text" placeholder="https://eu.ds.gocontact.com" style="background:var(--surface)">
+            <div class="mm-field-hint">Sending — default https://eu.ds.gocontact.com</div>
           </div>
           <div>
             <label class="wz-label" >Audience</label>
-            <input class="wz-input" id="cnGoAudience" type="text" placeholder="audience do token" style="background:var(--surface)">
+            <input class="wz-input" id="cnGoAudience" type="text" placeholder="token audience" style="background:var(--surface)">
           </div>
           <div>
             <label class="wz-label" >Channel UUID</label>
             <input class="wz-input" id="cnGoChannelUuid" type="text" placeholder="e1b0c3d8-5d74-4719-..." style="background:var(--surface)">
           </div>
           <div style="grid-column:1 / -1">
-            <label class="wz-label" >Callback token <span style="color:var(--text3)">(blank keeps current — secures the inbound callback)</span></label>
+            <label class="wz-label" >Callback token</label>
             <input class="wz-input" id="cnGoCallbackToken" type="password" autocomplete="new-password" style="background:var(--surface)">
+            <div class="mm-field-hint">Blank keeps current — secures the inbound callback</div>
           </div>
           <div style="grid-column:1 / -1">
-            <label class="wz-label" >Login field mapping <span style="color:var(--text3)">(optional override — one per line: <code>field=source</code>; source = name | phone | phoneNumberId | =literal)</span></label>
+            <label class="wz-label" >Login field mapping</label>
             <textarea class="wz-input" id="cnGoLoginFieldMap" rows="2" placeholder="contact=name&#10;first_phone=phone" style="background:var(--surface);font-family:monospace"></textarea>
+            <div class="mm-field-hint">Optional override — one per line: <code>field=source</code>; source = name | phone | phoneNumberId | =literal</div>
             <div style="margin-top:4px;font-size:11px;color:var(--text3)">Unmapped fields are auto-detected by a name/phone heuristic over the channel's field/label.</div>
           </div>
         </div>
@@ -3755,12 +3498,12 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       <!-- ── Agent replies ── -->
       <div style="margin-top:18px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Agent Replies</div>
       <label class="wz-label" id="cnDirectReplyRow" style="display:none;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--text);cursor:pointer">
-        <input class="wz-input" id="cnDirectReply" type="checkbox"> Send agent replies directly to the customer via the channel provider
+        <input class="wz-input mm-switch" id="cnDirectReply" type="checkbox"> Send agent replies directly to the customer via the channel provider
       </label>
 
       <div style="margin-top:14px">
         <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer;margin-bottom:6px">
-          <input class="wz-input" id="cnWebhooksEnabled" type="checkbox" checked onchange="connectorWebhooksEnabledChanged()"> Deliver events to webhook targets
+          <input class="wz-input mm-switch" id="cnWebhooksEnabled" type="checkbox" checked onchange="connectorWebhooksEnabledChanged()"> Deliver events to webhook targets
         </label>
         <label class="wz-label" >Webhook Targets <span style="color:var(--text3)">(where agent replies, joins and closes are delivered)</span></label>
         <div id="cnWebhookTargetsList"></div>
@@ -3785,17 +3528,18 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </summary>
         <div style="padding-bottom:10px">
           <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer">
-            <input class="wz-input" id="cnAutoReplyEnabled" type="checkbox" onchange="connectorAutoReplyChanged()"> Send an automatic reply on the first customer message of each session
+            <input class="wz-input mm-switch" id="cnAutoReplyEnabled" type="checkbox" onchange="connectorAutoReplyChanged()"> Send an automatic reply on the first customer message of each session
           </label>
           <div id="cnAutoReplySection" style="display:none;margin-top:8px">
-            <textarea class="wz-input" id="cnAutoReplyText" rows="2" maxlength="2000" placeholder="Obrigado pelo seu contacto! Em breve será atendido por um dos nossos agentes." ></textarea>
+            <textarea class="wz-input" id="cnAutoReplyText" rows="2" maxlength="2000" placeholder="Thanks for getting in touch. One of our agents will be with you shortly." ></textarea>
             <div style="display:flex;gap:12px;align-items:flex-end;margin-top:8px;flex-wrap:wrap">
               <div>
-                <label class="wz-label" >Active until <span style="color:var(--text3)">(blank = forever)</span></label>
+                <label class="wz-label" >Active until</label>
                 <input class="wz-input" id="cnAutoReplyExpires" type="datetime-local" >
+                <div class="mm-field-hint">Blank = forever</div>
               </div>
               <button type="button" class="btn btn-sm" onclick="document.getElementById('cnAutoReplyExpires').value=''" style="margin-bottom:1px">Forever</button>
-              <span id="cnAutoReplyExpiredBadge" style="display:none;background:var(--red-bg);color:var(--red);padding:3px 8px;border-radius:4px;font-size:11px;margin-bottom:4px">Expired — not firing</span>
+              <span id="cnAutoReplyExpiredBadge" class="mm-chip err" style="display:none;margin-bottom:4px">Expired — not firing</span>
             </div>
             <div style="margin-top:6px;font-size:11px;color:var(--text3)">Sent once per session — to the customer (via Meta/webhooks, like an agent reply with userType "AUTO") and mirrored into the GoContact chat so the agent sees it. After the expiry date it stops firing automatically.</div>
           </div>
@@ -3810,12 +3554,12 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </summary>
         <div style="padding-bottom:10px">
           <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer">
-            <input class="wz-input" id="cnBusinessHoursEnabled" type="checkbox" onchange="connectorBusinessHoursChanged()"> Reply with a notice when customers write outside opening hours
+            <input class="wz-input mm-switch" id="cnBusinessHoursEnabled" type="checkbox" onchange="connectorBusinessHoursChanged()"> Reply with a notice when customers write outside opening hours
           </label>
           <div id="cnBusinessHoursSection" style="display:none;margin-top:8px">
-            <textarea class="wz-input" id="cnBusinessHoursMessage" rows="2" maxlength="2000" placeholder="Estamos fora do horário de atendimento. Responderemos assim que voltarmos." ></textarea>
+            <textarea class="wz-input" id="cnBusinessHoursMessage" rows="2" maxlength="2000" placeholder="We are currently outside business hours. We will reply as soon as we are back." ></textarea>
             <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--text);cursor:pointer">
-              <input class="wz-input" id="cnBusinessHoursForward" type="checkbox"> Also forward the message into GoContact (agents see it when they return)
+              <input class="wz-input mm-switch" id="cnBusinessHoursForward" type="checkbox"> Also forward the message into GoContact (agents see it when they return)
             </label>
             <div style="margin-top:10px;display:grid;grid-template-columns:70px 1fr;gap:6px 10px;align-items:center">
               <span style="font-size:12px;color:var(--text2)">Mon</span>
@@ -3844,7 +3588,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
 
 <!-- Connector Sessions Modal -->
 <div id="connectorSessionsModal"
-  style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:1000;overflow-y:auto;padding:24px">
+  style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:var(--overlay);z-index:1000;overflow-y:auto;padding:24px">
   <div style="max-width:760px;margin:0 auto;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border)">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border)">
       <h3 id="connectorSessionsTitle" style="font-size:16px;font-weight:600">Active Sessions</h3>
@@ -3856,7 +3600,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
 
 <!-- Five9 Connector Modal -->
 <div id="five9Modal"
-  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;overflow-y:auto;align-items:center;justify-content:center;padding:24px">
+  style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:1000;overflow-y:auto;align-items:center;justify-content:center;padding:24px">
   <div class="wz-shell">
 <section class="wz-step" data-step="0" data-step-id="basics" data-step-title="Basics" data-step-hint="Name, channel and inbound security">
       <!-- ── General ── -->
@@ -3875,12 +3619,13 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           </select>
         </div>
         <div>
-          <label class="wz-label" >Port <span style="color:var(--text3)">(0 = auto)</span></label>
+          <label class="wz-label" >Port</label>
           <input class="wz-input" id="f9Port" type="number" placeholder="0" >
+          <div class="mm-field-hint">0 = auto</div>
         </div>
-        <div style="display:flex;align-items:flex-end;padding-bottom:7px">
+        <div class="mm-switch-cell">
           <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer">
-            <input class="wz-input" id="f9Enabled" type="checkbox" checked> Enabled
+            <input class="wz-input mm-switch" id="f9Enabled" type="checkbox" checked> Enabled
           </label>
         </div>
         <div class="form-group">
@@ -3905,8 +3650,9 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           </div>
         </div>
         <div>
-          <label class="wz-label" >Allowed IPs <span style="color:var(--text3)">(comma separated, blank = unrestricted)</span></label>
+          <label class="wz-label" >Allowed IPs</label>
           <input class="wz-input" id="f9AllowedIps" type="text" placeholder="157.240.0.0/16" >
+          <div class="mm-field-hint">Comma separated, blank = unrestricted</div>
         </div>
       </div>
 
@@ -3929,8 +3675,9 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
               <input class="wz-input" id="f9SmoochAppId" type="text" >
             </div>
             <div>
-              <label class="wz-label" >Base URL <span style="color:var(--text3)">(default api.smooch.io)</span></label>
+              <label class="wz-label" >Base URL</label>
               <input class="wz-input" id="f9SmoochBaseUrl" type="text" placeholder="https://api.smooch.io" >
+              <div class="mm-field-hint">Default api.smooch.io</div>
             </div>
             <div>
               <label class="wz-label" >Key ID</label>
@@ -3941,12 +3688,14 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
               <input class="wz-input" id="f9SmoochKeySecret" type="text" placeholder="(kept — type to replace)" >
             </div>
             <div>
-              <label class="wz-label" >Bearer Token <span style="color:var(--text3)">(alternative to keyId/keySecret)</span></label>
+              <label class="wz-label" >Bearer Token</label>
               <input class="wz-input" id="f9SmoochBearer" type="text" placeholder="(kept — type to replace)" >
+              <div class="mm-field-hint">Alternative to keyId/keySecret</div>
             </div>
             <div>
-              <label class="wz-label" >Webhook Secret <span style="color:var(--text3)">(X-Smooch-Signature validation)</span></label>
+              <label class="wz-label" >Webhook Secret</label>
               <input class="wz-input" id="f9SmoochWebhookSecret" type="text" placeholder="(kept — type to replace)" >
+              <div class="mm-field-hint">X-Smooch-Signature validation</div>
             </div>
           </div>
         </div>
@@ -3959,8 +3708,9 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px">
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
           <div>
-            <label class="wz-label" >Auth Base URL <span style="color:var(--text3)">(DC-specific, e.g. https://app.nld1.eu.five9.com)</span></label>
+            <label class="wz-label" >Auth Base URL</label>
             <input class="wz-input" id="f9AuthBaseUrl" type="text" placeholder="https://app.nld1.eu.five9.com" >
+            <div class="mm-field-hint">DC-specific, e.g. https://app.nld1.eu.five9.com</div>
           </div>
           <div>
             <label class="wz-label" >Tenant Name</label>
@@ -3972,8 +3722,9 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           <input class="wz-input" id="f9CampaignName" type="text" placeholder="WhatsApp_Campaign" >
         </div>
         <div>
-          <label class="wz-label" >Callback URL <span style="color:var(--text3)">(Five9 pushes agent replies here — expose via reverse proxy)</span></label>
+          <label class="wz-label" >Callback URL</label>
           <input class="wz-input" id="f9CallbackUrl" type="text" placeholder="https://midleman.example.com/five9/callback" >
+          <div class="mm-field-hint">Five9 pushes agent replies here — expose via reverse proxy</div>
         </div>
         <div>
           <label class="wz-label" >Callback Token <span style="color:var(--text3)">(appended as ?token= to callbackUrl; Five9 carries it back; validates all incoming callbacks)</span></label>
@@ -3991,16 +3742,17 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:10px">
         <div id="f9DirectReplyRow" style="display:none">
           <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer">
-            <input class="wz-input" id="f9DirectReply" type="checkbox"> Send agent replies directly back to customer (via Meta / Smooch)
+            <input class="wz-input mm-switch" id="f9DirectReply" type="checkbox"> Send agent replies directly back to customer (via Meta / Smooch)
           </label>
         </div>
         <div>
-          <label class="wz-label" >Phone Number Filter <span style="color:var(--text3)">(optional — comma-separated phone_number_ids; blank = accept all)</span></label>
+          <label class="wz-label" >Phone Number Filter</label>
           <input class="wz-input" id="f9PhoneFilter" type="text" placeholder="120363123456789, 120363987654321" >
+          <div class="mm-field-hint">Optional — comma-separated phone_number_ids; blank = accept all</div>
         </div>
         <div>
           <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer;margin-bottom:4px">
-            <input class="wz-input" id="f9WebhooksEnabled" type="checkbox" checked onchange="f9WebhooksEnabledChanged()"> Deliver events to webhook targets
+            <input class="wz-input mm-switch" id="f9WebhooksEnabled" type="checkbox" checked onchange="f9WebhooksEnabledChanged()"> Deliver events to webhook targets
           </label>
           <div id="f9WebhookTargetsList"></div>
           <div style="display:flex;gap:8px;margin-top:6px">
@@ -4025,13 +3777,14 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </summary>
         <div style="padding-bottom:10px">
           <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer">
-            <input class="wz-input" id="f9AutoReplyEnabled" type="checkbox" onchange="f9AutoReplyChanged()"> Send an automatic reply on the first customer message of each session
+            <input class="wz-input mm-switch" id="f9AutoReplyEnabled" type="checkbox" onchange="f9AutoReplyChanged()"> Send an automatic reply on the first customer message of each session
           </label>
           <div id="f9AutoReplySection" style="display:none;margin-top:10px">
-            <textarea class="wz-input" id="f9AutoReplyText" rows="2" placeholder="Obrigado pela sua mensagem! Um agente irá atendê-lo em breve." ></textarea>
+            <textarea class="wz-input" id="f9AutoReplyText" rows="2" placeholder="Thanks for your message. An agent will be with you shortly." ></textarea>
             <div style="margin-top:6px">
-              <label class="wz-label" >Expires at <span style="color:var(--text3)">(optional — auto-reply stops after this date/time)</span></label>
+              <label class="wz-label" >Expires at</label>
               <input class="wz-input" id="f9AutoReplyExpires" type="datetime-local" >
+              <div class="mm-field-hint">Optional — auto-reply stops after this date/time</div>
             </div>
           </div>
         </div>
@@ -4045,12 +3798,12 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </summary>
         <div style="padding-bottom:10px">
           <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer">
-            <input class="wz-input" id="f9BusinessHoursEnabled" type="checkbox" onchange="f9BusinessHoursChanged()"> Reply with a notice when customers write outside opening hours
+            <input class="wz-input mm-switch" id="f9BusinessHoursEnabled" type="checkbox" onchange="f9BusinessHoursChanged()"> Reply with a notice when customers write outside opening hours
           </label>
           <div id="f9BusinessHoursSection" style="display:none;margin-top:8px">
-            <textarea class="wz-input" id="f9BusinessHoursMessage" rows="2" maxlength="2000" placeholder="Estamos fora do horário de atendimento. Responderemos assim que voltarmos." ></textarea>
+            <textarea class="wz-input" id="f9BusinessHoursMessage" rows="2" maxlength="2000" placeholder="We are currently outside business hours. We will reply as soon as we are back." ></textarea>
             <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--text);cursor:pointer">
-              <input class="wz-input" id="f9BusinessHoursForward" type="checkbox"> Also forward the message into Five9 (agents see it when they return)
+              <input class="wz-input mm-switch" id="f9BusinessHoursForward" type="checkbox"> Also forward the message into Five9 (agents see it when they return)
             </label>
             <div style="margin-top:10px;display:grid;grid-template-columns:70px 1fr;gap:6px 10px;align-items:center">
               <span style="font-size:12px;color:var(--text2)">Mon</span>
@@ -4080,8 +3833,9 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           Advanced
         </summary>
         <div style="padding-bottom:10px">
-          <label class="wz-label" >Session TTL (minutes) <span style="color:var(--text3)">(default 120 — idle sessions are closed after this period)</span></label>
+          <label class="wz-label" >Session TTL (minutes)</label>
           <input class="wz-input" id="f9SessionTtl" type="number" placeholder="120" style="width:160px">
+          <div class="mm-field-hint">Default 120 — idle sessions are closed after this period</div>
         </div>
       </details>
           </section>
@@ -4090,7 +3844,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
 
 <!-- Five9 Sessions Modal -->
 <div id="five9SessionsModal"
-  style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:1000;overflow-y:auto;padding:24px">
+  style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:var(--overlay);z-index:1000;overflow-y:auto;padding:24px">
   <div style="max-width:760px;margin:0 auto;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border)">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border)">
       <h3 id="five9SessionsTitle" style="font-size:16px;font-weight:600">Active Five9 Sessions</h3>
@@ -4124,7 +3878,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
         <div id="bodyEditorFieldsList" style="flex:1;overflow:auto;padding:6px 0;font-family:monospace;font-size:11px">
           <div style="padding:12px;color:var(--text3);font-size:11px;font-family:inherit">
-            Cole um Test Payload (JSON) na seção anterior para ver os campos disponíveis aqui.
+            Paste a test payload (JSON) in the previous section to see the available fields here.
           </div>
         </div>
       </div>
@@ -4132,15 +3886,15 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
     <div
       style="padding:6px 16px;border-top:1px solid var(--border);background:var(--surface2);font-size:11px;color:var(--text3)">
       Use <code
-        style="background:rgba(0,120,212,0.15);padding:1px 4px;border-radius:3px;color:var(--accent)">{{variable.path}}</code>
-      syntax to interpolate incoming payload values. Click a field on the right to insert, or type <code style="background:rgba(0,120,212,0.15);padding:1px 4px;border-radius:3px;color:var(--accent)">{{</code> for suggestions.
+        style="background:var(--accent-bg);padding:1px 4px;border-radius:3px;color:var(--accent)">{{variable.path}}</code>
+      syntax to interpolate incoming payload values. Click a field on the right to insert, or type <code style="background:var(--accent-bg);padding:1px 4px;border-radius:3px;color:var(--accent)">{{</code> for suggestions.
     </div>
   </div>
 </div>
 
 <!-- DLQ Modal -->
 <div id="dlqModal"
-  style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px)"
+  style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px)"
   onclick="if(event.target===this)closeDlqModal()">
   <div
     style="max-width:600px;margin:60px auto;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);display:flex;flex-direction:column;max-height:80vh">
@@ -4149,7 +3903,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       <h3 id="dlqModalTitle" style="font-size:16px;font-weight:600">Failed Deliveries</h3>
       <div style="display:flex;gap:8px;align-items:center">
         <button id="dlqRetryAllBtn" class="btn"
-          style="padding:4px 14px;font-size:12px;background:var(--accent);color:#fff;border:none"
+          style="padding:4px 14px;font-size:12px;background:var(--accent);color:var(--on-accent);border:none"
           onclick="dlqRetryAll()">Retry All</button>
         <button id="dlqDismissAllBtn" class="btn btn-ghost" style="padding:4px 14px;font-size:12px" onclick="dlqDismissAll()">Dismiss All</button>
         <button onclick="closeDlqModal()"
@@ -4162,7 +3916,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
 
 <!-- Pending Retry Modal (persistent retry queue) -->
 <div id="pendingRetryModal"
-  style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px)"
+  style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px)"
   onclick="if(event.target===this)closePendingRetryModal()">
   <div
     style="max-width:680px;margin:60px auto;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);display:flex;flex-direction:column;max-height:80vh">
@@ -4172,7 +3926,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       <div style="display:flex;gap:8px;align-items:center">
         <button id="prCancelAllBtn" class="btn btn-danger"
           style="display:none;padding:4px 14px;font-size:12px"
-          onclick="prCancelAll()">Cancelar todas</button>
+          onclick="prCancelAll()">Cancel all</button>
         <button onclick="closePendingRetryModal()"
           style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;padding:4px 8px">&times;</button>
       </div>
@@ -4195,7 +3949,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       </div>
       <div class="form-section">Upstream (PBX / destination)</div>
       <div class="form-grid">
-        <div class="form-group span-2"><label>Upstream Host *</label><input class="wz-input" type="text" id="sipUpstreamHost" placeholder="192.168.1.100 or pbx.empresa.com"></div>
+        <div class="form-group span-2"><label>Upstream Host *</label><input class="wz-input" type="text" id="sipUpstreamHost" placeholder="192.168.1.100 or pbx.company.com"></div>
         <div class="form-group"><label>Upstream Port *</label><input class="wz-input" type="number" id="sipUpstreamPort" placeholder="5060" min="1" max="65535"></div>
         <div class="form-group">
           <label>Transport to upstream</label>
@@ -4207,7 +3961,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
         <div class="form-group" id="sipUpstreamTlsGroup" style="display:none">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input class="wz-input" type="checkbox" id="sipAllowSelfSignedUpstream" style="cursor:pointer;accent-color:var(--accent)">
+            <input class="wz-input mm-switch" type="checkbox" id="sipAllowSelfSignedUpstream" style="cursor:pointer;">
             <span>Skip upstream certificate verification</span>
           </label>
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Enable if the upstream uses a self-signed or private CA certificate (e.g. internal FusionPBX).</span>
@@ -4256,7 +4010,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       <div class="form-grid">
         <div class="form-group span-2">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input class="wz-input" type="checkbox" id="sipRtpRelay" onchange="toggleSipRtpRelay()" style="cursor:pointer;accent-color:var(--accent)">
+            <input class="wz-input mm-switch" type="checkbox" id="sipRtpRelay" onchange="toggleSipRtpRelay()" style="cursor:pointer;">
             <span>Enable RTP relay</span>
           </label>
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">
@@ -4266,16 +4020,19 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         <div id="sipRtpRelayGroup" style="display:none">
           <div class="form-grid" style="margin-top:12px">
             <div class="form-group">
-              <label>RTP Port Start <span style="color:var(--text3);font-weight:400;font-size:11px">(default: 50000)</span></label>
+              <label>RTP Port Start</label>
               <input class="wz-input" type="number" id="sipRtpPortStart" placeholder="50000" min="1024" max="65534">
+              <div class="mm-field-hint">Default: 50000</div>
             </div>
             <div class="form-group">
-              <label>RTP Port End <span style="color:var(--text3);font-weight:400;font-size:11px">(default: 51000)</span></label>
+              <label>RTP Port End</label>
               <input class="wz-input" type="number" id="sipRtpPortEnd" placeholder="51000" min="1025" max="65535">
+              <div class="mm-field-hint">Default: 51000</div>
             </div>
             <div class="form-group span-2">
-              <label>Worker Threads <span style="color:var(--text3);font-weight:400;font-size:11px">— parallel packet relay (default: auto = CPU cores − 1)</span></label>
+              <label>Worker Threads</label>
               <input class="wz-input" type="number" id="sipRtpWorkers" placeholder="auto" min="0" max="32">
+              <div class="mm-field-hint">Parallel packet relay (default: auto = CPU cores − 1)</div>
               <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px">
                 Each worker handles its own port slice independently.
                 <strong>0</strong> = single thread (~250 calls).
@@ -4291,15 +4048,16 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       <div class="form-section">Access Control</div>
       <div class="form-grid">
         <div class="form-group span-2">
-          <label>Allowed IPs <span style="color:var(--text3);font-weight:400;font-size:11px">— CIDR, wildcard or exact. Empty = allow all.</span></label>
+          <label>Allowed IPs</label>
           <input class="wz-input" type="text" id="sipAllowedIps" placeholder="203.0.113.0/24, 198.51.100.*">
+          <div class="mm-field-hint">CIDR, wildcard or exact. Empty = allow all.</div>
         </div>
       </div>
       <div class="form-section">Logging</div>
       <div class="form-grid">
         <div class="form-group span-2">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
-            <input class="wz-input" type="checkbox" id="sipLogConnections" style="accent-color:var(--accent)">
+            <input class="wz-input mm-switch" type="checkbox" id="sipLogConnections" style="">
             <span>Log connections</span>
           </label>
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px;margin-left:24px">
@@ -4308,7 +4066,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
         <div class="form-group span-2">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
-            <input class="wz-input" type="checkbox" id="sipLogMessages" style="accent-color:var(--accent)" onchange="toggleSipLogOptions()">
+            <input class="wz-input mm-switch" type="checkbox" id="sipLogMessages" style="" onchange="toggleSipLogOptions()">
             <span>Log messages</span>
           </label>
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px;margin-left:24px">
@@ -4317,7 +4075,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
         <div class="form-group span-2">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
-            <input class="wz-input" type="checkbox" id="sipLogMessageBody" style="accent-color:var(--accent)">
+            <input class="wz-input mm-switch" type="checkbox" id="sipLogMessageBody" style="">
             <span>Include message body (SDP)</span>
           </label>
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px;margin-left:24px">
@@ -4326,7 +4084,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
         <div class="form-group span-2">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
-            <input class="wz-input" type="checkbox" id="sipLogNoise" style="accent-color:var(--accent)">
+            <input class="wz-input mm-switch" type="checkbox" id="sipLogNoise" style="">
             <span>Include noise (100 Trying, OPTIONS keepalives)</span>
           </label>
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px;margin-left:24px">
@@ -4344,8 +4102,9 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         <div id="sipAdvancedSection" style="display:none;margin-top:8px">
           <div class="form-grid">
             <div class="form-group span-2">
-              <label>Public Host <span style="color:var(--text3);font-weight:400;font-size:11px">— override the address placed in SIP Via / Record-Route headers</span></label>
-              <input class="wz-input" type="text" id="sipPublicHost" placeholder="sip.empresa.com or 203.0.113.10">
+              <label>Public Host</label>
+              <input class="wz-input" type="text" id="sipPublicHost" placeholder="sip.company.com or 203.0.113.10">
+              <div class="mm-field-hint">Override the address placed in SIP Via / Record-Route headers</div>
               <span style="font-size:11px;color:var(--text3);display:block;margin-top:3px">Only needed when this server's public IP cannot be auto-detected, or differs from the ACME domain. Leave empty to use the <code>PROXY_HOST</code> env var.</span>
             </div>
           </div>
@@ -4360,7 +4119,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
 <div class="modal-overlay" id="profileModal">
         <div class="wz-shell">
           <section class="wz-step wz-stack" data-step-id="basics" data-step-title="Basics" data-step-hint="Name and where requests are forwarded">
-      <div id="pAdoptedBanner" style="display:none;background:rgba(0,120,212,0.08);border:1px solid rgba(0,120,212,0.35);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:14px;font-size:12.5px;display:none;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap">
+      <div id="pAdoptedBanner" style="display:none;background:var(--accent-bg);border:1px solid var(--accent-bdr);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:14px;font-size:12.5px;display:none;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap">
         <div>
           <strong>Adopted from NPM</strong> <span id="pAdoptedInfo" style="color:var(--text2)"></span>
           <div style="font-size:11.5px;color:var(--text3);margin-top:3px">Releasing restores the original forward target in NPM.</div>
@@ -4379,7 +4138,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       <div class="form-section" style="display:flex;align-items:center;justify-content:space-between;gap:10px">
         <span>Upstream credentials bypass <span style="color:var(--text3);font-weight:400;font-size:11px">— optional</span></span>
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer;font-weight:400;text-transform:none;letter-spacing:0">
-          <input class="wz-input" type="checkbox" id="pUpstreamAuthToggle" onchange="toggleUpstreamAuthSection()" style="cursor:pointer;accent-color:var(--accent)">
+          <input class="wz-input mm-switch" type="checkbox" id="pUpstreamAuthToggle" onchange="toggleUpstreamAuthSection()" style="cursor:pointer;">
           <span>Enable</span>
         </label>
       </div>
@@ -4399,8 +4158,13 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       <div class="form-section">Access Control</div>
       <div class="form-grid">
         <div class="form-group span-2">
-          <label>Auth Mode</label>
-          <select class="wz-input" id="pAuthMode" onchange="toggleProfileAuthMode()">
+          <label id="pAuthModeLabel">Auth Mode</label>
+          <div class="mm-seg" role="radiogroup" aria-labelledby="pAuthModeLabel" data-seg-for="pAuthMode" style="align-self:flex-start">
+            <button type="button" role="radio" data-value="none">Public</button>
+            <button type="button" role="radio" data-value="accessKey">Access key</button>
+            <button type="button" role="radio" data-value="login">User login</button>
+          </div>
+          <select class="wz-input mm-visually-hidden" id="pAuthMode" tabindex="-1" aria-hidden="true" onchange="toggleProfileAuthMode()">
             <option value="none">Public (no authentication)</option>
             <option value="accessKey">Access Key (static token)</option>
             <option value="login">User Login (JWT)</option>
@@ -4414,7 +4178,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
         <div class="form-group" id="pRequire2faGroup" style="display:none">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input class="wz-input" type="checkbox" id="pRequire2fa" style="cursor:pointer;accent-color:var(--accent)">
+            <input class="wz-input mm-switch" type="checkbox" id="pRequire2fa" style="cursor:pointer;">
             <span>Require 2FA</span>
           </label>
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Users without 2FA will be
@@ -4422,7 +4186,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
         <div class="form-group" id="pIsWebAppGroup" style="display:none">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input class="wz-input" type="checkbox" id="pIsWebApp" style="cursor:pointer;accent-color:var(--accent)">
+            <input class="wz-input mm-switch" type="checkbox" id="pIsWebApp" style="cursor:pointer;">
             <span>Web Application</span>
           </label>
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Redirect unauthenticated requests
@@ -4450,7 +4214,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
         <div class="form-group span-2" id="pConsentGroup" style="display:none">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input class="wz-input" type="checkbox" id="pConsentEnabled" onchange="toggleConsentFields()">
+            <input class="wz-input mm-switch" type="checkbox" id="pConsentEnabled" onchange="toggleConsentFields()">
             <span>Show consent modal before sign-in</span>
           </label>
           <div id="pConsentFields" style="display:none;margin-top:10px">
@@ -4474,7 +4238,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
         <div class="form-group span-2">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input class="wz-input" type="checkbox" id="pRateLimitEnabled" onchange="toggleRateLimitFields()" style="cursor:pointer;accent-color:var(--accent)">
+            <input class="wz-input mm-switch" type="checkbox" id="pRateLimitEnabled" onchange="toggleRateLimitFields()" style="cursor:pointer;">
             <span>Rate Limit</span>
           </label>
           <div id="pRateLimitFields" style="display:none;margin-top:10px;grid-template-columns:1fr 1fr;gap:10px;align-items:end">
@@ -4484,7 +4248,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
             </div>
             <div>
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer;height:38px">
-                <input class="wz-input" type="checkbox" id="pRateLimitPerIp" style="cursor:pointer;accent-color:var(--accent)">
+                <input class="wz-input mm-switch" type="checkbox" id="pRateLimitPerIp" style="cursor:pointer;">
                 <span>Apply per client IP</span>
               </label>
             </div>
@@ -4493,7 +4257,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
         <div class="form-group span-2">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input class="wz-input" type="checkbox" id="pCorsEnabled" onchange="toggleCorsFields()" style="cursor:pointer;accent-color:var(--accent)">
+            <input class="wz-input mm-switch" type="checkbox" id="pCorsEnabled" onchange="toggleCorsFields()" style="cursor:pointer;">
             <span>CORS policy</span>
           </label>
           <div id="pCorsFields" style="display:none;margin-top:10px;grid-template-columns:1fr 1fr;gap:10px">
@@ -4519,7 +4283,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
             </div>
             <div style="grid-column:span 2">
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                <input class="wz-input" type="checkbox" id="pCorsCredentials" style="cursor:pointer;accent-color:var(--accent)">
+                <input class="wz-input mm-switch" type="checkbox" id="pCorsCredentials" style="cursor:pointer;">
                 <span>Allow credentials (cookies / Authorization) — not allowed together with <code>*</code></span>
               </label>
             </div>
@@ -4543,14 +4307,14 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
         <div class="form-group">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input class="wz-input" type="checkbox" id="pForwardPath" style="cursor:pointer;accent-color:var(--accent)">
+            <input class="wz-input mm-switch" type="checkbox" id="pForwardPath" style="cursor:pointer;">
             <span>Forward PATH</span>
           </label>
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Append the incoming request path to the target URL.</span>
         </div>
         <div class="form-group">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input class="wz-input" type="checkbox" id="pAllowSelfSignedTls" style="cursor:pointer;accent-color:var(--accent)">
+            <input class="wz-input mm-switch" type="checkbox" id="pAllowSelfSignedTls" style="cursor:pointer;">
             <span>Allow Self-Signed TLS</span>
           </label>
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Skip certificate validation for this upstream. Use only for internal services.</span>
@@ -4606,8 +4370,8 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
         </div>
         <div id="npmBulkLoginGroup" style="display:none">
           <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Login options</label>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text2)"><input id="npmBulkRequire2fa" type="checkbox"> Require 2FA</label>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text2)"><input id="npmBulkIsWebApp" type="checkbox"> Web Application</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text2)"><input class="mm-switch" id="npmBulkRequire2fa" type="checkbox"> Require 2FA</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text2)"><input class="mm-switch" id="npmBulkIsWebApp" type="checkbox"> Web Application</label>
         </div>
       </div>
 
@@ -4640,7 +4404,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
     </div>
     <div class="modal-footer">
       <span id="npmSelectionCount" style="font-size:12px;color:var(--text2);margin-right:auto"></span>
-      <button class="btn btn-sm" onclick="withBusy(this, 'A carregar…', async () => { await fetchNpmProxyHosts(); })">Refresh</button>
+      <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchNpmProxyHosts(); })">Refresh</button>
       <button class="btn" onclick="closeNpmImportModal()">Close</button>
       <button class="btn btn-primary" id="npmBulkImportBtn" onclick="bulkAdoptNpmHosts()" disabled>Import selected</button>
     </div>
@@ -4675,7 +4439,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
               id="npuPassword" placeholder="Password" autocomplete="new-password"></div>
           <div class="form-group span-2" id="npuIsAdminGroup">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="npuIsAdmin" style="accent-color:var(--accent);cursor:pointer">
+              <input class="mm-switch" type="checkbox" id="npuIsAdmin" style="cursor:pointer">
               <span>Is administrator</span>
             </label>
             <span style="font-size:11px;color:var(--text3);margin-top:4px;display:block">Grants dashboard access. The new admin will be asked to set up 2FA on first dashboard login.</span>
@@ -4698,7 +4462,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
 <div class="modal-overlay" id="oauthClientUsersModal">
   <div class="modal" style="max-width:540px">
     <div class="modal-header">
-      <h3 id="oauthClientUsersTitle">Acesso ao client</h3><button class="close-btn"
+      <h3 id="oauthClientUsersTitle">Client access</h3><button class="close-btn"
         onclick="closeOauthClientUsersModal()">&times;</button>
     </div>
     <div class="modal-body">
@@ -4706,7 +4470,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm);border:1px solid var(--border)">
         <label style="flex:1;font-size:13px;font-weight:500;color:var(--text)">Restrict access (allow-list)</label>
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text2)">
-          <input type="checkbox" id="oauthAllowListToggle" onchange="toggleOauthAllowList(this.checked)" style="accent-color:var(--primary)">
+          <input class="mm-switch" type="checkbox" id="oauthAllowListToggle" onchange="toggleOauthAllowList(this.checked)" style="accent-color:var(--primary)">
           Enabled
         </label>
       </div>
@@ -4717,12 +4481,12 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
             style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
             <option value="">Select user...</option>
           </select>
-          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A adicionar…', async () => { await addUserToOauthClientUI(); })" style="white-space:nowrap">Add</button>
+          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Adding…', async () => { await addUserToOauthClientUI(); })" style="white-space:nowrap">Add</button>
         </div>
         <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead>
             <tr style="background:var(--surface2);text-align:left">
-              <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Utilizador</th>
+              <th style="padding:8px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">User</th>
               <th style="padding:8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Email</th>
               <th style="padding:8px 12px"></th>
             </tr>
@@ -4748,7 +4512,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
             </select>
             <input id="oclgGroupInput" type="text" placeholder="CN, DN or * (any group)"
               style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px;font-family:'SF Mono',ui-monospace,monospace">
-            <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A adicionar…', async () => { await addLdapGroupToClientUI(); })" style="white-space:nowrap">Add</button>
+            <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Adding…', async () => { await addLdapGroupToClientUI(); })" style="white-space:nowrap">Add</button>
           </div>
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
@@ -4864,7 +4628,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
           <option value="">Select proxy to assign...</option>
         </select>
-        <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A atribuir…', async () => { await assignProfileToCurrentUser(); })"
+        <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Assigning…', async () => { await assignProfileToCurrentUser(); })"
           style="white-space:nowrap">Assign</button>
       </div>
       <table class="ur-table">
@@ -4892,7 +4656,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px">
           <option value="">Select OAuth client to assign...</option>
         </select>
-        <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'A atribuir…', async () => { await assignOauthClientToCurrentUser(); })"
+        <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Assigning…', async () => { await assignOauthClientToCurrentUser(); })"
           style="white-space:nowrap">Assign</button>
       </div>
       <table class="ur-table">
@@ -4914,7 +4678,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
 <!-- Create Invite Modal (wizard) -->
 <div class="modal-overlay" id="createInviteModal">
   <!-- Result panel — shown after the link is generated, replaces the wizard -->
-  <div id="inviteGenResult" style="display:none;max-width:560px;width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden">
+  <div class="mm-dialog" id="inviteGenResult" style="display:none;max-width:560px;width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden">
     <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:16px">
       <h3 style="margin:0;font-size:16px">Invite link generated</h3>
       <button class="close-btn" onclick="closeCreateInviteModal()">&times;</button>
@@ -4929,7 +4693,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           <input type="text" id="inviteLinkInput" readonly
             style="flex:1;min-width:200px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:12px;font-family:monospace;outline:none">
           <button onclick="copyInviteLink()" id="copyInviteBtn"
-            style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0">Copy</button>
+            style="background:var(--accent);color:var(--on-accent);border:none;border-radius:var(--radius-sm);padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0">Copy</button>
           <button onclick="resendInviteEmail()" id="resendInviteBtn"
             style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0;display:none">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
@@ -5017,8 +4781,9 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           <input type="text" id="invNameInput" placeholder="e.g. John Doe" maxlength="100" autocomplete="off">
         </div>
         <div class="form-group span-2">
-          <label>Note <span style="color:var(--text3);font-weight:400">(optional)</span></label>
+          <label>Note</label>
           <input type="text" id="invNoteInput" placeholder="e.g. Access to the reports dashboard" maxlength="200" autocomplete="off">
+          <div class="mm-field-hint">Optional</div>
           <span style="font-size:11px;color:var(--text3);margin-top:3px;display:block">Context text shown on the signup page.</span>
         </div>
         <div class="form-group span-2">
@@ -5058,29 +4823,61 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
             <label class="wz-label" for="ldapBaseDn">Base DN <span class="req">*</span></label>
             <input class="wz-input" type="text" id="ldapBaseDn" placeholder="DC=example,DC=com" autocomplete="off">
           </div>
-          <div class="form-group">
+          <div class="form-group span-2">
+            <label class="wz-label" for="ldapBindMode">Authentication</label>
+            <select class="wz-input" id="ldapBindMode" onchange="_ldapSyncBindMode()">
+              <option value="user">Each user signs in with their own credentials</option>
+              <option value="service">Service account (bind DN)</option>
+            </select>
+            <span class="mm-field-hint" id="ldapBindModeHint"></span>
+          </div>
+          <div class="form-group span-2" data-bind-mode="user">
+            <label class="wz-label" for="ldapUpnSuffix">Domain</label>
+            <input class="wz-input" type="text" id="ldapUpnSuffix" placeholder="example.com" oninput="_ldapSyncBindMode()" autocomplete="off">
+            <span class="mm-field-hint">Added to plain logins: <code>jdoe</code> signs in as <code>jdoe@<span id="ldapUpnPreview">example.com</span></code>. Logins typed as <code>jdoe@domain</code> or <code>DOMAIN\jdoe</code> are used as they are.</span>
+          </div>
+          <div class="form-group" data-bind-mode="service">
             <label class="wz-label" for="ldapBindDn">Bind DN</label>
             <input class="wz-input" type="text" id="ldapBindDn" placeholder="CN=svc-midleman,OU=…" autocomplete="off">
           </div>
-          <div class="form-group">
+          <div class="form-group" data-bind-mode="service">
             <label class="wz-label" for="ldapBindPassword">Bind password</label>
             <input class="wz-input" type="password" id="ldapBindPassword" placeholder="(optional)" autocomplete="new-password">
           </div>
         </div>
         <div class="ldap-checks">
           <label class="ldap-check wz-label">
-            <input class="wz-input" type="checkbox" id="ldapStartTls">
+            <input class="wz-input mm-switch" type="checkbox" id="ldapStartTls">
             <span>StartTLS <span class="ldap-hint">(only for ldap://)</span></span>
           </label>
           <label class="ldap-check wz-label">
-            <input class="wz-input" type="checkbox" id="ldapTlsVerify" checked>
+            <input class="wz-input mm-switch" type="checkbox" id="ldapTlsVerify" checked>
             <span>Validate TLS certificate</span>
           </label>
           <label class="ldap-check wz-label">
-            <input class="wz-input" type="checkbox" id="ldapEnabled" checked>
+            <input class="wz-input mm-switch" type="checkbox" id="ldapEnabled" checked>
             <span>Directory enabled</span>
           </label>
         </div>
+      </div>
+      <!-- Section: Test (edit only) — part of the form, not a floating bar -->
+      <div class="ldap-section ldap-test-section">
+        <div class="ldap-section-title">Test connection</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="wz-label" for="ldapTestLogin">Login</label>
+            <input class="wz-input" type="text" id="ldapTestLogin" placeholder="e.g. jdoe (optional)" autocomplete="off">
+          </div>
+          <div class="form-group" data-bind-mode="user">
+            <label class="wz-label" for="ldapTestPassword">Password</label>
+            <input class="wz-input" type="password" id="ldapTestPassword" placeholder="Password" autocomplete="new-password">
+          </div>
+        </div>
+        <div class="ldap-test-actions">
+          <button type="button" class="btn btn-sm" onclick="testLdap()" id="ldapTestBtn">Test connection</button>
+          <span class="mm-field-hint">Uses the saved settings. Nothing is changed.</span>
+        </div>
+        <div id="ldapTestResult" class="ldap-test-result" style="display:none"></div>
       </div>
           </section>
           <section class="wz-step wz-stack" data-step-id="mapping" data-step-title="User mapping" data-step-hint="Which attributes become username, e-mail and name">
@@ -5157,7 +4954,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
           </div>
           <div class="form-group span-2">
             <label class="ldap-check wz-label" style="margin-top:8px">
-              <input class="wz-input" type="checkbox" id="ldapAutoAdoptLocal">
+              <input class="wz-input mm-switch" type="checkbox" id="ldapAutoAdoptLocal">
               <span>Auto-adopt local users with the same email</span>
             </label>
             <span class="ldap-hint" style="color:var(--err-text)"><strong>Risk:</strong> Allows an AD password to take over a local account with the same email. Enable only in directories where you're sure there are no namesakes. Adoptions stay pending for manual confirmation in <em>LDAP → Conflicts</em>. Local accounts that have 2FA configured are always refused even with this option enabled.</span>
@@ -5166,12 +4963,6 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       </div>
           </section>
       <input type="hidden" id="ldapEditId" value="">
-      <div id="ldapTestResult" class="ldap-test-result" style="display:none"></div>
-          <!-- Dialog-level action: try the credentials without saving. -->
-          <div class="ldap-test-row">
-            <input type="text" id="ldapTestLogin" placeholder="Login to test (optional)" autocomplete="off" class="wz-input">
-            <button type="button" class="btn" onclick="testLdap()" id="ldapTestBtn">Test connection</button>
-          </div>
         </div>
       </div>
 
@@ -5179,7 +4970,7 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
 <div class="modal-overlay" id="confirmModal" onclick="if(event.target===this)confirmModalCancel()">
   <div class="modal" style="max-width:440px">
     <div class="modal-header">
-      <h3 id="confirmModalTitle">Confirmação</h3>
+      <h3 id="confirmModalTitle">Confirm</h3>
       <button class="close-btn" id="confirmModalCloseBtn" onclick="confirmModalCancel()">&times;</button>
     </div>
     <div class="modal-body">
@@ -5187,8 +4978,8 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
       <p id="confirmModalDetail" style="margin:10px 0 0;color:var(--text3);font-size:13px;line-height:1.5;display:none"></p>
     </div>
     <div class="modal-footer">
-      <button class="btn" id="confirmModalCancelBtn" onclick="confirmModalCancel()">Cancelar</button>
-      <button class="btn btn-danger" id="confirmModalConfirmBtn" onclick="confirmModalAccept()">Confirmar</button>
+      <button class="btn" id="confirmModalCancelBtn" onclick="confirmModalCancel()">Cancel</button>
+      <button class="btn btn-danger" id="confirmModalConfirmBtn" onclick="confirmModalAccept()">Confirm</button>
     </div>
   </div>
 </div>
@@ -5197,15 +4988,15 @@ GET /reports/:group/docs?apiKey=&lt;key&gt;  ← específico do grupo</pre>
 <div class="modal-overlay" id="logoutModal" onclick="if(event.target===this)closeLogoutModal()">
   <div class="modal" style="max-width:420px">
     <div class="modal-header">
-      <h3>Terminar sessão</h3>
+      <h3>Sign out</h3>
       <button class="close-btn" id="logoutCloseBtn" onclick="closeLogoutModal()">&times;</button>
     </div>
     <div class="modal-body">
-      <p style="margin:0;color:var(--text2);font-size:14px;line-height:1.5">Tem a certeza que deseja terminar a sessão? Terá de iniciar sessão novamente para aceder ao painel.</p>
+      <p style="margin:0;color:var(--text2);font-size:14px;line-height:1.5">Are you sure you want to sign out? You will need to sign in again to access the dashboard.</p>
     </div>
     <div class="modal-footer">
-      <button class="btn" id="logoutCancelBtn" onclick="closeLogoutModal()">Cancelar</button>
-      <button class="btn btn-danger" id="logoutConfirmBtn" onclick="doLogout()">Terminar sessão</button>
+      <button class="btn" id="logoutCancelBtn" onclick="closeLogoutModal()">Cancel</button>
+      <button class="btn btn-danger" id="logoutConfirmBtn" onclick="doLogout()">Sign out</button>
     </div>
   </div>
 </div>

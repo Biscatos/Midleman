@@ -1,102 +1,77 @@
 <!DOCTYPE html>
-<html lang="pt" data-theme="dark">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Criar Conta — {{LOGIN_TITLE}}</title>
+  <title>Create account —{{LOGIN_TITLE}}</title>
+  <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='dark';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
+  <!-- MM_THEME -->
   <link rel="icon" href="{{LOGIN_LOGO_URL}}" type="image/x-icon">
   <link rel="shortcut icon" href="{{LOGIN_LOGO_URL}}">
-  <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='system';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: var(--scrollbar, #3a3d55); border-radius: 99px; }
-    * { scrollbar-width: thin; scrollbar-color: var(--scrollbar, #3a3d55) transparent; }
-    :root,
-    [data-theme="dark"] {
-      --bg: #080a0f; --text: #fafafa; --text2: #52525b; --text3: #71717a;
-      --input-bg: rgba(255,255,255,0.04); --input-bdr: rgba(255,255,255,0.09);
-      --input-text: #d4d4d8; --input-ph: #3f3f46;
-      --focus: #0078d4; --btn: #0078d4; --btn-hover: #005ea6; --btn-active: #004c8a;
-      --err-bg: rgba(220,38,38,0.08); --err-bdr: rgba(220,38,38,0.15); --err-text: #dc2626;
-      --ok-bg: rgba(0,184,92,0.08); --ok-bdr: rgba(0,184,92,0.2); --ok-text: #00b85c;
-      --footer: #27272a; --info-bg: rgba(255,255,255,0.03); --info-bdr: rgba(255,255,255,0.07);
-      --scrollbar: #3a3d55;
-    }
-    [data-theme="light"] {
-      --bg: #f4f5f7; --text: #0f1015; --text2: #52525b; --text3: #71717a;
-      --input-bg: rgba(0,0,0,0.04); --input-bdr: rgba(0,0,0,0.12);
-      --input-text: #0f1015; --input-ph: #a1a1aa;
-      --focus: #0078d4; --btn: #0078d4; --btn-hover: #005ea6; --btn-active: #004c8a;
-      --err-bg: rgba(220,38,38,0.06); --err-bdr: rgba(220,38,38,0.15); --err-text: #dc2626;
-      --ok-bg: rgba(0,184,92,0.06); --ok-bdr: rgba(0,184,92,0.15); --ok-text: #008a44;
-      --footer: #c4c4cc; --info-bg: rgba(0,0,0,0.03); --info-bdr: rgba(0,0,0,0.08);
-      --scrollbar: #c4c9d8;
-    }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; }
-    canvas#bg { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
-    .main { position: relative; z-index: 1; width: 100%; max-width: 400px; padding: 60px 24px 48px; }
-    h2 { font-size: 30px; font-weight: 300; letter-spacing: -0.4px; line-height: 1.2; margin-bottom: 6px; }
-    .greeting { font-size: 14px; color: var(--text3); margin-bottom: 28px; line-height: 1.5; }
-    .info-box { background: var(--info-bg); border: 1px solid var(--info-bdr); border-radius: 8px; padding: 12px 14px; margin-bottom: 24px; }
-    .info-row { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
-    .info-row + .info-row { margin-top: 6px; }
-    .info-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text3); white-space: nowrap; min-width: 44px; }
-    .info-val { color: var(--text2); word-break: break-all; }
-    .note-row { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--info-bdr); font-size: 12px; color: var(--text3); font-style: italic; line-height: 1.5; }
-    .error { background: var(--err-bg); border: 1px solid var(--err-bdr); color: var(--err-text); padding: 12px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; margin-bottom: 20px; display: none; }
+    ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
+    * { scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+    body { font-family: var(--font-sans); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; padding: 24px 16px; -webkit-font-smoothing: antialiased; }
+    .main { width: 100%; max-width: 440px; margin: auto; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 30px; }
+    .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 26px; min-width: 0; font-size: 16px; }
+    .brand-name { font-family: var(--font-display); font-weight: 600; font-size: 16px; letter-spacing: -0.1px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .brand-logo { width: 28px; height: 28px; object-fit: contain; border-radius: var(--radius-sm); flex-shrink: 0; }
+    .secured { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 16px; font-family: var(--font-mono); font-size: 11.5px; color: var(--text3); }
+    .secured svg { width: 13px; height: 13px; color: var(--accent); flex-shrink: 0; }
+    h2 { font-family: var(--font-display); font-size: 23px; font-weight: 600; letter-spacing: -0.3px; line-height: 1.25; margin-bottom: 6px; overflow-wrap: anywhere; }
+    .greeting { font-size: 13px; color: var(--text2); margin-bottom: 22px; line-height: 1.55; }
+    .invalid-title { margin-bottom: 10px; }
+    .invalid-msg { font-size: 13px; color: var(--text2); line-height: 1.6; }
+    .info-box { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 22px; }
+    .info-row { display: flex; align-items: baseline; gap: 10px; font-size: 13px; }
+    .info-row + .info-row { margin-top: 7px; }
+    .info-label { font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: .8px; color: var(--text3); white-space: nowrap; min-width: 52px; }
+    .info-val { color: var(--text); word-break: break-all; }
+    .note-row { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--text2); font-style: italic; line-height: 1.5; }
+    .error { background: var(--red-bg); border: 1px solid var(--red-bdr); color: var(--red); padding: 10px 12px; border-radius: var(--radius-sm); font-size: 13px; line-height: 1.5; margin-bottom: 18px; display: none; }
     .error.visible { display: block; }
-    .success-box { background: var(--ok-bg); border: 1px solid var(--ok-bdr); color: var(--ok-text); padding: 20px; border-radius: 10px; font-size: 14px; font-weight: 500; display: none; line-height: 1.6; }
+    .success-box { background: var(--green-bg); border: 1px solid var(--green-bdr); color: var(--green); padding: 16px; border-radius: var(--radius); font-size: 13.5px; line-height: 1.6; display: none; }
     .success-box.visible { display: block; }
-    .success-box svg { display: block; margin-bottom: 10px; }
-    .form-group { margin-bottom: 18px; }
-    .form-group label { display: block; font-size: 11px; font-weight: 500; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
-    .form-group input { width: 100%; height: 44px; padding: 12px; font-size: 14px; border-radius: 8px; border: 1px solid var(--input-bdr); background: var(--input-bg); color: var(--input-text); outline: none; transition: border-color .15s; font-family: inherit; }
-    .form-group input:focus { border-color: var(--focus); }
-    .form-group input::placeholder { color: var(--input-ph); }
-    .form-group input:-webkit-autofill, .form-group input:-webkit-autofill:hover, .form-group input:-webkit-autofill:focus {
-      border-color: transparent;
-      -webkit-box-shadow: inset 0 0 0 1000px rgba(12,14,20,0.97), 0 0 0 1px rgba(255,255,255,0.09);
-      box-shadow: inset 0 0 0 1000px rgba(12,14,20,0.97), 0 0 0 1px rgba(255,255,255,0.09);
-      -webkit-text-fill-color: var(--input-text); caret-color: var(--input-text);
-    }
-    [data-theme="light"] .form-group input:-webkit-autofill,
-    [data-theme="light"] .form-group input:-webkit-autofill:hover,
-    [data-theme="light"] .form-group input:-webkit-autofill:focus {
-      -webkit-box-shadow: inset 0 0 0 1000px rgba(234,236,242,0.97), 0 0 0 1px rgba(0,0,0,0.12);
-      box-shadow: inset 0 0 0 1000px rgba(234,236,242,0.97), 0 0 0 1px rgba(0,0,0,0.12);
-      -webkit-text-fill-color: var(--input-text);
-    }
+    .success-box svg { display: block; margin-bottom: 8px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: .8px; color: var(--text3); margin-bottom: 7px; }
+    .form-group input { width: 100%; height: var(--control-h-lg); padding: 0 12px; font-size: 14px; border-radius: var(--radius-sm); border: 1px solid var(--border2); background: var(--surface2); color: var(--text); outline: none; transition: border-color .15s; font-family: inherit; }
+    .form-group input:focus { border-color: var(--accent); }
+    .form-group input::placeholder { color: var(--text3); }
+    .form-group input:-webkit-autofill, .form-group input:-webkit-autofill:hover, .form-group input:-webkit-autofill:focus { -webkit-text-fill-color: var(--text); caret-color: var(--text); transition: background-color 600000s 0s, color 600000s 0s; }
     .pw-row { position: relative; }
     .pw-row input { padding-right: 42px; }
-    .pw-eye { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text3); cursor: pointer; padding: 2px; display: flex; align-items: center; }
-    .pw-eye:hover { color: var(--text2); }
-    .pw-strength { height: 2px; border-radius: 2px; margin-top: 6px; transition: all .3s; background: rgba(255,255,255,0.08); }
-    .pw-hint { font-size: 11px; color: var(--text3); margin-top: 4px; }
-    .btn-primary { width: 100%; height: 48px; border-radius: 8px; border: none; background: var(--btn); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; transition: background .15s; font-family: inherit; }
-    .btn-primary:hover { background: var(--btn-hover); }
-    .btn-primary:active { background: var(--btn-active); }
-    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
-    .btn-primary .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: spin .6s linear infinite; }
+    .pw-eye { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text3); cursor: pointer; padding: 3px; display: flex; align-items: center; border-radius: 4px; }
+    .pw-eye:hover { color: var(--accent); }
+    .pw-track { height: 3px; border-radius: 2px; margin-top: 7px; background: var(--surface2); overflow: hidden; }
+    .pw-strength { height: 100%; width: 0; border-radius: 2px; background: transparent; transition: width .3s, background-color .3s; }
+    .pw-hint { font-family: var(--font-mono); font-size: 11px; color: var(--text3); margin-top: 5px; }
+    .btn-primary { width: 100%; height: var(--control-h-lg); border-radius: var(--radius-sm); border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; margin-top: 6px; transition: background .15s, border-color .15s; font-family: inherit; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent2); border-color: var(--accent2); }
+    .btn-primary:disabled { opacity: .55; cursor: not-allowed; }
+    .btn-primary .spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .footer { position: relative; z-index: 1; text-align: center; font-size: 11px; color: var(--footer); padding: 20px; text-transform: uppercase; letter-spacing: .08em; }
-    @media (max-width: 480px) { .main { padding: 48px 20px 40px; } h2 { font-size: 26px; } }
+    @media (max-width: 420px) { .card { padding: 24px 20px; } h2 { font-size: 21px; } }
   </style>
 </head>
-<body>
-  <canvas id="bg"></canvas>
+<body class="mm-grid-ground">
 
   <main class="main">
+    <div class="card mm-frame">
+      <div class="brand"><img class="brand-logo" src="{{LOGIN_LOGO_URL}}" alt="" onerror="this.style.display='none'"><span class="brand-name">{{LOGIN_TITLE}}</span></div>
 
     <!-- Invalid / expired -->
     <div id="invalidBox" style="display:{{INVALID_DISPLAY}}">
-      <h2 style="margin-bottom:12px">Link inválido</h2>
-      <p style="color:var(--text3);font-size:14px;line-height:1.6">{{INVALID_MSG}}</p>
+      <h2 class="invalid-title">Invalid link</h2>
+      <p class="invalid-msg">{{INVALID_MSG}}</p>
     </div>
 
     <!-- Valid invite -->
     <div id="formBox" style="display:{{FORM_DISPLAY}}">
-      <h2 id="pageTitle">Criar conta</h2>
+      <h2 id="pageTitle">Create account</h2>
       <p class="greeting" id="pageGreeting"></p>
 
       <!-- Info box: email + note -->
@@ -119,58 +94,38 @@
       <!-- New user: password form -->
       <div id="newUserForm">
         <div class="form-group">
-          <label>Palavra-passe</label>
+          <label>Password</label>
           <div class="pw-row">
-            <input type="password" id="invPassword" placeholder="Mínimo 6 caracteres" autocomplete="new-password" oninput="checkStrength(this.value)">
+            <input type="password" id="invPassword" placeholder="At least 6 characters" autocomplete="new-password" oninput="checkStrength(this.value)">
             <button type="button" class="pw-eye" onclick="togglePw('invPassword',this)" tabindex="-1">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
           </div>
-          <div class="pw-strength" id="pwBar"></div>
+          <div class="pw-track"><div class="pw-strength" id="pwBar"></div></div>
           <div class="pw-hint" id="pwHint"></div>
         </div>
         <div class="form-group">
-          <label>Confirmar palavra-passe</label>
+          <label>Confirm password</label>
           <div class="pw-row">
-            <input type="password" id="invPassword2" placeholder="Repita a palavra-passe" autocomplete="new-password">
+            <input type="password" id="invPassword2" placeholder="Repeat password" autocomplete="new-password">
             <button type="button" class="pw-eye" onclick="togglePw('invPassword2',this)" tabindex="-1">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
           </div>
         </div>
-        <button class="btn-primary" id="regBtn" onclick="doRegister()">Criar conta e aceitar</button>
+        <button class="btn-primary" id="regBtn" onclick="doRegister()">Create account and accept</button>
       </div>
 
       <!-- Returning user: just accept -->
       <div id="returningUserForm" style="display:none">
-        <button class="btn-primary" id="acceptBtn" onclick="doAccept()">Aceitar acesso</button>
+        <button class="btn-primary" id="acceptBtn" onclick="doAccept()">Accept access</button>
       </div>
     </div>
+    </div>
+    <div class="secured"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 12h6.5"/><circle cx="12" cy="12" r="3.3"/><path d="M15 10.4 21.5 5.5"/><path d="M15.4 12H22"/><path d="M15 13.6 21.5 18.5"/></svg><span>Secured by Midleman</span></div>
   </main>
 
-  <footer class="footer">{{LOGIN_TITLE}}</footer>
-
   <script>
-    // Animated background
-    (function () {
-      const canvas = document.getElementById('bg'), ctx = canvas.getContext('2d');
-      const N = 38, D = 160, S = 0.28; let W, H, nodes;
-      const isLight = () => document.documentElement.getAttribute('data-theme') === 'light';
-      function resize() { W = canvas.width = innerWidth; H = canvas.height = innerHeight; }
-      function mk() { return { x: Math.random()*W, y: Math.random()*H, vx: (Math.random()-.5)*S, vy: (Math.random()-.5)*S, r: Math.random()*1.5+1 }; }
-      function init() { resize(); nodes = Array.from({length:N}, mk); }
-      function draw() {
-        ctx.clearRect(0,0,W,H);
-        const _l = isLight(); const lm = _l ? 0.10 : 0.18, dc = _l ? 'rgba(59,91,219,0.18)' : 'rgba(99,125,255,0.35)';
-        for (let i=0;i<nodes.length;i++) for (let j=i+1;j<nodes.length;j++) {
-          const dx=nodes[i].x-nodes[j].x, dy=nodes[i].y-nodes[j].y, d=Math.sqrt(dx*dx+dy*dy);
-          if (d<D) { ctx.strokeStyle=`rgba(59,91,219,${(1-d/D)*lm})`; ctx.lineWidth=0.8; ctx.beginPath(); ctx.moveTo(nodes[i].x,nodes[i].y); ctx.lineTo(nodes[j].x,nodes[j].y); ctx.stroke(); }
-        }
-        ctx.fillStyle=dc; for (const n of nodes) { ctx.beginPath(); ctx.arc(n.x,n.y,n.r,0,Math.PI*2); ctx.fill(); }
-      }
-      function tick() { for (const n of nodes) { n.x+=n.vx; n.y+=n.vy; if(n.x<0||n.x>W) n.vx*=-1; if(n.y<0||n.y>H) n.vy*=-1; } draw(); requestAnimationFrame(tick); }
-      addEventListener('resize', resize); init(); tick();
-    })();
 
     const TOKEN          = '{{TOKEN}}';
     const EMAIL          = '{{EMAIL}}';
@@ -185,14 +140,14 @@
 
     if (IS_RETURNING) {
       const name = INV_NAME ? INV_NAME.split(' ')[0] : '';
-      document.getElementById('pageTitle').textContent = 'Bem-vindo' + (name ? ', ' + name : '') + '!';
-      document.getElementById('pageGreeting').textContent = 'Já tem uma conta. Clique em Aceitar para ativar o seu acesso.';
+      document.getElementById('pageTitle').textContent = 'Welcome' + (name ? ', ' + name : '');
+      document.getElementById('pageGreeting').textContent = 'You already have an account. Click Accept access to activate your access.';
       document.getElementById('newUserForm').style.display = 'none';
       document.getElementById('returningUserForm').style.display = 'block';
     } else {
       const name = INV_NAME ? INV_NAME.split(' ')[0] : '';
-      document.getElementById('pageTitle').textContent = 'Criar conta' + (name ? ', ' + name : '');
-      document.getElementById('pageGreeting').textContent = 'Defina a sua palavra-passe para activar o acesso.';
+      document.getElementById('pageTitle').textContent = 'Create account' + (name ? ', ' + name : '');
+      document.getElementById('pageGreeting').textContent = 'Set your password to activate your access.';
     }
 
     function togglePw(id, btn) {
@@ -205,11 +160,11 @@
 
     function checkStrength(v) {
       const bar = document.getElementById('pwBar'), hint = document.getElementById('pwHint');
-      if (!v) { bar.style.width='0'; bar.style.background='rgba(255,255,255,0.08)'; hint.textContent=''; return; }
+      if (!v) { bar.style.width='0'; bar.style.background='var(--surface2)'; hint.textContent=''; return; }
       let s=0;
       if(v.length>=8) s++; if(v.length>=12) s++;
       if(/[A-Z]/.test(v)) s++; if(/[0-9]/.test(v)) s++; if(/[^A-Za-z0-9]/.test(v)) s++;
-      const l=[{w:'20%',c:'#dc2626',t:'Muito fraca'},{w:'40%',c:'#dc2626',t:'Fraca'},{w:'60%',c:'#f59e0b',t:'Razoável'},{w:'80%',c:'#00b85c',t:'Boa'},{w:'100%',c:'#00b85c',t:'Forte'}][Math.min(s,4)];
+      const l=[{w:'20%',c:'var(--red)',t:'Very weak'},{w:'40%',c:'var(--red)',t:'Weak'},{w:'60%',c:'var(--orange)',t:'Fair'},{w:'80%',c:'var(--green)',t:'Good'},{w:'100%',c:'var(--green)',t:'Strong'}][Math.min(s,4)];
       bar.style.width=l.w; bar.style.background=l.c; hint.textContent=l.t; hint.style.color=l.c;
     }
 
@@ -230,8 +185,8 @@
       clearError();
       const pw  = document.getElementById('invPassword').value;
       const pw2 = document.getElementById('invPassword2').value;
-      if (!pw || pw.length < 6) { showError('A palavra-passe deve ter pelo menos 6 caracteres.'); return; }
-      if (pw !== pw2) { showError('As palavras-passe não coincidem.'); return; }
+      if (!pw || pw.length < 6) { showError('Password must be at least 6 characters.'); return; }
+      if (pw !== pw2) { showError('Passwords do not match.'); return; }
       const btn = document.getElementById('regBtn');
       btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
       try {
@@ -240,9 +195,9 @@
           body: JSON.stringify({ password: pw }),
         });
         const data = await res.json();
-        if (!res.ok) { showError(data.error || 'Erro ao criar conta.'); btn.disabled=false; btn.textContent='Criar conta e aceitar'; return; }
-        showSuccess('Conta criada com sucesso. Já pode fazer login com o seu email e palavra-passe.');
-      } catch { showError('Erro de rede. Tente novamente.'); btn.disabled=false; btn.textContent='Criar conta e aceitar'; }
+        if (!res.ok) { showError(data.error || 'Could not create the account.'); btn.disabled=false; btn.textContent='Create account and accept'; return; }
+        showSuccess('Account created. You can now sign in with your email and password.');
+      } catch { showError('Network error. Try again.'); btn.disabled=false; btn.textContent='Create account and accept'; }
     }
 
     async function doAccept() {
@@ -254,9 +209,9 @@
           body: JSON.stringify({ password: '' }),
         });
         const data = await res.json();
-        if (!res.ok) { document.getElementById('regError').textContent=data.error||'Erro.'; document.getElementById('regError').classList.add('visible'); btn.disabled=false; btn.textContent='Aceitar acesso'; return; }
-        showSuccess('Acesso ativado com sucesso. Já pode fazer login com as suas credenciais existentes.');
-      } catch { document.getElementById('regError').textContent='Erro de rede.'; document.getElementById('regError').classList.add('visible'); btn.disabled=false; btn.textContent='Aceitar acesso'; }
+        if (!res.ok) { document.getElementById('regError').textContent=data.error||'Something went wrong.'; document.getElementById('regError').classList.add('visible'); btn.disabled=false; btn.textContent='Accept access'; return; }
+        showSuccess('Access activated. You can now sign in with your existing credentials.');
+      } catch { document.getElementById('regError').textContent='Network error.'; document.getElementById('regError').classList.add('visible'); btn.disabled=false; btn.textContent='Accept access'; }
     }
 
     document.addEventListener('keydown', e => {

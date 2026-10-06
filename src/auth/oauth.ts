@@ -105,6 +105,7 @@ export function initOauth(): void {
     // their own risk. New clients should always keep this on.
     if (!cols.includes('pkce_required'))         db.exec("ALTER TABLE oauth_clients ADD COLUMN pkce_required INTEGER NOT NULL DEFAULT 1");
     if (!cols.includes('post_logout_redirect_uri')) db.exec("ALTER TABLE oauth_clients ADD COLUMN post_logout_redirect_uri TEXT");
+    if (!cols.includes('logo_url'))              db.exec("ALTER TABLE oauth_clients ADD COLUMN logo_url TEXT");
     // Cleanup expired codes / refresh tokens / sessions once per hour.
     cleanupExpired();
     setInterval(cleanupExpired, 60 * 60 * 1000);
@@ -144,6 +145,15 @@ export interface OauthClient {
     /** Where /oauth/logout sends the browser when the request carries no valid
      *  post_logout_redirect_uri. Empty = origin of the first redirect_uri. */
     postLogoutRedirectUri: string;
+}
+
+/** https:// (or http on localhost) absolute URL, or throws. Used for admin-set URLs. */
+function assertHttpsUrl(v: string, field: string): void {
+    let u: URL;
+    try { u = new URL(v); } catch { throw new Error(`${field} must be an absolute URL`); }
+    if (u.protocol !== 'https:' && !(u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1'))) {
+        throw new Error(`${field} must use https (http only for localhost)`);
+    }
 }
 
 function randomToken(byteLength: number): string {

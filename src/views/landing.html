@@ -4,57 +4,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="icon" type="image/png" href="/logo.png">
   <title>Midleman — Edge middleware platform</title>
-  <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='system';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
+  <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='dark';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
+  <!-- MM_THEME -->
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
-    :root,
-    [data-theme="dark"] {
-      --bg: #0a0a0c;
-      --surface: #0e0e11;
-      --surface2: #18181b;
-      --surface3: #111114;
-      --border: #1a1a1f;
-      --border2: #27272a;
-      --border3: #3f3f46;
-      --text: #d4d4d8;
-      --text-strong: #fafafa;
-      --text-bright: #e4e4e7;
-      --text2: #a1a1aa;
-      --text3: #71717a;
-      --text4: #52525b;
-      --text5: #3f3f46;
-      --accent: #0078d4;
-      --accent-hover: #005ea6;
-      --accent-fg: #ffffff;
-      --up: #16a34a;
-      --down: #dc2626;
-    }
-
-    [data-theme="light"] {
-      --bg: #ffffff;
-      --surface: #f7f7f9;
-      --surface2: #eceef2;
-      --surface3: #f0f1f5;
-      --border: #e4e4e7;
-      --border2: #d4d4d8;
-      --border3: #a1a1aa;
-      --text: #18181b;
-      --text-strong: #09090b;
-      --text-bright: #18181b;
-      --text2: #52525b;
-      --text3: #71717a;
-      --text4: #a1a1aa;
-      --text5: #d4d4d8;
-      --accent: #0064b3;
-      --accent-hover: #004f8c;
-      --accent-fg: #ffffff;
-      --up: #15803d;
-      --down: #b91c1c;
-    }
-
     * {
       margin: 0;
       padding: 0;
@@ -62,14 +15,14 @@
     }
 
     body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: var(--bg);
+      font-family: var(--font-sans);
       color: var(--text);
       min-height: 100vh;
+      padding-top: 57px; /* clear the fixed top bar */
       -webkit-font-smoothing: antialiased;
     }
 
-    /* top bar — fixed */
+    /* ─── Top bar (fixed) ─────────────────────────────────────────────── */
     .topbar {
       position: fixed;
       top: 0;
@@ -79,46 +32,51 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 14px 32px;
+      gap: 12px;
+      height: 57px;
+      padding: 0 32px;
       border-bottom: 1px solid var(--border);
-      background: color-mix(in srgb, var(--bg) 88%, transparent);
+      background: var(--topbar-bg);
       backdrop-filter: saturate(140%) blur(10px);
       -webkit-backdrop-filter: saturate(140%) blur(10px);
     }
-    /* push content below the fixed bar */
-    body { padding-top: 60px; }
 
     .topbar-left {
       display: flex;
       align-items: center;
       gap: 10px;
+      min-width: 0;
     }
 
-    .topbar-left img {
-      width: 28px;
-      height: 28px;
-      border-radius: 6px;
-    }
+    .topbar-left .mm-mark { font-size: 14px; }
 
-    .topbar-left span {
+    .wordmark {
+      font-family: var(--font-display);
       font-weight: 600;
-      font-size: 15px;
-      color: var(--text-bright);
-      letter-spacing: -0.3px;
+      font-size: 16px;
+      color: var(--text);
+      letter-spacing: -0.01em;
     }
 
     .topbar-right {
       display: flex;
+      align-items: center;
       gap: 8px;
+      flex-shrink: 0;
     }
 
     .topbar-right a {
+      display: inline-flex;
+      align-items: center;
+      height: var(--control-h);
       font-size: 13px;
-      color: var(--text3);
+      font-weight: 500;
+      color: var(--text2);
       text-decoration: none;
-      padding: 6px 12px;
-      border-radius: 6px;
-      transition: color 0.15s, background 0.15s;
+      padding: 0 12px;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      transition: color var(--transition), background var(--transition), border-color var(--transition);
     }
 
     .topbar-right a:hover {
@@ -127,26 +85,25 @@
     }
 
     .topbar-right a.primary {
-      color: var(--accent-fg);
+      color: var(--on-accent);
       background: var(--accent);
+      border-color: var(--accent);
     }
 
     .topbar-right a.primary:hover {
-      background: var(--accent-hover);
+      background: var(--accent2);
+      border-color: var(--accent2);
     }
 
     .topbar-right a.gh {
-      display: inline-flex;
-      align-items: center;
       gap: 6px;
-      color: var(--text2);
-      border: 1px solid var(--border2);
+      border-color: var(--border2);
     }
 
     .topbar-right a.gh:hover {
-      color: var(--text-bright);
-      border-color: var(--border3);
-      background: var(--surface2);
+      color: var(--accent);
+      border-color: var(--accent);
+      background: transparent;
     }
 
     .topbar-right a.gh svg {
@@ -155,185 +112,140 @@
       fill: currentColor;
     }
 
-    /* main content */
-    .main {
-      max-width: 920px;
-      margin: 0 auto;
-      padding: 64px 24px 48px;
-    }
-
-    /* hero */
-    .hero {
-      max-width: 620px;
-      padding-top: 24px;
-      margin-bottom: 56px;
-    }
-
-    /* status pill — sits inside the fixed topbar, links to /health */
+    /* Status pill — sits in the top bar, links to /health */
     .status-pill {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 3px 9px 3px 8px;
+      height: 22px;
+      padding: 0 9px 0 8px;
       margin-left: 4px;
       border-radius: 999px;
-      background: var(--surface3);
+      background: var(--surface2);
       border: 1px solid var(--border);
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-family: var(--font-mono);
       font-size: 11px;
-      font-weight: 300;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.02em;
       color: var(--text3);
       text-decoration: none;
-      transition: color 0.15s, border-color 0.15s, background 0.15s;
-    }
-
-    .status-pill #statusText {
-      font-weight: 300;
+      white-space: nowrap;
+      transition: color var(--transition), border-color var(--transition);
     }
 
     .status-pill:hover {
       color: var(--text);
-      border-color: var(--border3);
+      border-color: var(--border2);
     }
 
     .status-pill .indicator {
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      background: var(--border3);
+      background: var(--border2);
+      flex-shrink: 0;
     }
 
-    .status-pill .indicator.up {
-      background: var(--up);
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--up) 22%, transparent);
+    .status-pill .indicator.up { background: var(--green); }
+    .status-pill .indicator.down { background: var(--red); }
+
+    /* ─── Main ────────────────────────────────────────────────────────── */
+    .main {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 72px 24px 48px;
     }
 
-    .status-pill .indicator.down {
-      background: var(--down);
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--down) 22%, transparent);
+    .hero {
+      max-width: 640px;
+      margin-bottom: 64px;
     }
 
     h1 {
-      font-size: 36px;
-      font-weight: 700;
-      color: var(--text-strong);
-      letter-spacing: -1px;
-      line-height: 1.2;
-      margin-bottom: 14px;
+      font-family: var(--font-display);
+      font-size: 42px;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: -0.025em;
+      line-height: 1.12;
+      margin-bottom: 16px;
     }
 
     .desc {
       font-size: 15px;
-      color: var(--text3);
+      color: var(--text2);
       line-height: 1.7;
-      margin-bottom: 36px;
+      margin-bottom: 32px;
     }
 
-    /* actions */
     .actions {
       display: flex;
+      flex-wrap: wrap;
       gap: 10px;
-      margin-bottom: 56px;
     }
 
     .actions a {
       display: inline-flex;
       align-items: center;
+      justify-content: center;
       gap: 6px;
-      padding: 10px 18px;
-      font-size: 13px;
-      font-weight: 600;
-      border-radius: 8px;
+      height: var(--control-h-lg);
+      padding: 0 18px;
+      font-size: 14px;
+      font-weight: 500;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
       text-decoration: none;
-      transition: all 0.15s;
+      transition: color var(--transition), background var(--transition), border-color var(--transition);
     }
 
     .actions .go {
       background: var(--accent);
-      color: var(--accent-fg);
+      border-color: var(--accent);
+      color: var(--on-accent);
     }
 
     .actions .go:hover {
-      background: var(--accent-hover);
-      transform: translateY(-1px);
+      background: var(--accent2);
+      border-color: var(--accent2);
     }
 
     .actions .sec {
       background: transparent;
       color: var(--text2);
-      border: 1px solid var(--border2);
+      border-color: var(--border2);
     }
 
     .actions .sec:hover {
-      border-color: var(--border3);
-      color: var(--text);
+      border-color: var(--accent);
+      color: var(--accent);
     }
 
-    /* info grid */
-    .grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      overflow: hidden;
-      margin-bottom: 48px;
-    }
-
-    .grid-item {
-      padding: 22px 18px;
-      border-right: 1px solid var(--border);
-      background: var(--surface);
-    }
-
-    .grid-item:last-child {
-      border-right: none;
-    }
-
-    .grid-item .label {
+    /* ─── Features ────────────────────────────────────────────────────── */
+    .section-title {
+      font-family: var(--font-mono);
       font-size: 11px;
       font-weight: 500;
-      color: var(--text4);
+      color: var(--text3);
       text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 8px;
+      letter-spacing: 0.08em;
+      margin-bottom: 14px;
     }
 
-    .grid-item .val {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 13px;
-      color: var(--text2);
-    }
-
-    .grid-item .val.ok {
-      color: var(--up);
-    }
-
-    .grid-item .val.err {
-      color: var(--down);
-    }
-
-    /* what it does */
-    .section-title {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text5);
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      margin-bottom: 16px;
-    }
-
+    /* 1px padding on a border-coloured ground draws the outer rule and the
+       1px gaps draw the dividers, so the frame brackets sit on the edge. */
     .cards {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 1px;
+      padding: 1px;
       background: var(--border);
-      border-radius: 10px;
+      border-radius: var(--radius-lg);
       overflow: hidden;
-      border: 1px solid var(--border);
       margin-bottom: 56px;
     }
+
+    .cards.mm-frame::before { top: 0; left: 0; }
+    .cards.mm-frame::after { bottom: 0; right: 0; }
 
     .card {
       padding: 20px 22px;
@@ -341,37 +253,38 @@
       display: flex;
       gap: 14px;
       align-items: flex-start;
-      transition: background 0.15s;
+      transition: background var(--transition);
     }
 
-    .card:hover { background: var(--surface2, var(--surface)); }
+    .card:hover { background: var(--surface2); }
 
     .card-num {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 11px;
-      color: var(--text5);
+      color: var(--accent);
       min-width: 20px;
-      padding-top: 2px;
-      letter-spacing: 0.5px;
+      padding-top: 3px;
+      letter-spacing: 0.04em;
     }
 
     .card-body { flex: 1; min-width: 0; }
 
     .card-body h3 {
-      font-size: 14px;
+      font-family: var(--font-display);
+      font-size: 15px;
       font-weight: 600;
       color: var(--text);
       margin-bottom: 6px;
-      letter-spacing: -0.2px;
+      letter-spacing: -0.005em;
     }
 
     .card-body p {
-      font-size: 12.5px;
-      color: var(--text3);
+      font-size: 13px;
+      color: var(--text2);
       line-height: 1.55;
     }
 
-    /* footer */
+    /* ─── Footer ──────────────────────────────────────────────────────── */
     footer {
       max-width: 920px;
       margin: 0 auto;
@@ -382,29 +295,29 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
       padding: 16px 0;
       border-top: 1px solid var(--border);
     }
 
     .footer-brand {
+      font-family: var(--font-mono);
       font-size: 12px;
-      color: var(--text5);
+      color: var(--text3);
     }
 
     .gh-badge {
       display: inline-flex;
-      align-items: center;
-      gap: 0;
-      border-radius: 6px;
+      align-items: stretch;
+      border-radius: var(--radius-sm);
       overflow: hidden;
       border: 1px solid var(--border2);
       text-decoration: none;
-      transition: border-color 0.15s;
+      transition: border-color var(--transition);
     }
 
-    .gh-badge:hover {
-      border-color: var(--border3);
-    }
+    .gh-badge:hover { border-color: var(--accent); }
 
     .gh-badge-left {
       display: flex;
@@ -428,17 +341,15 @@
       align-items: center;
       gap: 4px;
       padding: 5px 9px;
-      background: var(--surface3);
-      color: var(--text3);
+      background: var(--surface);
+      color: var(--text2);
       font-size: 11px;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       border-left: 1px solid var(--border2);
-      transition: color 0.15s;
+      transition: color var(--transition);
     }
 
-    .gh-badge:hover .gh-stat {
-      color: var(--text2);
-    }
+    .gh-badge:hover .gh-stat { color: var(--accent); }
 
     .gh-stat svg {
       width: 12px;
@@ -450,51 +361,38 @@
       stroke-linejoin: round;
     }
 
+    /* ─── Responsive ──────────────────────────────────────────────────── */
     @media (max-width: 760px) {
-      .topbar { padding: 12px 18px; }
+      .topbar { padding: 0 16px; }
       .topbar-right a:not(.primary):not(.gh) { display: none; }
       .cards { grid-template-columns: 1fr; }
     }
 
-    @media (max-width: 500px) {
-      .status-pill #statusText { display: none; }
-      .status-pill { padding: 6px; }
+    @media (max-width: 600px) {
+      .main { padding: 44px 16px 32px; }
+      footer { padding: 0 16px 28px; }
+      h1 { font-size: 30px; }
+      .hero { margin-bottom: 48px; }
+      .actions { flex-direction: column; }
+      .actions a { width: 100%; }
+      .card { padding: 18px 16px; }
     }
 
-    @media (max-width: 600px) {
-      .main {
-        padding: 40px 18px 32px;
-      }
-      h1 {
-        font-size: 28px;
-      }
-      .grid {
-        grid-template-columns: 1fr;
-      }
-      .grid-item {
-        border-right: none;
-        border-bottom: 1px solid var(--border);
-      }
-      .grid-item:last-child {
-        border-bottom: none;
-      }
-      .actions {
-        flex-direction: column;
-      }
-      .actions a {
-        justify-content: center;
-      }
-      .topbar-left span { display: none; }
+    @media (max-width: 500px) {
+      .status-pill #statusText { display: none; }
+      .status-pill { width: 22px; padding: 0; justify-content: center; margin-left: 0; }
+      .topbar-right a.gh .gh-label { display: none; }
+      .topbar-right a.gh { padding: 0 8px; }
     }
   </style>
 </head>
 
-<body>
+<body class="mm-grid-ground">
 
   <div class="topbar">
     <div class="topbar-left">
-      <img src="/logo.png" alt="Midleman">
-      <span>Midleman</span>
+      <span class="mm-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12h6.5"/><circle cx="12" cy="12" r="3.3"/><path d="M15 10.4 21.5 5.5"/><path d="M15.4 12H22"/><path d="M15 13.6 21.5 18.5"/></svg></span>
+      <span class="wordmark">Midleman</span>
       <a href="/health" class="status-pill" id="statusPill" title="View health">
         <span class="indicator" id="ind"></span>
         <span id="statusText">checking…</span>
@@ -503,7 +401,7 @@
     <div class="topbar-right">
       <a href="https://github.com/Biscatos/Midleman" class="gh" target="_blank" rel="noopener">
         <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-        GitHub
+        <span class="gh-label">GitHub</span>
       </a>
       <a href="/dashboard" class="primary">Dashboard</a>
     </div>
@@ -526,7 +424,7 @@
 
     <section class="features">
     <div class="section-title">What's inside</div>
-    <div class="cards">
+    <div class="cards mm-frame">
       <div class="card">
         <span class="card-num">01</span>
         <div class="card-body">

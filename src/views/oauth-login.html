@@ -3,131 +3,141 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sign in — Entrar</title>
-  <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='system';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
+  <title>Sign in</title>
+  <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='dark';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
+  <!-- MM_THEME -->
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root,
-    [data-theme="dark"] {
-      --bg: #080a0f; --text: #fafafa; --text2: #71717a;
-      --input-bg: rgba(255,255,255,0.04); --input-bdr: rgba(255,255,255,0.09);
-      --input-text: #d4d4d8; --input-ph: #3f3f46;
-      --btn: #0078d4; --btn-hover: #005ea6;
-      --err-bg: rgba(220,38,38,0.08); --err-bdr: rgba(220,38,38,0.2); --err-text: #f87171;
-      --card-bg: #0e1014; --card-bdr: #1f2128;
-      --back-bdr: #27272a; --back-hover: #18181b;
-    }
-    [data-theme="light"] {
-      --bg: #f4f5f7; --text: #0f1015; --text2: #52525b;
-      --input-bg: rgba(0,0,0,0.04); --input-bdr: rgba(0,0,0,0.12); --input-text: #0f1015; --input-ph: #a1a1aa;
-      --btn: #0078d4; --btn-hover: #005ea6;
-      --card-bg: #ffffff; --card-bdr: #e4e4e7;
-      --err-bg: rgba(220,38,38,0.06); --err-bdr: rgba(220,38,38,0.2); --err-text: #dc2626;
-      --back-bdr: #d4d4d8; --back-hover: #ebebee;
-    }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-      background: var(--bg); color: var(--text);
-      min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
+      font-family: var(--font-sans); color: var(--text);
+      min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 18px; padding: 32px 16px;
     }
     .card {
-      width: 100%; max-width: 380px;
-      background: var(--card-bg); border: 1px solid var(--card-bdr); border-radius: 12px;
-      padding: 32px 28px;
+      width: 100%; max-width: 400px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+      padding: 30px 32px;
     }
-    h1 { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
-    .sub { font-size: 13px; color: var(--text2); margin-bottom: 24px; }
-    label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 6px; margin-top: 14px; }
+    /* App ↔ Midleman handshake, like the "Sign in with" screens of big IdPs */
+    .handshake { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 20px; }
+    .app-logo {
+      position: relative; width: 48px; height: 48px; flex-shrink: 0;
+      border: 1px solid var(--border2); border-radius: 12px; background: var(--surface2);
+      display: flex; align-items: center; justify-content: center; overflow: hidden;
+    }
+    .app-logo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; padding: 8px; background: var(--surface); }
+    .app-logo img[src=""] { display: none; }
+    .app-initials { font: 600 16px var(--font-display); color: var(--text); letter-spacing: .3px; }
+    .handshake-line { width: 44px; height: 12px; color: var(--accent-bdr); }
+    .handshake .mm-mark { font-size: 24px; width: 48px; height: 48px; border-radius: 12px; }
+    .handshake .mm-mark svg { width: 24px; height: 24px; }
+
+    h1 { font: 600 22px/1.2 var(--font-display); letter-spacing: -.2px; text-align: center; }
+    .sub { font-size: 13px; color: var(--text2); text-align: center; margin-top: 6px; line-height: 1.5; }
+    .ctx { font-size: 13px; color: var(--text2); text-align: center; margin: 4px 0 22px; line-height: 1.5; }
+    .ctx strong { color: var(--text); font-weight: 600; }
+    .ctx .host { display: block; font: 11.5px var(--font-mono); color: var(--text3); margin-top: 2px; }
+
+    label {
+      display: block; margin: 14px 0 6px;
+      font: 500 10.5px var(--font-mono); letter-spacing: .8px; text-transform: uppercase; color: var(--text3);
+    }
     input {
-      width: 100%; padding: 10px 12px;
-      background: var(--input-bg); border: 1px solid var(--input-bdr);
-      border-radius: 6px; color: var(--input-text); font-size: 14px; outline: none;
-      transition: border-color .15s;
-      font-family: inherit;
+      width: 100%; height: var(--control-h-lg); padding: 0 12px;
+      background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius-sm);
+      color: var(--text); font: 14px var(--font-sans); outline: none; transition: border-color .15s;
     }
-    input:focus { border-color: var(--btn); }
-    input::placeholder { color: var(--input-ph); }
-    .totp-input { text-align: center; font-size: 22px; letter-spacing: 8px; font-weight: 700; }
-    button.primary {
-      width: 100%; padding: 11px; margin-top: 20px;
-      background: var(--btn); color: #fff; border: none; border-radius: 6px;
-      font-size: 14px; font-weight: 500; cursor: pointer; transition: background .15s;
-      font-family: inherit;
+    input:focus { border-color: var(--accent); }
+    input::placeholder { color: var(--text3); }
+    .totp-input { text-align: center; font: 500 20px var(--font-mono); letter-spacing: 10px; }
+
+    button.primary, button.retry, .consent-foot button {
+      width: 100%; height: var(--control-h-lg); margin-top: 20px;
+      background: var(--accent); color: var(--on-accent); border: 1px solid var(--accent); border-radius: var(--radius-sm);
+      font: 500 13.5px var(--font-sans); cursor: pointer; transition: background .15s, border-color .15s;
     }
-    button.primary:hover:not(:disabled) { background: var(--btn-hover); }
+    button.primary:hover:not(:disabled), button.retry:hover, .consent-foot button:hover { background: var(--accent2); border-color: var(--accent2); }
     button.primary:disabled { opacity: .5; cursor: not-allowed; }
     button.back {
-      width: 100%; padding: 9px; margin-top: 8px;
-      background: transparent; color: var(--text2); border: 1px solid var(--back-bdr);
-      border-radius: 6px; font-size: 13px; cursor: pointer; transition: background .15s;
-      font-family: inherit;
+      width: 100%; height: var(--control-h-lg); margin-top: 8px;
+      background: transparent; color: var(--text2); border: 1px solid var(--border2); border-radius: var(--radius-sm);
+      font: 500 13px var(--font-sans); cursor: pointer; transition: border-color .15s, color .15s;
     }
-    button.back:hover { background: var(--back-hover); }
+    button.back:hover { border-color: var(--accent); color: var(--accent); }
+    #forgotLink { color: var(--text2) !important; }
+    #forgotLink:hover { color: var(--accent) !important; }
     .err {
-      margin-top: 14px; padding: 8px 12px;
-      background: var(--err-bg); border: 1px solid var(--err-bdr); border-radius: 6px;
-      color: var(--err-text); font-size: 12.5px;
+      margin-top: 14px; padding: 9px 12px;
+      background: var(--red-bg); border: 1px solid var(--red-bdr); border-radius: var(--radius-sm);
+      color: var(--red); font-size: 12.5px;
     }
-    .hidden { display: none; }
-    .expired-icon { font-size: 36px; margin-bottom: 14px; }
-    .expired-title { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
-    .expired-msg { font-size: 13px; color: var(--text2); line-height: 1.6; margin-bottom: 20px; }
-    button.retry {
-      width: 100%; padding: 11px;
-      background: var(--btn); color: #fff; border: none; border-radius: 6px;
-      font-size: 14px; font-weight: 500; cursor: pointer; transition: background .15s;
-      font-family: inherit;
+    .hidden { display: none !important; }
+
+    .expired-icon {
+      width: 40px; height: 40px; margin: 0 auto 14px; border-radius: 50%;
+      border: 1px solid var(--orange-bdr); color: var(--orange);
+      display: flex; align-items: center; justify-content: center;
     }
-    button.retry:hover { background: var(--btn-hover); }
+    .expired-title { font: 600 17px var(--font-display); text-align: center; margin-bottom: 8px; }
+    .expired-msg { font-size: 13px; color: var(--text2); line-height: 1.6; margin-bottom: 4px; text-align: center; }
+
+    .qr { display: flex; justify-content: center; margin: 10px 0 12px; }
+    .qr img { width: 180px; height: 180px; background: #FFFFFF; padding: 8px; border: 1px solid var(--border2); border-radius: var(--radius); }
+    .secret {
+      text-align: center; font: 12px var(--font-mono); color: var(--text); word-break: break-all;
+      padding: 8px 10px; border: 1px dashed var(--accent-bdr); border-radius: var(--radius-sm); margin-bottom: 4px;
+    }
 
     .consent-overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.65);
-      display: flex; align-items: center; justify-content: center; padding: 20px;
-      z-index: 1000;
+      position: fixed; inset: 0; background: var(--overlay); backdrop-filter: blur(3px);
+      display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 1000;
     }
     .consent-box {
       width: 100%; max-width: 520px; max-height: 85vh;
-      background: var(--card-bg); border: 1px solid var(--card-bdr); border-radius: 12px;
+      background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius-lg);
       display: flex; flex-direction: column;
     }
-    .consent-head { padding: 20px 24px 12px; border-bottom: 1px solid var(--card-bdr); }
-    .consent-head h2 { font-size: 16px; font-weight: 600; color: var(--text); }
-    .consent-body {
-      padding: 16px 24px; overflow-y: auto; flex: 1;
-      font-size: 13px; line-height: 1.6; color: var(--text);
-    }
+    .consent-head { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+    .consent-head h2 { font: 600 15px var(--font-display); color: var(--text); }
+    .consent-body { padding: 16px 20px; overflow-y: auto; flex: 1; font-size: 13px; line-height: 1.6; color: var(--text); }
     .consent-body p { margin: 0 0 10px; }
     .consent-body p:last-child { margin-bottom: 0; }
     .consent-body ul { padding-left: 20px; margin: 0 0 10px; }
     .consent-body li { margin: 4px 0; }
-    .consent-body a { color: var(--btn); text-decoration: underline; }
+    .consent-body a { color: var(--accent); text-decoration: underline; }
     .consent-body strong { font-weight: 600; }
-    .consent-foot { padding: 14px 24px 18px; border-top: 1px solid var(--card-bdr); }
-    .consent-foot button {
-      width: 100%; padding: 11px;
-      background: var(--btn); color: #fff; border: none; border-radius: 6px;
-      font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit;
-    }
-    .consent-foot button:hover { background: var(--btn-hover); }
+    .consent-foot { padding: 12px 20px 16px; border-top: 1px solid var(--border); }
+    .consent-foot button { margin-top: 0; }
+
+    .secured { display: flex; align-items: center; gap: 8px; font: 11.5px var(--font-mono); color: var(--text3); }
+    .secured svg { width: 13px; height: 13px; color: var(--accent); }
+    .secured b { font-weight: 500; color: var(--text2); }
+    @media (max-width: 420px) { .card { padding: 24px 20px; } }
   </style>
 </head>
-<body>
+<body class="mm-grid-ground">
   <!-- Consent modal — only rendered if enabled -->
   <div id="consentModal" class="consent-overlay hidden" data-enabled="{{CONSENT_ENABLED}}">
-    <div class="consent-box">
+    <div class="consent-box mm-frame">
       <div class="consent-head"><h2>{{CONSENT_TITLE}}</h2></div>
       <div class="consent-body">{{CONSENT_BODY}}</div>
       <div class="consent-foot"><button type="button" id="consentAccept">Accept and continue</button></div>
     </div>
   </div>
 
-  <div class="card">
+  <div class="card mm-frame">
+    <div class="handshake" aria-hidden="true">
+      <span class="app-logo"><span class="app-initials">{{CLIENT_INITIALS}}</span><img src="{{CLIENT_LOGO_URL}}" alt="" referrerpolicy="no-referrer" onerror="this.remove()"></span>
+      <svg class="handshake-line" viewBox="0 0 44 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="3 4"><path d="M2 6h40"/></svg>
+      <span class="mm-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12h6.5"/><circle cx="12" cy="12" r="3.3"/><path d="M15 10.4 21.5 5.5"/><path d="M15.4 12H22"/><path d="M15 13.6 21.5 18.5"/></svg></span>
+    </div>
     <h1 id="heading">Sign in</h1>
-    <p class="sub" id="subText">Enter your credentials to continue.</p>
+    <p class="ctx"><span id="ctxPrefix">to continue to</span> <strong>{{CLIENT_NAME}}</strong><span class="host">{{CLIENT_HOST}}</span></p>
+    <p class="sub hidden" id="subText">Enter your credentials to continue.</p>
 
     <!-- Session expired / generic fatal error panel -->
     <div id="stepExpired" class="hidden">
-      <div class="expired-icon">⏱️</div>
+      <div class="expired-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M9 2h6"/></svg></div>
       <div class="expired-title" id="expiredTitle">Session expired</div>
       <div class="expired-msg" id="expiredMsg">Your sign-in session has expired. Please close this tab and start the sign-in process again from the application.</div>
       <button class="retry" id="btnClose" type="button" onclick="window.close()">Close tab</button>
@@ -158,9 +168,9 @@
 
     <!-- Step 2b: TOTP first-time setup (admin flagged "Pending setup") -->
     <div id="stepSetup" class="hidden">
-      <p class="sub" id="setupIntro" style="margin-bottom:14px">Scan this QR code with your authenticator app, then enter the 6-digit code to finish setup.</p>
-      <div style="display:flex;justify-content:center;margin:8px 0 12px"><img id="setupQr" alt="TOTP QR" style="width:180px;height:180px;background:#fff;padding:6px;border-radius:6px"></div>
-      <div style="text-align:center;font-family:monospace;font-size:12px;color:var(--text2);word-break:break-all;margin-bottom:6px" id="setupSecret"></div>
+      <p class="sub" id="setupIntro" style="margin-bottom:6px">Scan this QR code with your authenticator app, then enter the 6-digit code to finish setup.</p>
+      <div class="qr"><img id="setupQr" alt="TOTP QR"></div>
+      <div class="secret" id="setupSecret"></div>
       <label id="labelSetupTotp" for="setupTotp">6-digit code</label>
       <input id="setupTotp" type="text" class="totp-input" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code">
       <button id="setupBtn" class="primary" type="button">Verify & finish setup</button>
@@ -169,6 +179,8 @@
     </div>
 
   </div>
+
+  <div class="secured"><span>secured by</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12h6.5"/><circle cx="12" cy="12" r="3.3"/><path d="M15 10.4 21.5 5.5"/><path d="M15.4 12H22"/><path d="M15 13.6 21.5 18.5"/></svg><b>Midleman</b></div>
 
   <script>
     const AUTH_REQUEST = '{{AUTH_REQUEST}}';
@@ -180,6 +192,7 @@
       en: {
         pageTitle:       'Sign in',
         heading:         'Sign in',
+        ctxPrefix:       'to continue to',
         sub:             'Enter your credentials to continue.',
         labelUser:       'Username or email',
         labelPassword:   'Password',
@@ -212,6 +225,7 @@
       pt: {
         pageTitle:       'Entrar',
         heading:         'Entrar',
+        ctxPrefix:       'para continuar para',
         sub:             'Introduza as suas credenciais para continuar.',
         labelUser:       'Nome de utilizador ou email',
         labelPassword:   'Palavra-passe',
@@ -257,6 +271,7 @@
       document.documentElement.lang = detectLang();
       document.title = T.pageTitle;
       document.getElementById('heading').textContent   = T.heading;
+      document.getElementById('ctxPrefix').textContent = T.ctxPrefix;
       document.getElementById('subText').textContent   = T.sub;
       document.getElementById('labelUser').textContent = T.labelUser;
       document.getElementById('labelPw').textContent   = T.labelPassword;
@@ -467,7 +482,7 @@
       } catch {}
       err1.textContent = T.forgotSent;
       err1.classList.remove('hidden');
-      err1.style.color = '#00b85c';
+      err1.style.color = 'var(--green)';
       err1.style.background = 'rgba(0,184,92,0.08)';
       err1.style.borderColor = 'rgba(0,184,92,0.2)';
     }
@@ -479,8 +494,10 @@
     setupBackBtn.addEventListener('click', showStep1);
     const _fl = document.getElementById('forgotLink');
     if (_fl) _fl.addEventListener('click', doForgot);
-    passwordEl.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
-    usernameEl.addEventListener('keydown', e => { if (e.key === 'Enter') passwordEl.focus(); });
+    // Enter in either field submits, exactly like clicking Continue.
+    const submitOnEnter = e => { if (e.key === 'Enter') { e.preventDefault(); if (!loginBtn.disabled) doLogin(); } };
+    passwordEl.addEventListener('keydown', submitOnEnter);
+    usernameEl.addEventListener('keydown', submitOnEnter);
     totpEl.addEventListener('keydown', e => { if (e.key === 'Enter') doTotp(); });
     setupTotpEl.addEventListener('keydown', e => { if (e.key === 'Enter') doSetup(); });
 

@@ -18,9 +18,9 @@ const _prefersDark = (typeof window !== 'undefined' && window.matchMedia)
 
 function getThemePref() {
   const v = localStorage.getItem(THEME_KEY);
-  // Default to 'system' so the OS preference wins on first visit, matching the
-  // bootstrap snippet injected in every page <head>.
-  return THEME_MODES.includes(v) ? v : 'system';
+  // Dark by default (matches the bootstrap snippet in every page <head>);
+  // 'system' only when the user picks it.
+  return THEME_MODES.includes(v) ? v : 'dark';
 }
 function resolveTheme(pref) {
   if (pref === 'system') return _prefersDark && _prefersDark.matches ? 'dark' : 'light';
@@ -32,6 +32,9 @@ function applyTheme() {
   document.documentElement.setAttribute('data-theme', effective);
   updateThemeIcon(pref);
   if (typeof updateAceThemes === 'function') updateAceThemes();
+  // Charts sample the theme tokens at draw time — repaint on every theme
+  // change (toggle or OS switch in 'system' mode).
+  if (typeof redrawOverviewCharts === 'function') redrawOverviewCharts();
 }
 function initTheme() {
   applyTheme();
@@ -49,9 +52,6 @@ function toggleTheme() {
   const next = THEME_MODES[(idx + 1) % THEME_MODES.length];
   localStorage.setItem(THEME_KEY, next);
   applyTheme();
-  // Chart colors are sampled at draw time — repaint immediately instead of
-  // waiting for the next poll.
-  if (typeof redrawOverviewCharts === 'function') redrawOverviewCharts();
 }
 const THEME_ICONS = {
   dark: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>`,
@@ -292,10 +292,7 @@ async function doLoginStep2Setup() {
 function copyLoginSetupSecret() {
   const el = document.getElementById('loginSetupSecret');
   if (!el) return;
-  navigator.clipboard.writeText(el.textContent || '').catch(() => {});
-  const orig = el.style.background;
-  el.style.background = 'rgba(34,197,94,0.15)';
-  setTimeout(() => { el.style.background = orig; }, 400);
+  mmCopy(el.textContent || '', el);
 }
 
 async function doLoginStep2() {
@@ -384,9 +381,9 @@ function showConfirm(opts) {
     message = parts.shift();
     detail = parts.join('\n\n');
   }
-  if (!title) title = 'Confirmação';
-  const confirmText = o.confirmText || 'Confirmar';
-  const cancelText  = o.cancelText  || 'Cancelar';
+  if (!title) title = 'Confirm';
+  const confirmText = o.confirmText || 'Confirm';
+  const cancelText  = o.cancelText  || 'Cancel';
   const danger = (o.danger !== false);
 
   document.getElementById('confirmModalTitle').textContent = title;
@@ -438,7 +435,7 @@ async function doLogout() {
   if (confirmBtn) {
     confirmBtn.dataset.loading = '1';
     confirmBtn.disabled = true;
-    confirmBtn.innerHTML = '<span class="btn-spinner"></span> A terminar sessão…';
+    confirmBtn.innerHTML = '<span class="btn-spinner"></span> Signing out…';
   }
   if (cancelBtn) cancelBtn.disabled = true;
   if (closeBtn)  closeBtn.disabled  = true;
@@ -465,6 +462,7 @@ const PAGE_TITLES = {
   audit: 'Audit Log',
   errors: 'System Alerts',
   logsettings: 'Log Storage',
+  docs: 'Docs',
   reports: 'Report Feeds',
   webhookDestinations: 'Webhooks · Destinations'
 };
@@ -474,7 +472,7 @@ const PAGE_TITLES = {
 const ROUTABLE_PAGES = new Set([
   'overview','requests','proxyusers','profiles','connectors',
   'oauthclients','consentpages','ldap','email','sms','notifications',
-  'npm','audit','webhooks','ldap','reports','errors','logsettings',
+  'npm','audit','webhooks','ldap','reports','errors','logsettings','docs',
 ]);
 
 function navigate(page, opts = {}) {
@@ -546,6 +544,7 @@ function navigate(page, opts = {}) {
   if (page === 'audit') { fetchAuditLogs(true); }
   if (page === 'errors') { fetchErrorFeed(true); }
   if (page === 'logsettings') { fetchLogSettings(); }
+  if (page === 'docs') { renderDocs(); }
   if (page === 'reports') { loadReportFeeds(); loadGcInstances(); rfStartSse(); rfViewerUpdateSelect(); }
   const titleEl = document.getElementById('topbarPageTitle');
   if (titleEl) titleEl.textContent = PAGE_TITLES[page] || page;
@@ -682,7 +681,7 @@ async function withBusy(btnOrEvent, busyLabel, fn) {
   const wasDisabled = btn.disabled;
   btn.disabled = true;
   btn.setAttribute('aria-busy', 'true');
-  btn.innerHTML = '<span class="btn-spinner" aria-hidden="true"></span> ' + (busyLabel || 'A processar…');
+  btn.innerHTML = '<span class="btn-spinner" aria-hidden="true"></span> ' + (busyLabel || 'Processing…');
   try {
     return await fn();
   } finally {
@@ -697,3 +696,157 @@ function fmtNum(n) { if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'; if (n >= 1
 function fmtMs(ms) { if (!ms) return '0ms'; if (ms < 1) return ms.toFixed(2) + 'ms'; if (ms < 1000) return Math.round(ms) + 'ms'; return (ms / 1000).toFixed(2) + 's'; }
 function fmtUptime(s) { if (s < 60) return s + 's'; if (s < 3600) return Math.floor(s / 60) + 'm ' + s % 60 + 's'; const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h + 'h ' + m + 'm'; }
 function fmtBytes(b) { if (b < 1024) return b + ' B'; if (b < 1048576) return (b / 1024).toFixed(1) + ' KB'; return (b / 1048576).toFixed(1) + ' MB'; }
+
+// ─── Field hints live under the field, never inside the label ───────────────
+// A muted <span> inside a field label wraps the label onto two lines and pushes
+// that field's control below its neighbours in the same grid row. Move any such
+// hint to the end of the field's own block as a .mm-field-hint (most were moved
+// in the markup already; this catches nested layouts and JS-rendered forms).
+function mmRelocateLabelHints(root = document) {
+  root.querySelectorAll('label.wz-label > span[style*="--text3"], .form-group > label > span[style*="--text3"]').forEach(span => {
+    const label = span.parentElement;
+    if (!label || label.querySelector('input,select,textarea')) return; // toggle labels keep their text
+    const block = label.parentElement;
+    if (!block) return;
+    const hint = document.createElement('div');
+    hint.className = 'mm-field-hint';
+    let text = span.textContent.trim().replace(/^[—–-]\s*/, '');
+    if (text.startsWith('(') && text.endsWith(')')) text = text.slice(1, -1);
+    hint.textContent = text.charAt(0).toUpperCase() + text.slice(1);
+    if (span.title) hint.title = span.title;
+    span.remove();
+    block.appendChild(hint);
+  });
+}
+mmRelocateLabelHints();
+
+
+// ─── Menus are always A–Z ───────────────────────────────────────────────────
+// Within every section of the sidebar (and the Docs index) items are kept in
+// alphabetical order, whatever order the markup lists them in.
+function mmSortMenus() {
+  const sortRuns = (container, isItem, labelOf) => {
+    if (!container) return;
+    let run = [];
+    const flush = () => {
+      if (run.length > 1) {
+        const anchor = run[run.length - 1].nextSibling;
+        run.slice().sort((a, b) => labelOf(a).localeCompare(labelOf(b), 'en', { sensitivity: 'base' }))
+          .forEach(el => container.insertBefore(el, anchor));
+      }
+      run = [];
+    };
+    [...container.children].forEach(el => { if (isItem(el)) run.push(el); else flush(); });
+    flush();
+  };
+  const sidebarLabel = el => (el.querySelector('.sidebar-link-label')?.textContent || '').trim();
+  const isLink = el => el.classList.contains('sidebar-link');
+  sortRuns(document.getElementById('sidebarNav'), isLink, sidebarLabel);
+  sortRuns(document.getElementById('sidebarExtBody'), isLink, sidebarLabel);
+  sortRuns(document.querySelector('.docs-nav'), el => el.matches('a[data-docs]'), el => el.textContent.trim());
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mmSortMenus);
+else mmSortMenus();
+
+
+// ─── Clipboard ──────────────────────────────────────────────────────────────
+// navigator.clipboard only exists on HTTPS / localhost; dashboards served over
+// plain HTTP fall back to a hidden textarea + execCommand('copy').
+// Feedback is shown on the clicked control itself ("✓ Copied"), with a toast
+// only when there is no control to show it on.
+const MM_CHECK_SVG = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+
+function _mmCopyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text).catch(() => _mmCopyFallback(text));
+  }
+  return _mmCopyFallback(text);
+}
+function _mmCopyFallback(text) {
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0';
+    const active = document.activeElement;
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    ta.remove();
+    if (active && typeof active.focus === 'function') active.focus({ preventScroll: true });
+    ok ? resolve() : reject(new Error('copy not allowed'));
+  });
+}
+
+/** Copy `text`; `el` (optional) is the control that triggered it and shows the feedback. */
+function mmCopy(text, el, okMsg) {
+  return _mmCopyText(String(text ?? '')).then(() => {
+    if (el && el.tagName === 'BUTTON') _mmCopyFeedback(el, true);
+    else if (el) { el.classList.add('mm-copied'); setTimeout(() => el.classList.remove('mm-copied'), 900); }
+    if (!el || okMsg) toast(okMsg || 'Copied to clipboard');
+    return true;
+  }, () => {
+    if (el && el.tagName === 'BUTTON') _mmCopyFeedback(el, false);
+    toast('Could not copy — select the text and press Ctrl+C', 'error');
+    return false;
+  });
+}
+function _mmCopyFeedback(btn, ok) {
+  if (!btn.dataset.copyLabel) btn.dataset.copyLabel = btn.innerHTML;
+  clearTimeout(btn._copyTimer);
+  btn.classList.toggle('is-copied', ok);
+  btn.classList.toggle('is-copy-failed', !ok);
+  btn.innerHTML = ok ? MM_CHECK_SVG + '<span>Copied</span>' : '<span>Failed</span>';
+  btn.setAttribute('aria-live', 'polite');
+  btn._copyTimer = setTimeout(() => {
+    btn.innerHTML = btn.dataset.copyLabel;
+    delete btn.dataset.copyLabel;
+    btn.classList.remove('is-copied', 'is-copy-failed');
+  }, 1600);
+}
+/** For buttons: copies data-copy, else the <pre> of the surrounding code block. */
+function mmCopyFrom(btn) {
+  const text = btn.dataset.copy !== undefined
+    ? btn.dataset.copy
+    : (btn.closest('.rdm-code-block, .docs-codeblock')?.querySelector('pre')?.textContent || '');
+  return mmCopy(text, btn);
+}
+
+
+// ─── Sticky page toolbars ───────────────────────────────────────────────────
+// On list pages the title and the filter bar stay pinned while the table
+// scrolls: the page header and the filter bar that follows it are wrapped in
+// one sticky block (CSS: .page-sticky).
+function mmStickyToolbars() {
+  document.querySelectorAll('.page > .page-header').forEach(h => {
+    if (h.parentElement.classList.contains('page-sticky')) return;
+    const bar = h.nextElementSibling;
+    const hasBar = !!bar && bar.classList.contains('mm-filterbar');
+    // Pages opt in without a filter bar with data-sticky on their header (e.g. Docs).
+    if (!hasBar && !h.hasAttribute('data-sticky')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'page-sticky';
+    h.before(wrap);
+    wrap.append(h);
+    if (hasBar) wrap.append(bar);
+  });
+  // Table headers stick right under the toolbar: expose its height to CSS.
+  if (window.ResizeObserver) {
+    const ro = new ResizeObserver(entries => {
+      for (const en of entries) en.target.parentElement.style.setProperty('--page-sticky-h', Math.round(en.target.getBoundingClientRect().height) + 'px');
+    });
+    document.querySelectorAll('.page > .page-sticky').forEach(w => ro.observe(w));
+  }
+  const main = document.querySelector('.main');
+  if (!main) return;
+  const mark = () => {
+    const stuck = main.scrollTop > 8;
+    document.querySelectorAll('.page.active .page-sticky').forEach(w => w.classList.toggle('is-stuck', stuck));
+  };
+  main.addEventListener('scroll', mark, { passive: true });
+  mark();
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mmStickyToolbars);
+else mmStickyToolbars();

@@ -815,7 +815,7 @@ async function injectInboundWebchat(cs: ConnectorServer, session: ConnectorSessi
         } else {
             // The Webchat API rejects other types — surface a note so the agent
             // at least knows a file arrived (and its name/type).
-            await wc.sendClientMessage(conversationUuid, `📎 ${filename} (${effectiveMime}) — anexo não suportado pela Webchat API`);
+            await wc.sendClientMessage(conversationUuid, `📎 ${filename} (${effectiveMime}) — attachment not supported by the Webchat API`);
         }
     }
     if (msg.text) {

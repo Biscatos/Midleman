@@ -475,3 +475,82 @@
 .rdm-code-block:hover .rdm-copy-code {
   opacity: 1;
 }
+
+/* ═══ Fit to the viewport ═══════════════════════════════════════════════════
+   The dialog never grows past the visible area: header (and actions) stay
+   fixed, only the body scrolls, and long payloads scroll inside their block. */
+#reqDetailModal {
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow: hidden !important;
+}
+#reqDetailModal .rdm-panel {
+  width: 100%;
+  max-width: 960px;
+  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-lg, 12px);
+}
+#reqDetailModal .rdm-header { flex-shrink: 0; }
+#reqDetailModal .rdm-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+#reqDetailModal .rdm-code-block pre { max-height: 320px; }
+@media (max-width: 720px) {
+  #reqDetailModal { padding: 0; }
+  #reqDetailModal .rdm-panel { max-height: 100vh; max-height: 100dvh; height: 100%; border-radius: 0; }
+}
+
+/* ═══ Copy buttons: always discoverable, confirm in place ═══════════════════ */
+.rdm-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: 400 11px var(--font-mono);
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--surface);
+}
+.rdm-copy-code { opacity: .75; }
+.rdm-code-block:hover .rdm-copy-code, .rdm-copy-code:focus-visible { opacity: 1; }
+.rdm-copy-btn.is-copied, .docs-copy.is-copied, .btn.is-copied {
+  opacity: 1;
+  color: var(--green) !important;
+  border-color: var(--green-bdr) !important;
+  background: var(--green-bg) !important;
+}
+.rdm-copy-btn.is-copy-failed, .docs-copy.is-copy-failed, .btn.is-copy-failed {
+  opacity: 1;
+  color: var(--red) !important;
+  border-color: var(--red-bdr) !important;
+}
+.docs-copy { display: inline-flex; align-items: center; gap: 4px; }
+.mm-copied { outline: 1px solid var(--green-bdr); outline-offset: 2px; transition: outline-color .3s; }
+
+/* ═══ Full screen ═══ */
+.rdm-fs-btn { display: inline-flex; align-items: center; justify-content: center; }
+.rdm-fs-btn .rdm-fs-exit { display: none; }
+#reqDetailModal.is-fullscreen .rdm-fs-btn .rdm-fs-enter { display: none; }
+#reqDetailModal.is-fullscreen .rdm-fs-btn .rdm-fs-exit { display: inline; }
+#reqDetailModal.is-fullscreen { padding: 0; }
+#reqDetailModal.is-fullscreen .rdm-panel {
+  max-width: none;
+  height: 100%;
+  max-height: 100vh;
+  max-height: 100dvh;
+  border-radius: 0;
+  border: none;
+  animation: none;
+}
+#reqDetailModal.is-fullscreen .rdm-panel::before,
+#reqDetailModal.is-fullscreen .rdm-panel::after { display: none; }
+#reqDetailModal.is-fullscreen .rdm-body { padding-left: max(24px, calc((100% - 1280px) / 2)); padding-right: max(24px, calc((100% - 1280px) / 2)); }
+#reqDetailModal.is-fullscreen .rdm-code-block pre { max-height: 60vh; }
