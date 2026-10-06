@@ -1,4 +1,5 @@
 import type { ProxyProfile } from '../core/types';
+import { withTheme } from '../core/ui-theme';
 import { handleDirectProxy, rememberPeerIp, isSecureRequest } from '../proxy/proxy';
 import { resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { verifyProxyUserCredentials, signJwt, verifyJwt, getJwtMaxAge, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, proxyUserHasProfile, createProxyLoginChallenge, consumeProxyLoginChallenge, peekProxyLoginChallenge, generateTotpSecret, verifyTotp, setupProxyUserTotp, userIdToUuid, upsertLdapShadowProxyUserDetailed, assignProxyUserToProfile, getProxyUserTotpSecret, logAudit, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, findResetCandidateByEmail, getProxyUser, updateProxyUserPassword } from '../auth/auth';
@@ -370,7 +371,7 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
                     const info = getPasswordResetToken(token);
                     const expired = !info || !!info.usedAt || new Date(info.expiresAt) < new Date();
                     const escH = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-                    const pageHtml = readFileSync(resolve(import.meta.dir, '../views/password-reset.html'), 'utf-8');
+                    const pageHtml = withTheme(readFileSync(resolve(import.meta.dir, '../views/password-reset.html'), 'utf-8'));
                     const html = pageHtml
                         .replace(/\{\{TOKEN\}\}/g, expired ? '' : escH(token))
                         .replace(/\{\{INVALID_DISPLAY\}\}/g, expired ? 'block' : 'none')

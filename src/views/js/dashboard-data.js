@@ -293,12 +293,12 @@ async function fetchRecentRequests() {
     tbody.innerHTML = reqs.map((r, i) => {
       const ts = new Date(r.timestamp + 'Z');
       const sc = r.resStatus;
-      const statusCls = !sc ? 'color:var(--text3)' : sc < 300 ? 'color:var(--green)' : sc < 400 ? 'color:var(--blue)' : sc < 500 ? 'color:var(--orange)' : 'color:var(--red)';
+      const statusChip = !sc ? 'mm-chip' : sc < 300 ? 'mm-chip ok' : sc < 400 ? 'mm-chip acc' : sc < 500 ? 'mm-chip warn' : 'mm-chip err';
       const typeBadge = r.type === 'proxy'
-        ? '<span style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:4px;font-size:11px">proxy' + (r.profileName ? ' / ' + esc(r.profileName) : '') + '</span>'
+        ? '<span class="mm-chip acc">proxy' + (r.profileName ? ' / ' + esc(r.profileName) : '') + '</span>'
         : r.type === 'webhook'
-        ? '<span style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:4px;font-size:11px">webhook' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>'
-        : '<span style="background:var(--blue-bg);color:var(--blue);padding:2px 8px;border-radius:4px;font-size:11px">other' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>';
+        ? '<span class="mm-chip warn">webhook' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>'
+        : '<span class="mm-chip acc">other' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>';
       const methodCls = r.method === 'GET' ? 'color:var(--green)' : r.method === 'POST' ? 'color:var(--blue)' : r.method === 'DELETE' ? 'color:var(--red)' : 'color:var(--orange)';
       const flash = isNew && i === 0 ? 'animation:flash 1s ease' : '';
       return `<tr style="border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;${flash}" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''" onclick="navigate('requests');setTimeout(()=>openReqDetail(${r.id}),300)">
@@ -306,7 +306,7 @@ async function fetchRecentRequests() {
     <td style="padding:6px 8px">${typeBadge}</td>
     <td style="padding:6px 8px;font-weight:600;${methodCls}">${esc(r.method)}</td>
     <td style="padding:6px 8px;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.path)}">${esc(r.path)}</td>
-    <td style="padding:6px 8px;font-weight:600;${statusCls}">${sc || '-'}</td>
+    <td style="padding:6px 8px"><span class="${statusChip}">${sc || '-'}</span></td>
     <td style="padding:6px 8px;color:var(--text2)">${r.durationMs ? fmtMs(r.durationMs) : '-'}</td>
   </tr>`;
     }).join('');
@@ -463,8 +463,8 @@ async function openLinkToNpmModal(profileName) {
       const fwd = (h.forward_scheme || 'http') + '://' + (h.forward_host || '?') + ':' + (h.forward_port || '?');
       const domains = (h.domain_names || []).length ? h.domain_names.join(', ') : '(no domains)';
       const matchBadge = matches
-        ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 8px;border-radius:10px;font-size:11px">match</span>'
-        : '<span style="background:var(--surface2);color:var(--text3);padding:2px 8px;border-radius:10px;font-size:11px">mismatch</span>';
+        ? '<span style="background:rgba(34,197,94,0.15);color:var(--green);padding:2px 8px;border-radius:10px;font-size:11px">match</span>'
+        : '<span class="mm-chip">mismatch</span>';
       return '<tr style="border-bottom:1px solid var(--border)">' +
         '<td style="padding:8px;color:var(--text3)">#' + h.id + '</td>' +
         '<td style="padding:8px">' + _esc(domains) + '</td>' +
@@ -576,11 +576,11 @@ async function openLinkProfileToHostModal(hostId) {
     '      <tbody>' + (rows.length ? rows.map(r => {
       const matches = nHost && r.tgt.h === nHost && r.tgt.p === nPort;
       const matchBadge = matches
-        ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 8px;border-radius:10px;font-size:11px">match</span>'
-        : '<span style="background:var(--surface2);color:var(--text3);padding:2px 8px;border-radius:10px;font-size:11px">mismatch</span>';
+        ? '<span style="background:rgba(34,197,94,0.15);color:var(--green);padding:2px 8px;border-radius:10px;font-size:11px">match</span>'
+        : '<span class="mm-chip">mismatch</span>';
       const kindBadge = r.kind === 'profile'
-        ? '<span style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:10px;font-size:11px">Profile</span>'
-        : '<span style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:10px;font-size:11px">Webhook</span>';
+        ? '<span class="mm-chip acc">Profile</span>'
+        : '<span class="mm-chip warn">Webhook</span>';
       const pickFn = r.kind === 'profile'
         ? '_pickProfileForLink(\'' + _esc(r.name) + '\',' + hostId + ', event)'
         : '_pickWebhookForLink(\'' + _esc(r.name) + '\',' + hostId + ', event)';
@@ -726,8 +726,8 @@ async function openLinkToNpmModalForWebhook(webhookName) {
       const fwd = (h.forward_scheme || 'http') + '://' + (h.forward_host || '?') + ':' + (h.forward_port || '?');
       const domains = (h.domain_names || []).length ? h.domain_names.join(', ') : '(no domains)';
       const matchBadge = matches
-        ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 8px;border-radius:10px;font-size:11px">match</span>'
-        : '<span style="background:var(--surface2);color:var(--text3);padding:2px 8px;border-radius:10px;font-size:11px">mismatch</span>';
+        ? '<span style="background:rgba(34,197,94,0.15);color:var(--green);padding:2px 8px;border-radius:10px;font-size:11px">match</span>'
+        : '<span class="mm-chip">mismatch</span>';
       return '<tr style="border-bottom:1px solid var(--border)">' +
         '<td style="padding:8px;color:var(--text3)">#' + h.id + '</td>' +
         '<td style="padding:8px">' + _esc(domains) + '</td>' +
@@ -796,8 +796,8 @@ function renderProfiles(profiles) {
   if (profiles.length === 0) { c.innerHTML = '<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">No proxies yet. Click "+ New Proxy".</td></tr>'; return; }
   c.innerHTML = profiles.map(p => {
     const statusBadge = p.running
-      ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px">Running</span>'
-      : '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>';
+      ? '<span class="mm-chip ok">Running</span>'
+      : '<span class="mm-chip err">Stopped</span>';
     const npmHint = (() => {
       const match = _findPossibleNpmHostForProfile(p);
       if (!match) return '';
@@ -807,9 +807,9 @@ function renderProfiles(profiles) {
       const tip = 'NPM host #' + match.id + (domains.length ? ' (' + domains.join(', ') + ')' : '')
         + ' forwards to the same target as this profile. Click Link to vincular and redirect NPM → Midleman.';
       const linkBtn = '<button type="button" onclick="event.stopPropagation();linkProfileToNpmHost(\'' + esc(p.name) + '\',' + match.id + ')" '
-        + 'style="background:var(--accent);color:#fff;border:none;border-radius:3px;font-size:10.5px;padding:1px 7px;cursor:pointer;margin-left:6px" '
+        + 'style="background:var(--accent);color:var(--on-accent);border:none;border-radius:3px;font-size:10.5px;padding:1px 7px;cursor:pointer;margin-left:6px" '
         + 'title="Link this profile to NPM host #' + match.id + ' and redirect NPM to Midleman">Link</button>';
-      return '<span style="background:var(--surface2);color:var(--text2);padding:2px 4px 2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help;display:inline-flex;align-items:center" title="' + esc(tip) + '">Possible NPM: ' + esc(first) + esc(extra) + linkBtn + '</span>';
+      return '<span class="mm-chip" style="margin-left:4px;cursor:help;display:inline-flex;align-items:center" title="' + esc(tip) + '">Possible NPM: ' + esc(first) + esc(extra) + linkBtn + '</span>';
     })();
     const npmBadge = (() => {
       if (!p.npmProxyHostId) return npmHint;
@@ -824,10 +824,10 @@ function renderProfiles(profiles) {
       const inner = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shown}</span>`;
       if (hosts.length === 0) {
-        return `<span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle" title="${tip}">${inner}</span>`;
+        return `<span class="mm-chip acc" style="margin-left:4px;cursor:help;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle" title="${tip}">${inner}</span>`;
       }
       const href = 'https://' + hosts[0].replace(/^\*\./, 'www.');
-      return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle;text-decoration:none;transition:background 0.15s" onmouseover="this.style.background='rgba(0,120,212,0.22)'" onmouseout="this.style.background='rgba(0,120,212,0.12)'" title="${tip}">${inner}</a>`;
+      return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="background:var(--accent-bg);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle;text-decoration:none;transition:background 0.15s" onmouseover="this.style.background='var(--accent-bdr)'" onmouseout="this.style.background='var(--accent-bg)'" title="${tip}">${inner}</a>`;
     })();
     const hasAuth = p.authHeader;
     const authVal = hasAuth
@@ -837,16 +837,16 @@ function renderProfiles(profiles) {
     const accessBadge = authMode === 'login'
       ? '<span style="background:var(--blue-bg,rgba(59,130,246,0.1));color:var(--blue,#60a5fa);padding:2px 8px;border-radius:4px;font-size:11px">Login</span>'
       : authMode === 'accessKey'
-      ? '<span style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:4px;font-size:11px">Key</span>'
+      ? '<span class="mm-chip warn">Key</span>'
       : '<span style="color:var(--text3)">Public</span>';
     const ipBadge = (p.allowedIps && p.allowedIps.length)
-      ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px" title="${esc(p.allowedIps.join(', '))}">IP restricted</span>`
+      ? `<span class="mm-chip" style="margin-left:4px" title="${esc(p.allowedIps.join(', '))}">IP restricted</span>`
       : '';
     const rateLimitBadge = (p.rateLimit && p.rateLimit.requestsPerMinute)
-      ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px" title="${p.rateLimit.requestsPerMinute} req/min${p.rateLimit.perIp ? ' per IP' : ' shared'}">${p.rateLimit.requestsPerMinute}/min${p.rateLimit.perIp ? ' /IP' : ''}</span>`
+      ? `<span class="mm-chip" style="margin-left:4px" title="${p.rateLimit.requestsPerMinute} req/min${p.rateLimit.perIp ? ' per IP' : ' shared'}">${p.rateLimit.requestsPerMinute}/min${p.rateLimit.perIp ? ' /IP' : ''}</span>`
       : '';
     const corsBadge = (p.cors && p.cors.enabled)
-      ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px" title="${esc((p.cors.allowedOrigins || []).join(', '))}">CORS</span>`
+      ? `<span class="mm-chip" style="margin-left:4px" title="${esc((p.cors.allowedOrigins || []).join(', '))}">CORS</span>`
       : '';
     const blockedVal = p.blockedExtensions?.length
       ? `<span style="color:var(--red)">${esc(p.blockedExtensions.join(', '))}</span>`
@@ -883,6 +883,7 @@ async function openProfileModal(profile = null) {
   toggleUpstreamAuthSection();
   document.getElementById('pAccessKey').value = profile ? (profile.accessKey || '') : '';
   document.getElementById('pAuthMode').value = profile ? (profile.authMode || 'none') : 'none';
+  if (typeof mmSyncSeg === 'function') mmSyncSeg('pAuthMode');
   document.getElementById('pRequire2fa').checked = profile ? !!profile.require2fa : false;
   document.getElementById('pIsWebApp').checked = profile ? !!profile.isWebApp : false;
   document.getElementById('pLogMode').value = profile ? (profile.logMode || (profile.disableLogs ? 'off' : '')) : '';
@@ -1166,17 +1167,9 @@ function filterProxyUsersByRole() {
 
 function _roleBadge(u) {
   const parts = [];
-  if (u.blocked) {
-    parts.push('<span style="display:inline-block;background:rgba(225,112,85,.12);color:var(--red);border:1px solid rgba(225,112,85,.3);border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em" title="Blocked accounts cannot sign in anywhere">BLOCKED</span>');
-  }
-  if (u.isAdmin) {
-    parts.push('<span style="display:inline-block;background:rgba(59,130,246,.15);color:#2563eb;border:1px solid rgba(59,130,246,.3);border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em">ADMIN</span>');
-  } else {
-    parts.push('<span style="display:inline-block;background:rgba(148,163,184,.15);color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em">USER</span>');
-  }
-  if (u.authSource === 'ldap') {
-    parts.push('<span style="display:inline-block;background:rgba(168,85,247,.12);color:#a855f7;border:1px solid rgba(168,85,247,.25);border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em" title="Account synced from LDAP">LDAP</span>');
-  }
+  if (u.blocked) parts.push('<span class="mm-chip err" title="Blocked accounts cannot sign in anywhere">Blocked</span>');
+  parts.push(u.isAdmin ? '<span class="mm-chip acc">Admin</span>' : '<span class="mm-chip">User</span>');
+  if (u.authSource === 'ldap') parts.push('<span class="mm-chip" title="Account synced from LDAP">LDAP</span>');
   return parts.join(' ');
 }
 
@@ -1566,7 +1559,7 @@ function closeUserProfilesModal() { closeUserResourcesModal(); }
 function _sourceBadge(source) {
   const pill = (label, bg, color, border, title) =>
     '<span title="' + esc(title || '') + '" style="display:inline-block;background:' + bg + ';color:' + color + ';border:1px solid ' + border + ';border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em">' + label + '</span>';
-  if (source === 'direct') return pill('DIRECT', 'var(--accent-bg)', 'var(--accent)', 'rgba(0,120,212,0.25)', 'Assigned directly to this user');
+  if (source === 'direct') return pill('DIRECT', 'var(--accent-bg)', 'var(--accent)', 'var(--accent-bdr)', 'Assigned directly to this user');
   if (source === 'ldap_group') return pill('LDAP GROUP', 'rgba(168,85,247,.12)', '#a855f7', 'rgba(168,85,247,.25)', 'Granted by LDAP group membership');
   if (source === 'open') return pill('OPEN', 'var(--surface2)', 'var(--text3)', 'var(--border)', 'Allow-list disabled — open to all users');
   return '<span style="color:var(--text3)">—</span>';
@@ -2016,12 +2009,12 @@ function renderInvites(invites) {
     const profileNames = inv.profileNames && inv.profileNames.length ? inv.profileNames : (inv.profileName ? [inv.profileName] : []);
     const oauthIds = inv.oauthClientIds || [];
     const proxyChips = profileNames.map(p =>
-      `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--surface2);border:1px solid var(--border);padding:1px 7px;border-radius:10px;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text)">
+      `<span class="mm-chip" style="display:inline-flex;align-items:center;gap:4px">
          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
          ${esc(_inviteProfileLabel(p))}
        </span>`).join('');
     const oauthChips = oauthIds.map(c =>
-      `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--accent-bg);border:1px solid rgba(0,120,212,0.3);color:var(--accent);padding:1px 7px;border-radius:10px;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
+      `<span class="mm-chip acc" style="display:inline-flex;align-items:center;gap:4px">
          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
          ${esc(_inviteOauthLabel(c))}
        </span>`).join('');
@@ -2159,13 +2152,13 @@ function renderWebhooks(webhooks) {
   if (webhooks.length === 0) { c.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No webhooks yet. Click "+ New Webhook".</td></tr>'; return; }
   c.innerHTML = webhooks.map(w => {
     const statusBadge = w.running
-      ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px">Running</span>'
-      : '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>';
+      ? '<span class="mm-chip ok">Running</span>'
+      : '<span class="mm-chip err">Stopped</span>';
     const authBadge = w.hasAuth
       ? '<span style="color:var(--green)">Enabled</span>'
       : '<span style="color:var(--text3)">Public</span>';
     const wIpBadge = (w.allowedIps && w.allowedIps.length)
-      ? `<span style="background:var(--surface2);color:var(--text2);padding:2px 6px;border-radius:4px;font-size:11px;margin-left:4px" title="${esc(w.allowedIps.join(', '))}">IP restricted</span>`
+      ? `<span class="mm-chip" style="margin-left:4px" title="${esc(w.allowedIps.join(', '))}">IP restricted</span>`
       : '';
     const numTargets = w.targets.length;
     const numPaused = w.targets.filter(t => typeof t === 'object' && t && t.enabled === false).length;
@@ -2189,10 +2182,10 @@ function renderWebhooks(webhooks) {
       const inner = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shown}</span>`;
       if (hosts.length === 0) {
-        return `<span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;cursor:help;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle" title="${tip}">${inner}</span>`;
+        return `<span class="mm-chip acc" style="margin-left:4px;cursor:help;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle" title="${tip}">${inner}</span>`;
       }
       const href = 'https://' + hosts[0].replace(/^\*\./, 'www.');
-      return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle;text-decoration:none;transition:background 0.15s" onmouseover="this.style.background='rgba(0,120,212,0.22)'" onmouseout="this.style.background='rgba(0,120,212,0.12)'" title="${tip}">${inner}</a>`;
+      return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="background:var(--accent-bg);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle;text-decoration:none;transition:background 0.15s" onmouseover="this.style.background='var(--accent-bdr)'" onmouseout="this.style.background='var(--accent-bg)'" title="${tip}">${inner}</a>`;
     })();
     return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
   <td style="padding:8px 12px;font-weight:600">${esc(w.name)}</td>
@@ -2234,10 +2227,10 @@ function renderConnectors(connectors) {
   if (connectors.length === 0) { c.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No connectors yet. Click "+ New Connector".</td></tr>'; return; }
   c.innerHTML = connectors.map(cn => {
     const statusBadge = cn.running
-      ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px">Running</span>'
+      ? '<span class="mm-chip ok">Running</span>'
       : (cn.enabled
-        ? '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>'
-        : '<span style="background:var(--surface2);color:var(--text3);padding:2px 8px;border-radius:4px;font-size:11px">Disabled</span>');
+        ? '<span class="mm-chip err">Stopped</span>'
+        : '<span class="mm-chip">Disabled</span>');
     const replies = [
       cn.directReply ? (cn.channel === 'smooch' ? 'Smooch' : cn.channel === 'meta-whatsapp' ? 'Meta' : 'Direct') : null,
       (cn.webhookTargets && cn.webhookTargets.length)
@@ -2954,8 +2947,10 @@ function switchConnectorsTab(tab) {
   document.getElementById('tabPaneGoContact').style.display = isGC ? '' : 'none';
   document.getElementById('tabPaneFive9').style.display = isGC ? 'none' : '';
   document.getElementById('tabBtnGoContact').style.borderBottomColor = isGC ? 'var(--accent)' : 'transparent';
+  document.getElementById('tabBtnGoContact').classList.toggle('on', !!(isGC));
   document.getElementById('tabBtnGoContact').style.color = isGC ? 'var(--text)' : 'var(--text3)';
   document.getElementById('tabBtnFive9').style.borderBottomColor = isGC ? 'transparent' : 'var(--accent)';
+  document.getElementById('tabBtnFive9').classList.toggle('on', !(isGC));
   document.getElementById('tabBtnFive9').style.color = isGC ? 'var(--text3)' : 'var(--text)';
   document.getElementById('btnNewGoContact').style.display = isGC ? '' : 'none';
   document.getElementById('btnNewFive9').style.display = isGC ? 'none' : '';
@@ -3163,7 +3158,7 @@ function renderPendingRetryEntries() {
     const items = entries.map(e => {
       const nextIn = Math.max(0, e.nextAttemptAt - Date.now());
       const nextLabel = e.running ? 'running…' : (nextIn < 1000 ? 'now' : `in ${Math.ceil(nextIn / 1000)}s`);
-      const notifyBadge = e.notified ? '<span style="background:var(--orange-bg);color:var(--orange);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px">notified</span>' : '';
+      const notifyBadge = e.notified ? '<span class="mm-chip warn" style="margin-left:4px">notified</span>' : '';
       const checked = _prSelected.has(e.id) ? 'checked' : '';
       return `
       <div id="pr-${esc(e.id)}" style="display:flex;gap:10px;border:1px solid rgba(245,158,11,0.3);border-radius:6px;padding:10px 14px;margin-bottom:8px;background:rgba(245,158,11,0.06)">
@@ -3480,7 +3475,7 @@ function renderBodyEditorFieldsPanel() {
         return;
     }
     const colorFor = (kind) => {
-        if (kind === 'string') return 'var(--green, #4ade80)';
+        if (kind === 'string') return 'var(--green)';
         if (kind === 'number') return 'var(--accent, #3b82f6)';
         if (kind === 'boolean') return 'var(--orange, #fb923c)';
         if (kind === 'object' || kind === 'array') return 'var(--text3)';
@@ -3497,7 +3492,7 @@ function renderBodyEditorFieldsPanel() {
             const seen = stats.counts.get(key);
             if (seen !== undefined) {
                 const pct = Math.round((seen / stats.total) * 100);
-                const color = pct === 100 ? 'var(--green, #4ade80)' : (pct >= 50 ? 'var(--orange, #fb923c)' : 'var(--red, #f87171)');
+                const color = pct === 100 ? 'var(--green)' : (pct >= 50 ? 'var(--orange, #fb923c)' : 'var(--red, #f87171)');
                 freqBadge = `<span title="Present in ${seen} of ${stats.total} sampled payloads" style="color:${color};font-size:10px;flex-shrink:0">${pct}%</span>`;
             } else {
                 freqBadge = `<span title="Not seen in sampled payloads (synthesised)" style="color:var(--text3);font-size:10px;flex-shrink:0">—</span>`;
@@ -3521,7 +3516,7 @@ function renderBodyEditorFieldsPanel() {
 }
 
 function filterFieldColorFor(kind) {
-    if (kind === 'string') return 'var(--green, #4ade80)';
+    if (kind === 'string') return 'var(--green)';
     if (kind === 'number') return 'var(--accent, #3b82f6)';
     if (kind === 'boolean') return 'var(--orange, #fb923c)';
     if (kind === 'object' || kind === 'array') return 'var(--text3)';
@@ -3651,7 +3646,7 @@ function closeBodyEditor() {
 function setBodyEditorStatus(msg, kind) {
     const el = document.getElementById('bodyEditorStatus');
     if (!el) return;
-    const colors = { ok: 'var(--green, #4ade80)', err: 'var(--red, #f87171)', info: 'var(--text3)' };
+    const colors = { ok: 'var(--green)', err: 'var(--red, #f87171)', info: 'var(--text3)' };
     el.style.color = colors[kind] || colors.info;
     el.textContent = msg || '';
 }
@@ -3779,7 +3774,7 @@ function updateAllPreviews() {
         const { actual, found, matches } = evaluateFilterConditionJS(c, payloadObj);
         const sample = found ? (typeof actual === 'object' ? JSON.stringify(actual) : String(actual)) : '(path not found in test payload)';
         pf.textContent = (matches ? '✓ matches — ' : '✗ no match — ') + `payload value: ${sample}`;
-        pf.style.color = matches ? 'var(--green, #4ade80)' : 'var(--red)';
+        pf.style.color = matches ? 'var(--green)' : 'var(--red)';
         pf.style.display = 'block';
     });
 
@@ -4100,7 +4095,7 @@ function renderWebhookTargets() {
     return;
   }
 
-  const badge = (label, accent) => `<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:${accent ? 'rgba(0,120,212,0.12)' : 'var(--surface2)'};color:${accent ? 'var(--accent)' : 'var(--text3)'};border:1px solid ${accent ? 'rgba(0,120,212,0.3)' : 'var(--border)'};white-space:nowrap">${label}</span>`;
+  const badge = (label, accent) => `<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:${accent ? 'var(--accent-bg)' : 'var(--surface2)'};color:${accent ? 'var(--accent)' : 'var(--text3)'};border:1px solid ${accent ? 'var(--accent-bdr)' : 'var(--border)'};white-space:nowrap">${label}</span>`;
 
   container.innerHTML = webhookTargetState.map((t, i) => {
     const activeFilters = (t.filter || []).filter(c => c.path.trim());
@@ -4216,7 +4211,7 @@ function renderDestinationEditorMarkup(i) {
                 <option value="DELETE" ${t.method === 'DELETE' ? 'selected' : ''}>DELETE</option>
               </select>
               <label style="font-size:11px;color:var(--text);display:flex;align-items:center;gap:4px;margin-left:auto;cursor:pointer">
-                <input type="checkbox" ${t.forwardHeaders ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'forwardHeaders', this.checked)"> Forward incoming headers
+                <input class="mm-switch" type="checkbox" ${t.forwardHeaders ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'forwardHeaders', this.checked)"> Forward incoming headers
               </label>
             </div>
             
@@ -4230,7 +4225,7 @@ function renderDestinationEditorMarkup(i) {
 
             <div style="display:flex;flex-direction:column;gap:4px">
               <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none">
-                <input type="checkbox" ${t.customBody ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'customBody', this.checked); renderDestinationEditor(${i})" style="cursor:pointer;accent-color:var(--accent)">
+                <input class="mm-switch" type="checkbox" ${t.customBody ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'customBody', this.checked); renderDestinationEditor(${i})" style="cursor:pointer;accent-color:var(--accent)">
                 <span style="font-weight:600">Custom Body</span>
                 <span style="color:var(--text3);font-weight:400">— leave unchecked to forward the incoming body as-is</span>
               </label>
@@ -4243,9 +4238,9 @@ function renderDestinationEditorMarkup(i) {
                 </button>
               </div>
               <div id="aceBody_${i}" style="width:100%; min-height:100px; border-radius:4px; border:1px solid var(--border);"></div>
-              <div style="font-size:10px;color:var(--text3);margin-top:3px;margin-left:2px">Supports JSON + <code style="background:rgba(0,120,212,0.15);padding:1px 4px;border-radius:3px;color:var(--accent);font-size:10px">{{template.vars}}</code> + fallback <code style="background:rgba(0,120,212,0.15);padding:1px 4px;border-radius:3px;color:var(--accent);font-size:10px">{{a || b || "x"}}</code></div>
+              <div style="font-size:10px;color:var(--text3);margin-top:3px;margin-left:2px">Supports JSON + <code style="background:var(--accent-bg);padding:1px 4px;border-radius:3px;color:var(--accent);font-size:10px">{{template.vars}}</code> + fallback <code style="background:var(--accent-bg);padding:1px 4px;border-radius:3px;color:var(--accent);font-size:10px">{{a || b || "x"}}</code></div>
               <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none;margin-top:6px">
-                <input type="checkbox" ${t.dropEmpty ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'dropEmpty', this.checked); updateAllPreviews()" style="cursor:pointer;accent-color:var(--accent)">
+                <input class="mm-switch mm-switch" type="checkbox" ${t.dropEmpty ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'dropEmpty', this.checked); updateAllPreviews()" style="cursor:pointer;accent-color:var(--accent)">
                 <span>Drop null/empty fields on delivery</span>
                 <span style="color:var(--text3);font-size:10px">— remove keys whose value renders to null or "" before sending</span>
               </label>
@@ -4258,7 +4253,7 @@ function renderDestinationEditorMarkup(i) {
         <!-- Per-destination retry override -->
         <div class="destination-retry-override" style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
           <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:${t.persistentRetryOpen ? 'var(--text3)' : 'var(--text2)'};cursor:${t.persistentRetryOpen ? 'not-allowed' : 'pointer'}" onclick="${t.persistentRetryOpen ? 'return false' : `toggleTargetRetry(${i});return false`}" title="${t.persistentRetryOpen ? 'Disabled — Persistent retry is enabled below' : ''}">
-            <input type="checkbox" ${t.retryOpen ? 'checked' : ''} ${t.persistentRetryOpen ? 'disabled' : ''} onclick="event.preventDefault()">
+            <input class="mm-switch" type="checkbox" ${t.retryOpen ? 'checked' : ''} ${t.persistentRetryOpen ? 'disabled' : ''} onclick="event.preventDefault()">
             Override retry for this destination${t.persistentRetryOpen ? ' <span style="color:var(--text3);font-size:10px">(disabled — using persistent retry)</span>' : ''}
           </label>
           ${t.retryOpen ? `
@@ -4281,7 +4276,7 @@ function renderDestinationEditorMarkup(i) {
               </div>
             </div>
             <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer">
-              <input type="checkbox" ${t.retry?.retryUntilSuccess ? 'checked' : ''} onchange="updateTargetRetry(${i},'retryUntilSuccess',this.checked);document.getElementById('tRetryOnRow_${i}').style.display=this.checked?'none':'flex';renderDestinationEditor(${i})">
+              <input class="mm-switch" type="checkbox" ${t.retry?.retryUntilSuccess ? 'checked' : ''} onchange="updateTargetRetry(${i},'retryUntilSuccess',this.checked);document.getElementById('tRetryOnRow_${i}').style.display=this.checked?'none':'flex';renderDestinationEditor(${i})">
               <strong>Retry until success (2xx)</strong>
             </label>
             <div id="tRetryOnRow_${i}" style="display:${t.retry?.retryUntilSuccess ? 'none' : 'flex'};align-items:center;gap:6px">
@@ -4682,7 +4677,7 @@ function renderRequestLogs() {
   else {
     tbody.innerHTML = requests.map(r => {
       const ts = new Date(r.timestamp + 'Z'); const sc = r.resStatus;
-      const statusCls = !sc ? 'color:var(--text3)' : sc < 300 ? 'color:var(--green)' : sc < 400 ? 'color:var(--blue)' : sc < 500 ? 'color:var(--orange)' : 'color:var(--red)';
+      const statusChip = !sc ? 'mm-chip' : sc < 300 ? 'mm-chip ok' : sc < 400 ? 'mm-chip acc' : sc < 500 ? 'mm-chip warn' : 'mm-chip err';
       const typeBadge = r.type === 'proxy'
         ? '<span class="rdm-badge" style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:4px;font-size:11px">proxy' + (r.profileName ? ' / ' + esc(r.profileName) : '') + '</span>'
         : r.type === 'webhook'
@@ -4695,7 +4690,7 @@ function renderRequestLogs() {
   <td style="padding:8px">${typeBadge}</td>
   <td style="padding:8px;font-weight:600;${methodCls}">${esc(r.method)}</td>
   <td style="padding:8px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.path)}">${esc(r.path)}</td>
-  <td style="padding:8px;font-weight:600;${statusCls}">${sc || (r.error ? 'ERR' : '-')}</td>
+  <td style="padding:8px"><span class="${r.error && !sc ? 'mm-chip err' : statusChip}">${sc || (r.error ? 'ERR' : '-')}</span></td>
   <td style="padding:8px;color:var(--text2)">${r.durationMs ? fmtMs(r.durationMs) : '-'}</td>
   <td style="padding:8px;color:var(--text3);font-size:12px">${sz > 0 ? fmtBytes(sz) : '-'}</td>
   <td style="padding:8px 12px"><span style="color:var(--accent2);font-size:12px">View</span></td>
@@ -4861,9 +4856,9 @@ ${d.attempts && d.attempts.length > 1 ? `
           const st = a.status;
           const stText = a.statusText ? ' ' + esc(a.statusText) : '';
           const statusHtml = !st
-            ? '<span style="color:var(--red);font-weight:600">Network err</span>'
-            : st < 300 ? `<span style="color:var(--green);font-weight:600">${st}${stText}</span>`
-            : `<span style="color:var(--red);font-weight:600">${st}${stText}</span>`;
+            ? '<span class="mm-chip err">Network err</span>'
+            : st < 300 ? `<span class="mm-chip ok">${st}${stText}</span>`
+            : `<span class="mm-chip err">${st}${stText}</span>`;
           return `<tr style="border-bottom:1px solid var(--border)">
             <td style="padding:10px 16px;color:var(--text2);font-weight:600">${a.attempt}</td>
             <td style="padding:10px 16px">${statusHtml}</td>
@@ -4925,8 +4920,8 @@ async function loadFanoutDeliveries(reqId) {
       const ts = new Date(f.timestamp + 'Z').toLocaleTimeString();
       const st = f.resStatus;
       const stText = f.resStatusText ? ' ' + esc(f.resStatusText) : '';
-      const statusHtml = !st ? '<span style="color:var(--text3)">Err</span>' : st < 300 ? `<span style="color:var(--green);font-weight:600">${st}${stText}</span>` : `<span style="color:var(--red);font-weight:600">${st}${stText}</span>`;
-      const attemptBadge = f.attemptCount && f.attemptCount > 1 ? ` <span style="background:var(--orange-bg);color:var(--orange);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px" title="${f.attemptCount} attempts">${f.attemptCount}×</span>` : '';
+      const statusHtml = !st ? '<span class="mm-chip err">Err</span>' : st < 300 ? `<span class="mm-chip ok">${st}${stText}</span>` : `<span class="mm-chip err">${st}${stText}</span>`;
+      const attemptBadge = f.attemptCount && f.attemptCount > 1 ? ` <span class="mm-chip warn" style="margin-left:4px" title="${f.attemptCount} attempts">${f.attemptCount}×</span>` : '';
       const pending = pendingByTarget[f.targetUrl];
       const dlq = dlqByTarget[f.targetUrl];
       let retryBtn = '';
@@ -4935,7 +4930,7 @@ async function loadFanoutDeliveries(reqId) {
         extraBadge = ` <span style="background:rgba(245,158,11,0.18);color:var(--orange);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px" title="Persistent retry — ${pending.attempts} attempts so far">🔄 ${pending.attempts}</span>`;
         retryBtn = `<button class="btn btn-sm" onclick="fanoutRetryPending('${esc(pending.id)}',this,'${esc(reqId)}')" style="font-size:11px;padding:3px 8px;margin-right:4px" title="Force an immediate retry attempt">Retry now</button>`;
       } else if (dlq) {
-        extraBadge = ` <span style="background:var(--red-bg);color:var(--red);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px" title="In DLQ">DLQ</span>`;
+        extraBadge = ` <span class="mm-chip err" style="margin-left:4px" title="In DLQ">DLQ</span>`;
         retryBtn = `<button class="btn btn-sm" onclick="fanoutRetryDlq('${esc(dlq.id)}',this,'${esc(reqId)}')" style="font-size:11px;padding:3px 8px;margin-right:4px" title="Retry from the dead-letter queue">Retry</button>`;
       }
       return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
@@ -5027,7 +5022,7 @@ function renderTcpUdpProxies(list) {
       <td style="padding:10px 8px;font-size:12px">${dot}</td>
       <td style="padding:10px 8px">${listeners}</td>
       <td style="padding:10px 8px;font-family:monospace">${esc(p.upstreamHost)}:${p.upstreamPort}</td>
-      <td style="padding:10px 8px"><span style="background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:1px 6px;font-size:11px;text-transform:uppercase">${esc(p.upstreamTransport)}</span></td>
+      <td style="padding:10px 8px"><span class="mm-chip" style="text-transform:uppercase">${esc(p.upstreamTransport)}</span></td>
       <td style="padding:10px 12px;text-align:right">
         <button onclick="restartSipProxy('${esc(p.name)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px">Restart</button>
         <button onclick="editSipProxy('${esc(p.name)}')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px">Edit</button>
@@ -5240,21 +5235,268 @@ async function fetchOauthClients() {
     document.getElementById('oauthClientListBody').innerHTML =
       '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
   }
-  renderOauthEndpoints();
 }
 
-function renderOauthEndpoints() {
-  const origin = window.location.protocol + '//' + window.location.hostname;
-  const note = ' <span style="color:var(--text3)">(replace with the public issuer)</span>';
-  const set = (id, path) => {
-    const el = document.getElementById(id);
-    if (el) el.innerHTML = esc(origin + ':JWKS_PORT' + path) + note;
-  };
-  set('oeDiscovery', '/.well-known/openid-configuration');
-  set('oeAuth',      '/oauth/authorize');
-  set('oeToken',     '/oauth/token');
-  set('oeUserinfo',  '/oauth/userinfo');
-  set('oeJwks',      '/.well-known/jwks.json');
+// ─── Docs page ──────────────────────────────────────────────────────────────
+// Static reference lives in partials/_docs.html; this fills the live values
+// (OIDC endpoints, report port, OAuth clients), adds copy buttons to code
+// blocks, the search filter, and "Copy for AI" prompts built from the DOM.
+let _docsInfo = null;
+let _docsClients = [];
+async function renderDocs() {
+  _docsWireNav();
+  _docsEnhanceCode();
+  try {
+    if (!_docsInfo) {
+      const res = await api('/admin/docs/info');
+      if (res.ok) _docsInfo = await res.json();
+    }
+  } catch { /* keep placeholders */ }
+  try {
+    const res = await api('/admin/oauth-clients');
+    if (res.ok) _docsClients = (await res.json()).clients || [];
+  } catch { /* no client list */ }
+  _docsFillOidc();
+  _docsFillClients();
+}
+
+function _docsFillOidc() {
+  const info = _docsInfo;
+  if (!info) return;
+  const state = document.getElementById('docsOidcState');
+  const note = document.getElementById('docsOidcNote');
+  const box = document.getElementById('docsOidcEndpoints');
+  if (info.oidcEnabled && info.oidc) {
+    const d = Object.assign({}, info.oidc, { discovery: (info.oidc.issuer || '') + '/.well-known/openid-configuration' });
+    box.querySelectorAll('code[data-ep]').forEach(el => {
+      const v = d[el.dataset.ep] || '';
+      el.textContent = v || '—';
+      el.title = v ? 'Click to copy' : '';
+      el.onclick = v ? () => _docsClipboard(v, 'Copied') : null;
+    });
+    if (state) { state.textContent = 'Enabled · port ' + info.jwksPort; state.className = 'mm-chip ok'; }
+    if (note) note.innerHTML = info.oidc.issuer
+      ? 'Issuer from <code>JWT_ISSUER</code>. The OIDC server listens on port <code>' + esc(String(info.jwksPort)) + '</code>, published behind the reverse proxy at the issuer URL.'
+      : '<code>JWT_ISSUER</code> is not set, so the URLs above are relative. Set it to the public HTTPS URL of the OIDC server.';
+  } else {
+    if (state) { state.textContent = 'Disabled'; state.className = 'mm-chip warn'; }
+    if (note) note.innerHTML = 'The OIDC server is off. Set <code>JWKS_PORT</code> (and <code>JWT_ISSUER</code> to its public URL) and restart Midleman.';
+  }
+  const rp = document.getElementById('docsReportPort');
+  if (rp) rp.textContent = info.reportPort ? 'port ' + info.reportPort : '—';
+}
+
+function _docsFillClients() {
+  const sel = document.getElementById('docsOidcClient');
+  if (!sel) return;
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">Generic (no client)</option>' + _docsClients
+    .slice().sort((a, b) => (a.name || '').localeCompare(b.name || '', 'en', { sensitivity: 'base' }))
+    .map(c => `<option value="${esc(c.clientId)}">${esc(c.name || c.clientId)}</option>`).join('');
+  if (keep && _docsClients.some(c => c.clientId === keep)) sel.value = keep;
+  if (window.mmSelectSync) window.mmSelectSync(sel);
+  docsRenderClient();
+}
+
+function _docsSelectedClient() {
+  const id = document.getElementById('docsOidcClient')?.value;
+  return id ? _docsClients.find(c => c.clientId === id) || null : null;
+}
+
+function docsRenderClient() {
+  const info = document.getElementById('docsOidcClientInfo');
+  if (!info) return;
+  const c = _docsSelectedClient();
+  info.innerHTML = c
+    ? 'client_id <code>' + esc(c.clientId) + '</code> · ' + c.redirectUris.length + ' redirect URI' + (c.redirectUris.length === 1 ? '' : 's') + ' · PKCE ' + (c.pkceRequired ? 'required' : 'off')
+    : 'Pick a client to include its client_id and redirect URIs in the copied prompt.';
+}
+
+// Open the Docs page at a section (used by the "→ Docs" pointers on other pages).
+function docsGo(section) {
+  navigate('docs');
+  requestAnimationFrame(() => document.getElementById('docs-' + section)?.scrollIntoView({ block: 'start' }));
+}
+
+// Section links scroll inside the page and the current section is highlighted.
+let _docsNavWired = false;
+function _docsWireNav() {
+  if (_docsNavWired) return;
+  _docsNavWired = true;
+  const nav = document.querySelector('.docs-nav');
+  if (!nav) return;
+  nav.addEventListener('click', (e) => {
+    const a = e.target.closest('a[data-docs]');
+    if (!a) return;
+    e.preventDefault();
+    document.getElementById('docs-' + a.dataset.docs)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  });
+  const links = [...nav.querySelectorAll('a[data-docs]')];
+  const io = new IntersectionObserver((entries) => {
+    for (const en of entries) {
+      if (!en.isIntersecting) continue;
+      const id = en.target.id.replace(/^docs-/, '');
+      links.forEach(l => l.classList.toggle('active', l.dataset.docs === id));
+    }
+  }, { rootMargin: '-15% 0px -70% 0px' });
+  document.querySelectorAll('.docs-section').forEach(sec => io.observe(sec));
+}
+
+// Every code block gets a header with its label and a copy button.
+function _docsEnhanceCode() {
+  document.querySelectorAll('#pageDocs pre.docs-code:not([data-enhanced])').forEach(pre => {
+    pre.dataset.enhanced = '1';
+    const wrap = document.createElement('div');
+    wrap.className = 'docs-codeblock';
+    const head = document.createElement('div');
+    head.className = 'docs-codehead docs-noai';
+    const label = document.createElement('span');
+    label.textContent = pre.dataset.label || 'Example';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'docs-copy';
+    btn.textContent = 'Copy';
+    btn.onclick = () => {
+      _docsClipboard(pre.textContent, 'Copied');
+      btn.textContent = 'Copied';
+      setTimeout(() => { btn.textContent = 'Copy'; }, 1400);
+    };
+    head.append(label, btn);
+    pre.before(wrap);
+    wrap.append(head, pre);
+  });
+}
+
+// Search: hides sections (and their nav links) that do not contain the text.
+function docsFilter(q) {
+  const term = (q || '').trim().toLowerCase();
+  let shown = 0;
+  document.querySelectorAll('#pageDocs .docs-section').forEach(sec => {
+    const hit = !term || sec.textContent.toLowerCase().includes(term);
+    sec.hidden = !hit;
+    if (hit) shown++;
+    const link = document.querySelector(`.docs-nav a[data-docs="${sec.id.replace(/^docs-/, '')}"]`);
+    if (link) link.hidden = !hit;
+    if (term && hit) sec.querySelectorAll('details.docs-details').forEach(d => {
+      if (d.textContent.toLowerCase().includes(term)) d.open = true;
+    });
+  });
+  document.querySelectorAll('.docs-nav-group').forEach(g => {
+    let n = g.nextElementSibling, any = false;
+    while (n && !n.classList.contains('docs-nav-group')) { if (n.matches('a') && !n.hidden) any = true; n = n.nextElementSibling; }
+    g.hidden = !any;
+  });
+  const empty = document.getElementById('docsEmpty');
+  if (empty) empty.hidden = shown > 0;
+}
+
+// ── Copy for AI ──
+// Converts a docs section to Markdown (live values included) and wraps it in a
+// prompt an AI assistant can act on directly.
+function _docsMd(node) {
+  if (node.nodeType === 3) return node.nodeValue.replace(/\s+/g, ' ');
+  if (node.nodeType !== 1) return '';
+  const el = node;
+  if (el.hidden || el.classList.contains('docs-noai') || /^(BUTTON|SELECT|INPUT|SCRIPT|STYLE|SVG)$/i.test(el.tagName)) return '';
+  const kids = () => [...el.childNodes].map(_docsMd).join('');
+  switch (el.tagName) {
+    case 'PRE': return '\n\n```\n' + el.textContent.replace(/\n+$/, '') + '\n```\n\n';
+    case 'CODE': return '`' + el.textContent + '`';
+    case 'STRONG': case 'B': return '**' + kids().trim() + '**';
+    case 'EM': case 'I': return '*' + kids().trim() + '*';
+    case 'H3': return '\n\n## ' + el.textContent.trim() + '\n\n';
+    case 'H4': return '\n\n### ' + el.textContent.trim() + '\n\n';
+    case 'P': return '\n\n' + kids().trim() + '\n\n';
+    case 'LI': return '\n- ' + kids().trim();
+    case 'UL': case 'OL': return '\n' + kids() + '\n\n';
+    case 'TR': {
+      const cells = [...el.children].map(td => [...td.childNodes].map(_docsMd).join('').trim());
+      return '\n- **' + cells[0].replace(/\*\*/g, '') + '**: ' + cells.slice(1).join(' ');
+    }
+    case 'TABLE': return '\n' + kids() + '\n\n';
+    case 'SUMMARY': return '\n\n### ' + kids().trim() + '\n\n';
+    case 'DIV':
+      if (el.classList.contains('docs-codeblock')) {
+        const pre = el.querySelector('pre');
+        return '\n\n' + (pre?.dataset.label ? '*' + pre.dataset.label + '*\n' : '') + _docsMd(pre);
+      }
+      if (el.classList.contains('docs-ep')) {
+        const name = el.querySelector('.docs-ep-name')?.textContent.trim();
+        const m = el.querySelector('.docs-method')?.textContent.trim();
+        return '\n- **' + name + '**' + (m ? ' (' + m + ')' : '') + ': `' + el.querySelector('code')?.textContent.trim() + '`';
+      }
+      if (el.classList.contains('docs-eyebrow')) return '';
+      return kids();
+    default: return kids();
+  }
+}
+
+function _docsSectionMd(sec) {
+  return _docsMd(sec).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function _docsContextMd() {
+  const lines = ['## Facts about this Midleman instance', ''];
+  const info = _docsInfo;
+  if (info?.oidcEnabled && info.oidc?.issuer) lines.push('- OIDC issuer: `' + info.oidc.issuer + '`', '- OIDC discovery: `' + info.oidc.issuer + '/.well-known/openid-configuration`');
+  else lines.push('- OIDC: ' + (info?.oidcEnabled ? 'enabled, issuer URL not configured (<issuer>)' : 'not enabled on this instance'));
+  if (info?.reportPort) lines.push('- Report API port: `' + info.reportPort + '`');
+  lines.push('- Dashboard origin: `' + location.origin + '`');
+  return lines.join('\n');
+}
+
+function _docsClientMd() {
+  const c = _docsSelectedClient();
+  if (!c) return '## OAuth client\n\n- client_id: <client_id>\n- client_secret: <client_secret — shown once at creation; keep it in a secret store>\n- redirect URI: <must exactly match one registered on the client>';
+  return ['## OAuth client: ' + c.name, '',
+    '- client_id: `' + c.clientId + '`',
+    '- client_secret: <client_secret — shown once at creation; keep it in a secret store>',
+    '- registered redirect URIs (exact match):', ...c.redirectUris.map(u => '  - `' + u + '`'),
+    '- PKCE: ' + (c.pkceRequired ? 'required (S256)' : 'not required for this client'),
+    c.postLogoutRedirectUri ? '- post-logout redirect: `' + c.postLogoutRedirectUri + '`' : '- post-logout redirect: origin of the first redirect URI unless post_logout_redirect_uri is sent',
+  ].join('\n');
+}
+
+function docsCopyForAI(section) {
+  const secs = section
+    ? [document.getElementById('docs-' + section)].filter(Boolean)
+    : [...document.querySelectorAll('#pageDocs .docs-section')];
+  if (!secs.length) return;
+  const task = secs.length === 1 ? (secs[0].dataset.aiTask || '') : 'Use this reference to help me integrate my application with Midleman. Ask me which part I need before writing code, and ask for anything marked <…>.';
+  const parts = [
+    '# Midleman integration — ' + (secs.length === 1 ? secs[0].querySelector('h3').textContent.trim() : 'reference'),
+    '',
+    'You are helping me integrate an application with Midleman (an API gateway, webhook fan-out and OAuth/OIDC provider). Use only the facts below; do not invent endpoints or parameters. Values in <angle brackets> are placeholders I must provide.',
+    '',
+    '## Task',
+    '',
+    task,
+    '',
+    _docsContextMd(),
+  ];
+  if (section === 'oidc' || !section) parts.push('', _docsClientMd());
+  parts.push('', '---', '');
+  secs.forEach(s => parts.push(_docsSectionMd(s), ''));
+  _docsClipboard(parts.join('\n').trim() + '\n', 'Copied — paste it into your AI assistant');
+}
+
+function _docsClipboard(text, msg) {
+  const done = () => toast(msg || 'Copied', 'success');
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(done, () => _docsClipboardFallback(text, done));
+  } else {
+    _docsClipboardFallback(text, done);
+  }
+}
+function _docsClipboardFallback(text, done) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); done(); } catch { toast('Copy failed', 'error'); }
+  ta.remove();
 }
 
 function renderOauthClients(clients) {
@@ -5306,6 +5548,7 @@ function _populateConsentPageDropdown(selectId, selectedId) {
 function _resetOauthClientForm() {
   document.getElementById('oauthClientName').value = '';
   document.getElementById('oauthClientUris').value = '';
+  document.getElementById('oauthClientPostLogoutUri').value = '';
   document.getElementById('oauthClientPkceRequired').checked = true;
   document.getElementById('oauthClientConsentEnabled').checked = false;
   _populateConsentPageDropdown('oauthClientConsentPageId', null);
@@ -5331,6 +5574,7 @@ async function openCreateOauthClientModal() {
   document.getElementById('oauthClientSubmitBtn').onclick = submitOauthClient;
   document.getElementById('oauthClientCancelBtn').textContent = 'Cancel';
   document.getElementById('oauthClientModalTitle').textContent = 'New OAuth Client';
+  if (typeof updateOauthClientLogoPreview === 'function') updateOauthClientLogoPreview();
   document.getElementById('oauthClientModal').style.display = 'flex';
 }
 
@@ -5366,6 +5610,7 @@ async function openEditOauthClientModal(clientId) {
     document.getElementById('oauthClientSubmitBtn').onclick = submitEditOauthClient;
     document.getElementById('oauthClientCancelBtn').textContent = 'Cancel';
     document.getElementById('oauthClientModalTitle').textContent = 'Edit — ' + (client.name || clientId);
+    if (typeof updateOauthClientLogoPreview === 'function') updateOauthClientLogoPreview();
     document.getElementById('oauthClientModal').style.display = 'flex';
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -5949,7 +6194,7 @@ function renderLdapConfigs(configs) {
   };
   const totpBadge = p => {
     const map = {
-      required: ['Required',  '#dc2626'],
+      required: ['Required',  'var(--red)'],
       optional: ['Optional',  'var(--text2)'],
       disabled: ['Disabled',  'var(--text3)'],
     };
@@ -6572,7 +6817,7 @@ async function fetchSipLogs() {
 
 function renderSipLogRow(r) {
   const time = r.timestamp ? r.timestamp.replace('T', ' ').replace('Z', '') : '';
-  const dirColor = r.direction === 'in' ? '#3b82f6' : '#10b981';
+  const dirColor = r.direction === 'in' ? '#3b82f6' : 'var(--green)';
   const dirLabel = r.direction === 'in' ? '◀ IN' : 'OUT ▶';
   const methodOrStatus = r.is_request
     ? '<span style="font-weight:600">' + esc(r.method || '?') + '</span>'
@@ -6594,9 +6839,9 @@ function renderSipLogRow(r) {
 
 function statusColor(s) {
   if (!s) return 'var(--text)';
-  if (s >= 200 && s < 300) return '#10b981';
-  if (s >= 300 && s < 400) return '#f59e0b';
-  if (s >= 400) return '#ef4444';
+  if (s >= 200 && s < 300) return 'var(--green)';
+  if (s >= 300 && s < 400) return 'var(--orange)';
+  if (s >= 400) return 'var(--red)';
   return 'var(--text)';
 }
 
@@ -6682,6 +6927,7 @@ function switchTcpUdpTab(tab) {
   if (!btns.proxies || !btns.logs || !btns.certs) return;
   const setActive = (btn, on) => {
     btn.style.borderBottomColor = on ? 'var(--accent)' : 'transparent';
+    btn.classList.toggle('on', !!(on));
     btn.style.color = on ? 'var(--text)' : 'var(--text3)';
   };
   for (const k of Object.keys(panes)) {
@@ -6713,16 +6959,20 @@ function switchTcpUdpLogTab(tab) {
     msgPane.style.display = '';
     conPane.style.display = 'none';
     msgBtn.style.borderBottomColor = 'var(--accent)';
+    msgBtn.classList.add('on');
     msgBtn.style.color = 'var(--text)';
     conBtn.style.borderBottomColor = 'transparent';
+    conBtn.classList.remove('on');
     conBtn.style.color = 'var(--text3)';
     fetchSipLogs();
   } else {
     msgPane.style.display = 'none';
     conPane.style.display = '';
     msgBtn.style.borderBottomColor = 'transparent';
+    msgBtn.classList.remove('on');
     msgBtn.style.color = 'var(--text3)';
     conBtn.style.borderBottomColor = 'var(--accent)';
+    conBtn.classList.add('on');
     conBtn.style.color = 'var(--text)';
     populateConnProfileFilter();
     fetchConnLogs();
@@ -6791,8 +7041,8 @@ async function fetchConnLogs() {
 
 function renderConnLogRow(r) {
   const opened = r.opened_at ? r.opened_at.replace('T', ' ').replace('Z', '') : '';
-  const closeColor = (r.close_reason || '').startsWith('error:') ? '#ef4444'
-    : r.close_reason === 'rejected' ? '#f59e0b' : 'var(--text3)';
+  const closeColor = (r.close_reason || '').startsWith('error:') ? 'var(--red)'
+    : r.close_reason === 'rejected' ? 'var(--orange)' : 'var(--text3)';
   const dur = r.duration_ms != null ? humanDuration(r.duration_ms) : '';
   return '<tr style="border-top:1px solid var(--border)">'
     + '<td style="padding:8px 12px;font-family:monospace;font-size:12px;white-space:nowrap">' + esc(opened) + '</td>'
@@ -6850,7 +7100,7 @@ async function fetchCerts() {
 }
 
 function renderCertRow(c) {
-  const statusColors = { active: '#10b981', pending: '#f59e0b', expired: '#ef4444', error: '#ef4444' };
+  const statusColors = { active: 'var(--green)', pending: 'var(--orange)', expired: 'var(--red)', error: 'var(--red)' };
   const statusDot = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + (statusColors[c.status] || 'var(--text3)') + ';margin-right:6px;vertical-align:middle"></span>';
   const expiry = c.notAfter ? new Date(c.notAfter).toISOString().slice(0, 10) : '—';
   const daysLeft = c.notAfter ? Math.floor((new Date(c.notAfter).getTime() - Date.now()) / (24 * 3600 * 1000)) : null;
@@ -6858,17 +7108,17 @@ function renderCertRow(c) {
     ? expiry + ' <span style="color:var(--text3);font-size:11px">(' + (daysLeft >= 0 ? daysLeft + 'd left' : Math.abs(daysLeft) + 'd ago') + ')</span>'
     : expiry;
   const usedBy = (c.usedBy || []).length
-    ? (c.usedBy || []).map(u => '<span style="background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:1px 6px;font-size:11px;margin-right:3px">' + esc(u) + '</span>').join('')
+    ? (c.usedBy || []).map(u => '<span class="mm-chip" style="margin-right:3px">' + esc(u) + '</span>').join('')
     : '<span style="color:var(--text3);font-size:11px;font-style:italic">unused</span>';
   const renewBtn = c.source === 'acme'
     ? '<button onclick="renewCert(' + c.id + ')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);font-size:11px;margin-right:4px">Renew</button>'
     : '';
   const errorBadge = c.lastError
-    ? ' <span title="' + esc(c.lastError) + '" style="color:#ef4444;cursor:help">⚠</span>'
+    ? ' <span title="' + esc(c.lastError) + '" style="color:var(--red);cursor:help">⚠</span>'
     : '';
   return '<tr style="border-bottom:1px solid var(--border)">'
     + '<td style="padding:10px 12px;font-weight:600;font-family:monospace">' + esc(c.domain) + '</td>'
-    + '<td style="padding:10px 8px"><span style="background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:1px 6px;font-size:11px">' + esc(c.source) + '</span></td>'
+    + '<td style="padding:10px 8px"><span class="mm-chip">' + esc(c.source) + '</span></td>'
     + '<td style="padding:10px 8px;font-size:12px;text-transform:capitalize">' + statusDot + esc(c.status) + errorBadge + '</td>'
     + '<td style="padding:10px 8px;font-family:monospace;font-size:12px">' + expiryLabel + '</td>'
     + '<td style="padding:10px 8px">' + usedBy + '</td>'
@@ -6978,10 +7228,12 @@ function switchCertTab(source) {
     const pane = document.getElementById(panes[k]);
     if (k === source) {
       btn.style.borderBottomColor = 'var(--accent)';
+      btn.classList.add('on');
       btn.style.color = 'var(--text)';
       pane.style.display = '';
     } else {
       btn.style.borderBottomColor = 'transparent';
+      btn.classList.remove('on');
       btn.style.color = 'var(--text3)';
       pane.style.display = 'none';
     }
@@ -7087,7 +7339,7 @@ function _updateNpmPageVisibility(cfg, certVolumeMounted) {
       pill.style.display = '';
       pill.textContent = '● Connected';
       pill.style.background = 'rgba(34,197,94,0.15)';
-      pill.style.color = '#22c55e';
+      pill.style.color = 'var(--green)';
     } else if (cfg.enabled) {
       pill.style.display = '';
       pill.textContent = '● Pending';
@@ -7164,6 +7416,7 @@ function switchNpmSubpage(sub) {
   document.querySelectorAll('.npm-subpage-tab').forEach(b => {
     const active = b.getAttribute('data-subpage') === sub;
     b.style.borderBottomColor = active ? 'var(--accent)' : 'transparent';
+    b.classList.toggle('on', !!(active));
     b.style.color = active ? 'var(--text)' : 'var(--text2)';
     b.style.fontWeight = active ? '500' : '';
   });
@@ -7208,8 +7461,8 @@ function _certExpiryInfo(expiresOn) {
   const text = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   let color, suffix = '';
   if (diffMs < 0) { color = 'var(--err-text)'; suffix = ' (expired)'; }
-  else if (diffMs < 30 * dayMs) { color = '#f59e0b'; suffix = ` (in ${Math.ceil(diffMs / dayMs)}d)`; }
-  else { color = '#22c55e'; }
+  else if (diffMs < 30 * dayMs) { color = 'var(--orange)'; suffix = ` (in ${Math.ceil(diffMs / dayMs)}d)`; }
+  else { color = 'var(--green)'; }
   return { text: text + suffix, color, sortKey: t };
 }
 
@@ -7285,7 +7538,7 @@ function renderNpmCertsTable() {
     const domains = (c.domain_names || []).join(', ') || '—';
     const usedBy = _npmCertsHostUsage[c.id] || [];
     const usedTag = usedBy.length
-      ? ' <span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 7px;border-radius:10px;font-size:11px" title="' + _esc(usedBy.join(' | ')) + '">In use × ' + usedBy.length + '</span>'
+      ? ' <span class="mm-chip acc" title="' + _esc(usedBy.join(' | ')) + '">In use × ' + usedBy.length + '</span>'
       : '';
     const renewBtn = c.provider === 'letsencrypt'
       ? '<button type="button" class="btn btn-sm" onclick="renewNpmCert(' + c.id + ')" title="Renew certificate">Renew</button> '
@@ -7700,13 +7953,13 @@ function renderNpmImportTable() {
       : '<input type="checkbox" class="npm-import-cb" data-host-id="' + h.id + '" onchange="updateNpmSelectionCount()">';
     let badge, action;
     if (h.linkedProfile) {
-      badge = '<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:10px;font-size:11px">Linked → profile "' + _esc(h.linkedProfile) + '"</span>';
+      badge = '<span class="mm-chip">Linked → profile "' + _esc(h.linkedProfile) + '"</span>';
       action = '<a href="javascript:void(0)" onclick="openLinkedProfile(\'' + _esc(h.linkedProfile) + '\')" style="color:var(--accent);font-size:12px">Open</a>';
     } else if (h.linkedWebhook) {
-      badge = '<span style="background:var(--surface2);color:var(--text2);padding:2px 8px;border-radius:10px;font-size:11px">Linked → webhook "' + _esc(h.linkedWebhook) + '"</span>';
+      badge = '<span class="mm-chip">Linked → webhook "' + _esc(h.linkedWebhook) + '"</span>';
       action = '<a href="javascript:void(0)" onclick="openLinkedWebhook(\'' + _esc(h.linkedWebhook) + '\')" style="color:var(--accent);font-size:12px">Open</a>';
     } else {
-      badge = '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 8px;border-radius:10px;font-size:11px">Available</span>';
+      badge = '<span style="background:rgba(34,197,94,0.15);color:var(--green);padding:2px 8px;border-radius:10px;font-size:11px">Available</span>';
       action = '<div style="display:inline-flex;gap:6px">'
         + '<button class="btn btn-sm" onclick="adoptNpmHost(' + h.id + ', event)" title="Adopt as proxy with custom settings">Customize…</button>'
         + '<button class="btn btn-sm" onclick="closeNpmImportModal();openLinkProfileToHostModal(' + h.id + ')" title="Link to an existing Midleman profile">Link…</button>'
@@ -7974,13 +8227,13 @@ function renderNpmHostsTable() {
       : '(no domains)';
     const fwd = (h.forward_scheme || 'http') + '://' + (h.forward_host || '?') + ':' + (h.forward_port || '?');
     const sslBadge = (h.certificate_id && Number(h.certificate_id) > 0)
-      ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 7px;border-radius:10px;font-size:11px">SSL</span>'
+      ? '<span style="background:rgba(34,197,94,0.15);color:var(--green);padding:2px 7px;border-radius:10px;font-size:11px">SSL</span>'
       : '<span style="color:var(--text3);font-size:11px">—</span>';
     const enabledBadge = h.enabled
-      ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 7px;border-radius:10px;font-size:11px">Enabled</span>'
-      : '<span style="background:var(--surface2);color:var(--text2);padding:2px 7px;border-radius:10px;font-size:11px">Disabled</span>';
+      ? '<span style="background:rgba(34,197,94,0.15);color:var(--green);padding:2px 7px;border-radius:10px;font-size:11px">Enabled</span>'
+      : '<span class="mm-chip">Disabled</span>';
     const linkedTag = h.linkedProfile
-      ? ' <span style="background:rgba(0,120,212,0.12);color:var(--accent);padding:2px 7px;border-radius:10px;font-size:11px">Linked → ' + _esc(h.linkedProfile) + '</span>'
+      ? ' <span class="mm-chip acc">Linked → ' + _esc(h.linkedProfile) + '</span>'
       : '';
     const isLinked = !!h.linkedProfile;
     const toggleAction = h.enabled
@@ -8053,6 +8306,7 @@ function switchNpmHostTab(tab) {
   document.querySelectorAll('.npm-host-tab').forEach(btn => {
     const active = btn.getAttribute('data-tab') === tab;
     btn.style.borderBottomColor = active ? 'var(--accent)' : 'transparent';
+    btn.classList.toggle('on', !!(active));
     btn.style.color = active ? 'var(--text)' : 'var(--text2)';
     btn.style.fontWeight = active ? '500' : '400';
   });
@@ -8702,6 +8956,7 @@ function switchNotifTab(tab) {
   document.querySelectorAll('.notif-tab').forEach(b => {
     const active = b.getAttribute('data-tab') === tab;
     b.style.borderBottomColor = active ? 'var(--accent)' : 'transparent';
+    b.classList.toggle('on', !!(active));
     b.style.color = active ? 'var(--text)' : 'var(--text2)';
     b.style.fontWeight = active ? '500' : '400';
   });
@@ -8959,6 +9214,7 @@ function switchNotifMemberTab(tab) {
   document.querySelectorAll('.notif-member-tab').forEach(b => {
     const active = b.getAttribute('data-tab') === tab;
     b.style.borderBottomColor = active ? 'var(--accent)' : 'transparent';
+    b.classList.toggle('on', !!(active));
     b.style.color = active ? 'var(--text)' : 'var(--text2)';
     b.style.fontWeight = active ? '500' : '400';
   });
@@ -9284,10 +9540,10 @@ function renderFive9Connectors(connectors) {
   }
   c.innerHTML = connectors.map(cn => {
     const statusBadge = cn.running
-      ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:4px;font-size:11px">Running</span>'
+      ? '<span class="mm-chip ok">Running</span>'
       : (cn.enabled !== false
-        ? '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px">Stopped</span>'
-        : '<span style="background:var(--surface2);color:var(--text3);padding:2px 8px;border-radius:4px;font-size:11px">Disabled</span>');
+        ? '<span class="mm-chip err">Stopped</span>'
+        : '<span class="mm-chip">Disabled</span>');
     const replies = [
       cn.directReply ? (cn.channel === 'smooch' ? 'Smooch' : cn.channel === 'meta-whatsapp' ? 'Meta' : 'Direct') : null,
       (cn.webhookTargets && cn.webhookTargets.length)
@@ -9636,10 +9892,10 @@ function renderReportFeeds() {
       ? 'Last ' + f.dateRange.days + ' days'
       : ((f.dateRange && f.dateRange.startDate) || '') + ' → ' + ((f.dateRange && f.dateRange.endDate) || '');
     const refreshBadge = st.refreshing
-      ? ' <span style="background:var(--surface2);color:var(--accent);font-size:10px;padding:1px 6px;border-radius:8px">refreshing…</span>'
+      ? ' <span class="mm-chip">refreshing…</span>'
       : '';
     const groupBadge = (f.group && f.slug)
-      ? ' <span style="font-size:10px;font-weight:400;color:var(--accent);background:var(--surface2);padding:1px 5px;border-radius:4px;border:1px solid var(--border)">' + esc(f.group) + '/' + esc(f.slug) + '</span>'
+      ? ' <span class="mm-chip">' + esc(f.group) + '/' + esc(f.slug) + '</span>'
       : '';
     // Docs URL: group-scoped if group is set, always points to report API port (8444)
     var reportBase = window.location.protocol + '//' + window.location.hostname + ':' + (window.REPORT_PORT || 8444);
@@ -9650,7 +9906,7 @@ function renderReportFeeds() {
         : reportBase + '/reports/docs?apiKey=' + encodeURIComponent(f.apiKeys[0]);
     }
     return '<tr data-feed-row="' + esc(f.name) + '" style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background=\'var(--surface2)\'" onmouseleave="this.style.background=\'\'">' +
-      '<td style="padding:8px 12px;font-weight:600">' + esc(f.name) + groupBadge + (f.instanceName ? ' <span style="font-size:10px;font-weight:400;color:var(--text3);background:var(--surface2);padding:1px 5px;border-radius:4px;border:1px solid var(--border)">' + esc(f.instanceName) + '</span>' : '') + '</td>' +
+      '<td style="padding:8px 12px;font-weight:600">' + esc(f.name) + groupBadge + (f.instanceName ? ' <span class="mm-chip">' + esc(f.instanceName) + '</span>' : '') + '</td>' +
       '<td style="padding:8px;font-family:\'SF Mono\',Monaco,monospace;color:var(--text2)">' + esc(f.templateId) + '</td>' +
       '<td style="padding:8px;color:var(--text2)">' + esc(f.ownerType) + ' <span style="color:var(--text3)">(' + (f.ownerIds || []).length + ')</span></td>' +
       '<td style="padding:8px;color:var(--text2);font-size:12px">' + esc(dateStr) + '</td>' +
@@ -10052,12 +10308,12 @@ function rfStartSse() {
   }
 
   _rfSse.onopen = function() {
-    dot.style.background = '#22c55e';
+    dot.style.background = 'var(--green)';
     dot.title = 'SSE connected';
   };
 
   _rfSse.onerror = function() {
-    dot.style.background = '#ef4444';
+    dot.style.background = 'var(--red)';
     dot.title = 'SSE disconnected — retrying…';
   };
 
@@ -10112,7 +10368,7 @@ function rfStartSse() {
 function rfLogAppend(type, msg) {
   var log = document.getElementById('rfActivityLog');
   if (!log) return;
-  var colors = { start: '#60a5fa', done: '#4ade80', error: '#f87171', info: 'var(--text3)' };
+  var colors = { start: '#60a5fa', done: 'var(--green)', error: '#f87171', info: 'var(--text3)' };
   var icons  = { start: '⟳', done: '✓', error: '✗', info: '·' };
   var now = new Date().toLocaleTimeString('en-GB', { hour12: false });
   var line = document.createElement('div');
@@ -10336,7 +10592,7 @@ async function rfFetchPreview() {
       if (cacheRes.ok && cacheData.columns && cacheData.columns.length > 0) {
         _rfPreviewColumns = cacheData.columns;
         status.textContent = _rfPreviewColumns.length + ' columns (from cache — ' + cacheData.total + ' total rows).';
-        status.style.color = 'var(--green,#4ade80)';
+        status.style.color = 'var(--green)';
         rfRenderPreviewTable(cacheData.columns, cacheData.rows || []);
         rfBuildFieldMapVisual(cacheData.columns, cacheData.rows || []);
         rfPopulateColumnSelects(rfGetVisualProjectedColumns());
@@ -10374,7 +10630,7 @@ async function rfFetchPreview() {
 
     _rfPreviewColumns = data.columns || [];
     status.textContent = _rfPreviewColumns.length + ' columns, ' + data.totalRows + ' rows in report.';
-    status.style.color = 'var(--green,#4ade80)';
+    status.style.color = 'var(--green)';
 
     rfRenderPreviewTable(data.columns, data.sampleRows);
     rfBuildFieldMapVisual(data.columns, data.sampleRows || []);
@@ -10890,7 +11146,7 @@ function renderErrorFeed(entries, total) {
     tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Nenhum erro registado.</td></tr>';
   } else {
     tbody.innerHTML = entries.map(function (e, idx) {
-      const sevColor = e.severity === 'error' ? '#ef4444' : '#f59e0b';
+      const sevColor = e.severity === 'error' ? 'var(--red)' : 'var(--orange)';
       const dim = e.acknowledged ? 'opacity:0.55;' : '';
       const msg = e.message.length > 160 ? e.message.slice(0, 160) + '…' : e.message;
       return '<tr style="border-top:1px solid var(--border);' + dim + '">' +
@@ -11068,3 +11324,76 @@ async function compactLogsNow(ev) {
     fetchLogSettings();
   });
 }
+
+
+// Live preview of the sign-in logo in the OAuth client modal. The logo is never
+// set by hand: the server discovers it from the first redirect URI's site
+// (apple-touch-icon / icon links, else /favicon.ico), like the sign-in page.
+let _oauthLogoTimer = 0, _oauthLogoSeq = 0;
+function updateOauthClientLogoPreview() {
+  const box = document.getElementById('oauthClientLogoPreview');
+  const src = document.getElementById('oauthClientLogoSource');
+  if (!box) return;
+  const name = (document.getElementById('oauthClientName')?.value || '').trim();
+  const words = name.split(/[\s_\-]+/).filter(Boolean);
+  const initials = (words.length >= 2 ? words[0][0] + words[1][0] : (words[0] || '?').slice(0, 2)).toUpperCase();
+  const first = (document.getElementById('oauthClientUris')?.value || '').split(/\r?\n/).map(x => x.trim()).find(Boolean) || '';
+  let origin = '';
+  try { origin = first ? new URL(first).origin : ''; } catch { origin = ''; }
+  if (src) src.textContent = origin ? 'Detected from ' + origin : 'Add a redirect URI to detect the app logo.';
+  if (!box.querySelector('img')) box.textContent = initials;
+  clearTimeout(_oauthLogoTimer);
+  if (!origin) { box.textContent = initials; return; }
+  const seq = ++_oauthLogoSeq;
+  _oauthLogoTimer = setTimeout(async () => {
+    try {
+      const res = await api('/admin/oauth-clients/app-icon?uri=' + encodeURIComponent(first));
+      const data = await res.json();
+      if (seq !== _oauthLogoSeq) return;
+      box.textContent = initials;
+      if (!/^https?:\/\//i.test(data.iconUrl || '')) return;
+      const img = document.createElement('img');
+      img.alt = '';
+      img.referrerPolicy = 'no-referrer';
+      img.style.cssText = 'width:100%;height:100%;object-fit:contain;padding:6px;background:var(--surface)';
+      img.onload = () => { if (seq === _oauthLogoSeq) { box.textContent = ''; box.appendChild(img); } };
+      img.src = data.iconUrl;
+    } catch { if (seq === _oauthLogoSeq) box.textContent = initials; }
+  }, 400);
+}
+
+
+// ─── Segmented controls backed by a real <select> ───────────────────────────
+// Markup: <div class="mm-seg" data-seg-for="selectId"><button data-value=…>…</div>
+// The hidden <select> stays the source of truth (forms, Wizard.val, onchange
+// handlers keep working); the buttons only set it and dispatch "change".
+function mmSyncSeg(selectId) {
+  const sel = document.getElementById(selectId);
+  const seg = document.querySelector(`.mm-seg[data-seg-for="${selectId}"]`);
+  if (!sel || !seg) return;
+  seg.querySelectorAll('button[data-value]').forEach(b => {
+    const on = b.dataset.value === sel.value;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', on ? 'true' : 'false');
+    b.tabIndex = on ? 0 : -1;
+  });
+}
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest && e.target.closest('.mm-seg[data-seg-for] button[data-value]');
+  if (!btn) return;
+  const id = btn.closest('.mm-seg').dataset.segFor;
+  const sel = document.getElementById(id);
+  if (!sel || sel.value === btn.dataset.value) return;
+  sel.value = btn.dataset.value;
+  sel.dispatchEvent(new Event('change', { bubbles: true }));
+  mmSyncSeg(id);
+});
+document.addEventListener('keydown', (e) => {
+  const btn = e.target.closest && e.target.closest('.mm-seg[data-seg-for] button[data-value]');
+  if (!btn || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+  const all = [...btn.parentElement.querySelectorAll('button[data-value]')];
+  const next = all[(all.indexOf(btn) + (e.key === 'ArrowRight' ? 1 : all.length - 1)) % all.length];
+  next.focus(); next.click(); e.preventDefault();
+});
+document.addEventListener('change', (e) => { if (e.target && e.target.id) mmSyncSeg(e.target.id); });
+document.querySelectorAll('.mm-seg[data-seg-for]').forEach(seg => mmSyncSeg(seg.dataset.segFor));

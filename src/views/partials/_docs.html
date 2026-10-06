@@ -1,0 +1,427 @@
+    <!-- ═══ DOCS ═══ -->
+    <div class="page" id="pageDocs">
+      <div class="page-header docs-page-header">
+        <div>
+          <h2>Docs</h2>
+          <p>Integration reference for this Midleman instance. Endpoints shown here are the live values of this installation.</p>
+        </div>
+        <div class="docs-header-actions">
+          <label class="mm-search docs-search">
+            <input type="search" id="docsSearch" placeholder="Search docs" oninput="docsFilter(this.value)" autocomplete="off">
+          </label>
+          <button class="btn btn-sm" onclick="docsCopyForAI()" title="Copy every section as one prompt for an AI assistant">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg>
+            Copy all for AI
+          </button>
+        </div>
+      </div>
+
+      <div class="docs-layout">
+        <nav class="docs-nav" aria-label="Docs sections">
+          <div class="docs-nav-group">Identity</div>
+          <a href="#docs-oidc" data-docs="oidc">OAuth &amp; OIDC</a>
+          <a href="#docs-oidc-payloads" data-docs="oidc-payloads">Tokens &amp; payloads</a>
+          <div class="docs-nav-group">Traffic</div>
+          <a href="#docs-proxies" data-docs="proxies">HTTP proxies</a>
+          <a href="#docs-webhooks" data-docs="webhooks">Webhooks</a>
+          <div class="docs-nav-group">Extensions</div>
+          <a href="#docs-five9" data-docs="five9">Five9 connector</a>
+          <a href="#docs-gocontact" data-docs="gocontact">GoContact connector</a>
+          <a href="#docs-reports" data-docs="reports">Report feeds API</a>
+        </nav>
+
+        <div class="docs-content">
+          <p class="docs-empty" id="docsEmpty" hidden>No section matches your search.</p>
+
+          <!-- ── OAuth & OIDC ── -->
+          <section class="card docs-section" id="docs-oidc"
+            data-ai-task="Add “Sign in with Midleman” to my application using OpenID Connect. Use the authorization-code flow with PKCE (S256) through a maintained OIDC client library for my stack, configured from the discovery URL. Read the client id and secret from environment variables (MIDLEMAN_CLIENT_ID, MIDLEMAN_CLIENT_SECRET) — never hard-code them. The callback route must match the registered redirect URI exactly. Validate the id_token (RS256 via JWKS, iss, aud, exp, nonce), identify users by preferred_username, store the refresh token server-side and handle its rotation, and implement logout by redirecting to the end-session endpoint with client_id and post_logout_redirect_uri. Ask me for anything marked <…>.">
+            <header class="docs-head">
+              <div>
+                <div class="docs-eyebrow">Identity</div>
+                <h3>OAuth &amp; OIDC</h3>
+                <p class="docs-lead">Midleman is an OAuth 2.0 / OpenID Connect provider. Register the app under <a href="#" onclick="navigate('oauthclients');return false">OAuth Clients</a>, then configure it with the discovery URL.</p>
+              </div>
+              <div class="docs-head-actions">
+                <span class="mm-chip docs-noai" id="docsOidcState">—</span>
+                <button class="btn btn-sm btn-primary docs-noai" onclick="docsCopyForAI('oidc')">Copy for AI</button>
+              </div>
+            </header>
+            <div class="card-body">
+              <div class="docs-client-pick docs-noai">
+                <label for="docsOidcClient">Prepare for client</label>
+                <select id="docsOidcClient" onchange="docsRenderClient()"><option value="">Generic (no client)</option></select>
+                <span class="docs-client-info" id="docsOidcClientInfo">Pick a client to include its client_id and redirect URIs in the copied prompt.</span>
+              </div>
+
+              <h4>Endpoints</h4>
+              <div class="docs-endpoints" id="docsOidcEndpoints">
+                <div class="docs-ep"><span class="docs-ep-name">Issuer</span><span class="docs-method"></span><code data-ep="issuer">—</code></div>
+                <div class="docs-ep"><span class="docs-ep-name">Discovery</span><span class="docs-method get">GET</span><code data-ep="discovery">—</code></div>
+                <div class="docs-ep"><span class="docs-ep-name">Authorization</span><span class="docs-method get">GET</span><code data-ep="authorization_endpoint">—</code></div>
+                <div class="docs-ep"><span class="docs-ep-name">Token</span><span class="docs-method post">POST</span><code data-ep="token_endpoint">—</code></div>
+                <div class="docs-ep"><span class="docs-ep-name">Userinfo</span><span class="docs-method get">GET</span><code data-ep="userinfo_endpoint">—</code></div>
+                <div class="docs-ep"><span class="docs-ep-name">JWKS</span><span class="docs-method get">GET</span><code data-ep="jwks_uri">—</code></div>
+                <div class="docs-ep"><span class="docs-ep-name">Logout</span><span class="docs-method get">GET</span><code data-ep="end_session_endpoint">—</code></div>
+              </div>
+              <p class="docs-note" id="docsOidcNote"></p>
+
+              <h4>Client settings</h4>
+              <table class="docs-table">
+                <tr><td>Flow</td><td>Authorization code. Implicit and password grants are not supported.</td></tr>
+                <tr><td>PKCE</td><td><code>S256</code>, required by default. Disable per client only for legacy apps that cannot send a <code>code_challenge</code>.</td></tr>
+                <tr><td>Client authentication</td><td><code>client_secret_post</code> or <code>client_secret_basic</code>. The secret is shown once, when the client is created.</td></tr>
+                <tr><td>Scopes</td><td><code>openid profile email offline_access</code>, space-separated. <code>openid</code> is always added.</td></tr>
+                <tr><td>User identifier</td><td><code>preferred_username</code> (the login name). Use <code>sub</code> only for an opaque ID. Do not change it once users have signed in.</td></tr>
+                <tr><td>Redirect URI</td><td>Exact string match — no wildcards, no <code>#fragment</code>. The first one also provides the app logo on the sign-in screen.</td></tr>
+                <tr><td>Logout</td><td><code>/oauth/logout?client_id=…&amp;post_logout_redirect_uri=…</code> ends the session and returns to that URI, the client's post-logout redirect, or the origin of its first redirect URI.</td></tr>
+                <tr><td>Single sign-on</td><td>A user signed in to one client is signed in to every client they may use, until logout or session expiry.</td></tr>
+              </table>
+
+              <h4>Example — Portainer</h4>
+              <pre class="docs-code" data-label="Portainer · Custom OAuth">Authorization URL   https://&lt;issuer&gt;/oauth/authorize
+Access token URL    https://&lt;issuer&gt;/oauth/token
+Resource URL        https://&lt;issuer&gt;/oauth/userinfo
+Logout URL          https://&lt;issuer&gt;/oauth/logout
+Redirect URL        https://&lt;portainer-host&gt;/        (no #!/home)
+User identifier     preferred_username
+Scopes              openid profile email
+Use PKCE            on (Portainer 2.20+)</pre>
+            </div>
+          </section>
+
+          <section class="card docs-section" id="docs-oidc-payloads">
+            <header class="docs-head">
+              <div>
+                <div class="docs-eyebrow">Identity</div>
+                <h3>Tokens &amp; payloads</h3>
+                <p class="docs-lead">What the token, userinfo and error responses look like.</p>
+              </div>
+            </header>
+            <div class="card-body">
+              <h4>Authorization-code exchange</h4>
+              <pre class="docs-code" data-label="POST /oauth/token · response">{
+  "access_token":  "&lt;JWT&gt;",
+  "id_token":      "&lt;JWT&gt;",
+  "token_type":    "Bearer",
+  "expires_in":    86400,
+  "scope":         "openid profile email",
+  "refresh_token": "&lt;opaque&gt;"
+}</pre>
+              <p class="docs-note"><code>access_token</code> and <code>id_token</code> are the same RS256 JWT — verify it with the JWKS endpoint. Authorization codes are single-use, valid for 90 seconds and bound to the client, redirect URI and code challenge.</p>
+
+              <h4>JWT claims</h4>
+              <pre class="docs-code" data-label="Decoded token payload">{
+  "iss": "&lt;issuer&gt;",
+  "sub": "&lt;uuid-v5 derived from midleman_uid&gt;",
+  "aud": "&lt;client_id&gt;",
+  "iat": 1730000000,
+  "exp": 1730086400,
+  "midleman_uid": 42,
+  "preferred_username": "jdoe",
+  "email": "jdoe@example.com",     // with the "email" scope
+  "email_verified": true,
+  "name": "John Doe",              // with the "profile" scope
+  "nonce": "&lt;client-supplied&gt;"     // when the authorize request had one
+}</pre>
+
+              <h4>Userinfo</h4>
+              <pre class="docs-code" data-label="GET /oauth/userinfo · Authorization: Bearer &lt;access_token&gt;">{
+  "sub": "&lt;uuid&gt;",
+  "preferred_username": "jdoe",
+  "email": "jdoe@example.com",
+  "email_verified": true,
+  "name": "John Doe",
+  "midleman_uid": 42
+}</pre>
+
+              <h4>Refresh</h4>
+              <p><code>POST /oauth/token</code> with <code>grant_type=refresh_token</code> returns the same shape with a new <code>refresh_token</code>. Refresh tokens are single-use and rotate on every call; reusing an old one revokes the whole token family. Changing a client's redirect URIs revokes all of its refresh tokens.</p>
+
+              <h4>Errors</h4>
+              <pre class="docs-code" data-label="RFC 6749 §5.2">{
+  "error": "invalid_grant",
+  "error_description": "Authorization code expired or already used"
+}</pre>
+            </div>
+          </section>
+
+          <!-- ── HTTP proxies ── -->
+          <section class="card docs-section" id="docs-proxies"
+            data-ai-task="Call an upstream API through a Midleman HTTP proxy from my application. Use the proxy base URL instead of the upstream URL, send the access key in the X-Mid-Api-Key header read from an environment variable (MIDLEMAN_PROXY_KEY), and handle 401/403/429 responses. Ask me for anything marked <…>.">
+            <header class="docs-head">
+              <div>
+                <div class="docs-eyebrow">Traffic</div>
+                <h3>HTTP proxies</h3>
+                <p class="docs-lead">Each proxy listens on its own port and forwards every path to its target, injecting the configured auth header so upstream credentials never reach the client.</p>
+              </div>
+              <div class="docs-head-actions"><button class="btn btn-sm docs-noai" onclick="docsCopyForAI('proxies')">Copy for AI</button></div>
+            </header>
+            <div class="card-body">
+              <pre class="docs-code" data-label="Request flow">GET https://&lt;host&gt;:&lt;proxy-port&gt;/v1/messages
+→ forwarded to &lt;target-url&gt;/v1/messages  (+ Authorization: App &lt;secret&gt;)</pre>
+
+              <h4>Access modes</h4>
+              <table class="docs-table">
+                <tr><td>Access key</td><td>API clients send the key in the <code>X-Mid-Api-Key</code> header (removed before forwarding). Browsers can open <code>?key=&lt;key&gt;</code> once: Midleman strips it from the URL and keeps a cookie scoped to that proxy.</td></tr>
+                <tr><td>Login</td><td>Users sign in on the proxy's own <code>/auth/login</code> page with their Midleman or LDAP account and 2FA.</td></tr>
+                <tr><td>Public</td><td>Anyone who reaches the port can call it. Restrict with <em>Allowed IPs</em> and <em>Rate limit</em>.</td></tr>
+              </table>
+              <pre class="docs-code" data-label="curl">curl https://&lt;host&gt;:&lt;proxy-port&gt;/v1/status \
+  -H "X-Mid-Api-Key: &lt;access-key&gt;"</pre>
+
+              <h4>Responses from Midleman</h4>
+              <table class="docs-table">
+                <tr><td><code>401</code></td><td>Missing or wrong access key / no login session.</td></tr>
+                <tr><td><code>403</code></td><td>Caller IP not allowed, or the path ends in a blocked extension.</td></tr>
+                <tr><td><code>429</code></td><td>Rate limit exceeded.</td></tr>
+                <tr><td><code>502</code></td><td>The target could not be reached.</td></tr>
+              </table>
+
+              <h4>Other options</h4>
+              <table class="docs-table">
+                <tr><td>CORS</td><td>Answers preflight requests and adds <code>Access-Control-*</code> headers only for the allowed origins.</td></tr>
+                <tr><td>Request log</td><td><em>Full</em>, <em>errors only</em> or <em>off</em> per proxy. Traffic totals for the dashboard chart are counted in every mode. Failed requests can be resent from the request log.</td></tr>
+              </table>
+            </div>
+          </section>
+
+          <!-- ── Webhooks ── -->
+          <section class="card docs-section" id="docs-webhooks"
+            data-ai-task="Send events from my application to a Midleman webhook. POST JSON to the webhook URL with the X-Forward-Token header read from an environment variable (MIDLEMAN_WEBHOOK_TOKEN); treat 202 as accepted and retry with backoff on network errors or 5xx. Ask me for anything marked <…>.">
+            <header class="docs-head">
+              <div>
+                <div class="docs-eyebrow">Traffic</div>
+                <h3>Webhooks</h3>
+                <p class="docs-lead">A webhook listens on its own port, accepts a payload once and delivers it to every enabled destination, with retries.</p>
+              </div>
+              <div class="docs-head-actions"><button class="btn btn-sm docs-noai" onclick="docsCopyForAI('webhooks')">Copy for AI</button></div>
+            </header>
+            <div class="card-body">
+              <pre class="docs-code" data-label="POST · inbound event">POST https://&lt;host&gt;:&lt;webhook-port&gt;/any/path
+X-Forward-Token: &lt;auth-token&gt;
+Content-Type: application/json
+
+{ "event": "payment.completed", "order": { "id": 123, "total": 50 } }
+
+# response
+202 Accepted</pre>
+
+              <h4>Authentication</h4>
+              <p>When the webhook has an auth token, send it in the <code>X-Forward-Token</code> header or as <code>?token=</code>. A wrong or missing token gets <code>401</code>. <em>Allowed IPs</em> can restrict callers further.</p>
+
+              <h4>Meta (WhatsApp / Facebook / Instagram) verification</h4>
+              <p>Set the callback URL to <code>https://&lt;host&gt;:&lt;webhook-port&gt;/?token=&lt;auth-token&gt;</code> and use the same value as Meta's <em>Verify token</em>. Midleman answers the <code>hub.challenge</code> handshake automatically.</p>
+
+              <h4>Delivery</h4>
+              <table class="docs-table">
+                <tr><td>Body template</td><td>Reshape the payload per destination with <code>{{path.to.field}}</code>, e.g. <code>{"id": "{{order.id}}", "amount": {{order.total}}}</code>.</td></tr>
+                <tr><td>Conditions</td><td>Each destination can filter on payload fields; several conditions combine with <strong>AND</strong> or <strong>OR</strong>.</td></tr>
+                <tr><td>Enable / disable</td><td>A destination can be paused without deleting it.</td></tr>
+                <tr><td>Failed deliveries</td><td>Go to the dead-letter queue, where they can be resent, dismissed or cancelled — one by one or all at once.</td></tr>
+                <tr><td>Retries</td><td><code>maxRetries</code>, <code>retryDelayMs</code>, <code>backoff</code> (<code>exponential</code> or <code>fixed</code>). By default retries on <code>429, 502, 503, 504</code>; <em>retry until success</em> retries any non-2xx.</td></tr>
+              </table>
+            </div>
+          </section>
+
+          <!-- ── Five9 ── -->
+          <section class="card docs-section" id="docs-five9"
+            data-ai-task="Connect my system (for example an n8n flow or chatbot) to a Midleman Five9 connector: send customer messages to the inbound endpoint and expose an HTTPS endpoint that receives the agent events, answers 2xx and deduplicates by message.uuid. Ask me for anything marked <…>.">
+            <header class="docs-head">
+              <div>
+                <div class="docs-eyebrow">Extensions</div>
+                <h3>Five9 connector</h3>
+                <p class="docs-lead">Links a digital channel to a Five9 Digital Engagement conversation. The conversation is created on the first message and reused until it ends; agent replies arrive through the Five9 callback.</p>
+              </div>
+              <div class="docs-head-actions"><button class="btn btn-sm docs-noai" onclick="docsCopyForAI('five9')">Copy for AI</button></div>
+            </header>
+            <div class="card-body">
+              <details class="docs-details" open>
+                <summary>Generic channel — inbound</summary>
+                <p>POST to the connector port, any path, with the <em>Verify token</em> as <code>?token=</code> or <code>X-Forward-Token</code>. Files are downloaded by Midleman and uploaded to Five9.</p>
+                <pre class="docs-code" data-label="POST · customer message">POST http://&lt;host&gt;:&lt;port&gt;/?token=SECRET
+Content-Type: application/json
+
+{ "chatId": "244939609354", "name": "John", "text": "Hello" }
+
+# response
+{ "status": "accepted", "messages": 1, "requestId": "..." }</pre>
+              </details>
+
+              <details class="docs-details">
+                <summary>Session lifecycle and bot → human handover</summary>
+                <ul>
+                  <li><strong>First message</strong> of a <code>chatId</code> → Midleman authenticates anonymously, creates a Five9 conversation and uses that message's <code>text</code> as the <em>question</em> the agent sees.</li>
+                  <li><strong>Next messages</strong> with the same <code>chatId</code> → reuse the session.</li>
+                  <li><strong>Expired or closed session</strong> → the next message starts a new conversation.</li>
+                  <li><strong>Business hours</strong> → outside the configured hours the customer gets the business-hours message; the message is only passed on to Five9 when <em>forward to Five9</em> is on.</li>
+                </ul>
+                <p>For a bot → human handover, send the conversation summary as the first message — there is no separate endpoint:</p>
+                <pre class="docs-code" data-label="POST · handover summary">POST http://&lt;host&gt;:&lt;port&gt;/?token=SECRET
+Content-Type: application/json
+
+{ "chatId": "244939609354", "name": "John Smith",
+  "text": "Customer wants to cancel contract 12345. Identity already confirmed by the bot." }</pre>
+              </details>
+
+              <details class="docs-details">
+                <summary>Five9 callback and events</summary>
+                <p>Five9 sends agent replies to the connector's <strong>Callback URL</strong>. Midleman checks the token, finds the session by <code>correlationId</code> and fans out to your webhook targets and/or the customer via Meta/Smooch.</p>
+                <pre class="docs-code" data-label="Callback URL to register in Five9">https://&lt;host&gt;:&lt;connector-port&gt;/any-path?token=CALLBACK_TOKEN</pre>
+                <pre class="docs-code" data-label="Event sent to your webhook target">{
+  "connector": "name", "channel": "generic",
+  "event": "agent_message",       // or "agent_joined" | "chat_closed"
+  "chatId": "244939609354", "displayName": "John Smith",
+  "message": {
+    "uuid": "dedup-id", "text": "Hi! How can I help?",
+    "timestamp": 1234567890000, "agentName": "Mary",
+    "userType": "AGENT",
+    "file": null                  // or { url, filename, mimetype, size }
+  }
+}
+// chat_closed → message: null, "reason": "agent" | "expired"</pre>
+                <p class="docs-note">Answer <code>2xx</code> to acknowledge and deduplicate by <code>message.uuid</code> — Five9 can resend an event.</p>
+              </details>
+            </div>
+          </section>
+
+          <!-- ── GoContact ── -->
+          <section class="card docs-section" id="docs-gocontact"
+            data-ai-task="Connect my system (for example an n8n flow or chatbot) to a Midleman GoContact connector: send customer messages to the inbound endpoint, implement the bot → human handover with history when needed, and expose an HTTPS endpoint that receives the agent events, answers 2xx and deduplicates by message.uuid. Ask me for anything marked <…>.">
+            <header class="docs-head">
+              <div>
+                <div class="docs-eyebrow">Extensions</div>
+                <h3>GoContact connector</h3>
+                <p class="docs-lead">Links a digital channel (Meta WhatsApp, Smooch/Sunshine or generic JSON) to a GoContact webchat session and returns the agent's replies. Mode is <code>poll</code> or <code>webchat-api</code>; the channel is independent of the mode.</p>
+              </div>
+              <div class="docs-head-actions"><button class="btn btn-sm docs-noai" onclick="docsCopyForAI('gocontact')">Copy for AI</button></div>
+            </header>
+            <div class="card-body">
+              <details class="docs-details" open>
+                <summary>Generic channel — inbound</summary>
+                <p>POST to the connector port, any path. If a <em>Verify token</em> is set, send it as <code>?token=</code> or in the <code>X-Forward-Token</code> header.</p>
+                <pre class="docs-code" data-label="POST · customer messages">POST http://&lt;host&gt;:&lt;port&gt;/?token=SECRET
+Content-Type: application/json
+
+// plain text
+{ "chatId": "244939609354", "name": "John", "text": "Hello" }
+
+// with a file (Midleman downloads it and sends it to the contact center)
+{ "chatId": "244939609354", "name": "John",
+  "file": { "url": "https://.../photo.jpg", "filename": "photo.jpg", "mimetype": "image/jpeg" } }
+
+// several messages at once
+{ "messages": [ { "chatId": "c1", "text": "hi" }, { "chatId": "c2", "text": "hello" } ] }
+
+// response
+{ "status": "accepted", "messages": 1, "requestId": "..." }</pre>
+                <p class="docs-note">Accepted aliases: <code>chatId</code> = <code>idChat</code> / <code>from</code> · <code>name</code> = <code>displayName</code> · <code>text</code> = <code>message</code> / <code>mensagem</code>. Each message needs <code>text</code> or <code>file</code>.</p>
+              </details>
+
+              <details class="docs-details">
+                <summary>Agent replies</summary>
+                <p>Enable <strong>Direct reply</strong> (Meta/Smooch — delivered straight to the customer) and/or add <strong>Webhook targets</strong> (Midleman POSTs the event). The generic channel only supports webhook targets.</p>
+                <pre class="docs-code" data-label="POST · event sent to your webhook">POST &lt;your-webhook&gt;
+X-Connector: connector-name
+
+{
+  "connector": "connector-name",
+  "channel": "generic",
+  "event": "agent_message",          // or "agent_joined" | "chat_closed"
+  "chatId": "customer-244939609354",
+  "displayName": "John",
+  "message": {
+    "uuid": "unique-id", "text": "How can I help?",
+    "timestamp": 1781700000000, "agentName": "Mary",
+    "userType": "AGENT",
+    "file": null                      // or { url, filename, mimetype, size }
+  }
+}
+// chat_closed → message: null + "reason": "agent" | "admin" | "expired"</pre>
+                <p class="docs-note">Answer <code>2xx</code> to acknowledge. <code>agent_message</code> is at-least-once (retried on failure) — deduplicate by <code>message.uuid</code>. <code>chat_closed</code>: 3 attempts, then the dead-letter queue.</p>
+              </details>
+
+              <details class="docs-details">
+                <summary>Bot → human handover (with history)</summary>
+                <p>Creates the GoContact conversation <strong>with the chat history</strong>. <code>webchat-api</code> mode only; same auth as inbound.</p>
+                <pre class="docs-code" data-label="POST /handover">POST http://&lt;host&gt;:&lt;port&gt;/handover?token=SECRET
+Content-Type: application/json
+
+{
+  "chatId": "customer-244939609354",
+  "name": "John",
+  "phoneNumberId": "879847985208219",   // routes replies on Meta
+  "history": [
+    { "from": "client", "text": "I want to talk to a human", "timestamp": 1781700000000 },
+    { "from": "bot",    "text": "Sure, transferring you.",    "timestamp": 1781700001000 }
+  ]
+}
+
+// response
+{ "status": "ok", "conversationUuid": "…", "contactId": "…", "historyCount": 2 }</pre>
+                <p class="docs-note"><code>from: "bot"</code> is marked as BOT, anything else as CLIENT. Up to 100 messages (the most recent are kept), text only.</p>
+              </details>
+
+              <details class="docs-details">
+                <summary>Meta WhatsApp / Smooch</summary>
+                <p><strong>Meta</strong>: the <em>Verify token</em> answers the <code>hub.challenge</code> handshake; the full envelope, a bare <code>value</code> or an array of them is accepted. <strong>Smooch</strong>: validated with <code>X-Smooch-Signature</code>. Several connectors can share one Meta feed — each filters by its <em>Phone number filter</em> (<code>phone_number_id</code>).</p>
+                <pre class="docs-code" data-label="Callback URL for Meta / Smooch">https://&lt;host&gt;:&lt;port&gt;/?token=VERIFY_TOKEN</pre>
+              </details>
+
+              <details class="docs-details">
+                <summary><code>webchat-api</code> mode — callback and URLs</summary>
+                <p>GoContact pushes agent replies to Midleman. Register this URL in GoContact; the <em>Callback token</em> protects it.</p>
+                <pre class="docs-code" data-label="Callback URL for GoContact">https://&lt;host&gt;:&lt;port&gt;/gocontact/callback?token=CALLBACK_TOKEN</pre>
+                <p class="docs-note"><strong>API base URL</strong> (<code>eu.ds.gocontact.com</code>) serves the whole API. <strong>Base URL</strong> (the instance) only serves attachments in webchat-api mode. <code>loginFields</code> are detected automatically; override them in <em>Login field mapping</em>.</p>
+              </details>
+
+              <details class="docs-details">
+                <summary>Attachments by mode</summary>
+                <p><strong>poll</strong>: any file type is uploaded to the GoContact instance storage. <strong>webchat-api</strong>: the API only accepts <code>jpg / png / pdf</code> from the customer. Agent attachments are served by the instance at <code>&lt;Base URL&gt;/storage/webchat-attachments/…</code>.</p>
+              </details>
+            </div>
+          </section>
+
+          <!-- ── Report feeds ── -->
+          <section class="card docs-section" id="docs-reports"
+            data-ai-task="Consume Midleman report feeds from my application: call the feed routes with the API key in the X-API-Key header read from an environment variable (MIDLEMAN_REPORTS_KEY), use the typed filters for date ranges, and paginate or cache as appropriate. The OpenAPI spec at /reports/openapi.json describes every feed. Ask me for anything marked <…>.">
+            <header class="docs-head">
+              <div>
+                <div class="docs-eyebrow">Extensions</div>
+                <h3>Report feeds API</h3>
+                <p class="docs-lead">Report feeds are served on the report API port. Authenticate with an API key in <code>X-API-Key</code>, <code>Authorization: Bearer &lt;key&gt;</code> or <code>?apiKey=&lt;key&gt;</code>.</p>
+              </div>
+              <div class="docs-head-actions">
+                <span class="mm-chip docs-noai" id="docsReportPort">—</span>
+                <button class="btn btn-sm docs-noai" onclick="docsCopyForAI('reports')">Copy for AI</button>
+              </div>
+            </header>
+            <div class="card-body">
+              <pre class="docs-code" data-label="Routes">// Feed without a group
+GET /reports/:name
+X-API-Key: &lt;api-key&gt;
+
+// Grouped feed
+GET /reports/:group/:slug
+
+// Detail (needs detail.idField on the feed)
+GET /reports/:group/:slug/:id
+GET /reports/:name/:id
+
+// Audio stream
+GET /reports/:group/:slug/:id/audio</pre>
+              <pre class="docs-code" data-label="Filters">// Exact match
+GET /reports/:group/:slug?agentName=John
+
+// Typed operators (?field__op=value)
+GET /reports/:group/:slug?startDate__gte=2026-01-01&amp;startDate__lte=2026-01-31
+GET /reports/:group/:slug?talkTime__gte=60&amp;direction__contains=inbound</pre>
+              <pre class="docs-code" data-label="Swagger / OpenAPI">GET /reports/docs?apiKey=&lt;key&gt;           all feeds
+GET /reports/:group/docs?apiKey=&lt;key&gt;    one group
+GET /reports/openapi.json                machine-readable spec</pre>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </div>

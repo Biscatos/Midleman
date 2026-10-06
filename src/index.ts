@@ -1,6 +1,7 @@
 // MUST stay the first import: the module self-installs the console patch and
 // process-level handlers on evaluation, so keeping it first is what guarantees
 // no other module's top-level code throws before the feed is listening.
+import { getAppIconUrl, prefetchAppIcon } from './auth/app-icon';
 import { queryErrors as queryErrorFeed, getErrorStats, getError as getErrorEntry, ackErrors, clearErrors } from './core/error-feed';
 
 import { loadConfig, reloadEnvFile, loadProxyProfiles, loadTcpUdpProfiles } from './core/config';
@@ -24,6 +25,7 @@ import { initFive9Sessions, shutdownFive9Sessions, listFive9Sessions, deleteFive
 import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry/telemetry';
 import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart, getRequestLogBreakdown, getPurgeStatus, startPurge, compactDatabase, type RequestLogEntry, type PurgeOptions } from './telemetry/request-log';
 import { replayProxyRequest, ReplayError } from './proxy/replay';
+import { withTheme, dashboardAssetVersion, FAVICON_DATA_URI } from './core/ui-theme';
 import { normalizeCorsInput } from './core/cors';
 import { initLogSettings, getLogSettings, saveLogSettings, registerLogModeResolver, isLogMode, type LogMode } from './telemetry/log-settings';
 import { initSipLog, shutdownSipLog, querySipLogs, getSipLogDetail, getSipLogStats } from './telemetry/sip-log';
@@ -231,9 +233,9 @@ try {
 loadPortAssignments();
 
 // Load templates & assets
-const errorTemplate = readFileSync(resolve(import.meta.dir, 'views/error.html'), 'utf-8');
-const landingPage = readFileSync(resolve(import.meta.dir, 'views/landing.html'), 'utf-8');
-const proxyLoginTemplate = readFileSync(resolve(import.meta.dir, 'views/proxy-login.html'), 'utf-8');
+const errorTemplate = withTheme(readFileSync(resolve(import.meta.dir, 'views/error.html'), 'utf-8'));
+const landingPage = withTheme(readFileSync(resolve(import.meta.dir, 'views/landing.html'), 'utf-8'));
+const proxyLoginTemplate = withTheme(readFileSync(resolve(import.meta.dir, 'views/proxy-login.html'), 'utf-8'), { favicon: false });
 setProxyLoginTemplate(proxyLoginTemplate);
 let logoSvg: Uint8Array | null = null;
 try {
@@ -873,7 +875,7 @@ const server = Bun.serve({
                 const now = new Date();
                 const expired = !info || !!info.usedAt || new Date(info.expiresAt) < now;
                 const escH = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-                const pageHtml = readFileSync(resolve(import.meta.dir, 'views/password-reset.html'), 'utf-8');
+                const pageHtml = withTheme(readFileSync(resolve(import.meta.dir, 'views/password-reset.html'), 'utf-8'));
                 const html = pageHtml
                     .replace(/\{\{TOKEN\}\}/g, expired ? '' : escH(token))
                     .replace(/\{\{INVALID_DISPLAY\}\}/g, expired ? 'block' : 'none')
@@ -969,7 +971,7 @@ const server = Bun.serve({
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Midleman — Health</title>
-  <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='system';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
+  <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='dark';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root,
@@ -1078,7 +1080,7 @@ const server = Bun.serve({
                 const file = url.pathname.replace('/dashboard/css/', '');
                 try {
                     const css = readFileSync(resolve(import.meta.dir, `views/css/${file}`), 'utf-8');
-                    return new Response(css, { status: 200, headers: { 'Content-Type': 'text/css; charset=utf-8' } });
+                    return new Response(css, { status: 200, headers: { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': url.searchParams.has('v') ? 'public, max-age=31536000, immutable' : 'no-cache' } });
                 } catch {
                     return new Response('Not found', { status: 404 });
                 }
@@ -1088,7 +1090,7 @@ const server = Bun.serve({
                 const file = url.pathname.replace('/dashboard/js/', '');
                 try {
                     const js = readFileSync(resolve(import.meta.dir, `views/js/${file}`), 'utf-8');
-                    return new Response(js, { status: 200, headers: { 'Content-Type': 'application/javascript; charset=utf-8' } });
+                    return new Response(js, { status: 200, headers: { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': url.searchParams.has('v') ? 'public, max-age=31536000, immutable' : 'no-cache' } });
                 } catch {
                     return new Response('Not found', { status: 404 });
                 }
@@ -1101,11 +1103,13 @@ const server = Bun.serve({
                 try {
                     const setupHtml = readFileSync(resolve(import.meta.dir, 'views/partials/_setup.html'), 'utf-8');
                     const loginHtml = readFileSync(resolve(import.meta.dir, 'views/partials/_login.html'), 'utf-8');
-                    const appHtml = readFileSync(resolve(import.meta.dir, 'views/partials/_app.html'), 'utf-8');
+                    const docsHtml = readFileSync(resolve(import.meta.dir, 'views/partials/_docs.html'), 'utf-8');
+                    const appHtml = readFileSync(resolve(import.meta.dir, 'views/partials/_app.html'), 'utf-8').replace('<!-- INJECT_DOCS -->', docsHtml);
                     html = html.replace('<!-- INJECT_SETUP -->', setupHtml)
                                .replace('<!-- INJECT_LOGIN -->', loginHtml)
                                .replace('<!-- INJECT_APP -->', appHtml)
-                               .replace('<!-- INJECT_CONFIG -->', `<script>window.REPORT_PORT=${reportPortRaw};</script>`);
+                               .replace('<!-- INJECT_CONFIG -->', `<script>window.REPORT_PORT=${reportPortRaw};</script>`)
+                    html = html.replaceAll('__MM_V__', dashboardAssetVersion()).replace('__MM_FAVICON__', FAVICON_DATA_URI);
                 } catch (err) {
                     console.error('Failed to load dashboard partials:', err);
                 }
@@ -1121,7 +1125,7 @@ const server = Bun.serve({
                 const token = url.pathname.split('/')[2];
                 const invite = getAdminInvite(token);
                 const escH = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-                const pageHtml = readFileSync(resolve(import.meta.dir, 'views/admin-invite.html'), 'utf-8');
+                const pageHtml = withTheme(readFileSync(resolve(import.meta.dir, 'views/admin-invite.html'), 'utf-8'));
                 if (!invite || invite.usedAt || new Date(invite.expiresAt) < new Date()) {
                     const msg = !invite ? 'Link de convite não encontrado.' : invite.usedAt ? 'Este convite já foi utilizado.' : 'Este convite expirou.';
                     return new Response(
@@ -1173,7 +1177,7 @@ const server = Bun.serve({
 
                 if (!invite || invite.usedAt || new Date(invite.expiresAt) < new Date()) {
                     const msg = !invite ? 'Link de acesso não encontrado.' : invite.usedAt ? 'Este link de acesso já foi utilizado.' : 'Este link de acesso expirou.';
-                    const errHtml = readFileSync(resolve(import.meta.dir, 'views/invite.html'), 'utf-8')
+                    const errHtml = withTheme(readFileSync(resolve(import.meta.dir, 'views/invite.html'), 'utf-8'), { favicon: false })
                         .replace(/\{\{TOKEN\}\}/g, '')
                         .replace(/\{\{LOGIN_TITLE\}\}/g, esc(loginTitle))
                         .replace(/\{\{LOGIN_LOGO_URL\}\}/g, loginLogoUrl)
@@ -1197,7 +1201,7 @@ const server = Bun.serve({
                 const reqHost = req.headers.get('host')?.split(':')[0] || 'localhost';
                 const proxyLoginUrl = proxyPort ? `http://${reqHost}:${proxyPort}/auth/login` : '';
 
-                const inviteHtml = readFileSync(resolve(import.meta.dir, 'views/invite.html'), 'utf-8')
+                const inviteHtml = withTheme(readFileSync(resolve(import.meta.dir, 'views/invite.html'), 'utf-8'), { favicon: false })
                     .replace(/\{\{TOKEN\}\}/g, token)
                     .replace(/\{\{LOGIN_TITLE\}\}/g, esc(loginTitle))
                     .replace(/\{\{LOGIN_LOGO_URL\}\}/g, loginLogoUrl)
@@ -4209,8 +4213,25 @@ const server = Bun.serve({
 
                 // ── OAuth clients ────────────────────────────────────────────────────────
 
+                // Live values for the Docs page (OIDC endpoints, report API port).
+                if (url.pathname === '/admin/docs/info' && req.method === 'GET') {
+                    const oidcEnabled = !!jwksPortRaw;
+                    return jsonRes(200, {
+                        oidc: oidcEnabled ? getOidcDiscovery() : null,
+                        oidcEnabled,
+                        jwksPort: jwksPortRaw ? Number(jwksPortRaw) : null,
+                        reportPort: Number(reportPortRaw) || null,
+                    });
+                }
+
                 if (url.pathname === '/admin/oauth-clients' && req.method === 'GET') {
                     return jsonRes(200, { clients: listOauthClients() });
+                }
+
+                // Sign-in logo preview for the client modal: discovered from the first redirect URI.
+                if (url.pathname === '/admin/oauth-clients/app-icon' && req.method === 'GET') {
+                    const uri = (url.searchParams.get('uri') || '').trim();
+                    return jsonRes(200, { iconUrl: uri ? await getAppIconUrl([uri], 4000) : '' });
                 }
 
                 if (url.pathname === '/admin/oauth-clients' && req.method === 'POST') {
@@ -4223,10 +4244,13 @@ const server = Bun.serve({
                     const pkceRequired = body.pkceRequired === undefined ? true : !!body.pkceRequired;
                     try {
                         const { client, clientSecret } = await createOauthClient(name, redirectUris, { pkceRequired });
-                        if (typeof body.postLogoutRedirectUri === 'string' && body.postLogoutRedirectUri.trim()) {
-                            try { updateOauthClient(client.clientId, { postLogoutRedirectUri: body.postLogoutRedirectUri.trim() }); client.postLogoutRedirectUri = body.postLogoutRedirectUri.trim(); }
+                        const extra: { postLogoutRedirectUri?: string } = {};
+                        if (typeof body.postLogoutRedirectUri === 'string' && body.postLogoutRedirectUri.trim()) extra.postLogoutRedirectUri = body.postLogoutRedirectUri.trim();
+                        if (Object.keys(extra).length) {
+                            try { updateOauthClient(client.clientId, extra); Object.assign(client, extra); }
                             catch (e) { return jsonRes(400, { error: e instanceof Error ? e.message : String(e) }); }
                         }
+                        prefetchAppIcon(client.redirectUris);
                         console.log(`🪪 OAuth client created: ${client.name} (${client.clientId})`);
                         const me = getAuthedAdmin(req);
                         logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'oauth_client.create', targetType: 'oauth_client', targetId: client.clientId, details: { name, redirectUris }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
@@ -4252,6 +4276,7 @@ const server = Bun.serve({
                     if (typeof body.consentEnabled === 'boolean') input.consentEnabled = body.consentEnabled;
                     if (typeof body.pkceRequired === 'boolean') input.pkceRequired = body.pkceRequired;
                     if (typeof body.postLogoutRedirectUri === 'string') input.postLogoutRedirectUri = body.postLogoutRedirectUri.trim();
+                    if (input.redirectUris) prefetchAppIcon(input.redirectUris);
                     if (body.consentPageId === null) {
                         input.consentPageId = null;
                     } else if (typeof body.consentPageId === 'number') {
