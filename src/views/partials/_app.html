@@ -435,8 +435,8 @@
     </div>
 
     <!-- Request Detail Modal -->
-    <div id="reqDetailModal"
-      style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(6px);overflow-y:auto">
+    <div id="reqDetailModal" role="dialog" aria-modal="true" aria-labelledby="reqDetailTitle" onclick="if(event.target===this)closeReqDetail()"
+      style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(6px)">
       <div class="rdm-panel">
         <div class="rdm-header">
           <div class="rdm-header-left">
@@ -444,7 +444,11 @@
           </div>
           <div style="display:flex;align-items:center;gap:8px">
             <span id="reqDetailActions"></span>
-            <button onclick="closeReqDetail()" class="rdm-close">&times;</button>
+            <button type="button" onclick="toggleReqDetailFullscreen()" class="rdm-close rdm-fs-btn" id="reqDetailFsBtn" title="Full screen" aria-label="Full screen" aria-pressed="false">
+              <svg class="rdm-fs-enter" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+              <svg class="rdm-fs-exit" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></svg>
+            </button>
+            <button type="button" onclick="closeReqDetail()" class="rdm-close" title="Close" aria-label="Close">&times;</button>
           </div>
         </div>
         <div id="reqDetailContent" class="rdm-body"></div>

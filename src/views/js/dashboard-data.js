@@ -1108,7 +1108,7 @@ async function deleteProfile(name) {
 function copyProxyUrl(name, port) {
   if (!port || port <= 0) { toast('No port assigned for "' + name + '"', 'error'); return; }
   const url = location.protocol + '//' + location.hostname + ':' + port + '/';
-  navigator.clipboard.writeText(url).then(() => toast('Copied: ' + url)).catch(() => prompt('Copy:', url));
+  mmCopy(url, null, 'Copied: ' + url);
 }
 async function copyProfileCredential(name) {
   try {
@@ -1117,7 +1117,7 @@ async function copyProfileCredential(name) {
     const { profile } = await res.json();
     const key = profile.accessKey;
     if (!key) return toast('No access key set', 'error');
-    navigator.clipboard.writeText(key).then(() => toast('Access key copied')).catch(() => prompt('Copy:', key));
+    mmCopy(key, null, 'Access key copied');
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
@@ -1957,12 +1957,7 @@ async function generateInvite() {
 
 function copyInviteLink() {
   const inp = document.getElementById('inviteLinkInput');
-  navigator.clipboard.writeText(inp.value).then(() => {
-    const btn = document.getElementById('copyInviteBtn');
-    const orig = btn.textContent;
-    btn.textContent = 'Copied!'; btn.style.background = 'var(--green)';
-    setTimeout(() => { btn.textContent = orig; btn.style.background = ''; }, 2000);
-  });
+  mmCopy(inp.value, document.getElementById('copyInviteBtn'));
 }
 
 async function fetchInvites() {
@@ -2074,7 +2069,7 @@ async function resendInviteFromList(token) {
 
 function copyTokenLink(token) {
   const link = window.location.origin + '/invite/' + token;
-  navigator.clipboard.writeText(link).then(() => toast('Link copied'));
+  mmCopy(link, null, 'Link copied');
 }
 
 async function revokeInvite(token) {
@@ -4707,7 +4702,9 @@ function reqLogNextPage() { if (rlData && rlPage < rlData.totalPages) { rlPage++
 // ─── Request Detail ──────────────────────────────────────────────────────────
 async function openReqDetail(id) {
   const modal = document.getElementById('reqDetailModal');
-  modal.style.display = 'block';
+  modal.style.display = 'flex';
+  let fs = false; try { fs = localStorage.getItem(RDM_FS_KEY) === '1'; } catch { fs = false; }
+  _applyReqDetailFullscreen(fs);
   document.getElementById('reqDetailContent').innerHTML = '<div class="rdm-loading"><div class="rdm-spinner"></div><span>Loading request details\u2026</span></div>';
   try {
     const res = await api('/admin/requests/' + id);
@@ -4716,6 +4713,29 @@ async function openReqDetail(id) {
   } catch (e) { document.getElementById('reqDetailContent').innerHTML = '<div class="rdm-error">Error: ' + esc(e.message) + '</div>'; }
 }
 function closeReqDetail() { document.getElementById('reqDetailModal').style.display = 'none'; }
+
+// Full-screen view of the request detail; the choice is remembered per browser.
+const RDM_FS_KEY = 'midleman_rdm_fullscreen';
+function _applyReqDetailFullscreen(on) {
+  const m = document.getElementById('reqDetailModal');
+  const btn = document.getElementById('reqDetailFsBtn');
+  if (!m) return;
+  m.classList.toggle('is-fullscreen', on);
+  if (btn) {
+    btn.title = on ? 'Exit full screen' : 'Full screen';
+    btn.setAttribute('aria-label', btn.title);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+}
+function toggleReqDetailFullscreen() {
+  const on = !document.getElementById('reqDetailModal').classList.contains('is-fullscreen');
+  _applyReqDetailFullscreen(on);
+  try { localStorage.setItem(RDM_FS_KEY, on ? '1' : '0'); } catch { /* storage unavailable */ }
+}
+document.addEventListener('keydown', (e) => {
+  const m = document.getElementById('reqDetailModal');
+  if (e.key === 'Escape' && m && m.style.display !== 'none' && !document.querySelector('#confirmModal.active')) closeReqDetail();
+});
 
 async function resendRequest(id, btn) {
   if (!confirm('Re-send this request to the upstream now?\n\nThe upstream will process it again. A new entry is written to the request log.')) return;
@@ -4790,11 +4810,11 @@ function renderReqDetail(d) {
   <div class="rdm-meta-item"><div><div class="rdm-meta-lbl">Client IP</div><div class="rdm-meta-val" style="font-family:'SF Mono',ui-monospace,monospace">${esc(d.clientIp || 'unknown')}</div></div></div>
   <div class="rdm-meta-item rdm-meta-wide">
     <div style="min-width:0;flex:1"><div class="rdm-meta-lbl">Request ID</div><div class="rdm-meta-val rdm-mono-val" title="${esc(d.requestId)}">${esc(d.requestId)}</div></div>
-    <button class="rdm-copy-btn" onclick="navigator.clipboard.writeText('${esc(d.requestId)}').then(()=>toast('Copied ID'))" title="Copy ID">Copy</button>
+    <button class="rdm-copy-btn" data-copy="${esc(d.requestId)}" onclick="mmCopyFrom(this)" title="Copy ID">Copy</button>
   </div>
   <div class="rdm-meta-item rdm-meta-wide">
     <div style="min-width:0;flex:1"><div class="rdm-meta-lbl">Target URL</div><div class="rdm-meta-val rdm-mono-val" title="${esc(d.targetUrl)}">${esc(d.targetUrl)}</div></div>
-    <button class="rdm-copy-btn" onclick="navigator.clipboard.writeText('${esc(d.targetUrl)}').then(()=>toast('Copied URL'))" title="Copy URL">Copy</button>
+    <button class="rdm-copy-btn" data-copy="${esc(d.targetUrl)}" onclick="mmCopyFrom(this)" title="Copy URL">Copy</button>
   </div>
 </div>
 ${d.error ? `<div class="rdm-error-banner"><div><div style="font-weight:600;margin-bottom:2px">Error</div><div>${esc(d.error)}</div></div></div>` : ''}
@@ -4815,13 +4835,13 @@ ${d.error ? `<div class="rdm-error-banner"><div><div style="font-weight:600;marg
     <div class="rdm-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
       <span class="rdm-section-chevron">&#9660;</span><span class="rdm-section-title">Headers</span><span class="rdm-section-count">${reqHCount}</span>
     </div>
-    <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="rdmCopyCode(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(reqH)}</pre></div></div>
+    <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="mmCopyFrom(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(reqH)}</pre></div></div>
   </div>
   <div class="rdm-section">
     <div class="rdm-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
       <span class="rdm-section-chevron">&#9660;</span><span class="rdm-section-title">Body</span><span class="rdm-section-count">${fmtBytes(d.reqBodySize || 0)}</span>
     </div>
-    <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="rdmCopyCode(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(fmtBody(d.reqBody))}</pre></div></div>
+    <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="mmCopyFrom(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(fmtBody(d.reqBody))}</pre></div></div>
   </div>
 </div>
 <div id="rdmResPanel" class="rdm-tab-panel">
@@ -4829,13 +4849,13 @@ ${d.error ? `<div class="rdm-error-banner"><div><div style="font-weight:600;marg
     <div class="rdm-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
       <span class="rdm-section-chevron">&#9660;</span><span class="rdm-section-title">Headers</span><span class="rdm-section-count">${resHCount}</span>
     </div>
-    <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="rdmCopyCode(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(resH)}</pre></div></div>
+    <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="mmCopyFrom(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(resH)}</pre></div></div>
   </div>
   <div class="rdm-section">
     <div class="rdm-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
       <span class="rdm-section-chevron">&#9660;</span><span class="rdm-section-title">Body</span><span class="rdm-section-count">${fmtBytes(d.resBodySize || 0)}</span>
     </div>
-    <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="rdmCopyCode(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(fmtBody(d.resBody))}</pre></div></div>
+    <div class="rdm-section-body"><div class="rdm-code-block"><button class="rdm-copy-btn rdm-copy-code" onclick="mmCopyFrom(this)" title="Copy">Copy</button><pre>${rdmSyntaxHL(fmtBody(d.resBody))}</pre></div></div>
   </div>
 </div>
 ${d.attempts && d.attempts.length > 1 ? `
@@ -4974,10 +4994,7 @@ function rdmSwitchTab(btn, panelId) {
   document.getElementById(panelId).classList.add('active');
 }
 
-function rdmCopyCode(btn) {
-  const pre = btn.parentElement.querySelector('pre');
-  navigator.clipboard.writeText(pre.textContent).then(() => toast('Copied to clipboard'));
-}
+function rdmCopyCode(btn) { return mmCopyFrom(btn); }
 
 function rdmSyntaxHL(str) {
   if (!str || str === '(empty)') return '<span style="color:var(--text3);font-style:italic">(empty)</span>';
@@ -5356,11 +5373,7 @@ function _docsEnhanceCode() {
     btn.type = 'button';
     btn.className = 'docs-copy';
     btn.textContent = 'Copy';
-    btn.onclick = () => {
-      _docsClipboard(pre.textContent, 'Copied');
-      btn.textContent = 'Copied';
-      setTimeout(() => { btn.textContent = 'Copy'; }, 1400);
-    };
+    btn.onclick = () => mmCopyFrom(btn);
     head.append(label, btn);
     pre.before(wrap);
     wrap.append(head, pre);
@@ -5480,24 +5493,7 @@ function docsCopyForAI(section) {
   _docsClipboard(parts.join('\n').trim() + '\n', 'Copied — paste it into your AI assistant');
 }
 
-function _docsClipboard(text, msg) {
-  const done = () => toast(msg || 'Copied', 'success');
-  if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text).then(done, () => _docsClipboardFallback(text, done));
-  } else {
-    _docsClipboardFallback(text, done);
-  }
-}
-function _docsClipboardFallback(text, done) {
-  const ta = document.createElement('textarea');
-  ta.value = text;
-  ta.setAttribute('readonly', '');
-  ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
-  document.body.appendChild(ta);
-  ta.select();
-  try { document.execCommand('copy'); done(); } catch { toast('Copy failed', 'error'); }
-  ta.remove();
-}
+function _docsClipboard(text, msg, el) { return mmCopy(text, el, el ? undefined : msg); }
 
 function renderOauthClients(clients) {
   const tbody = document.getElementById('oauthClientListBody');

@@ -292,10 +292,7 @@ async function doLoginStep2Setup() {
 function copyLoginSetupSecret() {
   const el = document.getElementById('loginSetupSecret');
   if (!el) return;
-  navigator.clipboard.writeText(el.textContent || '').catch(() => {});
-  const orig = el.style.background;
-  el.style.background = 'rgba(34,197,94,0.15)';
-  setTimeout(() => { el.style.background = orig; }, 400);
+  mmCopy(el.textContent || '', el);
 }
 
 async function doLoginStep2() {
@@ -750,3 +747,69 @@ function mmSortMenus() {
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mmSortMenus);
 else mmSortMenus();
+
+
+// ─── Clipboard ──────────────────────────────────────────────────────────────
+// navigator.clipboard only exists on HTTPS / localhost; dashboards served over
+// plain HTTP fall back to a hidden textarea + execCommand('copy').
+// Feedback is shown on the clicked control itself ("✓ Copied"), with a toast
+// only when there is no control to show it on.
+const MM_CHECK_SVG = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+
+function _mmCopyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text).catch(() => _mmCopyFallback(text));
+  }
+  return _mmCopyFallback(text);
+}
+function _mmCopyFallback(text) {
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0';
+    const active = document.activeElement;
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    ta.remove();
+    if (active && typeof active.focus === 'function') active.focus({ preventScroll: true });
+    ok ? resolve() : reject(new Error('copy not allowed'));
+  });
+}
+
+/** Copy `text`; `el` (optional) is the control that triggered it and shows the feedback. */
+function mmCopy(text, el, okMsg) {
+  return _mmCopyText(String(text ?? '')).then(() => {
+    if (el && el.tagName === 'BUTTON') _mmCopyFeedback(el, true);
+    else if (el) { el.classList.add('mm-copied'); setTimeout(() => el.classList.remove('mm-copied'), 900); }
+    if (!el || okMsg) toast(okMsg || 'Copied to clipboard');
+    return true;
+  }, () => {
+    if (el && el.tagName === 'BUTTON') _mmCopyFeedback(el, false);
+    toast('Could not copy — select the text and press Ctrl+C', 'error');
+    return false;
+  });
+}
+function _mmCopyFeedback(btn, ok) {
+  if (!btn.dataset.copyLabel) btn.dataset.copyLabel = btn.innerHTML;
+  clearTimeout(btn._copyTimer);
+  btn.classList.toggle('is-copied', ok);
+  btn.classList.toggle('is-copy-failed', !ok);
+  btn.innerHTML = ok ? MM_CHECK_SVG + '<span>Copied</span>' : '<span>Failed</span>';
+  btn.setAttribute('aria-live', 'polite');
+  btn._copyTimer = setTimeout(() => {
+    btn.innerHTML = btn.dataset.copyLabel;
+    delete btn.dataset.copyLabel;
+    btn.classList.remove('is-copied', 'is-copy-failed');
+  }, 1600);
+}
+/** For buttons: copies data-copy, else the <pre> of the surrounding code block. */
+function mmCopyFrom(btn) {
+  const text = btn.dataset.copy !== undefined
+    ? btn.dataset.copy
+    : (btn.closest('.rdm-code-block, .docs-codeblock')?.querySelector('pre')?.textContent || '');
+  return mmCopy(text, btn);
+}
