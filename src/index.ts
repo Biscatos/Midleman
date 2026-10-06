@@ -1,7 +1,7 @@
 // MUST stay the first import: the module self-installs the console patch and
 // process-level handlers on evaluation, so keeping it first is what guarantees
 // no other module's top-level code throws before the feed is listening.
-import { getAppIconUrl, prefetchAppIcon } from './auth/app-icon';
+import { getAppIconUrl, prefetchAppIcon, iconSourceUri } from './auth/app-icon';
 import { queryErrors as queryErrorFeed, getErrorStats, getError as getErrorEntry, ackErrors, clearErrors } from './core/error-feed';
 
 import { loadConfig, reloadEnvFile, loadProxyProfiles, loadTcpUdpProfiles } from './core/config';
@@ -38,7 +38,7 @@ import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, dismissAllFailedFanouts, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, dismissAllPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState, setDlqAuthResolver, listRunningWebhookNames } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserAdminRole, setProxyUserBlocked, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, cleanupExpiredPasswordResetTokens, findResetCandidateByEmail, logSmsSend,
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserMfaExempt, setProxyUserAdminRole, setProxyUserBlocked, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, cleanupExpiredPasswordResetTokens, findResetCandidateByEmail, logSmsSend,
 listNotificationGroups, getNotificationGroup, createNotificationGroup, updateNotificationGroup, deleteNotificationGroup,
 addNotificationGroupMember, removeNotificationGroupMember,
 listNotificationRules, createNotificationRule, updateNotificationRule, deleteNotificationRule,
@@ -2960,6 +2960,23 @@ const server = Bun.serve({
                             });
                         }
                     }
+                    if (typeof body.mfaExempt === 'boolean') {
+                        const current = getProxyUser(userId);
+                        if (!current) return jsonRes(404, { error: 'User not found' });
+                        if (body.mfaExempt && current.isAdmin) {
+                            return jsonRes(409, { error: 'Admins always sign in with 2FA and cannot be exempted.' });
+                        }
+                        const me = getAuthedAdmin(req);
+                        if (setProxyUserMfaExempt(userId, body.mfaExempt)) {
+                            logAudit({
+                                actorUserId: me?.id, actorUsername: me?.username,
+                                action: body.mfaExempt ? 'proxy_user.2fa.exempt' : 'proxy_user.2fa.unexempt',
+                                targetType: 'proxy_user', targetId: userId,
+                                details: { username: current.username },
+                                ip: reqClientIp(req), userAgent: req.headers.get('user-agent'),
+                            });
+                        }
+                    }
                     return jsonRes(200, { status: 'updated' });
                 }
 
@@ -4230,8 +4247,10 @@ const server = Bun.serve({
 
                 // Sign-in logo preview for the client modal: discovered from the first redirect URI.
                 if (url.pathname === '/admin/oauth-clients/app-icon' && req.method === 'GET') {
-                    const uri = (url.searchParams.get('uri') || '').trim();
-                    return jsonRes(200, { iconUrl: uri ? await getAppIconUrl([uri], 4000) : '' });
+                    // ?uri= may repeat (all redirect URIs, in order): local ones are skipped.
+                    const uris = url.searchParams.getAll('uri').map(u => u.trim()).filter(Boolean);
+                    const source = iconSourceUri(uris);
+                    return jsonRes(200, { iconUrl: source ? await getAppIconUrl([source], 4000) : '', source: source || '' });
                 }
 
                 if (url.pathname === '/admin/oauth-clients' && req.method === 'POST') {
@@ -4245,7 +4264,6 @@ const server = Bun.serve({
                     try {
                         const { client, clientSecret } = await createOauthClient(name, redirectUris, { pkceRequired });
                         const extra: { postLogoutRedirectUri?: string } = {};
-                        if (typeof body.postLogoutRedirectUri === 'string' && body.postLogoutRedirectUri.trim()) extra.postLogoutRedirectUri = body.postLogoutRedirectUri.trim();
                         if (Object.keys(extra).length) {
                             try { updateOauthClient(client.clientId, extra); Object.assign(client, extra); }
                             catch (e) { return jsonRes(400, { error: e instanceof Error ? e.message : String(e) }); }
@@ -4275,7 +4293,6 @@ const server = Bun.serve({
                     }
                     if (typeof body.consentEnabled === 'boolean') input.consentEnabled = body.consentEnabled;
                     if (typeof body.pkceRequired === 'boolean') input.pkceRequired = body.pkceRequired;
-                    if (typeof body.postLogoutRedirectUri === 'string') input.postLogoutRedirectUri = body.postLogoutRedirectUri.trim();
                     if (input.redirectUris) prefetchAppIcon(input.redirectUris);
                     if (body.consentPageId === null) {
                         input.consentPageId = null;

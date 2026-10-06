@@ -3771,3 +3771,25 @@ div[style*="overflow"] > table > thead th {
 .wd-cond-row > .mm-select, .wd-grid3 .mm-select { width: 100%; }
 /* The rendered body lives in the preview panel; the old inline copy is redundant here. */
 #destinationEditContent [id^="previewBody_"] { display: none !important; }
+
+
+/* ── Sticky on every page: topbar (solid) → page toolbar → table header ── */
+.topbar { background: var(--bg); }
+.page-sticky { top: var(--topbar-h, 52px); }
+@media (min-width: 1100px) {
+  .page .card > .card-body:has(> table) > table > thead th { top: calc(var(--topbar-h, 52px) + var(--page-sticky-h, 0px)); }
+}
+#pageDocs .docs-nav { top: calc(var(--topbar-h, 52px) + var(--page-sticky-h, 0px) + 12px); }
+#pageDocs .docs-section { scroll-margin-top: calc(var(--topbar-h, 52px) + var(--page-sticky-h, 0px) + 12px); }
+
+/* ── Context menu (⋮ button and right-click on list rows) ── */
+.mm-ctx { position: fixed; z-index: 9999; min-width: 190px; max-width: 320px; padding: 4px; background: var(--surface); border: 1px solid var(--border2); border-radius: 8px; }
+.mm-ctx-item { display: flex; align-items: center; gap: 16px; width: 100%; padding: 7px 10px; border: none; border-radius: 5px; background: transparent; color: var(--text); font: 400 12.5px var(--font-sans); text-align: left; white-space: nowrap; cursor: pointer; outline: none; }
+.mm-ctx-item:hover, .mm-ctx-item:focus-visible, .mm-ctx-item:focus { background: var(--accent-sel); color: var(--text); }
+.mm-ctx-item.danger { color: var(--red); }
+.mm-ctx-item.danger:hover, .mm-ctx-item.danger:focus { background: var(--red-bg); color: var(--red); }
+.mm-ctx-item:disabled { color: var(--text3); cursor: default; background: transparent; }
+.mm-ctx-hint { margin-left: auto; font: 400 11px var(--font-mono); color: var(--text3); }
+.mm-ctx-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+tr.mm-ctx-row, tr.mm-ctx-row > td, [role="row"].mm-ctx-row { background: var(--accent-sel) !important; }
+.mm-ctx-item:focus, .mm-ctx-item:focus-visible { outline: none !important; }

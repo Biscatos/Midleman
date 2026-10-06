@@ -115,46 +115,176 @@ IpTagInput.init('pAllowedIps');
 IpTagInput.init('wAllowedIps');
 IpTagInput.init('wTargetAllowedCidrs');
 
-// ─── Action Dropdown Menu ────────────────────────────────────────────────────
+// ─── Action / context menu ──────────────────────────────────────────────────
+// One menu for both entry points: the row's ⋮ button (anchored under it) and a
+// right-click anywhere on a list row (opened at the cursor, like Windows).
+// Keyboard: ↑/↓ move, Home/End, Enter/Space run, Esc closes. Shift+right-click
+// keeps the browser's own menu.
 let _activeMenu = null;
+let _menuAt = null;          // {x, y} when the next menu opens at the cursor
+let _menuRow = null;         // row highlighted while its context menu is open
+let _menuReturnFocus = null;
 
-document.addEventListener('click', () => {
+function closeActionMenu() {
   if (_activeMenu) { _activeMenu.remove(); _activeMenu = null; }
+  if (_menuRow) { _menuRow.classList.remove('mm-ctx-row'); _menuRow = null; }
+  if (_menuReturnFocus && document.contains(_menuReturnFocus)) { try { _menuReturnFocus.focus({ preventScroll: true }); } catch {} }
+  _menuReturnFocus = null;
+}
+
+document.addEventListener('click', (e) => {
+  if (_activeMenu && !_activeMenu.contains(e.target)) closeActionMenu();
 });
+document.addEventListener('scroll', (e) => {
+  if (_activeMenu && !_activeMenu.contains(e.target)) closeActionMenu();
+}, true);
+window.addEventListener('resize', () => closeActionMenu());
+window.addEventListener('blur', () => closeActionMenu());
 
 function showActionMenu(btn, items) {
-  if (_activeMenu) { _activeMenu.remove(); _activeMenu = null; }
-
-  const rect = btn.getBoundingClientRect();
+  closeActionMenu();
+  const at = _menuAt; _menuAt = null;
   const menu = document.createElement('div');
-  menu.style.cssText = 'position:fixed;z-index:9999;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.25);min-width:170px;padding:4px 0;';
-  menu.style.top  = (rect.bottom + 6) + 'px';
-  menu.style.right = (window.innerWidth - rect.right) + 'px';
+  menu.className = 'mm-ctx';
+  menu.setAttribute('role', 'menu');
 
+  // Drop empty / duplicate separators (leading, trailing, consecutive).
+  const clean = [];
   for (const item of items) {
     if (!item) continue;
+    if (item === '---' && (!clean.length || clean[clean.length - 1] === '---')) continue;
+    clean.push(item);
+  }
+  while (clean[clean.length - 1] === '---') clean.pop();
+  if (!clean.length) return;
+
+  for (const item of clean) {
     if (item === '---') {
       const sep = document.createElement('div');
-      sep.style.cssText = 'border-top:1px solid var(--border);margin:3px 0;';
+      sep.className = 'mm-ctx-sep';
+      sep.setAttribute('role', 'separator');
       menu.appendChild(sep);
       continue;
     }
     const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'mm-ctx-item' + (item.danger ? ' danger' : '');
+    el.setAttribute('role', 'menuitem');
+    el.tabIndex = -1;
     el.textContent = item.label;
-    el.style.cssText = `appearance:none;-webkit-appearance:none;display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:8px 14px;background:transparent;border:none;cursor:pointer;font-size:13px;color:${item.danger ? 'var(--red)' : 'var(--text)'};white-space:nowrap;`;
-    el.onmouseenter = () => { el.style.background = 'var(--surface2)'; el.style.color = item.danger ? 'var(--red)' : 'var(--text)'; };
-    el.onmouseleave = () => { el.style.background = 'transparent'; el.style.color = item.danger ? 'var(--red)' : 'var(--text)'; };
-    el.onclick = (e) => { e.stopPropagation(); _activeMenu?.remove(); _activeMenu = null; item.fn(); };
+    if (item.hint) {
+      const k = document.createElement('span');
+      k.className = 'mm-ctx-hint';
+      k.textContent = item.hint;
+      el.appendChild(k);
+    }
+    if (item.disabled) { el.disabled = true; el.setAttribute('aria-disabled', 'true'); }
+    el.onclick = (e) => { e.stopPropagation(); closeActionMenu(); item.fn(); };
+    el.onmouseenter = () => el.focus({ preventScroll: true });
     menu.appendChild(el);
   }
 
-  // Flip upward if it would overflow the viewport
+  menu.addEventListener('keydown', (e) => {
+    const list = [...menu.querySelectorAll('.mm-ctx-item:not(:disabled)')];
+    const i = list.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown') { e.preventDefault(); list[(i + 1) % list.length]?.focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); list[(i - 1 + list.length) % list.length]?.focus(); }
+    else if (e.key === 'Home') { e.preventDefault(); list[0]?.focus(); }
+    else if (e.key === 'End') { e.preventDefault(); list[list.length - 1]?.focus(); }
+    else if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); closeActionMenu(); }
+  });
+  menu.addEventListener('contextmenu', (e) => e.preventDefault());
+
   document.body.appendChild(menu);
-  if (rect.bottom + menu.offsetHeight + 6 > window.innerHeight) {
-    menu.style.top = (rect.top - menu.offsetHeight - 6) + 'px';
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  const vw = window.innerWidth, vh = window.innerHeight, m = 6;
+  let x, y;
+  if (at) {
+    // At the cursor; flip left/up when it would leave the window.
+    x = at.x + mw > vw - m ? Math.max(m, at.x - mw) : at.x;
+    y = at.y + mh > vh - m ? Math.max(m, at.y - mh) : at.y;
+  } else {
+    const rect = btn.getBoundingClientRect();
+    x = Math.min(Math.max(m, rect.right - mw), vw - mw - m);
+    y = rect.bottom + 6 + mh > vh - m ? Math.max(m, rect.top - mh - 6) : rect.bottom + 6;
   }
+  menu.style.left = Math.round(x) + 'px';
+  menu.style.top = Math.round(y) + 'px';
   _activeMenu = menu;
+  _menuReturnFocus = at ? null : btn;
+  const first = menu.querySelector('.mm-ctx-item:not(:disabled)');
+  if (first) first.focus({ preventScroll: true });
 }
+
+/** Menu items for a row that has no ⋮ button: its own action buttons and links. */
+function _rowActionItems(row) {
+  const items = [], danger = [];
+  const seen = new Set();
+  row.querySelectorAll('button, a[href], a[onclick]').forEach(b => {
+    if (b.closest('.mm-ctx') || b.disabled || b.offsetParent === null) return;
+    if (b.matches('[role="switch"], .mm-switch, [type="checkbox"]')) return;
+    if (b.closest('.mm-select, .mm-seg')) return;
+    let label = (b.getAttribute('aria-label') || b.textContent || b.title || '').replace(/\s+/g, ' ').trim();
+    if (!label || label === '⋮' || label.length > 40) label = (b.title || '').trim();
+    if (!label || seen.has(label)) return;
+    // A plain link inside a cell (e.g. a domain) is an "Open" action.
+    if (b.tagName === 'A' && b.getAttribute('href') && !b.getAttribute('onclick')) label = 'Open ' + label;
+    seen.add(label);
+    const isDanger = /\b(delete|remove|revoke|disable|block|cancel|dismiss|purge)\b/i.test(label)
+      || b.classList.contains('wd-danger') || b.classList.contains('btn-danger');
+    const item = { label, fn: () => b.click(), danger: /\b(delete|remove|revoke|purge)\b/i.test(label) };
+    (isDanger && item.danger ? danger : items).push(item);
+  });
+  return danger.length ? [...items, '---', ...danger] : items;
+}
+
+document.addEventListener('contextmenu', (e) => {
+  if (e.shiftKey) return; // escape hatch: the browser's own menu
+  const t = e.target;
+  if (!(t instanceof Element)) return;
+  if (t.closest('input, textarea, select, [contenteditable="true"], .ace_editor, pre, code')) return;
+  const row = t.closest('.page tbody tr, .modal tbody tr, .wd-dialog tbody tr, [role="row"]');
+  if (!row || row.closest('thead')) return;
+
+  const selection = String(window.getSelection ? window.getSelection() : '').trim();
+  const kebab = row.querySelector('button[data-type][onclick*="showContextMenu"]');
+  let items = null;
+  if (!kebab) {
+    items = _rowActionItems(row);
+    if (!items.length && !selection) return; // nothing to offer: native menu
+  }
+  e.preventDefault();
+  _menuRow = null;
+  const at = { x: e.clientX, y: e.clientY };
+  if (kebab) {
+    _menuAt = at;
+    showContextMenu({ stopPropagation() {} }, kebab);
+    if (selection && _activeMenu) _prependCopyItem(selection);
+  } else {
+    _menuAt = at;
+    showActionMenu(row, selection ? [{ label: 'Copy', hint: 'Ctrl+C', fn: () => mmCopy(selection, null, 'Copied') }, '---', ...items] : items);
+  }
+  if (_activeMenu) { row.classList.add('mm-ctx-row'); _menuRow = row; }
+});
+
+/** Adds "Copy" (selected text) at the top of an already open menu. */
+function _prependCopyItem(text) {
+  if (!_activeMenu) return;
+  const el = document.createElement('button');
+  el.type = 'button';
+  el.className = 'mm-ctx-item';
+  el.setAttribute('role', 'menuitem');
+  el.tabIndex = -1;
+  el.textContent = 'Copy';
+  const k = document.createElement('span'); k.className = 'mm-ctx-hint'; k.textContent = 'Ctrl+C'; el.appendChild(k);
+  el.onclick = (ev) => { ev.stopPropagation(); closeActionMenu(); mmCopy(text, null, 'Copied'); };
+  el.onmouseenter = () => el.focus({ preventScroll: true });
+  const sep = document.createElement('div'); sep.className = 'mm-ctx-sep'; sep.setAttribute('role', 'separator');
+  _activeMenu.prepend(sep);
+  _activeMenu.prepend(el);
+  el.focus({ preventScroll: true });
+}
+
 
 function showContextMenu(e, btn) {
   e.stopPropagation();
@@ -207,6 +337,9 @@ function showContextMenu(e, btn) {
       u.totpEnabled
         ? { label: 'Disable 2FA', fn: () => disable2fa(u.id, u.username) }
         : (u.force2faSetup ? null : { label: 'Force 2FA', fn: () => force2fa(u.id, u.username) }),
+      u.isAdmin ? null : (u.mfaExempt
+        ? { label: 'Require 2FA per directory policy', fn: () => setUserMfaExempt(u.id, false) }
+        : { label: 'Allow sign-in without 2FA', fn: () => setUserMfaExempt(u.id, true) }),
       u.blocked
         ? { label: 'Unblock user', fn: () => toggleBlockProxyUser(u.id, u.username, false) }
         : { label: 'Block user', fn: () => toggleBlockProxyUser(u.id, u.username, true), danger: true },
@@ -1142,6 +1275,9 @@ let _allInvites = [];
 let _allProxyUsers = [];
 
 let _userRoleFilter = '';
+let _userSearch = '';
+let _usersPage = 1;
+const USERS_PAGE_SIZE = 25;
 
 async function fetchProxyUsers() {
   try {
@@ -1156,17 +1292,37 @@ async function fetchProxyUsers() {
 }
 
 function _filteredProxyUsers() {
+  let list;
   switch (_userRoleFilter) {
-    case 'admin': return _allProxyUsers.filter(u => u.isAdmin);
-    case 'user':  return _allProxyUsers.filter(u => !u.isAdmin);
-    case 'ldap':  return _allProxyUsers.filter(u => u.authSource === 'ldap');
-    case 'local': return _allProxyUsers.filter(u => u.authSource !== 'ldap');
-    default:      return _allProxyUsers;
+    case 'admin': list = _allProxyUsers.filter(u => u.isAdmin); break;
+    case 'user':  list = _allProxyUsers.filter(u => !u.isAdmin); break;
+    case 'ldap':  list = _allProxyUsers.filter(u => u.authSource === 'ldap'); break;
+    case 'local': list = _allProxyUsers.filter(u => u.authSource !== 'ldap'); break;
+    default:      list = _allProxyUsers;
   }
+  const q = _userSearch.trim().toLowerCase();
+  if (q) list = list.filter(u => [u.fullName, u.username, u.email].some(v => v && String(v).toLowerCase().includes(q)));
+  return list;
 }
 
 function filterProxyUsersByRole() {
   _userRoleFilter = document.getElementById('userRoleFilter').value;
+  _usersPage = 1;
+  renderProxyUsers(_filteredProxyUsers());
+}
+
+let _userSearchTimer = 0;
+function searchProxyUsers(q) {
+  clearTimeout(_userSearchTimer);
+  _userSearchTimer = setTimeout(() => {
+    _userSearch = q || '';
+    _usersPage = 1;
+    renderProxyUsers(_filteredProxyUsers());
+  }, 150);
+}
+
+function changeProxyUsersPage(delta) {
+  _usersPage += delta;
   renderProxyUsers(_filteredProxyUsers());
 }
 
@@ -1182,17 +1338,30 @@ function renderProxyUsers(users) {
   const c = document.getElementById('proxyUserListBody');
   if (!c) return;
   const countEl = document.getElementById('userRoleFilterCount');
-  if (countEl) countEl.textContent = users.length + ' of ' + _allProxyUsers.length;
+  const filtered = users.length !== _allProxyUsers.length;
+  if (countEl) countEl.textContent = filtered ? users.length + ' of ' + _allProxyUsers.length : _allProxyUsers.length + ' users';
+  // Client-side pages; the pager hides itself when everything fits on one.
+  const pages = Math.max(1, Math.ceil(users.length / USERS_PAGE_SIZE));
+  _usersPage = Math.min(Math.max(1, _usersPage), pages);
+  const from = (_usersPage - 1) * USERS_PAGE_SIZE;
+  const pageUsers = users.slice(from, from + USERS_PAGE_SIZE);
+  const info = document.getElementById('usersPageInfo');
+  if (info) info.textContent = users.length ? `${from + 1}–${from + pageUsers.length} of ${users.length}` : '';
+  const prev = document.getElementById('usersPrev'), next = document.getElementById('usersNext');
+  if (prev) prev.disabled = _usersPage <= 1;
+  if (next) next.disabled = _usersPage >= pages;
   if (users.length === 0) {
-    c.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No users match the current filter.</td></tr>';
+    c.innerHTML = `<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">${_userSearch.trim() ? 'No users match “' + esc(_userSearch.trim()) + '”.' : 'No users match the current filter.'}</td></tr>`;
     return;
   }
-  c.innerHTML = users.map(u => {
+  c.innerHTML = pageUsers.map(u => {
     const twoFa = u.totpEnabled
       ? '<span style="color:var(--green)">Active</span>'
       : (u.force2faSetup
         ? '<span style="color:var(--orange)" title="User must configure 2FA on next login">Pending setup</span>'
-        : '<span style="color:var(--text3)">Off</span>');
+        : (u.mfaExempt
+          ? '<span class="mm-chip warn" title="Allowed to sign in without 2FA even if the directory requires it">Exempt</span>'
+          : '<span style="color:var(--text3)">Off</span>'));
     const nameCell = u.fullName
       ? `<div style="font-weight:600;color:var(--text)">${esc(u.fullName)}</div><div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`
       : `<div style="font-weight:600;color:var(--text)">${esc(u.username)}</div>`;
@@ -1242,12 +1411,26 @@ async function openEditProxyUserModal(id) {
   // Hide the admin toggle when editing yourself — backend refuses self-demote.
   const isSelf = user.id === _currentUserId;
   document.getElementById('npuIsAdminGroup').style.display = isSelf ? 'none' : '';
+  // 2FA exemption: only for non-admin accounts (admins always use 2FA).
+  document.getElementById('npuMfaExempt').checked = !!user.mfaExempt;
+  document.getElementById('npuMfaExemptGroup').style.display = user.isAdmin ? 'none' : '';
   document.getElementById('npuError').style.display = 'none';
   // Profile assignment is managed elsewhere — hide the section.
   document.getElementById('npuProfileChecks').closest('.form-group').style.display = 'none';
   document.getElementById('npuUsername').readOnly = true;
   document.getElementById('npuUsername').style.opacity = '0.5';
   document.getElementById('newProxyUserModal').classList.add('active');
+}
+
+async function setUserMfaExempt(id, exempt) {
+  if (exempt && !(await showConfirm({ title: 'Allow sign-in without 2FA', message: 'Let this user sign in without a second factor?', detail: 'This overrides the LDAP directory policy for this user only.', confirmText: 'Allow' }))) return;
+  try {
+    const res = await api('/admin/proxy-users/' + id, { method: 'PUT', body: JSON.stringify({ mfaExempt: exempt }) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return toast(d.error || 'Could not update the user', 'error');
+    toast(exempt ? 'User may sign in without 2FA' : '2FA follows the directory policy again');
+    fetchProxyUsers();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function saveEditProxyUser() {
@@ -1270,6 +1453,14 @@ async function saveEditProxyUser() {
     if (desired !== current) {
       if (!desired && !(await showConfirm({ title: 'Remove admin role', message: 'Remove the admin role from this user? They will lose access to the dashboard.', confirmText: 'Remove' }))) return;
       body.isAdmin = desired;
+    }
+  }
+  if (document.getElementById('npuMfaExemptGroup').style.display !== 'none') {
+    const wantExempt = document.getElementById('npuMfaExempt').checked;
+    const isExempt = !!_allProxyUsers.find(u => u.id === _editUserId)?.mfaExempt;
+    if (wantExempt !== isExempt) {
+      if (wantExempt && !(await showConfirm({ title: 'Allow sign-in without 2FA', message: 'Let this user sign in without a second factor?', detail: 'This overrides the LDAP directory policy for this user only. Use it for service or shared accounts that cannot use an authenticator app.', confirmText: 'Allow' }))) return;
+      body.mfaExempt = wantExempt;
     }
   }
   try {
@@ -5624,7 +5815,7 @@ function _docsClientMd() {
     '- client_secret: <client_secret — shown once at creation; keep it in a secret store>',
     '- registered redirect URIs (exact match):', ...c.redirectUris.map(u => '  - `' + u + '`'),
     '- PKCE: ' + (c.pkceRequired ? 'required (S256)' : 'not required for this client'),
-    c.postLogoutRedirectUri ? '- post-logout redirect: `' + c.postLogoutRedirectUri + '`' : '- post-logout redirect: origin of the first redirect URI unless post_logout_redirect_uri is sent',
+    '- after logout: the post_logout_redirect_uri the app sends if it is on the same origin as a redirect URI, else the home of the first non-localhost redirect URI',
   ].join('\n');
 }
 
@@ -5702,7 +5893,6 @@ function _populateConsentPageDropdown(selectId, selectedId) {
 function _resetOauthClientForm() {
   document.getElementById('oauthClientName').value = '';
   document.getElementById('oauthClientUris').value = '';
-  document.getElementById('oauthClientPostLogoutUri').value = '';
   document.getElementById('oauthClientPkceRequired').checked = true;
   document.getElementById('oauthClientConsentEnabled').checked = false;
   _populateConsentPageDropdown('oauthClientConsentPageId', null);
@@ -5749,7 +5939,6 @@ async function openEditOauthClientModal(clientId) {
     document.getElementById('oauthClientUris').value = urisText;
     _editingOauthClientOriginalUris = urisText;
     document.getElementById('oauthClientPkceRequired').checked = client.pkceRequired !== false;
-    document.getElementById('oauthClientPostLogoutUri').value = client.postLogoutRedirectUri || '';
     document.getElementById('oauthClientConsentEnabled').checked = !!client.consentEnabled;
     _populateConsentPageDropdown('oauthClientConsentPageId', client.consentPageId);
     toggleOauthClientConsentFields();
@@ -5787,7 +5976,7 @@ async function submitOauthClient() {
   try {
     const res = await api('/admin/oauth-clients', {
       method: 'POST',
-      body: JSON.stringify({ name, redirectUris, pkceRequired, postLogoutRedirectUri: document.getElementById('oauthClientPostLogoutUri').value.trim() }),
+      body: JSON.stringify({ name, redirectUris, pkceRequired }),
     });
     const data = await res.json();
     if (!res.ok) return toast(data.error || 'Failed to create', 'error');
@@ -5828,7 +6017,6 @@ async function submitEditOauthClient() {
     consentEnabled,
     consentPageId,
     pkceRequired,
-    postLogoutRedirectUri: document.getElementById('oauthClientPostLogoutUri').value.trim(),
   };
   try {
     const res = await api('/admin/oauth-clients/' + encodeURIComponent(_editingOauthClientId), {
@@ -11517,10 +11705,14 @@ function updateOauthClientLogoPreview() {
   const name = (document.getElementById('oauthClientName')?.value || '').trim();
   const words = name.split(/[\s_\-]+/).filter(Boolean);
   const initials = (words.length >= 2 ? words[0][0] + words[1][0] : (words[0] || '?').slice(0, 2)).toUpperCase();
-  const first = (document.getElementById('oauthClientUris')?.value || '').split(/\r?\n/).map(x => x.trim()).find(Boolean) || '';
-  let origin = '';
-  try { origin = first ? new URL(first).origin : ''; } catch { origin = ''; }
-  if (src) src.textContent = origin ? 'Detected from ' + origin : 'Add a redirect URI to detect the app logo.';
+  const uris = (document.getElementById('oauthClientUris')?.value || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  // Same rule as the server: local development URIs (localhost, 127.x, ::1) are skipped.
+  const isLocal = (h) => { h = h.toLowerCase().replace(/^\[|\]$/g, ''); return h === 'localhost' || h.endsWith('.localhost') || h === '0.0.0.0' || h === '::1' || /^127\./.test(h); };
+  let first = '', origin = '';
+  for (const u of uris) {
+    try { const p = new URL(u); if (/^https?:$/.test(p.protocol) && !isLocal(p.hostname)) { first = u; origin = p.origin; break; } } catch { /* not a URL */ }
+  }
+  if (src) src.textContent = origin ? 'Detected from ' + origin : (uris.length ? 'Only local redirect URIs — add a public one to detect the logo.' : 'Add a redirect URI to detect the app logo.');
   if (!box.querySelector('img')) box.textContent = initials;
   clearTimeout(_oauthLogoTimer);
   if (!origin) { box.textContent = initials; return; }

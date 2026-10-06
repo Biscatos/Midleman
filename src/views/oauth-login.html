@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sign in</title>
-  <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='dark';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
+  <!-- Apps' sign-in follows the operating system theme, independent of the admin dashboard's choice. -->
+  <script>(function(){try{var m=matchMedia('(prefers-color-scheme: dark)');var a=function(){document.documentElement.setAttribute('data-theme',m.matches?'dark':'light')};a();if(m.addEventListener)m.addEventListener('change',a);else if(m.addListener)m.addListener(a)}catch(e){}})();</script>
   <!-- MM_THEME -->
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

@@ -1058,18 +1058,20 @@
         </div>
       </div>
 
-      <!-- Role filter -->
+      <!-- Search + role filter -->
       <div class="mm-filterbar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <span style="font-size:12.5px;color:var(--text2)">Filter:</span>
-          <select id="userRoleFilter" onchange="filterProxyUsersByRole()"
-            style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px;min-width:140px">
+          <label class="mm-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="text" id="userSearch" placeholder="Search name, username or email…" autocomplete="off" aria-label="Search users"
+            oninput="searchProxyUsers(this.value)" onkeydown="if(event.key==='Escape'){this.value='';searchProxyUsers('')}"
+            style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"></label>
+          <select id="userRoleFilter" onchange="filterProxyUsersByRole()" aria-label="Role"
+            style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px;min-width:150px">
             <option value="">All roles</option>
             <option value="admin">Admins only</option>
             <option value="user">Users only</option>
             <option value="ldap">LDAP only</option>
             <option value="local">Local only</option>
           </select>
-          <span id="userRoleFilterCount" style="font-size:12px;color:var(--text3);margin-left:auto"></span>
+          <span id="userRoleFilterCount" style="font-size:12px;color:var(--text3)"></span>
       </div>
 
       <!-- Users Table -->
@@ -1092,6 +1094,13 @@
               </tr>
             </tbody>
           </table>
+        </div>
+        <div class="card-body" style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border)">
+          <span id="usersPageInfo" style="font-size:12px;color:var(--text3)"></span>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-ghost btn-sm" onclick="changeProxyUsersPage(-1)" id="usersPrev" disabled>‹ Prev</button>
+            <button class="btn btn-ghost btn-sm" onclick="changeProxyUsersPage(1)" id="usersNext" disabled>Next ›</button>
+          </div>
         </div>
       </div>
 
@@ -3065,17 +3074,12 @@
           <p style="font-size:11.5px;color:var(--text3);margin-top:6px">HTTPS required (except http://localhost for dev). Exact match — no wildcards.</p>
         </div>
         <div class="form-group">
-          <label class="form-label">Post-logout redirect (optional)</label>
-          <input type="text" id="oauthClientPostLogoutUri" class="form-input" placeholder="https://app.example.com/login" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px">
-          <p style="font-size:11.5px;color:var(--text3);margin-top:6px">Where <code>/oauth/logout?client_id=…</code> sends the browser after signing out. Leave empty to use the origin of the first redirect URI.</p>
-        </div>
-        <div class="form-group">
           <label class="form-label">App logo</label>
           <div style="display:flex;gap:10px;align-items:center">
             <span id="oauthClientLogoPreview" aria-hidden="true" style="width:40px;height:40px;flex-shrink:0;border:1px solid var(--border2);border-radius:10px;background:var(--surface2);display:flex;align-items:center;justify-content:center;overflow:hidden;font:600 13px var(--font-display);color:var(--text)"></span>
             <span id="oauthClientLogoSource" style="font-size:12px;color:var(--text3)">Add a redirect URI to detect the app logo.</span>
           </div>
-          <p class="mm-field-hint">Detected automatically from the site of the first redirect URI and shown on the sign-in screen. Falls back to the app initials.</p>
+          <p class="mm-field-hint">Detected automatically from the first redirect URI on a real host (localhost and 127.x are skipped) and shown on the sign-in screen. Falls back to the app initials.</p>
         </div>
         <div id="oauthClientUrisChangeWarning" style="display:none;background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.25);color:#ca8a04;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:14px">
           Changing redirect URIs revokes every refresh token for this client — apps will have to re-authenticate.
@@ -4455,6 +4459,13 @@
               <span>Is administrator</span>
             </label>
             <span style="font-size:11px;color:var(--text3);margin-top:4px;display:block">Grants dashboard access. The new admin will be asked to set up 2FA on first dashboard login.</span>
+          </div>
+          <div class="form-group span-2" id="npuMfaExemptGroup" style="display:none">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input class="mm-switch" type="checkbox" id="npuMfaExempt" style="cursor:pointer">
+              <span>Allow sign-in without 2FA</span>
+            </label>
+            <span class="mm-field-hint">Lets this user sign in without a second factor even when their LDAP directory requires 2FA. A user who already set up 2FA keeps being asked for it, and a proxy that requires 2FA still does. Not available for admins.</span>
           </div>
           <div class="form-group span-2">
             <label>Assign to Proxies</label>

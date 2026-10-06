@@ -295,6 +295,8 @@ export interface ProxyUser {
   totpEnabled: boolean;
   /** If true, user is forced to set up TOTP on their next login regardless of profile config. */
   force2faSetup?: boolean;
+  /** Admin allowed this user to sign in without 2FA even if their LDAP directory requires it. */
+  mfaExempt?: boolean;
   createdAt: string;
   authSource?: 'local' | 'ldap' | 'admin_shadow';
   ldapConfigId?: number | null;

@@ -380,6 +380,14 @@ function runLegacyAdditiveMigrations(d: Database): void {
 function ensureProxyUsersColumns(d: Database): void {
     try {
         const cols = (d.prepare("PRAGMA table_info(proxy_users)").all() as any[]).map((c: any) => c.name);
+        // LDAP columns: the legacy migration only adds them to a pre-existing table,
+        // so a fresh install (table created just now) needs them here too.
+        if (!cols.includes('auth_source')) d.exec("ALTER TABLE proxy_users ADD COLUMN auth_source TEXT NOT NULL DEFAULT 'local'");
+        if (!cols.includes('ldap_config_id')) d.exec("ALTER TABLE proxy_users ADD COLUMN ldap_config_id INTEGER");
+        if (!cols.includes('ldap_dn')) d.exec("ALTER TABLE proxy_users ADD COLUMN ldap_dn TEXT");
+        if (!cols.includes('ldap_groups_last_seen')) d.exec("ALTER TABLE proxy_users ADD COLUMN ldap_groups_last_seen TEXT NOT NULL DEFAULT '[]'");
+        if (!cols.includes('ldap_last_sync_at')) d.exec("ALTER TABLE proxy_users ADD COLUMN ldap_last_sync_at TEXT");
+        if (!cols.includes('ldap_orphan')) d.exec("ALTER TABLE proxy_users ADD COLUMN ldap_orphan INTEGER NOT NULL DEFAULT 0");
         if (!cols.includes('roles')) d.exec("ALTER TABLE proxy_users ADD COLUMN roles TEXT NOT NULL DEFAULT 'proxy'");
         if (!cols.includes('created_by_user_id')) d.exec("ALTER TABLE proxy_users ADD COLUMN created_by_user_id INTEGER");
         if (!cols.includes('force_2fa_setup')) d.exec("ALTER TABLE proxy_users ADD COLUMN force_2fa_setup INTEGER NOT NULL DEFAULT 0");
@@ -387,6 +395,8 @@ function ensureProxyUsersColumns(d: Database): void {
         if (!cols.includes('phone_verified')) d.exec("ALTER TABLE proxy_users ADD COLUMN phone_verified INTEGER NOT NULL DEFAULT 0");
         if (!cols.includes('sms_2fa_enabled')) d.exec("ALTER TABLE proxy_users ADD COLUMN sms_2fa_enabled INTEGER NOT NULL DEFAULT 0");
         if (!cols.includes('blocked')) d.exec("ALTER TABLE proxy_users ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0");
+        // Per-user exemption from a directory's "2FA required" policy (admin decision).
+        if (!cols.includes('mfa_exempt')) d.exec("ALTER TABLE proxy_users ADD COLUMN mfa_exempt INTEGER NOT NULL DEFAULT 0");
     } catch {}
 }
 
@@ -1188,6 +1198,7 @@ function rowToProxyUser(r: any): ProxyUser {
         email: r.email || '',
         totpEnabled: !!r.totp_enabled,
         force2faSetup: !!r.force_2fa_setup,
+        mfaExempt: !!r.mfa_exempt,
         createdAt: r.created_at,
         authSource: (r.auth_source || 'local') as 'local' | 'ldap',
         ldapConfigId: r.ldap_config_id ?? null,
@@ -1206,7 +1217,7 @@ export async function createProxyUser(username: string, password: string, fullNa
     const hash = await Bun.password.hash(password, 'bcrypt');
     db.prepare('INSERT INTO proxy_users (username, full_name, email, password) VALUES ($u, $fn, $em, $p)')
         .run({ $u: username, $fn: fullName.trim(), $em: email.trim().toLowerCase(), $p: hash });
-    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
+    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, mfa_exempt, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
     return rowToProxyUser(row);
 }
 
@@ -1216,14 +1227,14 @@ export function listAllProxyUsers(): ProxyUser[] {
     // (admins lived in a separate table and had mirror rows here). After the
     // migration any admin is just a regular row with 'admin' in `roles`.
     const rows = db.prepare(
-        "SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, phone_number, phone_verified, sms_2fa_enabled, blocked, created_at FROM proxy_users WHERE auth_source != 'admin_shadow' ORDER BY username"
+        "SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, mfa_exempt, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, phone_number, phone_verified, sms_2fa_enabled, blocked, created_at FROM proxy_users WHERE auth_source != 'admin_shadow' ORDER BY username"
     ).all() as any[];
     return rows.map(rowToProxyUser);
 }
 
 export function getProxyUser(id: number): ProxyUser | null {
     if (!db) return null;
-    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, phone_number, phone_verified, sms_2fa_enabled, blocked, created_at FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
+    const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, mfa_exempt, auth_source, ldap_config_id, ldap_dn, ldap_orphan, roles, phone_number, phone_verified, sms_2fa_enabled, blocked, created_at FROM proxy_users WHERE id = $id').get({ $id: id }) as any;
     return row ? rowToProxyUser(row) : null;
 }
 
@@ -1288,11 +1299,11 @@ export async function updateProxyUserPassword(id: number, newPassword: string): 
 export function findProxyUserByEmailOrUsername(email: string, username: string): ProxyUser | null {
     if (!db) return null;
     if (email) {
-        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE email = $e AND email != \'\'').get({ $e: email.toLowerCase() }) as any;
+        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, mfa_exempt, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE email = $e AND email != \'\'').get({ $e: email.toLowerCase() }) as any;
         if (row) return rowToProxyUser(row);
     }
     if (username) {
-        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
+        const row = db.prepare('SELECT id, username, full_name, email, totp_enabled, force_2fa_setup, mfa_exempt, auth_source, ldap_config_id, ldap_dn, ldap_orphan, created_at FROM proxy_users WHERE username = $u').get({ $u: username }) as any;
         if (row) return rowToProxyUser(row);
     }
     return null;
@@ -1327,9 +1338,9 @@ export function updateProxyUserInfo(id: number, fullName: string, email: string,
 export async function verifyProxyUserCredentials(login: string, password: string): Promise<{ user: ProxyUser; totpSecret: string | null } | null> {
     if (!db) return null;
     // Try username first, then email
-    let row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, phone_number, phone_verified, sms_2fa_enabled, blocked, created_at FROM proxy_users WHERE username = $u').get({ $u: login }) as any;
+    let row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, force_2fa_setup, mfa_exempt, auth_source, ldap_config_id, ldap_dn, ldap_orphan, phone_number, phone_verified, sms_2fa_enabled, blocked, created_at FROM proxy_users WHERE username = $u').get({ $u: login }) as any;
     if (!row && login.includes('@')) {
-        row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, force_2fa_setup, auth_source, ldap_config_id, ldap_dn, ldap_orphan, phone_number, phone_verified, sms_2fa_enabled, blocked, created_at FROM proxy_users WHERE email = $e').get({ $e: login.toLowerCase() }) as any;
+        row = db.prepare('SELECT id, username, full_name, email, password, totp_secret, totp_enabled, force_2fa_setup, mfa_exempt, auth_source, ldap_config_id, ldap_dn, ldap_orphan, phone_number, phone_verified, sms_2fa_enabled, blocked, created_at FROM proxy_users WHERE email = $e').get({ $e: login.toLowerCase() }) as any;
     }
     if (!row) return null;
     // Blocked accounts cannot authenticate — same generic failure as a bad
@@ -1883,8 +1894,18 @@ export function disableProxyUserTotp(userId: number): boolean {
 export function setProxyUserForce2faSetup(userId: number, force: boolean): boolean {
     if (!db) return false;
     const sql = force
-        ? "UPDATE proxy_users SET force_2fa_setup = 1, totp_secret = NULL, totp_enabled = 0, updated_at = datetime('now') WHERE id = $id"
+        ? "UPDATE proxy_users SET force_2fa_setup = 1, mfa_exempt = 0, totp_secret = NULL, totp_enabled = 0, updated_at = datetime('now') WHERE id = $id"
         : "UPDATE proxy_users SET force_2fa_setup = 0, updated_at = datetime('now') WHERE id = $id";
+    return db.prepare(sql).run({ $id: userId }).changes > 0;
+}
+
+/** Allow (or stop allowing) a user to sign in without a second factor even when
+ *  their LDAP directory requires 2FA. Exempting clears a pending forced setup. */
+export function setProxyUserMfaExempt(userId: number, exempt: boolean): boolean {
+    if (!db) return false;
+    const sql = exempt
+        ? "UPDATE proxy_users SET mfa_exempt = 1, force_2fa_setup = 0, updated_at = datetime('now') WHERE id = $id"
+        : "UPDATE proxy_users SET mfa_exempt = 0, updated_at = datetime('now') WHERE id = $id";
     return db.prepare(sql).run({ $id: userId }).changes > 0;
 }
 
