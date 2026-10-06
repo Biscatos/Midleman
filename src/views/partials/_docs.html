@@ -1,19 +1,16 @@
     <!-- ═══ DOCS ═══ -->
     <div class="page" id="pageDocs">
-      <div class="page-header docs-page-header">
-        <div>
-          <h2>Docs</h2>
-          <p>Integration reference for this Midleman instance. Endpoints shown here are the live values of this installation.</p>
-        </div>
-        <div class="docs-header-actions">
-          <label class="mm-search docs-search">
-            <input type="search" id="docsSearch" placeholder="Search docs" oninput="docsFilter(this.value)" autocomplete="off">
-          </label>
+      <div class="page-header">
+        <h2>Docs</h2>
+        <p>Integration reference for this Midleman instance. Endpoints shown here are the live values of this installation.</p>
+      </div>
+      <div class="mm-filterbar docs-toolbar">
+          <label class="mm-search docs-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="text" id="docsSearch" placeholder="Search docs" oninput="docsFilter(this.value)" onkeydown="if(event.key==='Escape'){this.value='';docsFilter('')}" autocomplete="off" aria-label="Search docs"
+            style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"></label>
           <button class="btn btn-sm" onclick="docsCopyForAI()" title="Copy every section as one prompt for an AI assistant">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg>
             Copy all for AI
           </button>
-        </div>
       </div>
 
       <div class="docs-layout">

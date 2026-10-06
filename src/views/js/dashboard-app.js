@@ -821,12 +821,16 @@ function mmCopyFrom(btn) {
 // one sticky block (CSS: .page-sticky).
 function mmStickyToolbars() {
   document.querySelectorAll('.page > .page-header').forEach(h => {
+    if (h.parentElement.classList.contains('page-sticky')) return;
     const bar = h.nextElementSibling;
-    if (!bar || !bar.classList.contains('mm-filterbar') || h.parentElement.classList.contains('page-sticky')) return;
+    const hasBar = !!bar && bar.classList.contains('mm-filterbar');
+    // Pages opt in without a filter bar with data-sticky on their header (e.g. Docs).
+    if (!hasBar && !h.hasAttribute('data-sticky')) return;
     const wrap = document.createElement('div');
     wrap.className = 'page-sticky';
     h.before(wrap);
-    wrap.append(h, bar);
+    wrap.append(h);
+    if (hasBar) wrap.append(bar);
   });
   // Table headers stick right under the toolbar: expose its height to CSS.
   if (window.ResizeObserver) {

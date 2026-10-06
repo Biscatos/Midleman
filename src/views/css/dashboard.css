@@ -3605,3 +3605,13 @@ div[style*="overflow"] > table > thead th {
   background-position: bottom left !important;
   background-repeat: no-repeat !important;
 }
+
+/* Docs: sticky header (title, search, Copy all for AI); the index and section
+   anchors sit below it. */
+.page-sticky > .docs-page-header { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+#pageDocs .docs-nav { top: calc(var(--page-sticky-h, 0px) + 12px); }
+#pageDocs .docs-section { scroll-margin-top: calc(var(--page-sticky-h, 0px) + 12px); }
+.docs-search { flex: 0 1 260px; min-width: 200px; }
+.docs-toolbar { display: flex; align-items: center; gap: 8px; }
+.docs-toolbar .docs-search { flex: 0 1 320px; }
+.docs-toolbar .btn { margin-left: auto; }
