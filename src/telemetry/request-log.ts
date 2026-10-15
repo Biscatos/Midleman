@@ -95,6 +95,9 @@ const MIGRATIONS = [
     `ALTER TABLE request_logs ADD COLUMN target_name TEXT`,
     // Store per-attempt timeline for webhook-fanout retries (JSON array)
     `ALTER TABLE request_logs ADD COLUMN attempts TEXT`,
+    // Identical failures repeating (retry loops) update one row instead of adding rows
+    `ALTER TABLE request_logs ADD COLUMN repeat_count INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE request_logs ADD COLUMN last_seen_at TEXT`,
 ];
 
 // ─── Initialization ─────────────────────────────────────────────────────────
@@ -238,15 +241,52 @@ function buildParams(entry: RequestLogEntry) {
     };
 }
 
+// ─── Repeated failures ─────────────────────────────────────────────────────
+// A request that keeps failing the same way (a retry loop, a sender re-posting
+// the same payload) used to add a full row — headers and bodies — every time.
+// Now an identical failure within REPEAT_WINDOW_MS only bumps `repeat_count`
+// and `last_seen_at` on the row already stored. Successes are always stored.
+const REPEAT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const REPEAT_INDEX_MAX = 5000;
+const _repeatIndex = new Map<string, { id: number; at: number }>();
+
+function repeatKey(entry: RequestLogEntry, params: ReturnType<typeof buildParams>): string | null {
+    const failed = !!entry.error || (typeof entry.resStatus === 'number' && entry.resStatus >= 400);
+    if (!failed) return null;
+    const h = (v: unknown) => (v == null ? '' : Bun.hash(String(v)).toString(36));
+    return [params.$type, params.$profileName, params.$targetName, params.$method, params.$path, params.$targetUrl,
+        params.$resStatus, params.$error, h(params.$reqBody), h(params.$resBody)].join('|');
+}
+
+let _repeatStmt: ReturnType<Database['prepare']> | null = null;
+
 function flushLogQueue(): void {
     _flushScheduled = false;
     if (_logQueue.length === 0 || !db) return;
     const batch = _logQueue.splice(0);
     try {
         if (!_insertStmt) _insertStmt = insertStmt();
+        if (!_repeatStmt) _repeatStmt = db.prepare(
+            "UPDATE request_logs SET repeat_count = repeat_count + 1, last_seen_at = datetime('now'), duration_ms = $d WHERE id = $id"
+        );
         const stmt = _insertStmt!;
+        const upd = _repeatStmt!;
+        const now = Date.now();
         db.transaction(() => {
-            for (const entry of batch) stmt.run(buildParams(entry));
+            for (const entry of batch) {
+                const params = buildParams(entry);
+                const key = repeatKey(entry, params);
+                const seen = key ? _repeatIndex.get(key) : undefined;
+                if (seen && now - seen.at < REPEAT_WINDOW_MS) {
+                    // Row may have been purged meanwhile: fall through to a fresh insert.
+                    if (upd.run({ $id: seen.id, $d: params.$durationMs }).changes > 0) { seen.at = now; continue; }
+                }
+                const r = stmt.run(params);
+                if (key) {
+                    if (_repeatIndex.size >= REPEAT_INDEX_MAX) _repeatIndex.delete(_repeatIndex.keys().next().value as string);
+                    _repeatIndex.set(key, { id: Number(r.lastInsertRowid), at: now });
+                }
+            }
         })();
     } catch (err) {
         console.error('⚠️  Failed to flush log queue:', err);
@@ -508,6 +548,10 @@ export interface RequestLogSummary {
     resBodySize: number;
     error: string | null;
     attemptCount: number | null;
+    /** How many times this exact failure happened (1 = once). */
+    repeatCount: number;
+    /** When it last happened, if more than once (SQLite UTC, no 'Z'). */
+    lastSeenAt: string | null;
 }
 
 export interface RequestLogDetail extends RequestLogSummary {
@@ -589,7 +633,8 @@ export function queryRequestLogs(query: RequestLogQuery): RequestLogListResult {
     const bodyCol = query.includeBody ? 'req_body, ' : '';
     const rows = db.prepare(`
         SELECT id, request_id, timestamp, type, profile_name, target_name, method, path, target_url,
-               client_ip, ${bodyCol}res_status, res_status_text, duration_ms, req_body_size, res_body_size, error, attempts
+               client_ip, ${bodyCol}res_status, res_status_text, duration_ms, req_body_size, res_body_size, error, attempts,
+               repeat_count, last_seen_at
         FROM request_logs ${where}
         ORDER BY id DESC
         LIMIT $limit OFFSET $offset
@@ -620,6 +665,8 @@ export function queryRequestLogs(query: RequestLogQuery): RequestLogListResult {
                 resBodySize: r.res_body_size,
                 error: r.error,
                 attemptCount,
+                repeatCount: r.repeat_count || 1,
+                lastSeenAt: r.last_seen_at || null,
             };
         }),
         total,
@@ -636,7 +683,7 @@ export function getRequestLogDetail(id: number): RequestLogDetail | null {
         SELECT id, request_id, timestamp, type, profile_name, target_name, method, path, target_url,
                client_ip, req_headers, req_body, req_body_size,
                res_status, res_status_text, res_headers, res_body, res_body_size,
-               duration_ms, error, attempts
+               duration_ms, error, attempts, repeat_count, last_seen_at
         FROM request_logs WHERE id = $id
     `).get({ $id: id }) as any;
 
@@ -670,6 +717,8 @@ export function getRequestLogDetail(id: number): RequestLogDetail | null {
         error: row.error,
         attempts,
         attemptCount: attempts ? attempts.length : null,
+        repeatCount: row.repeat_count || 1,
+        lastSeenAt: row.last_seen_at || null,
     };
 }
 

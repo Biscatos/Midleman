@@ -618,9 +618,12 @@ async function ensureFive9Session(cs: Five9ConnectorServer, msg: NormalizedInbou
         farm_id: auth.farmId, org_id: auth.orgId, api_host: auth.apiHost, api_host_candidates: auth.apiHostCandidates || '', reauth_host: auth.reauthHost || '',
     });
 
-    const nameParts = msg.displayName.split(' ');
+    // Five9 rejects an empty contact.lastName (HTTP 435 "size must be between 1
+    // and …"). WhatsApp profiles often have a single word ("Maria") or none, so
+    // split on any whitespace and fall back to "-" when there is no surname.
+    const nameParts = String(msg.displayName || '').trim().split(/\s+/).filter(Boolean);
     const firstName = nameParts[0] || msg.chatId;
-    const lastName = nameParts.slice(1).join(' ') || '';
+    const lastName = nameParts.slice(1).join(' ') || '-';
     const number1 = toE164(msg.chatId);
     const question = msg.text || '(arquivo)';
 

@@ -1783,6 +1783,7 @@ const server = Bun.serve({
                         nextAttemptAt: e.nextAttemptAt,
                         notified: e.notified,
                         running: e.running,
+                        duplicates: e.duplicates || 0,
                         notifyEmail: e.persistentRetry.notifyEmail || '',
                         maxAttemptsPerMinute: e.persistentRetry.maxAttemptsPerMinute ?? 10,
                     }));
