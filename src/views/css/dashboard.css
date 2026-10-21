@@ -3793,3 +3793,7 @@ div[style*="overflow"] > table > thead th {
 .mm-ctx-sep { height: 1px; margin: 4px 6px; background: var(--border); }
 tr.mm-ctx-row, tr.mm-ctx-row > td, [role="row"].mm-ctx-row { background: var(--accent-sel) !important; }
 .mm-ctx-item:focus, .mm-ctx-item:focus-visible { outline: none !important; }
+
+/* Light theme: the menu sits on the lighter card tone, not the page grey */
+[data-theme="light"] .sidebar, [data-theme="light"] .sidebar-header { background: var(--surface); }
+[data-theme="light"] .sidebar-status { background: var(--bg); }

@@ -3451,7 +3451,7 @@ async function prCancelAll() {
   if (!count) return;
   if (!(await showConfirm({
     title: 'Cancel all retries',
-    message: `Cancel all ${count} pending retries${_prModalWebhook ? ' for "' + _prModalWebhook + '"' : ''}? The deliveries will be abandoned. (Retries currently running will be kept.)`,
+    message: `Cancel all ${count} pending retries${_prModalWebhook ? ' for "' + _prModalWebhook + '"' : ''}? The deliveries will be abandoned, including any attempt in progress.`,
     confirmText: 'Cancel all',
   }))) return;
   const btn = document.getElementById('prCancelAllBtn');
@@ -5034,7 +5034,7 @@ function renderRequestLogs() {
   <td style="padding:8px">${typeBadge}</td>
   <td style="padding:8px;font-weight:600;${methodCls}">${esc(r.method)}</td>
   <td style="padding:8px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.path)}">${esc(r.path)}</td>
-  <td style="padding:8px"><span class="${r.error && !sc ? 'mm-chip err' : statusChip}">${sc || (r.error ? 'ERR' : '-')}</span></td>
+  <td style="padding:8px;white-space:nowrap"><span class="${r.error && !sc ? 'mm-chip err' : statusChip}">${sc || (r.error ? 'ERR' : '-')}</span>${r.repeatCount > 1 ? ` <span class="mm-chip" title="Same failure repeated ${r.repeatCount}× — last at ${esc(new Date((r.lastSeenAt || r.timestamp) + 'Z').toLocaleString())}">${r.repeatCount}×</span>` : ''}</td>
   <td style="padding:8px;color:var(--text2)">${r.durationMs ? fmtMs(r.durationMs) : '-'}</td>
   <td style="padding:8px;color:var(--text3);font-size:12px">${sz > 0 ? fmtBytes(sz) : '-'}</td>
   <td style="padding:8px 12px"><span style="color:var(--accent2);font-size:12px">View</span></td>
@@ -5155,7 +5155,8 @@ function renderReqDetail(d) {
   </div>
 </div>
 <div class="rdm-meta-grid">
-  <div class="rdm-meta-item"><div><div class="rdm-meta-lbl">Timestamp</div><div class="rdm-meta-val">${esc(ts.toLocaleString())}</div></div></div>
+  <div class="rdm-meta-item"><div><div class="rdm-meta-lbl">${d.repeatCount > 1 ? 'First seen' : 'Timestamp'}</div><div class="rdm-meta-val">${esc(ts.toLocaleString())}</div></div></div>
+  ${d.repeatCount > 1 ? `<div class="rdm-meta-item"><div><div class="rdm-meta-lbl">Repeated</div><div class="rdm-meta-val">${d.repeatCount}× · last ${esc(new Date((d.lastSeenAt || d.timestamp) + 'Z').toLocaleString())}</div></div></div>` : ''}
   <div class="rdm-meta-item"><div><div class="rdm-meta-lbl">Client IP</div><div class="rdm-meta-val" style="font-family:'SF Mono',ui-monospace,monospace">${esc(d.clientIp || 'unknown')}</div></div></div>
   <div class="rdm-meta-item rdm-meta-wide">
     <div style="min-width:0;flex:1"><div class="rdm-meta-lbl">Request ID</div><div class="rdm-meta-val rdm-mono-val" title="${esc(d.requestId)}">${esc(d.requestId)}</div></div>

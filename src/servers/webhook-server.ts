@@ -259,6 +259,8 @@ export interface PendingRetry {
     nextAttemptAt: number;
     notified: boolean;
     running: boolean;             // in-memory only — true while an attempt is in flight
+    cancelled?: boolean;          // in-memory only — removed by the user while an attempt was running
+    duplicates?: number;          // identical failures merged into this entry instead of queued again
 }
 
 function serializePending(e: PendingRetry): StoredPendingRetry {
@@ -310,7 +312,29 @@ function deserializePending(s: StoredPendingRetry): PendingRetry {
     };
 }
 
-const pendingRetryQueue: PendingRetry[] = loadPersistedPendingRetry().map(deserializePending);
+/** Content fingerprint of a queued delivery: same webhook, destination, method
+ *  and body = the same delivery, however many times the source re-sent it. */
+function pendingFingerprint(e: { webhookName: string; targetUrl: string; method: string; body: ArrayBuffer | string | null }): string {
+    const b = e.body instanceof ArrayBuffer ? new Uint8Array(e.body) : (e.body ?? '');
+    return `${e.webhookName}|${e.method}|${e.targetUrl}|${Bun.hash(b as any).toString(36)}`;
+}
+
+// Restored queue, with copies of the same delivery collapsed into the oldest
+// entry (earlier versions queued one entry per re-sent payload).
+const pendingRetryQueue: PendingRetry[] = (() => {
+    const byFp = new Map<string, PendingRetry>();
+    let merged = 0;
+    for (const e of loadPersistedPendingRetry().map(deserializePending)) {
+        const fp = pendingFingerprint(e);
+        const keep = byFp.get(fp);
+        if (!keep) { byFp.set(fp, e); continue; }
+        keep.duplicates = (keep.duplicates || 0) + 1 + (e.duplicates || 0);
+        keep.attempts = Math.max(keep.attempts, e.attempts);
+        merged++;
+    }
+    if (merged > 0) console.warn(`📌 [pending-retry] Collapsed ${merged} duplicate entr${merged === 1 ? 'y' : 'ies'} on load`);
+    return [...byFp.values()];
+})();
 
 let _pendingFlushTimer: ReturnType<typeof setTimeout> | null = null;
 function schedulePendingFlush(): void {
@@ -332,6 +356,7 @@ export function getPendingRetryQueue(): PendingRetry[] {
 export function dismissPendingRetry(id: string): boolean {
     const idx = pendingRetryQueue.findIndex(e => e.id === id);
     if (idx === -1) return false;
+    pendingRetryQueue[idx].cancelled = true; // an in-flight attempt must not revive it
     pendingRetryQueue.splice(idx, 1);
     flushPendingSync();
     return true;
@@ -341,9 +366,10 @@ export function dismissPendingRetry(id: string): boolean {
 //   - webhook:    only entries belonging to this webhook
 //   - ids:        only entries whose id is in this set (explicit selection)
 //   - targetUrls: only entries delivering to one of these destinations
-// Filters combine with AND. With no filter, every (non-running) entry is removed.
-// Entries with an attempt currently in flight (`running`) are always left alone
-// so we don't drop a delivery mid-request. Returns the number of entries removed.
+// Filters combine with AND. With no filter, every entry is removed — including
+// one whose attempt is in flight: it is flagged so the attempt, when it ends,
+// neither reschedules nor notifies. (Skipping running entries used to make
+// "Cancel all" a no-op for a destination that hangs.) Returns the number removed.
 export function dismissAllPendingRetry(filter?: {
     webhook?: string;
     ids?: string[];
@@ -354,16 +380,18 @@ export function dismissAllPendingRetry(filter?: {
     let removed = 0;
     for (let i = pendingRetryQueue.length - 1; i >= 0; i--) {
         const e = pendingRetryQueue[i];
-        if (e.running) continue;
         if (filter?.webhook && e.webhookName !== filter.webhook) continue;
         if (idSet && !idSet.has(e.id)) continue;
         if (urlSet && !urlSet.has(e.targetUrl)) continue;
+        e.cancelled = true;
         pendingRetryQueue.splice(i, 1);
         removed++;
     }
     if (removed > 0) flushPendingSync();
     return removed;
 }
+
+const PENDING_ATTEMPT_TIMEOUT_MS = 30_000;
 
 function pendingMinInterval(pr: WebhookPersistentRetry): number {
     const perMin = Math.max(1, Math.min(600, pr.maxAttemptsPerMinute ?? 10));
@@ -384,6 +412,17 @@ function enqueuePendingRetry(input: {
         body = body.slice(0, DLQ_MAX_BODY_SIZE);
     } else if (typeof body === 'string' && body.length > DLQ_MAX_BODY_SIZE) {
         body = body.slice(0, DLQ_MAX_BODY_SIZE);
+    }
+    const fp = pendingFingerprint({ webhookName: input.webhookName, targetUrl: input.targetUrl, method: input.method, body });
+    const same = pendingRetryQueue.find(e => !e.cancelled && pendingFingerprint(e) === fp);
+    if (same) {
+        // Same payload to the same destination is already being retried: keep
+        // one entry and only record that it happened again.
+        same.duplicates = (same.duplicates || 0) + 1;
+        same.lastError = input.lastError;
+        same.lastAttemptAt = now;
+        schedulePendingFlush();
+        return;
     }
     const entry: PendingRetry = {
         id: crypto.randomUUID(),
@@ -480,8 +519,12 @@ async function attemptPendingRetry(entry: PendingRetry): Promise<void> {
             method: entry.method,
             headers,
             body: body as any,
+            // A destination that never answers used to leave the entry "running"
+            // forever — un-cancellable and never retried again.
+            signal: AbortSignal.timeout(PENDING_ATTEMPT_TIMEOUT_MS),
             tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' },
         } as RequestInit);
+        try { await res.arrayBuffer(); } catch { /* drain so the socket is released */ }
         entry.attempts += 1;
         entry.lastAttemptAt = Date.now();
         if (res.status >= 200 && res.status < 300) {
@@ -504,6 +547,9 @@ async function attemptPendingRetry(entry: PendingRetry): Promise<void> {
         entry.nextAttemptAt = Date.now() + interval;
         entry.running = false;
     }
+
+    // Cancelled while the attempt was in flight: it is already out of the queue.
+    if (entry.cancelled) return;
 
     // Notification on first cross of the threshold
     const threshold = Math.max(1, entry.persistentRetry.notifyAfterAttempts ?? 10);
@@ -536,6 +582,7 @@ let _schedulerInterval: ReturnType<typeof setInterval> | null = null;
 export function startPendingRetryScheduler(): void {
     if (_schedulerInterval) return;
     _schedulerInterval = setInterval(() => { void pendingRetryTick(); }, 1000);
+    flushPendingSync(); // persist the collapsed queue (and compact file format) right away
     console.log(`📌 [pending-retry] Scheduler started — ${pendingRetryQueue.length} entries restored`);
 }
 

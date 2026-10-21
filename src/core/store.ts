@@ -539,7 +539,8 @@ export function loadPersistedPendingRetry(): StoredPendingRetry[] {
 export function persistPendingRetry(entries: StoredPendingRetry[]): void {
     try {
         ensureDataDir();
-        writeFileSync(PENDING_RETRY_FILE, JSON.stringify(entries, null, 2), 'utf-8');
+        // Compact: entries carry base64 bodies and the file is rewritten on every attempt.
+        writeFileSync(PENDING_RETRY_FILE, JSON.stringify(entries), 'utf-8');
     } catch (err) {
         console.error('❌ Could not save pending-retry.json:', err instanceof Error ? err.message : err);
     }

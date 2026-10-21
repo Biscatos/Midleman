@@ -525,6 +525,32 @@ if (jwksServer) {
 // Exposes ONLY /reports/* consumer endpoints — no admin, no dashboard.
 // Configure with REPORT_PORT env var (default 4001).
 
+// ─── Public face of the admin server ─────────────────────────────────────────
+// PUBLIC_URL (e.g. https://convites.example.com) is the address emailed links
+// use — invites, admin invites, password reset — and the only host that is
+// fenced to those pages. Unset: links use the address the admin is browsing on,
+// and nothing is fenced (the previous behaviour).
+const PUBLIC_URL = (process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
+const PUBLIC_HOST = (() => { try { return PUBLIC_URL ? new URL(PUBLIC_URL).hostname.toLowerCase() : ''; } catch { return ''; } })();
+const PUBLIC_PATHS: RegExp[] = [
+    /^\/invite\/[^/]+(\/register)?$/,
+    /^\/admin-invite\/[^/]+(\/register)?$/,
+    /^\/auth\/reset$/,
+    /^\/(logo\.png|favicon\.(ico|png))$/,
+];
+function publicLinkBase(req: Request): string {
+    if (PUBLIC_URL) return PUBLIC_URL;
+    const reqHost = req.headers.get('host') || `localhost:${config.port}`;
+    const protocol = req.headers.get('x-forwarded-proto') || 'http';
+    return `${protocol}://${reqHost}`;
+}
+function isPublicHostRequest(req: Request): boolean {
+    if (!PUBLIC_HOST) return false;
+    const hosts = [req.headers.get('x-forwarded-host'), req.headers.get('host')];
+    return hosts.some(h => !!h && h.split(',')[0].trim().split(':')[0].toLowerCase() === PUBLIC_HOST);
+}
+if (PUBLIC_URL) console.log(`🌐 Public URL: ${PUBLIC_URL} — only invite and password-reset pages are served on ${PUBLIC_HOST}`);
+
 const reportPortRaw = process.env.REPORT_PORT ?? '8444';
 const reportApiServer = Bun.serve({
     port: parseInt(reportPortRaw, 10),
@@ -573,6 +599,14 @@ const server = Bun.serve({
         if (req.method === 'POST' && /^\/five9(\/|$)/.test(url0.pathname)) {
             console.warn(`🚫 FIVE9_CALLBACK result=misrouted reason=hit-admin-port path=${url0.pathname} admin_port=${config.port} hint="point the reverse proxy for this host at the Five9 connector port (see 'Connector ... on :PORT' at boot)"`);
             return jsonRes(404, { error: 'Not Found', message: `Five9 callbacks must target the connector port, not the admin port ${config.port}` });
+        }
+
+        // Requests arriving on the public domain (PUBLIC_URL) may only reach the
+        // pages people open from an email: invites and password reset. The
+        // dashboard and the admin API answer 404 there, whatever the proxy in
+        // front lets through.
+        if (isPublicHostRequest(req) && !PUBLIC_PATHS.some(re => re.test(url0.pathname))) {
+            return new Response('Not Found', { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } });
         }
 
         activeRequests++;
@@ -832,7 +866,7 @@ const server = Bun.serve({
                 const { token, expiresAt } = createPasswordResetToken(candidate.id, { createdBy: null, createdIp: clientIp });
                 const reqHost = req.headers.get('host') || `localhost:${config.port}`;
                 const protocol = req.headers.get('x-forwarded-proto') || 'http';
-                const resetUrl = `${protocol}://${reqHost}/auth/reset?token=${encodeURIComponent(token)}`;
+                const resetUrl = `${publicLinkBase(req)}/auth/reset?token=${encodeURIComponent(token)}`;
                 const tpl = renderPasswordResetEmail({
                     fullName: candidate.fullName,
                     resetUrl,
@@ -1783,6 +1817,7 @@ const server = Bun.serve({
                         nextAttemptAt: e.nextAttemptAt,
                         notified: e.notified,
                         running: e.running,
+                        duplicates: e.duplicates || 0,
                         notifyEmail: e.persistentRetry.notifyEmail || '',
                         maxAttemptsPerMinute: e.persistentRetry.maxAttemptsPerMinute ?? 10,
                     }));
@@ -2998,7 +3033,7 @@ const server = Bun.serve({
                     const { token, expiresAt } = createPasswordResetToken(userId, { createdBy: me?.id ?? null, createdIp: reqClientIp(req) });
                     const reqHost = req.headers.get('host') || `localhost:${config.port}`;
                     const protocol = req.headers.get('x-forwarded-proto') || 'http';
-                    const resetUrl = `${protocol}://${reqHost}/auth/reset?token=${encodeURIComponent(token)}`;
+                    const resetUrl = `${publicLinkBase(req)}/auth/reset?token=${encodeURIComponent(token)}`;
                     const tpl = renderPasswordResetEmail({
                         fullName: target.fullName,
                         resetUrl,
@@ -3098,7 +3133,7 @@ const server = Bun.serve({
                     const invite = createAdminInvite(email, fullName, note, expiresInHours, me?.id);
                     const reqHost = req.headers.get('host') || `localhost:${config.port}`;
                     const protocol = req.headers.get('x-forwarded-proto') || 'http';
-                    const inviteUrl = `${protocol}://${reqHost}/admin-invite/${invite.token}`;
+                    const inviteUrl = `${publicLinkBase(req)}/admin-invite/${invite.token}`;
                     let emailSent: boolean | undefined;
                     let emailError: string | undefined;
                     if (email && isSmtpConfigured()) {
@@ -3133,7 +3168,7 @@ const server = Bun.serve({
                     if (!isSmtpConfigured()) return jsonRes(400, { error: 'SMTP not configured. Configure SMTP in Settings first.' });
                     const reqHost = req.headers.get('host') || `localhost:${config.port}`;
                     const protocol = req.headers.get('x-forwarded-proto') || 'http';
-                    const inviteUrl = `${protocol}://${reqHost}/admin-invite/${invite.token}`;
+                    const inviteUrl = `${publicLinkBase(req)}/admin-invite/${invite.token}`;
                     const expiresInHours = Math.max(1, Math.round((new Date(invite.expiresAt).getTime() - Date.now()) / 3_600_000));
                     const tpl = renderAdminInviteEmail({ inviteUrl, fullName: invite.fullName, note: invite.note, expiresInHours });
                     const r = await sendMail({ to: invite.email, subject: tpl.subject, html: tpl.html, text: tpl.text });
@@ -4830,7 +4865,7 @@ const server = Bun.serve({
                     const invite = createInviteToken(profileNames, oauthClientIds, email, invitedName, note, expiresInHours);
                     const reqHost = req.headers.get('host') || `localhost:${config.port}`;
                     const protocol = req.headers.get('x-forwarded-proto') || 'http';
-                    const inviteUrl = `${protocol}://${reqHost}/invite/${invite.token}`;
+                    const inviteUrl = `${publicLinkBase(req)}/invite/${invite.token}`;
                     let emailSent: boolean | undefined;
                     let emailError: string | undefined;
                     const resourceNames = getInviteResourceNames(profileNames, oauthClientIds);
@@ -4860,7 +4895,7 @@ const server = Bun.serve({
                     if (!isSmtpConfigured()) return jsonRes(400, { error: 'SMTP not configured. Configure SMTP in Settings first.' });
                     const reqHost = req.headers.get('host') || `localhost:${config.port}`;
                     const protocol = req.headers.get('x-forwarded-proto') || 'http';
-                    const inviteUrl = `${protocol}://${reqHost}/invite/${invite.token}`;
+                    const inviteUrl = `${publicLinkBase(req)}/invite/${invite.token}`;
                     const expiresInHours = Math.max(1, Math.round((new Date(invite.expiresAt).getTime() - Date.now()) / 3_600_000));
                     const resourceNames = getInviteResourceNames(invite.profileNames || (invite.profileName ? [invite.profileName] : []), invite.oauthClientIds || []);
                     const tpl = renderProxyInviteEmail({ inviteUrl, profileName: invite.profileName, invitedName: invite.invitedName, note: invite.note, expiresInHours, resourceNames });

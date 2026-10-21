@@ -78,17 +78,18 @@
 /* ─── Light ──────────────────────────────────────────────────────────────── */
 [data-theme="light"] {
   color-scheme: light;
-  /* Soft light: cards are an off-white step above the page, never pure white. */
-  --bg: #DCE1E7;
-  --bg2: #E4E8ED;
-  --grid-line: #D3D9E0;
-  --surface: #E4E8ED;
-  --surface2: #DAE0E6;
-  --surface3: #D2D9E0;
-  --border: #CBD2DB;
-  --border2: #BCC5D0;
-  --table-bg: #DFE6EE;
-  --table-head: #D1DCE8;
+  /* Soft light: a clear, slightly cool page; cards one small step lighter,
+     never pure white (too much glare) nor grey (reads as disabled). */
+  --bg: #F7F9FC;
+  --bg2: #FCFDFE;
+  --grid-line: #EEF1F6;
+  --surface: #FCFDFE;
+  --surface2: #EFF2F7;
+  --surface3: #E7EBF1;
+  --border: #E0E5EC;
+  --border2: #C9D1DC;
+  --table-bg: #FAFBFD;
+  --table-head: #ECF1F7;
   --text: #1E293B;
   --text2: #475569;
   --text3: #556070;
@@ -97,7 +98,7 @@
   --accent2: #1E6FAE;
   --accent-bg: rgba(42, 139, 212, 0.10);
   --accent-bdr: #A9CDEB;
-  --accent-sel: #D0E1F0;
+  --accent-sel: #DCEBF7;
   --accent-sel-bdr: #9CC4E6;
   --on-accent: #FFFFFF;
 
@@ -107,8 +108,8 @@
   --blue: #1D4ED8;   --blue-bg: rgba(29, 78, 216, 0.07);   --blue-bdr: #BFD0F5;
   --on-danger: #FFFFFF;
 
-  --code-bg: #DDE2E8;
-  --topbar-bg: rgba(220, 225, 231, 0.9);
+  --code-bg: #F1F4F8;
+  --topbar-bg: rgba(247, 249, 252, 0.9);
   --overlay: rgba(15, 23, 42, 0.38);
   --focus: var(--accent);
 }
