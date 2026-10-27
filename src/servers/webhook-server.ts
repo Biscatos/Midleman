@@ -632,6 +632,7 @@ const WEBHOOK_FETCH_TIMEOUT_MS = (() => {
     return Number.isFinite(n) && n > 0 ? n : 30_000;
 })();
 
+
 async function fetchWithRetry(
     url: string,
     init: RequestInit,
@@ -1063,6 +1064,15 @@ async function handleWebhookFanout(
                 tBodyStringPreview = rendered;
                 tBodySize = new TextEncoder().encode(rendered).byteLength;
                 tHeaders.set('content-type', 'application/json');
+            }
+            // GET and HEAD are sent without a body (fetch also refuses one).
+            const m = tMethod.toUpperCase();
+            if (m === 'GET' || m === 'HEAD') {
+                tBody = undefined;
+                tBodySize = 0;
+                tBodyStringPreview = null;
+                tHeaders.delete('content-type');
+                tHeaders.delete('content-length');
             }
         }
 
