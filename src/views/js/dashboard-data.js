@@ -4523,7 +4523,7 @@ function renderDestinationEditorMarkup(i) {
       </div>
       <label class="wd-label" for="wdUrl_${i}">${custom ? 'Method and URL' : 'URL'}</label>
       <div class="wd-url-row">
-        ${custom ? `<select onchange="updateWebhookTargetField(${i}, 'method', this.value)" aria-label="Method" class="wd-method-select">${['POST','PUT','GET','DELETE'].map(m => `<option ${t.method === m ? 'selected' : ''}>${m}</option>`).join('')}</select>` : ''}
+        ${custom ? `<select onchange="updateWebhookTargetField(${i}, 'method', this.value); renderDestinationEditor(${i})" aria-label="Method" class="wd-method-select">${['POST','PUT','GET','DELETE'].map(m => `<option ${t.method === m ? 'selected' : ''}>${m}</option>`).join('')}</select>` : ''}
         <input id="wdUrl_${i}" type="text" class="wd-mono" placeholder="https://api.example.com/orders/{{order.id}}" value="${esc(t.url)}" oninput="updateWebhookTargetField(${i}, 'url', this.value)">
       </div>
       <div id="previewUrl_${i}" class="wd-inline-preview" style="display:none"></div>
@@ -4556,6 +4556,7 @@ function renderDestinationEditorMarkup(i) {
         ${headerRows}
         <button type="button" class="wd-add wd-add-row" onclick="addWebhookTargetHeader(${i})">+ Add header</button>
       </div>
+      ${t.method === 'GET' ? `<p class="wd-sec-sub" style="margin:0">GET requests are sent without a body.</p><div id="aceBody_${i}" style="display:none"></div><div id="previewBody_${i}" style="display:none"></div>` : `
       <div class="wd-body-head">
         <span class="wd-label" style="margin:0">Body</span>
         <div class="mm-seg wd-seg" role="radiogroup" aria-label="Body">
@@ -4572,7 +4573,7 @@ function renderDestinationEditorMarkup(i) {
         </div>
         <label class="wd-switch-label" style="margin-top:2px"><input class="mm-switch" type="checkbox" ${t.dropEmpty ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'dropEmpty', this.checked)"> Drop null or empty fields before sending</label>
         <div id="previewBody_${i}" style="display:none"></div>
-      ` : `<p class="wd-sec-sub" style="margin:0">The incoming body is sent unchanged.</p><div id="aceBody_${i}" style="display:none"></div><div id="previewBody_${i}" style="display:none"></div>`}
+      ` : `<p class="wd-sec-sub" style="margin:0">The incoming body is sent unchanged.</p><div id="aceBody_${i}" style="display:none"></div><div id="previewBody_${i}" style="display:none"></div>`}`}
     </section>` : ''}
 
     <section class="wd-sec">
@@ -4643,9 +4644,12 @@ function renderDestinationPreview() {
       : `<div class="wd-verdict-box skip"><span>SKIPPED</span><span>${t.filterMode === 'any' ? 'No condition matches.' : `${ev.total - ev.matched} of ${ev.total} conditions do not match.`}</span></div>`;
   const url = renderTemplateJS(t.url || '', payload);
   const headers = custom ? (t.customHeaders || []).filter(h => h.key).map(h => `${h.key}: ${_wdSecretHeader(h.key) ? '••••••••' : renderTemplateJS(h.value || '', payload)}`) : [];
-  if (custom && t.customBody) headers.push('Content-Type: application/json');
+  if (custom && t.customBody && !(t.method === 'GET' || t.method === 'HEAD')) headers.push('Content-Type: application/json');
   let body;
-  if (custom && t.customBody && (t.bodyTemplate || '').trim()) {
+  const noBody = custom && (t.method === 'GET' || t.method === 'HEAD');
+  if (noBody) {
+    body = '';
+  } else if (custom && t.customBody && (t.bodyTemplate || '').trim()) {
     body = renderTemplateJS(t.bodyTemplate, payload);
     try { let parsed = JSON.parse(body); if (t.dropEmpty) parsed = stripEmptyDeepJS(parsed); body = JSON.stringify(parsed, null, 2); } catch { /* show as rendered */ }
   } else {
@@ -4655,7 +4659,7 @@ function renderDestinationPreview() {
     <div class="wd-req">
       <div class="wd-req-line"><span class="wd-method">${esc(custom ? (t.method || 'POST') : 'POST')}</span> ${esc(url || '(no URL)')}</div>
       ${headers.length ? `<pre class="wd-req-headers">${esc(headers.join('\n'))}${custom && t.forwardHeaders ? '\n<span class="wd-muted">+ incoming headers</span>' : ''}</pre>` : (custom && t.forwardHeaders ? '<pre class="wd-req-headers"><span class="wd-muted">Incoming headers are forwarded</span></pre>' : '')}
-      <pre class="wd-req-body">${esc(body)}</pre>
+      ${noBody ? '<pre class="wd-req-body"><span class="wd-muted">(no body)</span></pre>' : `<pre class="wd-req-body">${esc(body)}</pre>`}
     </div>
     <p class="wd-sec-sub" style="margin:0">${custom && t.customBody ? 'Rendered from the test payload.' : 'The incoming body is forwarded as-is.'} Secret header values stay masked.</p>`;
 }
