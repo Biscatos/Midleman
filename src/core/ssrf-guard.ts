@@ -98,6 +98,16 @@ const V4_ALWAYS_BLOCK = ['0.0.0.0/8', '127.0.0.0/8', '169.254.0.0/16', '255.255.
 // Private/internal — blocked by default, opt-in via env.
 const V4_PRIVATE = ['10.0.0.0/8', '100.64.0.0/10', '172.16.0.0/12', '192.0.0.0/24', '192.168.0.0/16', '198.18.0.0/15'];
 
+/** True when the IPv4 address is in any of the CIDRs (bare addresses count as /32). Non-v4 input → false. */
+export function ipInCidrs(ip: string, cidrs: string[]): boolean {
+    return cidrs.some(c => inV4Cidr(ip, c.includes('/') ? c : c + '/32'));
+}
+/** Loopback, link-local or RFC1918/CGNAT — i.e. a client that did not come in from the internet. */
+export function isPrivateOrLoopbackV4(ip: string): boolean {
+    const v4 = ip.replace(/^::ffff:/, '');
+    return v4 === '::1' || ip === '::1' || ipInCidrs(v4, [...V4_ALWAYS_BLOCK, ...V4_PRIVATE]);
+}
+
 export interface SsrfPolicy {
     allowPrivate: boolean;
     allowedCidrs: string[];

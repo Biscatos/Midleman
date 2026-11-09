@@ -704,6 +704,7 @@
     <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
       <symbol id="mon-ico-rabbitmq" viewBox="0 0 24 24"><path fill="#FF6600" d="M21 9h-6.3a.7.7 0 0 1-.7-.7V2.7a.7.7 0 0 0-.7-.7h-2.6a.7.7 0 0 0-.7.7v5.6a.7.7 0 0 1-.7.7H7.3a.7.7 0 0 1-.7-.7V2.7A.7.7 0 0 0 5.9 2H3.3a.7.7 0 0 0-.7.7V21.3c0 .4.3.7.7.7H21a.7.7 0 0 0 .7-.7V9.7A.7.7 0 0 0 21 9zm-3.5 8.2a1.3 1.3 0 0 1-1.3 1.3h-2.4a1.3 1.3 0 0 1-1.3-1.3v-2.4a1.3 1.3 0 0 1 1.3-1.3h2.4a1.3 1.3 0 0 1 1.3 1.3z"/></symbol>
       <symbol id="mon-ico-redis" viewBox="0 0 24 24"><g fill="#DC382D"><path d="M12 3 2.5 7.2 12 11.4l9.5-4.2z"/><path d="M2.5 10.4 12 14.6l9.5-4.2v2.3L12 16.9 2.5 12.7z" opacity=".85"/><path d="M2.5 15.6 12 19.8l9.5-4.2v2.3L12 22.1 2.5 17.9z" opacity=".7"/></g></symbol>
+      <symbol id="mon-ico-server" viewBox="0 0 24 24"><g fill="none" stroke="#2496ED" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6"/><rect x="3" y="14" width="18" height="6"/><path d="M7 7h.01M7 17h.01M11 7h4M11 17h4"/></g></symbol>
       <symbol id="mon-ico-http" viewBox="0 0 24 24"><g fill="none" stroke="#2A8BD4" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></g></symbol>
     </defs></svg>
     <div class="page" id="pageMonitors">
@@ -731,6 +732,7 @@
           </div>
           <select class="mm-input" id="mdPeekWhich" style="display:none;width:auto;padding:4px 26px 4px 8px;font-size:12px"><option value="error">error queue</option><option value="main" id="mdPeekMain">queue</option></select>
           <button class="btn btn-sm" id="mdPeekBtn" onclick="mdPeek()" style="display:none" title="Read the next messages without consuming them">Peek messages</button>
+          <button class="btn btn-sm" id="mdInstallBtn" onclick="mdInstall()" style="display:none" title="Show the docker run command for this server's agent">Install agent</button>
           <button class="btn btn-sm" onclick="mdCheckNow()">Check now</button>
           <button class="btn btn-sm" onclick="mdEdit()">Edit</button>
           <button onclick="closeMonitorDetail()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">&times;</button>
@@ -738,6 +740,7 @@
         <div style="padding:14px 22px 0;display:grid;grid-template-columns:repeat(4,1fr);gap:10px" id="mdStats"></div>
         <div style="padding:12px 22px 0"><div id="mdChart"></div></div>
         <div id="mdPeek" style="display:none;padding:12px 22px 0"></div>
+        <div id="mdContainers" style="display:none;padding:12px 22px 0"></div>
         <div style="padding:12px 22px 18px;overflow:auto;min-height:0">
           <table class="md-table"><thead><tr><th>Time</th><th>Result</th><th>Value</th><th>Took</th><th>Detail</th></tr></thead><tbody id="mdRows"></tbody></table>
         </div>
@@ -766,6 +769,7 @@
                 <option value="rabbitmq">RabbitMQ queue</option>
                 <option value="http">HTTP endpoint</option>
                 <option value="redis">Redis server</option>
+                <option value="server">Server (Docker host agent)</option>
               </select>
             </div>
           </div>
@@ -829,12 +833,30 @@
               <div><label class="mm-label">Max latency (ms, 0 = off)</label><input class="mm-input" id="monRedisMaxLatencyMs" type="number" min="0" value="0"></div>
               <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);padding-bottom:8px"><input type="checkbox" class="mm-switch" id="monRedisTls"> TLS</label>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-              <div><label class="mm-label">Memory alert (% of maxmemory, 0 = off)</label><input class="mm-input" id="monRedisMaxMemoryPct" type="number" min="0" max="100" value="85"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:end">
+              <div><label class="mm-label">Memory alert % (0 = off)</label><input class="mm-input" id="monRedisMaxMemoryPct" type="number" min="0" max="100" value="85"></div>
               <div><label class="mm-label">Max clients (0 = off)</label><input class="mm-input" id="monRedisMaxClients" type="number" min="0" value="0"></div>
               <div><label class="mm-label">Replica lag (s, 0 = off)</label><input class="mm-input" id="monRedisMaxReplicaLagSec" type="number" min="0" value="60"></div>
             </div>
             <div class="mm-field-hint">Always alerts on: restart, evicted keys, rejected connections, failed RDB/AOF persistence, replica link down.</div>
+          </div>
+
+          <!-- Server / Docker host -->
+          <div id="monServerFields" class="mm-group" style="display:none"><div class="mm-group-title">Docker host agent</div>
+            <div class="mm-field-hint">A small agent runs on the server and pushes a report every "check every" seconds — outbound only, nothing to open on the server. You get the install command (with the token) once you save.</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;align-items:end">
+              <div><label class="mm-label">Log errors (0 = off)</label><input class="mm-input" id="monSrvLogErrors" type="number" min="0" value="5"></div>
+              <div><label class="mm-label">Window (min)</label><input class="mm-input" id="monSrvLogWindow" type="number" min="1" value="5"></div>
+              <div><label class="mm-label">Disk alert (%)</label><input class="mm-input" id="monSrvDiskPct" type="number" min="0" max="100" value="90"></div>
+              <div><label class="mm-label">Memory alert (%)</label><input class="mm-input" id="monSrvMemPct" type="number" min="0" max="100" value="90"></div>
+            </div>
+            <div><label class="mm-label">Critical containers <span style="color:var(--text3)">(none marked = every container Docker should keep up)</span></label>
+              <div id="monSrvCriticalPick" class="mon-crit-pick" style="display:none"></div>
+              <input class="mm-input" id="monSrvCritical" type="text" placeholder="prt-emis, rabbitmq, redis">
+              <div class="mm-field-hint" id="monSrvCriticalHint">The agent has not reported yet — type names now, or come back once it runs and pick them from the list.</div></div>
+            <div><label class="mm-label">Ignore containers (comma-separated names)</label><input class="mm-input" id="monSrvIgnore" type="text" placeholder="one-shot-job, backup"></div>
+            <div><label class="mm-label">Allowed source IPs (comma-separated IPv4 / CIDR, empty = any)</label><input class="mm-input" id="monSrvCidrs" type="text" placeholder="41.63.10.20, 10.11.1.0/24"><div class="mm-field-hint">Reports from any other address are refused even with a valid token — set it to the cloud server's egress IP.</div></div>
+            <div class="mm-field-hint">Always alerts on: container stopped/unhealthy, restart, OOM kill, a never-seen error type, agent silent for 3 intervals.</div>
           </div>
 
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">

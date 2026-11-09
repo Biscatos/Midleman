@@ -45,7 +45,8 @@ listNotificationRules, createNotificationRule, updateNotificationRule, deleteNot
 timingSafeEqualStr,
 type NotificationSeverity, type NotificationChannel } from './auth/auth';
 import { emitNotificationEvent, dispatchTestToGroup } from './core/notifications';
-import { listMonitors, getMonitor, upsertMonitor, deleteMonitor, publicMonitor, validateMonitorInput, runCheck, peekQueue, listRabbitQueues, errorQueueName, requeueErrorMessages, discardErrorMessages, exportErrorMessages, startMonitorScheduler, stopMonitorScheduler } from './core/monitors';
+import { isPrivateOrLoopbackV4 } from './core/ssrf-guard';
+import { listMonitors, getMonitor, upsertMonitor, deleteMonitor, publicMonitor, validateMonitorInput, runCheck, peekQueue, listRabbitQueues, errorQueueName, requeueErrorMessages, discardErrorMessages, exportErrorMessages, startMonitorScheduler, stopMonitorScheduler, agentMonitorForToken, agentSourceAllowed, agentReportTooSoon, ingestAgentReport, serverErrors, newAgentToken, hashAgentToken, type AgentReport } from './core/monitors';
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
 import { initConsentPages, listConsentPages, getConsentPage, createConsentPage, updateConsentPage, deleteConsentPage, findConsentPageOauthReferences } from './auth/consent-pages';
 import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin, runLdapSync, getLastLdapSyncReport } from './auth/ldap';
@@ -599,13 +600,56 @@ function isPublicHostRequest(req: Request): boolean {
 }
 if (PUBLIC_URL) console.log(`🌐 Public URL: ${PUBLIC_URL} — only invite and password-reset pages are served on ${PUBLIC_HOST}`);
 
+/** POST /agent/report — Docker-host agents push here (Bearer token per server monitor).
+ *  Served on the public Report port too, so cloud servers reach it through the same
+ *  reverse proxy / tunnel as the report feeds, without exposing the admin UI. */
+const AGENT_MAX_BODY = 1024 * 1024;
+const AGENT_FAILS_PER_IP = 20; // bad tokens per 15 min before the IP is ignored (auth.ts window)
+const agentRejectLogged = new Map<string, number>(); // ip → last audit entry, so a scanner cannot flood the audit log
+async function handleAgentReport(req: Request): Promise<Response> {
+    if (req.method !== 'POST') return jsonRes(405, { error: 'POST only' });
+    const ip = reqClientIp(req);
+    const deny = (status: number, why: string) => {
+        // one audit line per IP per 15 min; the response never says which check failed
+        const last = agentRejectLogged.get(ip) || 0;
+        if (Date.now() - last > 15 * 60_000) { agentRejectLogged.set(ip, Date.now()); logAudit({ action: 'agent.report.rejected', targetType: 'agent', targetId: ip, details: { why }, ip, userAgent: req.headers.get('user-agent') }); }
+        return jsonRes(status, { error: status === 429 ? 'too many requests' : 'unauthorized' });
+    };
+    // Reports carry container logs: never over plaintext from the internet.
+    if (!isSecureRequest(req) && !isPrivateOrLoopbackV4(ip)) return deny(426, 'plaintext from public address');
+    if (Number(req.headers.get('content-length') || 0) > AGENT_MAX_BODY) return deny(413, 'body too large');
+    if (!checkRateLimit('agent:' + ip, AGENT_FAILS_PER_IP)) return deny(429, 'auth failures');
+    const auth = req.headers.get('authorization') || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    let body: AgentReport;
+    try { body = await req.json() as AgentReport; } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
+    if (!body || typeof body.agent !== 'string' || body.agent.length > 64 || !Array.isArray(body.containers) || !body.host) return jsonRes(400, { error: 'report needs agent, host, containers' });
+    const m = agentMonitorForToken(body.agent, token);
+    if (!m || !agentSourceAllowed(m, ip)) { recordFailedAttempt('agent:' + ip); return deny(401, m ? 'source ip not allowed' : 'bad token'); }
+    if (agentReportTooSoon(m)) return deny(429, 'faster than interval');
+    if (!m.enabled) return jsonRes(200, { status: 'disabled' });
+    body.containers = body.containers.slice(0, 500).map((c: any) => ({
+        id: String(c.id || '').slice(0, 64), name: String(c.name || '?').slice(0, 128), image: String(c.image || '').slice(0, 200),
+        status: String(c.status || 'unknown'), health: c.health ? String(c.health) : null,
+        restartCount: Number(c.restartCount) || 0, oomKilled: c.oomKilled === true, restartPolicy: c.restartPolicy ? String(c.restartPolicy).slice(0, 20) : undefined, exitCode: Number.isFinite(c.exitCode) ? Number(c.exitCode) : null,
+        startedAt: c.startedAt ? String(c.startedAt) : null,
+        cpuPct: Number.isFinite(c.cpuPct) ? Number(c.cpuPct) : null, memBytes: Number.isFinite(c.memBytes) ? Number(c.memBytes) : null, memLimit: Number.isFinite(c.memLimit) ? Number(c.memLimit) : null,
+        errors: (Array.isArray(c.errors) ? c.errors : []).slice(0, 100).map((e: any) => ({ at: Number(e.at) || Date.now(), line: String(e.line || '').slice(0, 500) })),
+    }));
+    body.host = { ...body.host, memPct: Number.isFinite(body.host.memPct) ? Number(body.host.memPct) : null, disks: (Array.isArray(body.host.disks) ? body.host.disks : []).slice(0, 50).map((d: any) => ({ mount: String(d.mount || '/'), pct: Number(d.pct) || 0, total: Number(d.total) || 0, used: Number(d.used) || 0 })) };
+    const status = await ingestAgentReport(m, body);
+    return jsonRes(200, { status: status.state, intervalSeconds: m.intervalSeconds });
+}
+
 const reportPortRaw = process.env.REPORT_PORT ?? '8444';
 const reportApiServer = Bun.serve({
     port: parseInt(reportPortRaw, 10),
     idleTimeout: 0,
     maxRequestBodySize: 1 * 1024 * 1024, // 1MB — consumer API only
-    async fetch(req: Request): Promise<Response> {
+    async fetch(req: Request, srv): Promise<Response> {
+        rememberPeerIp(req, srv?.requestIP?.(req)?.address ?? null); // the agent handler needs the real peer for its HTTPS / lockout / allowlist checks
         const url = new URL(req.url);
+        if (url.pathname === '/agent/report') return handleAgentReport(req);
         if (!url.pathname.startsWith('/reports/')) {
             return new Response('Not Found', { status: 404 });
         }
@@ -1014,6 +1058,8 @@ const server = Bun.serve({
                 });
                 return jsonRes(200, { status: 'ok' });
             }
+
+            if (url.pathname === '/agent/report') return handleAgentReport(req);
 
             // Health check
             if (url.pathname === '/health') {
@@ -4691,19 +4737,34 @@ const server = Bun.serve({
                     if ('error' in v) return jsonRes(400, { error: v.error });
                     // `passwordFrom`: reuse another saved monitor's password (same broker) — it is never sent to the browser.
                     const from = typeof (body as any)?.passwordFrom === 'string' ? getMonitor((body as any).passwordFrom.toLowerCase()) : undefined;
-                    if (v.monitor.type !== 'http' && !v.monitor.password && from && from.type === v.monitor.type && from.password) v.monitor.password = from.password;
+                    if ((v.monitor.type === 'rabbitmq' || v.monitor.type === 'redis') && !v.monitor.password && from && from.type === v.monitor.type && from.password) v.monitor.password = from.password;
+                    const minted = v.monitor.type === 'server' && !getMonitor(v.monitor.name) ? newAgentToken() : null;
+                    if (minted && v.monitor.type === 'server') v.monitor.agentTokenHash = hashAgentToken(minted);
                     const { created } = upsertMonitor(v.monitor);
                     const me = getAuthedAdmin(req);
                     logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: created ? 'monitor.create' : 'monitor.update', targetType: 'monitor', targetId: v.monitor.name, details: { type: v.monitor.type }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
-                    void runCheck(v.monitor).catch(() => {});
-                    return jsonRes(200, { status: created ? 'created' : 'updated', monitor: publicMonitor(v.monitor) });
+                    if (v.monitor.type !== 'server') void runCheck(v.monitor).catch(() => {});
+                    // The agent token is returned exactly once (here or on rotate); it is never readable afterwards.
+                    return jsonRes(200, { status: created ? 'created' : 'updated', monitor: publicMonitor(v.monitor), ...(minted ? { token: minted } : {}) });
                 }
                 {
-                    const mm = url.pathname.match(/^\/admin\/monitors\/([^/]+)(\/check|\/peek|\/error-queue\/(?:requeue|discard|export))?$/);
+                    const mm = url.pathname.match(/^\/admin\/monitors\/([^/]+)(\/check|\/peek|\/errors|\/rotate-token|\/error-queue\/(?:requeue|discard|export))?$/);
                     if (mm) {
                         const name = decodeURIComponent(mm[1]).toLowerCase();
                         const m = getMonitor(name);
                         if (!m) return jsonRes(404, { error: `Monitor "${name}" not found` });
+                        if (mm[2] === '/errors' && req.method === 'GET') {
+                            if (m.type !== 'server') return jsonRes(400, { error: 'Only server monitors keep log errors' });
+                            return jsonRes(200, { errors: serverErrors(name, url.searchParams.get('container') || undefined, Math.min(parseInt(url.searchParams.get('limit') || '200', 10) || 200, 300)) });
+                        }
+                        if (mm[2] === '/rotate-token' && req.method === 'POST') {
+                            if (m.type !== 'server') return jsonRes(400, { error: 'Only server monitors have an agent token' });
+                            const token = newAgentToken();
+                            upsertMonitor({ ...m, agentTokenHash: hashAgentToken(token) });
+                            const me = getAuthedAdmin(req);
+                            logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'monitor.rotate_token', targetType: 'monitor', targetId: name, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                            return jsonRes(200, { token });
+                        }
                         if (mm[2] === '/peek' && req.method === 'GET') {
                             if (m.type !== 'rabbitmq') return jsonRes(400, { error: 'Only RabbitMQ monitors can peek messages' });
                             try {

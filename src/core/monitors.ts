@@ -7,6 +7,10 @@
 //               'health'   → broker aliveness-test on the vhost fails
 //   http      — an endpoint: down, unexpected status, or too slow.
 //   redis     — connect + AUTH + PING (Bun's native client); down or too slow.
+//   server    — a Docker host: a tiny agent on the server (src/agent) POSTs a
+//               report every N seconds (outbound only — nothing to expose on the
+//               server). Alerts: container down/unhealthy, restart loop, OOM,
+//               error lines in container logs, disk/memory full, agent silent.
 //
 // Alerts fire once per episode (plus a re-alert after cooldownMinutes while
 // still failing) and a recovery notice when the check turns green again.
@@ -17,10 +21,11 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { RedisClient } from 'bun';
 import { resolve } from 'path';
 import { emitNotificationEvent } from './notifications';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 
 /** Seam for tests: swap the notification sink without SMTP/SMS. */
 export const sink = { emit: emitNotificationEvent };
-import { assertResolvedHostAllowed } from './ssrf-guard';
+import { assertResolvedHostAllowed, ipInCidrs } from './ssrf-guard';
 import { isWithinBusinessHours, validateWeekly, type DaySchedule } from './business-hours';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -100,7 +105,51 @@ export interface RedisInfo {
     rdbStatus: string; aofStatus: string | null; linkStatus: string | null; replicaLagSec: number | null;
 }
 
-export type Monitor = RabbitMqMonitor | HttpMonitor | RedisMonitor;
+export interface ServerMonitor extends MonitorBase {
+    type: 'server';
+    /** sha256 of the Bearer token the agent presents. The token itself is generated here, shown to the admin once and never stored. */
+    agentTokenHash: string;
+    /** Optional: only accept reports from these source IPs/CIDRs (the cloud server's egress IP). Empty = any. */
+    allowedSourceCidrs?: string[];
+    /** Burst alert when ≥ this many matching log lines arrive within logWindowMinutes (0 = off). */
+    logErrorsPerWindow: number;
+    logWindowMinutes: number;
+    /** Episodic alerts when any mount / host memory is above these % (0 = off). */
+    diskPct: number;
+    memPct: number;
+    /** Container names never alerted on (e.g. one-shot jobs). */
+    ignoreContainers: string[];
+    /** When set, only these containers alert (down, restart, OOM, log errors) and one that disappears from the host alerts too; the rest are shown as information. Empty = every container Docker should keep up. */
+    criticalContainers: string[];
+}
+
+/** What the agent sends (see src/agent/index.ts). */
+export interface AgentContainer {
+    id: string; name: string; image: string;
+    /** docker State.Status: running | exited | paused | restarting | dead | created */
+    status: string;
+    /** healthy | unhealthy | starting | null (no healthcheck) */
+    health: string | null;
+    restartCount: number; oomKilled: boolean; exitCode: number | null; startedAt: string | null;
+    /** HostConfig.RestartPolicy.Name: no | always | unless-stopped | on-failure. A stopped container only alerts when Docker was supposed to keep it up, or it was running in an earlier report. */
+    restartPolicy?: string;
+    cpuPct: number | null; memBytes: number | null; memLimit: number | null;
+    /** New matching log lines since the previous report. */
+    errors: { at: number; line: string }[];
+}
+export interface AgentReport {
+    agent: string; at: number; intervalSeconds?: number;
+    host: { hostname?: string; uptimeSec?: number; load1?: number; memPct: number | null; memTotal?: number; disks: { mount: string; pct: number; total: number; used: number }[] };
+    containers: AgentContainer[];
+}
+/** Report as kept in the status: per-container error lines summarised, full lines live in State.serverErrors. */
+export interface ServerSnapshot {
+    at: number;
+    host: AgentReport['host'];
+    containers: (Omit<AgentContainer, 'errors'> & { errorsInWindow: number; lastError: { at: number; line: string } | null })[];
+}
+
+export type Monitor = RabbitMqMonitor | HttpMonitor | RedisMonitor | ServerMonitor;
 
 export interface MonitorStatus {
     state: 'ok' | 'alert' | 'unknown' | 'disabled';
@@ -121,6 +170,8 @@ export interface MonitorStatus {
     consumers: number | null;
     /** redis: last INFO readings. */
     redis: RedisInfo | null;
+    /** server: last agent report. */
+    server: ServerSnapshot | null;
 }
 const HISTORY_MAX = 60;
 
@@ -135,6 +186,9 @@ export function loadMonitors(): Monitor[] {
     try {
         monitors = existsSync(FILE) ? JSON.parse(readFileSync(FILE, 'utf-8')) : [];
         if (!Array.isArray(monitors)) monitors = [];
+        let migrated = false;
+        for (const m of monitors as any[]) if (m.type === 'server' && typeof m.agentToken === 'string') { m.agentTokenHash = m.agentToken ? hashAgentToken(m.agentToken) : ''; delete m.agentToken; migrated = true; }
+        if (migrated) persist();
     } catch (err) {
         console.warn('⚠️  Could not load monitors:', err instanceof Error ? err.message : err);
         monitors = [];
@@ -159,12 +213,13 @@ export function upsertMonitor(m: Monitor): { created: boolean } {
     const idx = monitors.findIndex(x => x.name === m.name);
     if (idx >= 0) {
         const prev = monitors[idx];
-        if (m.type !== 'http' && prev.type === m.type && !m.password && prev.password) m.password = prev.password;
+        if ((m.type === 'rabbitmq' || m.type === 'redis') && prev.type === m.type && !m.password && prev.password) m.password = prev.password;
+        if (m.type === 'server' && prev.type === 'server' && !m.agentTokenHash) m.agentTokenHash = prev.agentTokenHash;
         monitors[idx] = m;
     } else {
         monitors.push(m);
     }
-    states.delete(m.name); // config changed → fresh baseline
+    if (m.type !== 'server') states.delete(m.name); // config changed → fresh baseline (a server keeps its agent report: toggling a critical container must not blank the detail)
     persist();
     return { created: idx < 0 };
 }
@@ -182,6 +237,7 @@ export function deleteMonitor(name: string): boolean {
 export function publicMonitor(m: Monitor): Record<string, unknown> {
     const o = { ...(m as unknown as Record<string, unknown>) };
     if (m.type === 'rabbitmq' || m.type === 'redis') { delete o.password; o.hasPassword = !!m.password; }
+    if (m.type === 'server') { delete o.agentTokenHash; o.hasToken = !!m.agentTokenHash; }
     return { ...o, status: getStatus(m.name) };
 }
 
@@ -291,18 +347,44 @@ export function validateMonitorInput(input: unknown): { error: string } | { moni
         } };
     }
 
-    return { error: '"type" must be "rabbitmq", "http" or "redis"' };
+    if (i.type === 'server') {
+        const logErrorsPerWindow = num('logErrorsPerWindow', 0, 100000, 5);
+        if (typeof logErrorsPerWindow === 'string') return { error: logErrorsPerWindow };
+        const logWindowMinutes = num('logWindowMinutes', 1, 1440, 5);
+        if (typeof logWindowMinutes === 'string') return { error: logWindowMinutes };
+        const diskPct = num('diskPct', 0, 100, 90);
+        if (typeof diskPct === 'string') return { error: diskPct };
+        const memPct = num('memPct', 0, 100, 90);
+        if (typeof memPct === 'string') return { error: memPct };
+        if (i.ignoreContainers !== undefined && !Array.isArray(i.ignoreContainers)) return { error: '"ignoreContainers" must be an array' };
+        const cidrs = Array.isArray(i.allowedSourceCidrs) ? (i.allowedSourceCidrs as unknown[]).filter((x): x is string => typeof x === 'string').map(x => x.trim()).filter(Boolean) : [];
+        for (const c of cidrs) if (!/^\d{1,3}(\.\d{1,3}){3}(\/\d{1,2})?$/.test(c)) return { error: `"allowedSourceCidrs": "${c}" is not an IPv4 address or CIDR` };
+        return { monitor: {
+            ...base, type: 'server',
+            agentTokenHash: '', // set from newAgentToken() on create / rotate, kept from the saved monitor on edit
+            allowedSourceCidrs: cidrs.length ? cidrs.slice(0, 20) : undefined,
+            logErrorsPerWindow, logWindowMinutes, diskPct, memPct,
+            ignoreContainers: ((i.ignoreContainers as unknown[]) || []).filter((x): x is string => typeof x === 'string').map(x => x.trim()).filter(Boolean).slice(0, 100),
+            criticalContainers: (Array.isArray(i.criticalContainers) ? i.criticalContainers as unknown[] : []).filter((x): x is string => typeof x === 'string').map(x => x.trim()).filter(Boolean).slice(0, 200),
+        } };
+    }
+
+    return { error: '"type" must be "rabbitmq", "http", "redis" or "server"' };
 }
+
+export function newAgentToken(): string { return 'mma_' + randomBytes(32).toString('base64url'); }
+export function hashAgentToken(token: string): string { return createHash('sha256').update(token).digest('hex'); }
 
 // ─── Runtime state & checks ─────────────────────────────────────────────────
 
-interface State extends MonitorStatus { checking: boolean; /** dead-letter queue publish counter at the previous check */ errPublished: number | null; /** redis counters at the previous check (restart / eviction / rejection detection) */ redisPrev: { evicted: number; rejected: number; uptime: number } | null }
+interface State extends MonitorStatus { checking: boolean; /** dead-letter queue publish counter at the previous check */ errPublished: number | null; /** redis counters at the previous check (restart / eviction / rejection detection) */ redisPrev: { evicted: number; rejected: number; uptime: number } | null; /** server: bursts detected when a report arrived, consumed by the next runCheck */ pendingBursts: string[]; /** server: captured log lines, newest last (max ERRORS_MAX) */ serverErrors: { at: number; container: string; line: string }[]; /** server: exception classes already seen per container */ seenErrorKinds: Map<string, Set<string>>; /** server: previous report's restart counters */ serverPrev: Map<string, { restartCount: number; oomKilled: boolean; running: boolean }> }
+const ERRORS_MAX = 300;
 const states = new Map<string, State>();
 
 function stateOf(name: string): State {
     let s = states.get(name);
     if (!s) {
-        s = { state: 'unknown', lastCheckAt: null, lastError: null, lastValue: null, lastActivityAt: null, alertSince: null, lastAlertAt: null, history: [], errorQueue: null, consumers: null, redis: null, checking: false, errPublished: null, redisPrev: null };
+        s = { state: 'unknown', lastCheckAt: null, lastError: null, lastValue: null, lastActivityAt: null, alertSince: null, lastAlertAt: null, history: [], errorQueue: null, consumers: null, redis: null, server: null, checking: false, errPublished: null, redisPrev: null, pendingBursts: [], serverErrors: [], seenErrorKinds: new Map(), serverPrev: new Map() };
         states.set(name, s);
     }
     return s;
@@ -310,7 +392,7 @@ function stateOf(name: string): State {
 
 export function getStatus(name: string): MonitorStatus {
     const m = getMonitor(name);
-    const { checking: _c, errPublished: _e, redisPrev: _r, ...s } = stateOf(name);
+    const { checking: _c, errPublished: _e, redisPrev: _r, pendingBursts: _b, serverErrors: _se, seenErrorKinds: _k, serverPrev: _sp, ...s } = stateOf(name);
     if (m && !m.enabled) return { ...s, state: 'disabled' };
     return s;
 }
@@ -463,7 +545,7 @@ async function checkRabbit(m: RabbitMqMonitor, s: State): Promise<{ fail: string
 }
 
 async function notify(m: Monitor, kind: 'alert' | 'recovered', detail: string): Promise<void> {
-    const target = m.type === 'http' ? `${m.method} ${m.url}` : m.type === 'redis' ? `redis ${m.host}:${m.port}/${m.db}` : `queue ${m.queue} @ ${m.apiUrl}`;
+    const target = m.type === 'http' ? `${m.method} ${m.url}` : m.type === 'redis' ? `redis ${m.host}:${m.port}/${m.db}` : m.type === 'server' ? `docker host ${m.name}` : `queue ${m.queue} @ ${m.apiUrl}`;
     const category = `monitor.${m.type}.${kind === 'alert' ? 'alert' : 'recovered'}`;
     // Silence on a payments queue is a warning; everything else (down, errors arriving) is critical.
     const severity = kind === 'recovered' ? 'info' : (m.type === 'rabbitmq' && /^no messages/.test(detail) ? 'warning' : 'critical');
@@ -627,6 +709,109 @@ async function errorQueueDepth(m: RabbitMqMonitor): Promise<number | null> {
     } catch { return null; }
 }
 
+// ─── Server (Docker host agent) ─────────────────────────────────────────────
+
+const ERROR_KIND_RE = /\b([A-Z][A-Za-z0-9_$.]*(?:Exception|Error|Fault|Timeout))\b/;
+/** "NullPointerException" from a Java/.NET/Node line; else the first word after the level. */
+function errorKind(line: string): string {
+    const m = ERROR_KIND_RE.exec(line);
+    if (m) return m[1].split('.').pop()!;
+    const t = line.replace(/^\S*\d{4}-\d\d-\d\d\S*\s*/, '').match(/\b(ERROR|FATAL|Exception|panic|WARN)\b[:\s-]*(\S+)/i);
+    return t ? (t[1] + ' ' + t[2]).slice(0, 60) : line.slice(0, 40);
+}
+
+/** Validate a token against a server monitor; constant-time. Returns the monitor or null. */
+export function agentMonitorForToken(name: string, token: string): ServerMonitor | null {
+    const m = getMonitor(name.toLowerCase());
+    if (!m || m.type !== 'server' || !m.agentTokenHash || !token || token.length > 256) return null;
+    const a = Buffer.from(m.agentTokenHash, 'hex'), b = Buffer.from(hashAgentToken(token), 'hex');
+    return a.length === b.length && timingSafeEqual(a, b) ? m : null;
+}
+/** Source-IP allowlist, when the monitor has one. */
+export function agentSourceAllowed(m: ServerMonitor, ip: string): boolean {
+    return !m.allowedSourceCidrs?.length || ipInCidrs(ip.replace(/^::ffff:/, ''), m.allowedSourceCidrs);
+}
+/** A genuine agent reports once per interval; anything much faster is a replay or a misconfigured/abusive client. */
+export function agentReportTooSoon(m: ServerMonitor): boolean {
+    const s = stateOf(m.name);
+    const minGapMs = Math.max(5, Math.floor(m.intervalSeconds / 3)) * 1000;
+    return s.server !== null && Date.now() - s.server.at < minGapMs;
+}
+
+/** Store an agent report, detect one-shot events against the previous one, then evaluate the monitor. */
+export async function ingestAgentReport(m: ServerMonitor, r: AgentReport): Promise<MonitorStatus> {
+    const s = stateOf(m.name);
+    const now = Date.now();
+    const windowMs = m.logWindowMinutes * 60_000;
+    const containers: ServerSnapshot['containers'] = [];
+    for (const c of r.containers) {
+        const { errors, ...rest } = c;
+        for (const e of errors) s.serverErrors.push({ at: e.at || now, container: c.name, line: e.line.slice(0, 500) });
+        if (watchedContainer(m, c.name)) {
+            const prev = s.serverPrev.get(c.name);
+            if (prev && c.restartCount > prev.restartCount) s.pendingBursts.push(`container "${c.name}" restarted (${c.restartCount - prev.restartCount}×, total ${c.restartCount})${c.oomKilled ? ' — OOM killed' : ''}${c.exitCode ? ` exit ${c.exitCode}` : ''}`);
+            else if (prev && c.oomKilled && !prev.oomKilled) s.pendingBursts.push(`container "${c.name}" was OOM killed`);
+            let seen = s.seenErrorKinds.get(c.name);
+            const firstReport = !seen;
+            if (!seen) { seen = new Set(); s.seenErrorKinds.set(c.name, seen); }
+            for (const e of errors) {
+                const k = errorKind(e.line);
+                if (!seen.has(k)) { seen.add(k); if (!firstReport) s.pendingBursts.push(`new error in "${c.name}": ${e.line.slice(0, 200)}`); }
+            }
+            const inWindow = s.serverErrors.filter(e => e.container === c.name && now - e.at <= windowMs).length;
+            // first report only baselines: a backlog of old errors must not alert
+            if (!firstReport && m.logErrorsPerWindow > 0 && errors.length && inWindow >= m.logErrorsPerWindow) s.pendingBursts.push(`${inWindow} error lines in "${c.name}" within ${m.logWindowMinutes} min — last: ${errors[errors.length - 1].line.slice(0, 200)}`);
+        }
+        s.serverPrev.set(c.name, { restartCount: c.restartCount, oomKilled: c.oomKilled, running: c.status === 'running' || s.serverPrev.get(c.name)?.running === true });
+        const mine = s.serverErrors.filter(e => e.container === c.name);
+        containers.push({ ...rest, errorsInWindow: mine.filter(e => now - e.at <= windowMs).length, lastError: mine.length ? { at: mine[mine.length - 1].at, line: mine[mine.length - 1].line } : null });
+    }
+    if (s.serverErrors.length > ERRORS_MAX) s.serverErrors.splice(0, s.serverErrors.length - ERRORS_MAX);
+    s.server = { at: now, host: r.host, containers: containers.sort((a, b) => a.name.localeCompare(b.name)) };
+    s.lastActivityAt = now;
+    return runCheck(m);
+}
+
+export function serverErrors(name: string, container?: string, limit = 200): { at: number; container: string; line: string }[] {
+    const all = stateOf(name).serverErrors;
+    const list = container ? all.filter(e => e.container === container) : all;
+    return list.slice(-limit).reverse();
+}
+
+/** Critical list set → only those; otherwise everything not ignored. */
+export function watchedContainer(m: ServerMonitor, name: string): boolean {
+    if (m.ignoreContainers.includes(name)) return false;
+    return !m.criticalContainers?.length || m.criticalContainers.includes(name);
+}
+
+/** Episodic failures from the latest report; bursts queued by ingestAgentReport. value = error lines in this report. */
+function checkServer(m: ServerMonitor, s: State): { fail: string | null; burst: string | null; value: number } {
+    const fails: string[] = [];
+    const burst = s.pendingBursts.join('; ') || null;
+    s.pendingBursts = [];
+    const snap = s.server;
+    if (!snap) {
+        if (s.lastCheckAt === null) return { fail: null, burst, value: 0 }; // just created: wait for the first report
+        return { fail: 'no report from the agent yet — is it running?', burst, value: 0 };
+    }
+    const staleMs = Math.max(3 * m.intervalSeconds, 90) * 1000;
+    if (Date.now() - snap.at > staleMs) fails.push(`agent silent for ${Math.round((Date.now() - snap.at) / 60_000)} min — server offline or agent down`);
+    const crit = m.criticalContainers || [];
+    for (const name of crit) if (!snap.containers.some(c => c.name === name)) fails.push(`critical container "${name}" not found on the host`);
+    for (const c of snap.containers) {
+        if (!watchedContainer(m, c.name)) continue;
+        // without a critical list: a stopped container only matters when Docker was meant to keep it up
+        const wanted = crit.length > 0 || (c.restartPolicy && c.restartPolicy !== 'no') || s.serverPrev.get(c.name)?.running === true;
+        if (c.status !== 'running') { if (wanted) fails.push(`container "${c.name}" is ${c.status}${c.exitCode ? ` (exit ${c.exitCode})` : ''}`); }
+        else if (c.health === 'unhealthy') fails.push(`container "${c.name}" is unhealthy`);
+    }
+    if (m.diskPct > 0) for (const d of snap.host.disks) if (d.pct >= m.diskPct) fails.push(`disk ${d.mount} at ${d.pct}%`);
+    if (m.memPct > 0 && snap.host.memPct !== null && snap.host.memPct >= m.memPct) fails.push(`host memory at ${snap.host.memPct}%`);
+    const value = snap.containers.reduce((a, c) => a + c.errorsInWindow, 0);
+    const text = fails.length > 6 ? fails.slice(0, 6).join('; ') + `; and ${fails.length - 6} more` : fails.join('; ');
+    return { fail: text || null, burst, value };
+}
+
 export async function runCheck(m: Monitor): Promise<MonitorStatus> {
     const s = stateOf(m.name);
     if (s.checking) return getStatus(m.name);
@@ -639,6 +824,7 @@ export async function runCheck(m: Monitor): Promise<MonitorStatus> {
         try {
             if (m.type === 'http') fail = await checkHttp(m, s);
             else if (m.type === 'redis') ({ fail, burst } = await checkRedis(m, s));
+            else if (m.type === 'server') { const r = checkServer(m, s); fail = r.fail; burst = r.burst; s.lastValue = r.value; }
             else ({ fail, burst, delta } = await checkRabbit(m, s));
         } catch (e: any) {
             // Unreachable target is itself the failure.
@@ -653,12 +839,13 @@ export async function runCheck(m: Monitor): Promise<MonitorStatus> {
         const cooldownMs = m.cooldownMinutes * 60_000;
         const canAlert = () => inHours && (s.lastAlertAt === null || now - s.lastAlertAt >= cooldownMs);
 
-        if (burst && canAlert()) { s.lastAlertAt = now; await notify(m, 'alert', burst); }
+        // One notification per check: a burst arriving together with a failure goes in the same message.
+        if (burst && !fail && canAlert()) { s.lastAlertAt = now; await notify(m, 'alert', burst); }
 
         if (fail) {
             s.state = 'alert';
             if (s.alertSince === null) s.alertSince = now;
-            if (canAlert()) { s.lastAlertAt = now; await notify(m, 'alert', fail); }
+            if (canAlert()) { s.lastAlertAt = now; await notify(m, 'alert', burst ? `${fail}; ${burst}` : fail); }
         } else {
             s.state = burst ? 'alert' : 'ok';
             if (s.alertSince !== null) {
