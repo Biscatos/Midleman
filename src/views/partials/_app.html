@@ -729,7 +729,8 @@
             <h3 style="margin:0;font-size:16px;display:flex;align-items:center;gap:10px"><span id="mdName"></span><span id="mdState"></span></h3>
             <div id="mdTarget" style="font:400 12px var(--font-mono);color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
           </div>
-          <button class="btn btn-sm" id="mdPeekBtn" onclick="mdPeek()" style="display:none" title="Read the next messages in the queue without consuming them">Peek messages</button>
+          <select class="mm-input" id="mdPeekWhich" style="display:none;width:auto;padding:4px 26px 4px 8px;font-size:12px"><option value="error">error queue</option><option value="main" id="mdPeekMain">queue</option></select>
+          <button class="btn btn-sm" id="mdPeekBtn" onclick="mdPeek()" style="display:none" title="Read the next messages without consuming them">Peek messages</button>
           <button class="btn btn-sm" onclick="mdCheckNow()">Check now</button>
           <button class="btn btn-sm" onclick="mdEdit()">Edit</button>
           <button onclick="closeMonitorDetail()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">&times;</button>
@@ -795,6 +796,10 @@
               </div>
               <div id="monSilenceWrap"><label class="mm-label">Silence (minutes)</label><input class="mm-input" id="monSilenceMinutes" type="number" min="1" value="30"></div>
             </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end">
+              <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);padding-bottom:8px"><input type="checkbox" class="mm-switch" id="monWatchError" checked onchange="monitorTypeChanged()"> Also watch the dead-letter queue <span style="color:var(--text3)">(new messages there always alert)</span></label>
+              <div id="monErrorQueueWrap"><label class="mm-label">Dead-letter queue</label><input class="mm-input" id="monErrorQueue" type="text" placeholder="(default: &lt;queue&gt;_error)"></div>
+            </div>
           </div>
 
           <!-- HTTP -->
@@ -824,6 +829,12 @@
               <div><label class="mm-label">Max latency (ms, 0 = off)</label><input class="mm-input" id="monRedisMaxLatencyMs" type="number" min="0" value="0"></div>
               <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);padding-bottom:8px"><input type="checkbox" class="mm-switch" id="monRedisTls"> TLS</label>
             </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+              <div><label class="mm-label">Memory alert (% of maxmemory, 0 = off)</label><input class="mm-input" id="monRedisMaxMemoryPct" type="number" min="0" max="100" value="85"></div>
+              <div><label class="mm-label">Max clients (0 = off)</label><input class="mm-input" id="monRedisMaxClients" type="number" min="0" value="0"></div>
+              <div><label class="mm-label">Replica lag (s, 0 = off)</label><input class="mm-input" id="monRedisMaxReplicaLagSec" type="number" min="0" value="60"></div>
+            </div>
+            <div class="mm-field-hint">Always alerts on: restart, evicted keys, rejected connections, failed RDB/AOF persistence, replica link down.</div>
           </div>
 
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">

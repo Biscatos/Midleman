@@ -11841,6 +11841,14 @@ async function fetchMonitors() {
   } catch { }
 }
 
+/** "4 ms · mem 120 MB (12%) · 7 clients · 98% hits" from the last INFO. */
+function _monRedisLine(s) {
+  const r = s.redis; if (!r) return s.lastValue != null ? s.lastValue + ' ms' : '—';
+  const mem = _monBytes(r.usedMemory) + (r.memoryPct !== null ? ` (${r.memoryPct}%)` : '');
+  return [s.lastValue != null ? s.lastValue + ' ms' : null, 'mem ' + mem, r.clients + ' clients', r.hitRatio !== null ? r.hitRatio + '% hits' : null].filter(Boolean).join(' · ');
+}
+function _monUptime(sec) { return sec >= 86400 ? Math.floor(sec / 86400) + 'd ' + Math.floor(sec % 86400 / 3600) + 'h' : sec >= 3600 ? Math.floor(sec / 3600) + 'h ' + Math.floor(sec % 3600 / 60) + 'm' : Math.floor(sec / 60) + 'm'; }
+function _monBytes(b) { return b >= 1 << 30 ? (b / (1 << 30)).toFixed(2) + ' GB' : b >= 1 << 20 ? (b / (1 << 20)).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB'; }
 function monitorTarget(m) {
   if (m.type === 'http') return `${m.method} ${m.url}`;
   if (m.type === 'redis') return `redis://${m.host}:${m.port}/${m.db}`;
@@ -11901,11 +11909,20 @@ function openMonitorDetail(name) {
   const avg = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
   const max = vals.length ? Math.max(...vals) : null;
   const stat = (l, v, sub) => `<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:10px 12px"><div style="font-size:11px;color:var(--text3)">${l}</div><div style="font-size:18px;font-weight:500">${v}</div>${sub ? `<div style="font-size:11px;color:var(--text3)">${sub}</div>` : ''}</div>`;
+  g('mdStats').style.gridTemplateColumns = s.errorQueue ? 'repeat(5,1fr)' : 'repeat(4,1fr)';
   g('mdStats').innerHTML =
     stat('Checks kept', h.length, h.length ? `since ${new Date(h[0].at).toLocaleTimeString()}` : '') +
     stat('Failed', `<span style="color:${fails ? 'var(--red)' : 'inherit'}">${fails}</span>`, h.length ? Math.round(100 * (h.length - fails) / h.length) + '% ok' : '') +
     stat(unit === 'ms' ? 'Avg latency' : 'Avg msgs / check', avg === null ? '—' : _monFmt(avg, unit), max === null ? '' : 'max ' + _monFmt(max, unit)) +
+    (s.errorQueue ? stat('Error queue', s.errorQueue.messages === null ? '<span style="color:var(--text3)">not found</span>' : `<span style="color:${s.errorQueue.messages ? 'var(--red)' : 'inherit'}">${s.errorQueue.messages}</span>`, esc(s.errorQueue.name)) : '') +
     stat(alert ? 'Alerting for' : 'Last check', alert && s.alertSince ? _monAgo(s.alertSince).replace(' ago', '') : _monAgo(s.lastCheckAt), s.lastError && !alert ? '' : (alert ? 'since ' + new Date(s.alertSince || Date.now()).toLocaleTimeString() : ''));
+  const r = s.redis;
+  if (r) g('mdStats').innerHTML +=
+    stat('Memory', r.memoryPct !== null ? `<span style="color:${r.memoryPct > (m.maxMemoryPct || 100) ? 'var(--red)' : 'inherit'}">${r.memoryPct}%</span>` : _monBytes(r.usedMemory), r.memoryPct !== null ? `${_monBytes(r.usedMemory)} of ${_monBytes(r.maxMemory)}` : 'no maxmemory set') +
+    stat('Clients', r.clients, r.blockedClients ? `${r.blockedClients} blocked` : 'none blocked') +
+    stat('Hit ratio', r.hitRatio !== null ? r.hitRatio + '%' : '—', `${r.hits} hits · ${r.misses} misses`) +
+    stat('Evicted / rejected', `<span style="color:${r.evictedKeys || r.rejectedConnections ? 'var(--red)' : 'inherit'}">${r.evictedKeys} / ${r.rejectedConnections}</span>`, 'since server start') +
+    stat('Persistence', `<span style="color:${r.rdbStatus !== 'ok' || (r.aofStatus && r.aofStatus !== 'ok') ? 'var(--red)' : 'inherit'}">${esc(r.rdbStatus)}</span>`, (r.aofStatus ? 'AOF ' + esc(r.aofStatus) + ' · ' : '') + `up ${_monUptime(r.uptimeSec)} · v${esc(r.version)} ${esc(r.role)}${r.linkStatus ? ' · link ' + esc(r.linkStatus) : ''}`);
   g('mdChart').innerHTML = _monSpark(h, alert, unit).replace('class="mon-chart', 'class="mon-chart md-chart');
   g('mdRows').innerHTML = h.length ? [...h].reverse().map(x => `<tr class="${x.ok ? '' : 'is-fail'}">
       <td class="mono">${new Date(x.at).toLocaleString()}</td>
@@ -11915,6 +11932,10 @@ function openMonitorDetail(name) {
       <td class="detail" title="${esc(x.error || '')}">${x.error ? esc(x.error) : '<span style="color:var(--text3)">healthy</span>'}</td>
     </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:24px">No checks recorded yet.</td></tr>';
   g('mdPeekBtn').style.display = m.type === 'rabbitmq' ? '' : 'none';
+  g('mdPeekWhich').style.display = m.type === 'rabbitmq' ? '' : 'none';
+  const mainOpt = g('mdPeekMain'); const busy = s.consumers === null || s.consumers > 0;
+  mainOpt.disabled = busy; mainOpt.textContent = busy ? `queue (${s.consumers ?? '?'} consumer${s.consumers === 1 ? '' : 's'} — peek disabled)` : 'queue (no consumers)';
+  if (busy) g('mdPeekWhich').value = 'error';
   if (!document.getElementById('monitorDetailModal').style.display || document.getElementById('monitorDetailModal').style.display === 'none') { const pk = g('mdPeek'); pk.style.display = 'none'; pk.innerHTML = ''; }
   g('monitorDetailModal').style.display = 'flex';
 }
@@ -11923,11 +11944,22 @@ async function mdPeek() {
   const box = document.getElementById('mdPeek'); const btn = document.getElementById('mdPeekBtn');
   box.style.display = ''; box.innerHTML = '<div style="color:var(--text3);font-size:12.5px">Reading queue…</div>'; btn.disabled = true;
   try {
-    const res = await api(`/admin/monitors/${encodeURIComponent(_mdName)}/peek?count=10`);
+    const which = document.getElementById('mdPeekWhich').style.display !== 'none' ? document.getElementById('mdPeekWhich').value : 'main';
+    const res = await api(`/admin/monitors/${encodeURIComponent(_mdName)}/peek?count=10&which=${which}`);
     const d = await res.json().catch(() => ({}));
     if (!res.ok) { box.innerHTML = `<div class="md-peek-err">${esc(d.error || 'Peek failed')}</div>`; return; }
     if (!d.messages.length) { box.innerHTML = `<div class="md-peek-head">Queue <b>${esc(d.queue)}</b> is empty right now.</div>`; return; }
-    box.innerHTML = `<div class="md-peek-head">Next ${d.messages.length} message(s) in <b>${esc(d.queue)}</b> — read without consuming (RabbitMQ marks them <i>redelivered</i>).</div>` +
+    const tools = d.which === 'error' ? `<div class="md-eq-tools">
+        <label>First <input type="number" id="mdEqN" min="1" max="1000" value="${Math.min(d.messages.length, 10)}"></label>
+        <button class="btn btn-sm" onclick="mdErrorOp('requeue', false)" title="Pop the first N from the error queue and republish them to the main queue">Requeue first N</button>
+        <button class="btn btn-sm" onclick="mdErrorOp('requeue', true)">Requeue all</button>
+        <span class="md-eq-sep"></span>
+        <button class="btn btn-sm" onclick="mdErrorOp('discard', false)">Discard first N</button>
+        <button class="btn btn-sm md-danger" onclick="mdErrorOp('discard', true)">Purge all</button>
+        <span class="md-eq-sep"></span>
+        <a class="btn btn-sm" href="/admin/monitors/${encodeURIComponent(_mdName)}/error-queue/export?count=500" download>Export JSON</a>
+      </div>` : '';
+    box.innerHTML = tools + `<div class="md-peek-head">Next ${d.messages.length} message(s) in <b>${esc(d.queue)}</b> — read without consuming (RabbitMQ marks them <i>redelivered</i>).</div>` +
       d.messages.map((m, i) => {
         let pretty = m.payload; try { pretty = JSON.stringify(JSON.parse(m.payload), null, 2); } catch {}
         const meta = [m.timestamp ? new Date(m.timestamp).toLocaleString() : null, m.routingKey ? 'key ' + m.routingKey : null, m.bytes + ' B', m.redelivered ? 'redelivered' : null].filter(Boolean).join(' · ');
@@ -11938,6 +11970,21 @@ async function mdPeek() {
 }
 async function mdCheckNow() { if (!_mdName) return; await checkMonitorNow(_mdName); openMonitorDetail(_mdName); }
 function mdEdit() { const n = _mdName; closeMonitorDetail(); editMonitor(n); }
+async function mdErrorOp(op, all) {
+  const m = _allMonitors.find(x => x.name === _mdName); if (!m) return;
+  const n = all ? 'all' : Math.max(1, parseInt(document.getElementById('mdEqN')?.value || '1', 10) || 1);
+  const eq = m.status?.errorQueue?.name || (m.queue + '_error');
+  const what = all ? `ALL messages in "${eq}"` : `the first ${n} message(s) in "${eq}"`;
+  const ok = await showConfirm(op === 'requeue'
+    ? { title: 'Requeue to ' + m.queue, message: `Move ${what} back to "${m.queue}"?`, detail: 'They are removed from the error queue and republished with their original properties (x-death headers dropped). If the cause is not fixed they will fail again and come back here.', confirmText: 'Requeue' }
+    : { title: all ? 'Purge error queue' : 'Discard messages', message: `Permanently delete ${what}?`, detail: 'This cannot be undone. Export first if you may need them.', confirmText: all ? 'Purge all' : 'Discard', danger: true });
+  if (!ok) return;
+  const res = await api(`/admin/monitors/${encodeURIComponent(_mdName)}/error-queue/${op}`, { method: 'POST', body: JSON.stringify({ count: n }) });
+  const d = await res.json().catch(() => ({}));
+  if (res.status >= 400) return toast(d.error || 'Operation failed', 'error');
+  toast(`${op === 'requeue' ? 'Requeued' : 'Discarded'} ${d.processed} message(s)` + (d.remaining != null ? ` · ${d.remaining} left in error queue` : '') + (d.error ? ` · stopped: ${d.error}` : ''), d.error ? 'error' : 'success');
+  await fetchMonitors(); if (_mdName) { openMonitorDetail(_mdName); mdPeek(); }
+}
 function _monFmt(v, unit) { return unit === 'ms' ? Math.round(v) + ' ms' : Math.round(v) + (unit ? ' ' + unit : ''); }
 // One delegated handler for every card chart: nearest sample under the pointer.
 document.addEventListener('mousemove', ev => {
@@ -11973,7 +12020,8 @@ function renderOverviewMonitors() {
     const s = m.status || {}; const alert = s.state === 'alert';
     const chip = s.state === 'ok' ? '<span class="mm-chip ok">OK</span>' : alert ? '<span class="mm-chip err">ALERT</span>' : s.state === 'disabled' ? '<span class="mm-chip">Disabled</span>' : '<span class="mm-chip">Pending</span>';
     const reading = alert ? (s.lastError || 'alerting')
-      : m.type === 'rabbitmq' ? (s.lastActivityAt ? 'last message ' + _monAgo(s.lastActivityAt) : 'no messages seen yet')
+      : m.type === 'rabbitmq' ? (s.lastActivityAt ? 'last message ' + _monAgo(s.lastActivityAt) : 'no messages seen yet') + (s.errorQueue && s.errorQueue.messages ? ` · ${s.errorQueue.messages} in error queue` : '')
+      : m.type === 'redis' ? _monRedisLine(s)
       : (s.lastValue != null ? s.lastValue + ' ms' : '—');
     return `<div class="ovm-row${alert ? ' is-alert' : ''}" onclick="openMonitorDetail('${esc(m.name)}')" role="button" tabindex="0" title="Open details">
       <span class="mon-ico mon-ico-${m.type}" style="width:28px;height:28px;border-radius:7px"><svg style="width:16px;height:16px"><use href="#mon-ico-${m.type}"/></svg></span>
@@ -12002,10 +12050,15 @@ function renderMonitors() {
     const typeLabel = m.type === 'http' ? 'HTTP endpoint' : m.type === 'redis' ? 'Redis server' : 'RabbitMQ queue';
     const reading = m.type === 'rabbitmq'
       ? (s.lastActivityAt ? 'Last message ' + _monAgo(s.lastActivityAt) : 'No messages seen yet')
+      : m.type === 'redis' ? _monRedisLine(s)
       : (s.lastValue != null ? s.lastValue + ' ms' : '—');
+    const eq = s.errorQueue;
+    const eqBadge = eq ? (eq.messages === null
+      ? `<span class="mon-eq mon-eq-missing" title="Dead-letter queue ${esc(eq.name)} not found">${esc(eq.name)}: not found</span>`
+      : `<span class="mon-eq${eq.messages ? ' has' : ''}" title="${esc(eq.name)}">${eq.messages} in error queue</span>`) : '';
     const foot = alert && s.lastError
       ? `<span class="mon-err" title="${esc(s.lastError)}">${esc(s.lastError)}</span>`
-      : `<span>${esc(reading)}</span>`;
+      : `<span>${esc(reading)}${eqBadge ? ' · ' + eqBadge : ''}</span>`;
     return `<div class="mon-card${alert ? ' is-alert' : ''}${s.state === 'disabled' ? ' is-off' : ''}">
   <div class="mon-head" style="cursor:pointer" onclick="openMonitorDetail('${esc(m.name)}')" title="Open details">
     <span class="mon-ico mon-ico-${m.type}"><svg><use href="#mon-ico-${m.type}"/></svg></span>
@@ -12062,6 +12115,7 @@ function monitorTypeChanged() {
   document.getElementById('monHttpFields').style.display = type === 'http' ? 'flex' : 'none';
   document.getElementById('monRedisFields').style.display = type === 'redis' ? 'flex' : 'none';
   document.getElementById('monSilenceWrap').style.visibility = document.getElementById('monAlertSilence').checked ? 'visible' : 'hidden';
+  document.getElementById('monErrorQueueWrap').style.visibility = document.getElementById('monWatchError').checked ? 'visible' : 'hidden';
 }
 
 function openMonitorModal(m) {
@@ -12082,6 +12136,8 @@ function openMonitorModal(m) {
   g('monAlertMessages').checked = alertOn.includes('messages');
   g('monAlertHealth').checked = alertOn.includes('health');
   g('monSilenceMinutes').value = m?.silenceMinutes ?? 30;
+  g('monWatchError').checked = m ? m.watchErrorQueue !== false : true;
+  g('monErrorQueue').value = m?.errorQueue || '';
   g('monMethod').value = m?.method || 'GET';
   g('monUrl').value = m?.url || '';
   g('monExpectStatus').value = m?.expectStatus || '2xx';
@@ -12095,6 +12151,9 @@ function openMonitorModal(m) {
   g('monRedisPassword').value = '';
   g('monRedisPassword').placeholder = (m?.type === 'redis' && m?.hasPassword) ? '(kept — type to replace)' : '';
   g('monRedisMaxLatencyMs').value = m?.type === 'redis' ? (m.maxLatencyMs ?? 0) : 0;
+  g('monRedisMaxMemoryPct').value = m?.type === 'redis' ? (m.maxMemoryPct ?? 85) : 85;
+  g('monRedisMaxClients').value = m?.type === 'redis' ? (m.maxClients ?? 0) : 0;
+  g('monRedisMaxReplicaLagSec').value = m?.type === 'redis' ? (m.maxReplicaLagSec ?? 60) : 60;
   g('monRedisTls').checked = !!m?.tls;
   g('monIntervalSeconds').value = m?.intervalSeconds ?? 60;
   g('monCooldownMinutes').value = m?.cooldownMinutes ?? 60;
@@ -12138,12 +12197,14 @@ async function saveMonitor() {
       apiUrl: g('monApiUrl').trim(), vhost: g('monVhost').trim() || undefined, queue: g('monQueue').trim(),
       username: g('monUsername').trim() || undefined, password: g('monPassword') || undefined,
       alertOn: [['silence', 'monAlertSilence'], ['messages', 'monAlertMessages'], ['health', 'monAlertHealth']].filter(([, id]) => document.getElementById(id).checked).map(([v]) => v),
+      watchErrorQueue: document.getElementById('monWatchError').checked, errorQueue: g('monErrorQueue').trim() || undefined,
       silenceMinutes: parseInt(g('monSilenceMinutes'), 10),
     });
   } else if (type === 'redis') {
     Object.assign(body, {
       host: g('monRedisHost').trim(), port: parseInt(g('monRedisPort'), 10) || 6379, db: parseInt(g('monRedisDb'), 10) || 0,
       password: g('monRedisPassword') || undefined, maxLatencyMs: parseInt(g('monRedisMaxLatencyMs'), 10) || 0,
+      maxMemoryPct: parseInt(g('monRedisMaxMemoryPct'), 10) || 0, maxClients: parseInt(g('monRedisMaxClients'), 10) || 0, maxReplicaLagSec: parseInt(g('monRedisMaxReplicaLagSec'), 10) || 0,
       tls: document.getElementById('monRedisTls').checked,
     });
   } else {

@@ -45,7 +45,7 @@ listNotificationRules, createNotificationRule, updateNotificationRule, deleteNot
 timingSafeEqualStr,
 type NotificationSeverity, type NotificationChannel } from './auth/auth';
 import { emitNotificationEvent, dispatchTestToGroup } from './core/notifications';
-import { listMonitors, getMonitor, upsertMonitor, deleteMonitor, publicMonitor, validateMonitorInput, runCheck, peekQueue, listRabbitQueues, startMonitorScheduler, stopMonitorScheduler } from './core/monitors';
+import { listMonitors, getMonitor, upsertMonitor, deleteMonitor, publicMonitor, validateMonitorInput, runCheck, peekQueue, listRabbitQueues, errorQueueName, requeueErrorMessages, discardErrorMessages, exportErrorMessages, startMonitorScheduler, stopMonitorScheduler } from './core/monitors';
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
 import { initConsentPages, listConsentPages, getConsentPage, createConsentPage, updateConsentPage, deleteConsentPage, findConsentPageOauthReferences } from './auth/consent-pages';
 import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin, runLdapSync, getLastLdapSyncReport } from './auth/ldap';
@@ -4699,7 +4699,7 @@ const server = Bun.serve({
                     return jsonRes(200, { status: created ? 'created' : 'updated', monitor: publicMonitor(v.monitor) });
                 }
                 {
-                    const mm = url.pathname.match(/^\/admin\/monitors\/([^/]+)(\/check|\/peek)?$/);
+                    const mm = url.pathname.match(/^\/admin\/monitors\/([^/]+)(\/check|\/peek|\/error-queue\/(?:requeue|discard|export))?$/);
                     if (mm) {
                         const name = decodeURIComponent(mm[1]).toLowerCase();
                         const m = getMonitor(name);
@@ -4707,8 +4707,34 @@ const server = Bun.serve({
                         if (mm[2] === '/peek' && req.method === 'GET') {
                             if (m.type !== 'rabbitmq') return jsonRes(400, { error: 'Only RabbitMQ monitors can peek messages' });
                             try {
-                                const messages = await peekQueue(m, parseInt(url.searchParams.get('count') || '10', 10) || 10);
-                                return jsonRes(200, { messages, queue: m.queue });
+                                const which = url.searchParams.get('which') === 'error' ? 'error' : 'main';
+                                const messages = await peekQueue(m, parseInt(url.searchParams.get('count') || '10', 10) || 10, which);
+                                return jsonRes(200, { messages, queue: which === 'error' ? errorQueueName(m) : m.queue, which });
+                            } catch (e) {
+                                return jsonRes(502, { error: e instanceof Error ? e.message : String(e) });
+                            }
+                        }
+                        if (mm[2] && mm[2].startsWith('/error-queue/')) {
+                            if (m.type !== 'rabbitmq') return jsonRes(400, { error: 'Only RabbitMQ monitors have an error queue' });
+                            const op = mm[2].split('/')[2];
+                            const me = getAuthedAdmin(req);
+                            const audit = (details: Record<string, unknown>) => logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'monitor.error_queue.' + op, targetType: 'monitor', targetId: m.name, details: { errorQueue: errorQueueName(m), ...details }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                            try {
+                                if (op === 'export' && req.method === 'GET') {
+                                    const messages = await exportErrorMessages(m, parseInt(url.searchParams.get('count') || '500', 10) || 500);
+                                    audit({ exported: messages.length });
+                                    return new Response(JSON.stringify({ monitor: m.name, queue: errorQueueName(m), exportedAt: new Date().toISOString(), messages }, null, 2), {
+                                        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="${errorQueueName(m).replace(/[^\w.-]+/g, '_')}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}.json"` } });
+                                }
+                                if ((op === 'requeue' || op === 'discard') && req.method === 'POST') {
+                                    let body: any = {};
+                                    try { body = await req.json(); } catch { /* defaults */ }
+                                    const count: number | 'all' = body?.count === 'all' ? 'all' : Math.max(1, Math.min(1000, parseInt(String(body?.count ?? '1'), 10) || 1));
+                                    const r = op === 'requeue' ? await requeueErrorMessages(m, count) : await discardErrorMessages(m, count);
+                                    audit({ requested: count, processed: r.processed, remaining: r.remaining, error: r.error });
+                                    void runCheck(m).catch(() => {});
+                                    return jsonRes(r.error ? 207 : 200, { ...r });
+                                }
                             } catch (e) {
                                 return jsonRes(502, { error: e instanceof Error ? e.message : String(e) });
                             }

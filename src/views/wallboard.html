@@ -69,7 +69,7 @@
   .dlg-h .target { font: 400 11.5px var(--font-mono, monospace); color: var(--wb-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .dlg-x { background: none; border: none; color: var(--wb-dim); font-size: 22px; cursor: pointer; line-height: 1; padding: 0 4px; }
   .dlg-b { padding: 14px 18px 18px; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
   .stat { background: var(--wb-bg); border: 1px solid var(--wb-line); padding: 10px 12px; }
   .stat .l { font: 500 10.5px var(--font-mono, monospace); letter-spacing: .6px; text-transform: uppercase; color: var(--wb-dim); }
   .stat .v { font: 600 20px var(--font-display, inherit); margin-top: 2px; }
@@ -82,6 +82,9 @@
   .hist tr.f td { background: rgba(255,90,90,.08); } .hist tr.f td.d { color: var(--wb-al); }
   .hist td.d { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .peek-head { font-size: 12.5px; color: var(--wb-dim); }
+  .eq-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; font-size: 12px; color: var(--wb-dim); }
+  .eq-tools input { width: 56px; background: var(--wb-bg); border: 1px solid var(--wb-line); color: var(--wb-text); padding: 4px 6px; font: inherit; margin: 0 4px; }
+  .btn.danger { color: var(--wb-al); border-color: var(--wb-al); }
   .msg { border: 1px solid var(--wb-line); background: var(--wb-bg); margin-top: 6px; }
   .msg summary { display: flex; gap: 10px; align-items: center; padding: 7px 10px; cursor: pointer; font-size: 12px; list-style: none; }
   .msg summary::-webkit-details-marker { display: none; }
@@ -118,6 +121,7 @@
     <div class="dlg-h">
       <span class="ico" id="dIco"></span>
       <div style="flex:1;min-width:0"><div class="name"><span id="dName"></span> <span class="badge" id="dBadge"></span></div><div class="target" id="dTarget"></div></div>
+      <select class="btn" id="dPeekWhich" style="display:none"><option value="error">error queue</option><option value="main" id="dPeekMain">queue</option></select>
       <button class="btn" id="dPeekBtn" onclick="peek()" style="display:none">Peek messages</button>
       <a class="btn" id="dDash" href="#">Open in dashboard</a>
       <button class="dlg-x" onclick="closeDetail()" aria-label="Close">&times;</button>
@@ -174,10 +178,16 @@
     if (m.type === 'rabbitmq') {
       const last = s.lastActivityAt ? ago(s.lastActivityAt) : null;
       const perMin = (s.history || []).slice(-6).reduce((a, h) => a + Math.max(0, h.value || 0), 0);
-      return { big: last ? last : '—', unit: last ? 'since last message' : 'no messages seen', aux: perMin ? perMin + ' msgs in last 6 checks' : '' };
+      const eq = s.errorQueue && s.errorQueue.messages ? `${s.errorQueue.messages} in error queue` : '';
+      return { big: last ? last : '—', unit: last ? 'since last message' : 'no messages seen', aux: [perMin ? perMin + ' msgs in last 6 checks' : '', eq].filter(Boolean).join(' · ') };
+    }
+    if (m.type === 'redis' && s.redis) {
+      const r = s.redis;
+      return { big: r.memoryPct !== null ? r.memoryPct + '%' : bytes(r.usedMemory), unit: r.memoryPct !== null ? 'memory used' : 'memory (no limit)', aux: [s.lastValue != null ? s.lastValue + ' ms' : '', r.clients + ' clients', r.hitRatio !== null ? r.hitRatio + '% hits' : ''].filter(Boolean).join(' · ') };
     }
     return { big: s.lastValue != null ? s.lastValue : '—', unit: s.lastValue != null ? 'ms' : '', aux: '' };
   }
+  const bytes = b => b >= 1 << 30 ? (b / (1 << 30)).toFixed(2) + ' GB' : b >= 1 << 20 ? (b / (1 << 20)).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB';
 
   let LAST = [], OPEN = null;
   const fmt = (v, unit) => Math.round(v) + ' ' + unit;
@@ -194,12 +204,22 @@
     document.getElementById('dTarget').textContent = target(m);
     document.getElementById('dDash').href = '/dashboard#monitors/' + encodeURIComponent(m.name);
     document.getElementById('dPeekBtn').style.display = m.type === 'rabbitmq' ? '' : 'none';
+    document.getElementById('dPeekWhich').style.display = m.type === 'rabbitmq' ? '' : 'none';
+    const mo = document.getElementById('dPeekMain'), busy = s.consumers === null || s.consumers > 0; mo.disabled = busy; mo.textContent = busy ? `queue (${s.consumers ?? '?'} consumers — peek disabled)` : 'queue (no consumers)'; if (busy) document.getElementById('dPeekWhich').value = 'error';
     const stat = (l, v, sub) => `<div class="stat"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${sub || ''}</div></div>`;
     document.getElementById('dStats').innerHTML =
       stat('Checks kept', h.length, h.length ? 'since ' + new Date(h[0].at).toLocaleTimeString() : '') +
       stat('Failed', `<span style="color:${fails ? 'var(--wb-al)' : 'inherit'}">${fails}</span>`, h.length ? Math.round(100 * (h.length - fails) / h.length) + '% ok' : '') +
       stat(unit === 'ms' ? 'Avg latency' : 'Avg msgs / check', avg === null ? '—' : fmt(avg, unit), max === null ? '' : 'max ' + fmt(max, unit)) +
+      (s.errorQueue ? stat('Error queue', s.errorQueue.messages === null ? '—' : `<span style="color:${s.errorQueue.messages ? 'var(--wb-al)' : 'inherit'}">${s.errorQueue.messages}</span>`, esc(s.errorQueue.name)) : '') +
       stat(al ? 'Alerting for' : 'Last check', al && s.alertSince ? ago(s.alertSince) : ago(s.lastCheckAt) + ' ago', al && s.alertSince ? 'since ' + new Date(s.alertSince).toLocaleTimeString() : '');
+    const r = s.redis;
+    if (r) document.getElementById('dStats').innerHTML +=
+      stat('Memory', r.memoryPct !== null ? r.memoryPct + '%' : bytes(r.usedMemory), r.memoryPct !== null ? bytes(r.usedMemory) + ' of ' + bytes(r.maxMemory) : 'no maxmemory set') +
+      stat('Clients', r.clients, r.blockedClients ? r.blockedClients + ' blocked' : 'none blocked') +
+      stat('Hit ratio', r.hitRatio !== null ? r.hitRatio + '%' : '—', r.hits + ' hits · ' + r.misses + ' misses') +
+      stat('Evicted / rejected', `<span style="color:${r.evictedKeys || r.rejectedConnections ? 'var(--wb-al)' : 'inherit'}">${r.evictedKeys} / ${r.rejectedConnections}</span>`, 'since server start') +
+      stat('Persistence', `<span style="color:${r.rdbStatus !== 'ok' ? 'var(--wb-al)' : 'inherit'}">${esc(r.rdbStatus)}</span>`, 'v' + esc(r.version) + ' ' + esc(r.role) + (r.linkStatus ? ' · link ' + esc(r.linkStatus) : ''));
     document.getElementById('dChart').innerHTML = spark(h, al ? 'var(--wb-al)' : 'var(--wb-ok)', 900, 120);
     document.getElementById('dRows').innerHTML = h.length ? [...h].reverse().map(x => `<tr class="${x.ok ? '' : 'f'}"><td class="mono">${new Date(x.at).toLocaleString()}</td><td><span class="badge ${x.ok ? 'ok' : 'al'}">${x.ok ? 'OK' : 'FAIL'}</span></td><td class="mono">${typeof x.value === 'number' ? fmt(x.value, unit) : '—'}</td><td class="mono">${typeof x.ms === 'number' ? x.ms + ' ms' : '—'}</td><td class="d" title="${esc(x.error || '')}">${x.error ? esc(x.error) : '<span style="color:var(--wb-dim)">healthy</span>'}</td></tr>`).join('')
       : '<tr><td colspan="5" style="text-align:center;color:var(--wb-dim);padding:20px">No checks recorded yet.</td></tr>';
@@ -207,15 +227,33 @@
   }
   function closeDetail() { document.getElementById('ov').classList.remove('on'); OPEN = null; const p = document.getElementById('dPeek'); p.style.display = 'none'; p.innerHTML = ''; }
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
+  async function errorOp(op, all) {
+    const m = LAST.find(x => x.name === OPEN); if (!m) return;
+    const n = all ? 'all' : Math.max(1, parseInt(document.getElementById('eqN')?.value || '1', 10) || 1);
+    const eq = m.status?.errorQueue?.name || (m.queue + '_error');
+    const what = all ? `ALL messages in "${eq}"` : `the first ${n} message(s) in "${eq}"`;
+    if (!confirm(op === 'requeue' ? `Move ${what} back to "${m.queue}"?\n\nIf the cause is not fixed they will fail again.` : `Permanently delete ${what}?\n\nThis cannot be undone.`)) return;
+    const res = await fetch(`/admin/monitors/${encodeURIComponent(OPEN)}/error-queue/${op}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: n }) });
+    const d = await res.json().catch(() => ({}));
+    const el = document.getElementById('err'); el.style.display = 'block'; el.style.background = res.status >= 400 || d.error ? '#C9372C' : '#1D9E75';
+    el.textContent = res.status >= 400 ? (d.error || 'Operation failed') : `${op === 'requeue' ? 'Requeued' : 'Discarded'} ${d.processed} message(s)` + (d.remaining != null ? ` · ${d.remaining} left` : '') + (d.error ? ` · stopped: ${d.error}` : '');
+    setTimeout(() => { el.style.display = 'none'; el.style.background = ''; }, 6000);
+    await load(); if (OPEN) peek();
+  }
   async function peek() {
     const box = document.getElementById('dPeek'), btn = document.getElementById('dPeekBtn');
     box.style.display = ''; box.innerHTML = '<div class="peek-head">Reading queue…</div>'; btn.disabled = true;
     try {
-      const res = await fetch(`/admin/monitors/${encodeURIComponent(OPEN)}/peek?count=10`, { cache: 'no-store' });
+      const which = document.getElementById('dPeekWhich').style.display !== 'none' ? document.getElementById('dPeekWhich').value : 'main';
+      const res = await fetch(`/admin/monitors/${encodeURIComponent(OPEN)}/peek?count=10&which=${which}`, { cache: 'no-store' });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) { box.innerHTML = `<div class="peek-head" style="color:var(--wb-al)">${esc(d.error || 'Peek failed')}</div>`; return; }
       if (!d.messages.length) { box.innerHTML = `<div class="peek-head">Queue <b>${esc(d.queue)}</b> is empty right now.</div>`; return; }
-      box.innerHTML = `<div class="peek-head">Next ${d.messages.length} message(s) in <b>${esc(d.queue)}</b> — read without consuming (marked redelivered).</div>` +
+      const tools = d.which === 'error' ? `<div class="eq-tools"><label>First <input type="number" id="eqN" min="1" max="1000" value="${Math.min(d.messages.length, 10)}"></label>
+          <button class="btn" onclick="errorOp('requeue',false)">Requeue first N</button><button class="btn" onclick="errorOp('requeue',true)">Requeue all</button>
+          <button class="btn" onclick="errorOp('discard',false)">Discard first N</button><button class="btn danger" onclick="errorOp('discard',true)">Purge all</button>
+          <a class="btn" href="/admin/monitors/${encodeURIComponent(OPEN)}/error-queue/export?count=500" download>Export JSON</a></div>` : '';
+      box.innerHTML = tools + `<div class="peek-head">Next ${d.messages.length} message(s) in <b>${esc(d.queue)}</b> — read without consuming (marked redelivered).</div>` +
         d.messages.map((m, i) => { let pretty = m.payload; try { pretty = JSON.stringify(JSON.parse(m.payload), null, 2); } catch {}
           const meta = [m.timestamp ? new Date(m.timestamp).toLocaleString() : null, m.routingKey ? 'key ' + m.routingKey : null, m.bytes + ' B', m.redelivered ? 'redelivered' : null].filter(Boolean).join(' · ');
           return `<details class="msg"${i === 0 ? ' open' : ''}><summary><span class="n">#${i + 1}</span><span class="mt">${esc(meta)}</span><span class="pv">${esc(m.payload.slice(0, 110))}</span></summary><pre>${esc(pretty)}${m.truncated ? '\n… (truncated)' : ''}</pre></details>`; }).join('');
