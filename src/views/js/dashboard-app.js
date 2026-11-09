@@ -130,6 +130,7 @@ async function startApp(username) {
   // otherwise a refresh lands on an empty page — so fetch webhooks before
   // restoring that one specifically.
   const initialPage = pageFromHash(location.hash) || 'overview';
+  fetchMonitors();
   if (initialPage === 'webhookDestinations') {
     const name = hashSuffixFromHash(location.hash);
     await fetchWebhooks();
@@ -139,7 +140,8 @@ async function startApp(username) {
       navigate('webhooks', { pushHistory: false });
     }
   } else {
-    navigate(initialPage, { pushHistory: false });
+    // #monitors/<name> deep-links straight into a monitor's detail (used by the wallboard tiles).
+    navigate(initialPage, { pushHistory: false, hashSuffix: initialPage === 'monitors' ? hashSuffixFromHash(location.hash) : null });
   }
 
   // Trigger rest of initializations concurrently without blocking UI main thread
@@ -149,6 +151,7 @@ async function startApp(username) {
     appIntervals.push(setInterval(fetchHealth, 5000));
     appIntervals.push(setInterval(fetchRecentRequests, 3000));
     appIntervals.push(setInterval(fetchChartData, 15000));
+    appIntervals.push(setInterval(() => { if (currentPage === 'overview' || currentPage === 'monitors') fetchMonitors(); }, 15000));
     appIntervals.push(setInterval(() => {
       if (currentPage === 'requests' && document.getElementById('rlAutoRefresh').checked) fetchRequestLogs();
     }, 5000));
@@ -453,6 +456,7 @@ const PAGE_TITLES = {
   tcpudp: 'TCP/UDP',
   profiles: 'HTTP Proxies',
   webhooks: 'Webhooks',
+  monitors: 'Monitors',
   connectors: 'Chat Connectors',
   proxyusers: 'Users',
   oauthclients: 'OAuth Clients',
@@ -475,7 +479,7 @@ const PAGE_TITLES = {
 const ROUTABLE_PAGES = new Set([
   'overview','requests','proxyusers','profiles','connectors',
   'oauthclients','consentpages','ldap','email','sms','notifications',
-  'npm','audit','webhooks','ldap','reports','errors','logsettings','docs',
+  'npm','audit','webhooks','monitors','ldap','reports','errors','logsettings','docs',
 ]);
 
 function navigate(page, opts = {}) {
@@ -536,6 +540,7 @@ function navigate(page, opts = {}) {
     if (pendingTcpTab) switchTcpUdpTab(pendingTcpTab);
     else fetchSipProxies();
   }
+  if (page === 'monitors') { fetchMonitors().then(() => { if (hashSuffix && typeof openMonitorDetail === 'function') openMonitorDetail(decodeURIComponent(hashSuffix)); }); }
   if (page === 'connectors') { fetchConnectors(); fetchFive9Connectors(); }
   if (page === 'proxyusers') { fetchProxyUsers(); fetchInvites(); }
   if (page === 'oauthclients') { fetchOauthClients(); }

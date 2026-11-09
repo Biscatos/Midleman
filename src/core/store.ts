@@ -1,5 +1,6 @@
 import type { ProxyProfile, WebhookDistributor, TcpUdpProfile, NpmCustomLocation } from './types';
 import { validateCorsInput } from './cors';
+import { validateWeekly } from './business-hours';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { assertSafeOutboundUrl, SsrfBlockedError } from './ssrf-guard';
@@ -594,6 +595,8 @@ export function validateWebhookInput(input: unknown): string | null {
             // notifyEmail is now optional — when empty, the silence alert is
             // dispatched only through the central notifications pipeline.
             if (s.notifyEmail !== undefined && s.notifyEmail !== '' && (typeof s.notifyEmail !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.notifyEmail))) return '"silenceAlert.notifyEmail" must be a valid email or empty';
+            const wk = validateWeekly(s.weekly);
+            if ('error' in wk) return '"silenceAlert.weekly": ' + wk.error;
         }
     }
 
@@ -611,6 +614,7 @@ export function validateWebhookInput(input: unknown): string | null {
             if (dest.bodyTemplate && typeof dest.bodyTemplate !== 'string') return '"bodyTemplate" must be a string';
             if (dest.dropEmpty !== undefined && typeof dest.dropEmpty !== 'boolean') return '"dropEmpty" must be a boolean';
             if (dest.customHeaders && typeof dest.customHeaders !== 'object') return '"customHeaders" must be an object';
+            if (dest.secretHeaders !== undefined && (!Array.isArray(dest.secretHeaders) || dest.secretHeaders.some(h => typeof h !== 'string'))) return '"secretHeaders" must be an array of header names';
             if (dest.forwardHeaders !== undefined && typeof dest.forwardHeaders !== 'boolean') return '"forwardHeaders" must be a boolean';
             if (dest.filterMode !== undefined && dest.filterMode !== 'all' && dest.filterMode !== 'any') return '"filterMode" must be "all" or "any"';
             if (dest.filter !== undefined) {

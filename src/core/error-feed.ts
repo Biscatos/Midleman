@@ -196,11 +196,50 @@ export function record(input: RecordInput): void {
             : redact(typeof input.context === 'string' ? input.context : safeJson(input.context)).slice(0, 4000);
         const fp = fingerprintOf(input.severity, source, message, stack);
 
-        db().run(
+        // Buffered: a burst of errors/retries used to run one synchronous
+        // SQLite upsert per console.warn on the request path. Now repeats of
+        // the same fingerprint fold in memory and one transaction writes them.
+        const pending = _buffer.get(fp);
+        if (pending) {
+            pending.count++;
+            pending.lastSeen = now;
+            if (stack) pending.stack = stack;
+            if (context) pending.context = context;
+        } else {
+            _buffer.set(fp, { fp, severity: input.severity, source, message, stack, context, count: 1, firstSeen: now, lastSeen: now });
+        }
+        if (!_flushTimer) _flushTimer = setTimeout(flushErrorBuffer, FLUSH_MS);
+
+        _totalCaptured++;
+        if (input.severity === 'error') _lastErrorAt = now;
+    } catch {
+        // Swallow: the feed is best-effort observability, never a failure mode.
+    } finally {
+        _reentrant = false;
+    }
+}
+
+const FLUSH_MS = 2000;
+const PRUNE_EVERY_MS = 5 * 60 * 1000;
+let _lastPrune = 0;
+let _flushTimer: ReturnType<typeof setTimeout> | null = null;
+const _buffer = new Map<string, { fp: string; severity: ErrorSeverity; source: string; message: string; stack: string | null; context: string | null; count: number; firstSeen: number; lastSeen: number }>();
+
+/** Write buffered captures (also called before every read, so the page is current). */
+export function flushErrorBuffer(): void {
+    if (_flushTimer) { clearTimeout(_flushTimer); _flushTimer = null; }
+    if (_buffer.size === 0) return;
+    const batch = [..._buffer.values()];
+    _buffer.clear();
+    const prevReentrant = _reentrant;
+    _reentrant = true;
+    try {
+        const d = db();
+        const stmt = d.prepare(
             `INSERT INTO error_events (fingerprint, severity, source, message, stack, context, count, first_seen, last_seen)
-             VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(fingerprint) DO UPDATE SET
-               count        = count + 1,
+               count        = count + excluded.count,
                last_seen    = excluded.last_seen,
                stack        = COALESCE(excluded.stack, stack),
                context      = COALESCE(excluded.context, context),
@@ -208,17 +247,15 @@ export function record(input: RecordInput): void {
                acknowledged = 0,
                acknowledged_at = NULL,
                acknowledged_by = NULL`,
-            [fp, input.severity, source, message, stack, context, now, now],
         );
-
-        _totalCaptured++;
-        if (input.severity === 'error') _lastErrorAt = now;
-        // Prune cheaply — only every so often, not on every single capture.
-        if (_totalCaptured % 50 === 0) prune();
+        d.transaction(() => {
+            for (const e of batch) stmt.run(e.fp, e.severity, e.source, e.message, e.stack, e.context, e.count, e.firstSeen, e.lastSeen);
+        })();
+        if (Date.now() - _lastPrune > PRUNE_EVERY_MS) { _lastPrune = Date.now(); prune(); }
     } catch {
-        // Swallow: the feed is best-effort observability, never a failure mode.
+        /* best effort */
     } finally {
-        _reentrant = false;
+        _reentrant = prevReentrant;
     }
 }
 
@@ -340,6 +377,7 @@ function toEntry(r: Row): ErrorEntry {
 }
 
 export function queryErrors(q: ErrorQuery = {}): { entries: ErrorEntry[]; total: number; page: number; limit: number } {
+    flushErrorBuffer();
     const page = Math.max(1, q.page || 1);
     const limit = Math.min(200, Math.max(1, q.limit || 50));
     const where: string[] = [];
@@ -376,6 +414,7 @@ export interface ErrorStats {
 }
 
 export function getErrorStats(): ErrorStats {
+    flushErrorBuffer();
     try {
         const d = db();
         const openErrors = d.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM error_events WHERE acknowledged = 0 AND severity = 'error'`).get()?.n || 0;
@@ -399,6 +438,7 @@ export function getErrorStats(): ErrorStats {
 }
 
 export function getError(id: number): ErrorEntry | null {
+    flushErrorBuffer();
     try {
         const r = db().query<Row, [number]>('SELECT * FROM error_events WHERE id = ?').get(id);
         return r ? toEntry(r) : null;
@@ -407,6 +447,7 @@ export function getError(id: number): ErrorEntry | null {
 
 /** Acknowledge specific ids, or every open entry when `ids` is empty. */
 export function ackErrors(ids: number[], by: string | null): number {
+    flushErrorBuffer();
     try {
         const now = Date.now();
         if (!ids.length) {
@@ -425,6 +466,7 @@ export function ackErrors(ids: number[], by: string | null): number {
 
 /** Delete entries permanently. Empty `ids` clears the whole feed. */
 export function clearErrors(ids: number[]): number {
+    flushErrorBuffer();
     try {
         if (!ids.length) {
             const n = db().query<{ n: number }, []>('SELECT COUNT(*) AS n FROM error_events').get()?.n || 0;

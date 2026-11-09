@@ -1,7 +1,7 @@
 import type { WebhookDistributor, WebhookRetryConfig, WebhookPersistentRetry, WebhookDestination } from '../core/types';
 import { logRequest, headersToRecord, getLastWebhookActivity } from '../telemetry/request-log';
 import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
-import { assertResolvedHostAllowed, webhookSsrfPolicy, type SsrfPolicyOverride } from '../core/ssrf-guard';
+import { assertResolvedHostAllowed, webhookSsrfPolicy, SsrfBlockedError, type SsrfPolicyOverride } from '../core/ssrf-guard';
 import { timingSafeEqualStr } from '../auth/auth';
 
 // Real socket peer IP, captured at the server boundary and looked up in the
@@ -57,6 +57,7 @@ import {
 } from '../core/store';
 import { sendMail, isSmtpConfigured } from '../core/smtp';
 import { emitNotificationEvent } from '../core/notifications';
+import { isWithinBusinessHours } from '../core/business-hours';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -143,11 +144,12 @@ export function flushDlqSync(): void {
 // Debounced flush — for non-critical updates (dismiss, retry metadata)
 let _dlqFlushTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleDlqFlush(): void {
-    if (_dlqFlushTimer) clearTimeout(_dlqFlushTimer);
+    // Throttle (not debounce): at most one rewrite per 2 s, and never postponed forever.
+    if (_dlqFlushTimer) return;
     _dlqFlushTimer = setTimeout(() => {
-        persistDlq(deadLetterQueue.map(serializeDlqEntry));
         _dlqFlushTimer = null;
-    }, 500);
+        persistDlq(deadLetterQueue.map(serializeDlqEntry));
+    }, 2000);
 }
 
 export function getDeadLetterQueue(): FailedFanout[] {
@@ -338,11 +340,13 @@ const pendingRetryQueue: PendingRetry[] = (() => {
 
 let _pendingFlushTimer: ReturnType<typeof setTimeout> | null = null;
 function schedulePendingFlush(): void {
-    if (_pendingFlushTimer) clearTimeout(_pendingFlushTimer);
+    // Throttle (not debounce): the whole queue (with bodies) is rewritten at most
+    // once per 2 s; a steady stream of attempts no longer rewrites it constantly.
+    if (_pendingFlushTimer) return;
     _pendingFlushTimer = setTimeout(() => {
-        persistPendingRetry(pendingRetryQueue.map(serializePending));
         _pendingFlushTimer = null;
-    }, 500);
+        persistPendingRetry(pendingRetryQueue.map(serializePending));
+    }, 2000);
 }
 function flushPendingSync(): void {
     if (_pendingFlushTimer) { clearTimeout(_pendingFlushTimer); _pendingFlushTimer = null; }
@@ -633,6 +637,33 @@ const WEBHOOK_FETCH_TIMEOUT_MS = (() => {
 })();
 
 
+/** Largest body parsed for {{variables}} and filters (the log preview is capped at 64 KB). */
+const PAYLOAD_PARSE_MAX = 5 * 1024 * 1024;
+
+/** a=1&b[c]=2&d.e=3 → { a: '1', b: { c: '2' }, d: { e: '3' } } (prototype keys ignored). */
+function formToObject(params: URLSearchParams): Record<string, any> | null {
+    const out: Record<string, any> = {};
+    let any = false;
+    for (const [rawKey, value] of params) {
+        const parts = rawKey.replace(/\]/g, '').split(/[[.]/).filter(Boolean);
+        if (!parts.length || parts.some(k => k === '__proto__' || k === 'constructor' || k === 'prototype')) continue;
+        let node = out;
+        for (let i = 0; i < parts.length - 1; i++) {
+            if (typeof node[parts[i]] !== 'object' || node[parts[i]] === null) node[parts[i]] = {};
+            node = node[parts[i]];
+        }
+        node[parts[parts.length - 1]] = value;
+        any = true;
+    }
+    return any ? out : null;
+}
+
+/** Value inserted into a URL: encoded so spaces, & or # cannot break it, while
+ *  keeping the characters a query value may carry as-is (: / @ ,). */
+function encodeUrlValue(v: string): string {
+    return encodeURIComponent(v).replace(/%3A/gi, ':').replace(/%2F/gi, '/').replace(/%40/gi, '@').replace(/%2C/gi, ',');
+}
+
 async function fetchWithRetry(
     url: string,
     init: RequestInit,
@@ -652,9 +683,16 @@ async function fetchWithRetry(
     }
 
     // SSRF guard: resolve the target host and reject internal/metadata addresses
-    // before any network egress. Thrown here (not inside the retry loop) so a
-    // blocked target fails permanently instead of retrying forever.
-    await assertResolvedHostAllowed(url, ssrf);
+    // before any network egress. A policy block is thrown here (not inside the
+    // retry loop) so it fails permanently. A transient DNS failure (the guard
+    // already retried and tried its cache) is left to the retry loop below:
+    // fetch() resolves again on each attempt with the configured backoff.
+    try {
+        await assertResolvedHostAllowed(url, ssrf);
+    } catch (err) {
+        if (err instanceof SsrfBlockedError) throw err;
+        console.warn(`🌐 [${label}] ${err instanceof Error ? err.message : err} — entering retry loop`);
+    }
 
     const attemptLog: import('../telemetry/request-log').AttemptRecord[] = [];
     let lastError: unknown;
@@ -795,7 +833,11 @@ async function silenceTick(): Promise<void> {
         const thresholdMs = Math.max(1, cfg.thresholdMinutes) * 60_000;
         const state = silenceStates.get(ws.webhook.name) || { alerted: false, silentSince: null };
 
-        if (ageMs >= thresholdMs && !state.alerted) {
+        // Optional schedule: outside it a silence is not alerted (it fires at the
+        // next tick inside the schedule if still silent). Recovery is always sent.
+        const inHours = !cfg.weekly?.length || isWithinBusinessHours(cfg.weekly, undefined, new Date());
+
+        if (ageMs >= thresholdMs && !state.alerted && inHours) {
             state.alerted = true;
             state.silentSince = last;
             silenceStates.set(ws.webhook.name, state);
@@ -916,10 +958,21 @@ async function handleWebhookFanout(
     // some senders (proxies, certain webhook providers) post valid JSON
     // without a precise `application/json` content-type, which would
     // otherwise silently leave templates/filters unable to see the payload.
+    //
+    // Parsed from the FULL body (up to PAYLOAD_PARSE_MAX), not from the 64 KB
+    // log preview: a larger payload used to leave every {{variable}} unrendered.
+    // Form-encoded bodies and, with no body, the query string are understood too.
     let payloadObj: any = null;
-    const looksLikeJson = !!bodyStringPreview && /^\s*[\[{]/.test(bodyStringPreview);
-    if (looksLikeJson) {
-        try { payloadObj = JSON.parse(bodyStringPreview!); } catch {}
+    if (bodyBuffer && bodyBuffer.byteLength > 0 && bodyBuffer.byteLength <= PAYLOAD_PARSE_MAX) {
+        const text = new TextDecoder('utf-8').decode(bodyBuffer).replace(/^\uFEFF/, '');
+        if (/^\s*[\[{]/.test(text)) {
+            try { payloadObj = JSON.parse(text); } catch {}
+        } else if (/application\/x-www-form-urlencoded/i.test(req.headers.get('content-type') || '') || /^[^\s=&]+=[^&]*(&|$)/.test(text.trim())) {
+            payloadObj = formToObject(new URLSearchParams(text));
+        }
+    }
+    if (payloadObj === null && url.search.length > 1) {
+        payloadObj = formToObject(url.searchParams);
     }
 
     const FILTER_BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -970,7 +1023,7 @@ async function handleWebhookFanout(
         return { matched: true };
     }
 
-    function renderTemplate(template: string, data: any): string {
+    function renderTemplate(template: string, data: any, encode?: (v: string) => string): string {
         if (!data) return template;
         // Supports {{path}}, {{path || other.path}}, {{path || "literal"}} (chained).
         return template.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_, expr) => {
@@ -980,13 +1033,13 @@ async function handleWebhookFanout(
                 if (!op) continue;
                 // String literal: "..." or '...'
                 const litMatch = op.match(/^(['"])(.*)\1$/);
-                if (litMatch) return litMatch[2].slice(0, 4096);
+                if (litMatch) return (encode ? encode(litMatch[2]) : litMatch[2]).slice(0, 4096);
                 // Path lookup
                 if (!/^[a-zA-Z0-9_.-]+$/.test(op)) continue; // ignore malformed segments
                 const val = resolvePath(data, op);
                 if (val === undefined || val === null || val === '') continue;
-                if (typeof val === 'object') return JSON.stringify(val).slice(0, 4096);
-                return String(val).slice(0, 4096);
+                const out = (typeof val === 'object' ? JSON.stringify(val) : String(val)).slice(0, 4096);
+                return encode ? encode(out) : out;
             }
             return '';
         });
@@ -1039,7 +1092,7 @@ async function handleWebhookFanout(
         if (typeof target === 'string') {
             tUrl = target;
         } else {
-            tUrl = renderTemplate(target.url, payloadObj);
+            tUrl = renderTemplate(target.url, payloadObj, encodeUrlValue);
 
             if (!target.forwardHeaders) {
                 tHeaders = new Headers();

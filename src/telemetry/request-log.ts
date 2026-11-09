@@ -20,6 +20,7 @@ const DEFAULT_CONFIG: RequestLogConfig = {
 };
 
 let config: RequestLogConfig = { ...DEFAULT_CONFIG };
+const MAX_BODY_CEILING = 1024 * 1024;
 let db: Database | null = null;
 
 // ─── Schema ─────────────────────────────────────────────────────────────────
@@ -104,6 +105,12 @@ const MIGRATIONS = [
 
 export function initRequestLog(cfg: Partial<RequestLogConfig> = {}): void {
     config = { ...DEFAULT_CONFIG, ...cfg };
+    // Bodies are written synchronously into SQLite; multi-MB captures stall the
+    // event loop for every request. Hard ceiling whatever the env asks for.
+    if (config.maxBodySize > MAX_BODY_CEILING) {
+        console.warn(`📋 REQUEST_LOG_MAX_BODY_SIZE=${config.maxBodySize} is above the ${MAX_BODY_CEILING / 1024} KB ceiling — capped (64 KB is recommended)`);
+        config.maxBodySize = MAX_BODY_CEILING;
+    }
 
     if (!config.enabled) {
         console.log('📋 Request logging: disabled');
@@ -215,7 +222,9 @@ let _insertStmt: ReturnType<typeof insertStmt> | null = null;
 // flushed in a single WAL batch transaction on the next microtask tick.
 
 let _logQueue: RequestLogEntry[] = [];
-let _flushScheduled = false;
+const LOG_FLUSH_MS = 200;
+const LOG_FLUSH_BATCH = 500;
+let _flushTimer: ReturnType<typeof setTimeout> | null = null;
 
 function buildParams(entry: RequestLogEntry) {
     return {
@@ -261,7 +270,7 @@ function repeatKey(entry: RequestLogEntry, params: ReturnType<typeof buildParams
 let _repeatStmt: ReturnType<Database['prepare']> | null = null;
 
 function flushLogQueue(): void {
-    _flushScheduled = false;
+    if (_flushTimer) { clearTimeout(_flushTimer); _flushTimer = null; }
     if (_logQueue.length === 0 || !db) return;
     const batch = _logQueue.splice(0);
     try {
@@ -329,10 +338,10 @@ export function logRequest(entry: RequestLogEntry): void {
     if (mode === 'off') return;
     if (mode === 'errors-only' && !isErrorEntry(entry)) return;
     _logQueue.push(entry);
-    if (!_flushScheduled) {
-        _flushScheduled = true;
-        queueMicrotask(flushLogQueue);
-    }
+    // Batched: one transaction every LOG_FLUSH_MS (or as soon as a big batch
+    // builds up) instead of one right after every request.
+    if (_logQueue.length === LOG_FLUSH_BATCH) queueMicrotask(flushLogQueue);
+    else if (!_flushTimer) _flushTimer = setTimeout(flushLogQueue, LOG_FLUSH_MS);
 }
 
 // ─── Body Capture Helpers ───────────────────────────────────────────────────
@@ -512,6 +521,8 @@ export interface RequestLogQuery {
 // COUNT(*) over millions of rows on the main thread. Invalidated on purge.
 const COUNT_CACHE_TTL_MS = 15_000;
 const STATS_CACHE_TTL_MS = 30_000;
+/** Above this many rows the total is estimated from the id range (approx: true). */
+const EXACT_COUNT_LIMIT = 200_000;
 const _countCache = new Map<string, { at: number; total: number }>();
 let _statsCache: { at: number; value: ReturnType<typeof getRequestLogStats> } | null = null;
 let _breakdownCache: { at: number; value: ReturnType<typeof getRequestLogBreakdown> } | null = null;
@@ -979,19 +990,30 @@ function fileSizeMB(): number {
     }
 }
 
-export function getRequestLogStats(): { total: number; oldest: string | null; newest: string | null; dbSizeMB: number; fileSizeMB: number; retentionDays: number } {
+export function getRequestLogStats(): { total: number; approx?: boolean; oldest: string | null; newest: string | null; dbSizeMB: number; fileSizeMB: number; retentionDays: number } {
     const empty = { total: 0, oldest: null, newest: null, dbSizeMB: 0, fileSizeMB: 0, retentionDays: getEffectiveRetentionDays() };
     if (!db) return empty;
     if (_statsCache && Date.now() - _statsCache.at < STATS_CACHE_TTL_MS) return _statsCache.value;
 
     try {
-        const stats = db.prepare(`
-            SELECT COUNT(*) as total,
-                   MIN(timestamp) as oldest,
-                   MAX(timestamp) as newest
-            FROM request_logs
-            WHERE type != 'webhook-fanout'
-        `).get() as any;
+        // COUNT(*) walks the whole table — seconds on a multi-GB log, blocking
+        // every request. On big tables the id range is a close, instant estimate.
+        const range = db.prepare('SELECT MIN(id) AS lo, MAX(id) AS hi FROM request_logs').get() as any;
+        const span = range?.hi ? range.hi - range.lo + 1 : 0;
+        const approx = span > EXACT_COUNT_LIMIT;
+        const stats = approx
+            ? {
+                total: span,
+                oldest: (db.prepare('SELECT timestamp AS t FROM request_logs WHERE id = $id').get({ $id: range.lo }) as any)?.t || null,
+                newest: (db.prepare('SELECT timestamp AS t FROM request_logs WHERE id = $id').get({ $id: range.hi }) as any)?.t || null,
+            }
+            : db.prepare(`
+                SELECT COUNT(*) as total,
+                       MIN(timestamp) as oldest,
+                       MAX(timestamp) as newest
+                FROM request_logs
+                WHERE type != 'webhook-fanout'
+            `).get() as any;
 
         const pageCount = (db.prepare('PRAGMA page_count').get() as any)?.page_count || 0;
         const pageSize = (db.prepare('PRAGMA page_size').get() as any)?.page_size || 4096;
@@ -999,6 +1021,7 @@ export function getRequestLogStats(): { total: number; oldest: string | null; ne
 
         const value = {
             total: stats?.total || 0,
+            approx,
             oldest: stats?.oldest || null,
             newest: stats?.newest || null,
             dbSizeMB,

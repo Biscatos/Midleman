@@ -126,6 +126,9 @@
     .secured svg { width: 13px; height: 13px; color: var(--accent); }
     .secured b { font-weight: 500; color: var(--text2); }
     @media (max-width: 420px) { .card { padding: 24px 20px; } }
+    /* Flat: no rounded corners (matches the dashboard) */
+    *, *::before, *::after { border-radius: 0 !important; }
+    [style*="border-radius:50%"], [style*="border-radius: 50%"], .spinner, .dot { border-radius: 50% !important; }
   </style>
 </head>
 <body class="mm-grid-ground">
@@ -140,7 +143,7 @@
 
   <div class="card mm-frame">
     <div class="handshake" aria-hidden="true">
-      <span class="mm-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12h6.5"/><circle cx="12" cy="12" r="3.3"/><path d="M15 10.4 21.5 5.5"/><path d="M15.4 12H22"/><path d="M15 13.6 21.5 18.5"/></svg></span>
+      <span class="mm-mark"><svg viewBox="0 0 64 64" aria-hidden="true"><polygon points="14,8 26,16 18,24" fill="#1E6FAE"/><polygon points="50,8 38,16 46,24" fill="#1E6FAE"/><polygon points="18,24 26,16 38,16 46,24 48,46 32,58 16,46" fill="#2A8BD4"/><polygon points="16,46 18,24 8,40" fill="#1E6FAE"/><polygon points="48,46 46,24 56,40" fill="#1E6FAE"/><polygon points="26,16 38,16 32,22" fill="#1E6FAE"/><polygon points="22,40 32,58 42,40 32,46" fill="#5FB0EA"/><circle cx="25" cy="29" r="6" fill="#fff"/><circle cx="39" cy="29" r="6" fill="#fff"/><circle cx="25.8" cy="29.5" r="2.8" fill="#1E6FAE"/><circle cx="38.2" cy="29.5" r="2.8" fill="#1E6FAE"/><polygon points="29.5,35 34.5,35 32,40" fill="#1E6FAE"/><polygon points="26,58 30,58 28,62" fill="#1E6FAE"/><polygon points="34,58 38,58 36,62" fill="#1E6FAE"/></svg></span>
       <svg class="handshake-line" viewBox="0 0 44 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="3 4"><path d="M2 6h40"/></svg>
       <span class="app-logo"><span class="app-initials">{{CLIENT_INITIALS}}</span><img src="{{CLIENT_LOGO_URL}}" alt="" referrerpolicy="no-referrer" onerror="this.remove()"></span>
     </div>
@@ -193,7 +196,7 @@
 
   </div>
 
-  <div class="secured"><span>secured by</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12h6.5"/><circle cx="12" cy="12" r="3.3"/><path d="M15 10.4 21.5 5.5"/><path d="M15.4 12H22"/><path d="M15 13.6 21.5 18.5"/></svg><b>Midleman</b></div>
+  <div class="secured"><span>secured by</span><svg viewBox="0 0 64 64" aria-hidden="true"><polygon points="14,8 26,16 18,24" fill="#1E6FAE"/><polygon points="50,8 38,16 46,24" fill="#1E6FAE"/><polygon points="18,24 26,16 38,16 46,24 48,46 32,58 16,46" fill="#2A8BD4"/><polygon points="16,46 18,24 8,40" fill="#1E6FAE"/><polygon points="48,46 46,24 56,40" fill="#1E6FAE"/><polygon points="26,16 38,16 32,22" fill="#1E6FAE"/><polygon points="22,40 32,58 42,40 32,46" fill="#5FB0EA"/><circle cx="25" cy="29" r="6" fill="#fff"/><circle cx="39" cy="29" r="6" fill="#fff"/><circle cx="25.8" cy="29.5" r="2.8" fill="#1E6FAE"/><circle cx="38.2" cy="29.5" r="2.8" fill="#1E6FAE"/><polygon points="29.5,35 34.5,35 32,40" fill="#1E6FAE"/><polygon points="26,58 30,58 28,62" fill="#1E6FAE"/><polygon points="34,58 38,58 36,62" fill="#1E6FAE"/></svg><b>Midleman</b></div>
 
   <script>
     const AUTH_REQUEST = '{{AUTH_REQUEST}}';

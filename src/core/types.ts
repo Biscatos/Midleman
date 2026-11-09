@@ -112,6 +112,10 @@ export interface WebhookDestination {
   enabled?: boolean;
   method?: string; // e.g. "POST", "GET"
   customHeaders?: Record<string, string>;
+  /** Header names the admin marked as secret: masked in the API/UI like
+   *  Authorization/API-key headers are by name. One-way — the server only ever
+   *  adds to this list, never removes (a secret cannot be un-marked). */
+  secretHeaders?: string[];
   forwardHeaders?: boolean; // If true, inherit all incoming request headers
   bodyTemplate?: string; // uses {{field}} syntax, supports {{path || "fallback"}} and {{path || other.path}}
   /** When true and a bodyTemplate produces valid JSON, recursively strip keys
@@ -145,6 +149,9 @@ export interface WebhookSilenceAlert {
   thresholdMinutes: number;
   /** Destination email address. SMTP must be configured. */
   notifyEmail: string;
+  /** Only fire the silence alert inside these hours (Africa/Luanda). Absent or
+   *  empty = alert at any time. Same shape as connector business hours. */
+  weekly?: import('./business-hours').DaySchedule[];
 }
 
 export interface WebhookDistributor {
