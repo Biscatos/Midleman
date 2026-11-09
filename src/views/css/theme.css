@@ -78,18 +78,18 @@
 /* ─── Light ──────────────────────────────────────────────────────────────── */
 [data-theme="light"] {
   color-scheme: light;
-  /* Soft light: a clear, slightly cool page; cards one small step lighter,
-     never pure white (too much glare) nor grey (reads as disabled). */
-  --bg: #F7F9FC;
-  --bg2: #FCFDFE;
-  --grid-line: #EEF1F6;
-  --surface: #FCFDFE;
-  --surface2: #EFF2F7;
-  --surface3: #E7EBF1;
-  --border: #E0E5EC;
-  --border2: #C9D1DC;
-  --table-bg: #FAFBFD;
-  --table-head: #ECF1F7;
+  /* Light: near-white page, white cards; the only grey is the subtle
+     --surface2 used for inputs, hovers and the active nav item. */
+  --bg: #FCFCFD;
+  --bg2: #FFFFFF;
+  --grid-line: #F1F3F6;
+  --surface: #FFFFFF;
+  --surface2: #F4F6F9;
+  --surface3: #ECEFF3;
+  --border: #E3E7EC;
+  --border2: #CDD4DC;
+  --table-bg: #FFFFFF;
+  --table-head: #FFFFFF;
   --text: #1E293B;
   --text2: #475569;
   --text3: #556070;
@@ -119,10 +119,6 @@
 /* Ground with the faint technical grid */
 .mm-grid-ground {
   background-color: var(--bg);
-  background-image:
-    linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-  background-size: var(--grid-size) var(--grid-size);
 }
 
 /* Accent corner brackets — the system's only "elevation" cue */
@@ -150,11 +146,9 @@
   flex-shrink: 0;
   width: 2em;
   height: 2em;
-  border: 1px solid var(--accent);
-  border-radius: 0.45em;
   color: var(--accent);
 }
-.mm-mark svg { width: 1.15em; height: 1.15em; }
+.mm-mark svg { width: 2em; height: 2em; display: block; }
 
 .mm-mono { font-family: var(--font-mono); }
 .mm-display { font-family: var(--font-display); }

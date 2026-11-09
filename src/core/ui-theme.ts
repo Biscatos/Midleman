@@ -16,20 +16,14 @@ const THEME_PATH = resolve(VIEWS, 'css/theme.css');
 
 export const MM_THEME_MARKER = '<!-- MM_THEME -->';
 
-/** The logo glyph: one line in, a node, three lines out. 24×24, stroke = currentColor. */
-export const LOGO_GLYPH_SVG =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">'
-    + '<path d="M2 12h6.5"/><circle cx="12" cy="12" r="3.3"/><path d="M15 10.4 21.5 5.5"/><path d="M15.4 12H22"/><path d="M15 13.6 21.5 18.5"/></svg>';
+/** The logo: a faceted owl — flat polygons in two blues, white eyes. 64×64, self-coloured. */
+export const LOGO_GLYPH_SVG = '<svg viewBox="0 0 64 64" aria-hidden="true"><polygon points="14,8 26,16 18,24" fill="#1E6FAE"/><polygon points="50,8 38,16 46,24" fill="#1E6FAE"/><polygon points="18,24 26,16 38,16 46,24 48,46 32,58 16,46" fill="#2A8BD4"/><polygon points="16,46 18,24 8,40" fill="#1E6FAE"/><polygon points="48,46 46,24 56,40" fill="#1E6FAE"/><polygon points="26,16 38,16 32,22" fill="#1E6FAE"/><polygon points="22,40 32,58 42,40 32,46" fill="#5FB0EA"/><circle cx="25" cy="29" r="6" fill="#fff"/><circle cx="39" cy="29" r="6" fill="#fff"/><circle cx="25.8" cy="29.5" r="2.8" fill="#1E6FAE"/><circle cx="38.2" cy="29.5" r="2.8" fill="#1E6FAE"/><polygon points="29.5,35 34.5,35 32,40" fill="#1E6FAE"/><polygon points="26,58 30,58 28,62" fill="#1E6FAE"/><polygon points="34,58 38,58 36,62" fill="#1E6FAE"/></svg>';
 
 /** Square mark (glyph inside the bordered tile). Size it with `font-size` on the parent. */
 export const LOGO_MARK_HTML = `<span class="mm-mark">${LOGO_GLYPH_SVG}</span>`;
 
-// Favicon: the bare glyph, no tile. Colour follows the browser theme (deeper blue on light tabs, #41A5EE on dark).
-const FAVICON_SVG =
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
-    + '<style>g{stroke:#2A8BD4}@media (prefers-color-scheme:dark){g{stroke:#41A5EE}}</style>'
-    + '<g fill="none" stroke-width="2.2" stroke-linecap="round">'
-    + '<path d="M1.5 12h7"/><circle cx="12" cy="12" r="3.3"/><path d="M15 10.4 22 5"/><path d="M15.4 12H22.5"/><path d="M15 13.6 22 19"/></g></svg>';
+// Favicon: the owl itself — self-coloured, so it reads the same on light and dark tabs.
+const FAVICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><polygon points="14,8 26,16 18,24" fill="#1E6FAE"/><polygon points="50,8 38,16 46,24" fill="#1E6FAE"/><polygon points="18,24 26,16 38,16 46,24 48,46 32,58 16,46" fill="#2A8BD4"/><polygon points="16,46 18,24 8,40" fill="#1E6FAE"/><polygon points="48,46 46,24 56,40" fill="#1E6FAE"/><polygon points="26,16 38,16 32,22" fill="#1E6FAE"/><polygon points="22,40 32,58 42,40 32,46" fill="#5FB0EA"/><circle cx="25" cy="29" r="6" fill="#fff"/><circle cx="39" cy="29" r="6" fill="#fff"/><circle cx="25.8" cy="29.5" r="2.8" fill="#1E6FAE"/><circle cx="38.2" cy="29.5" r="2.8" fill="#1E6FAE"/><polygon points="29.5,35 34.5,35 32,40" fill="#1E6FAE"/><polygon points="26,58 30,58 28,62" fill="#1E6FAE"/><polygon points="34,58 38,58 36,62" fill="#1E6FAE"/></svg>';
 export const FAVICON_DATA_URI = 'data:image/svg+xml,' + encodeURIComponent(FAVICON_SVG);
 
 export const FONT_LINKS =

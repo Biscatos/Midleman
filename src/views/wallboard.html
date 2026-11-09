@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Midleman · Wallboard</title>
+<!-- MM_THEME -->
+<style>
+  /* Wallboard: dark operations board. KPI strip, one tile per monitor with its brand
+     icon, headline metric, sparkline and a heartbeat strip of the last checks, plus an
+     "active alerts" rail. Everything is inline SVG — no chart library. Polls every 10 s. */
+  /* Two palettes; the board follows the dashboard's saved theme and has its own toggle. */
+  :root, [data-theme="dark"] { --wb-bg: #0B1220; --wb-panel: #111A2B; --wb-line: rgba(255,255,255,.08); --wb-text: #E6EDF7; --wb-dim: #93A1B7; --wb-ok: #22C38B; --wb-al: #FF5A5A; --wb-unk: #5B6B82; --wb-btn: rgba(255,255,255,.06); --wb-btn-bdr: rgba(255,255,255,.12); --wb-btn-fg: #C8D3E3; --wb-tip-ok: #7BD88F; --wb-tip-al: #F3B4B4; }
+  [data-theme="light"] { --wb-bg: #F4F6F9; --wb-panel: #FFFFFF; --wb-line: #E3E7EC; --wb-text: #1E293B; --wb-dim: #64748B; --wb-ok: #15A371; --wb-al: #E0443E; --wb-unk: #94A3B8; --wb-btn: #FFFFFF; --wb-btn-bdr: #CDD4DC; --wb-btn-fg: #334155; --wb-tip-ok: #15A371; --wb-tip-al: #B42318; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--wb-bg); color: var(--wb-text); font-family: var(--font-sans, system-ui); display: flex; flex-direction: column; overflow: hidden; }
+  .top { display: flex; align-items: center; gap: 16px; padding: 14px 24px; border-bottom: 1px solid var(--wb-line); }
+  .brand { display: flex; align-items: center; gap: 10px; font: 500 17px var(--font-display, inherit); }
+  .brand svg { width: 28px; height: 28px; }
+  .clock { margin-left: auto; font: 500 26px var(--font-mono, monospace); letter-spacing: 1px; }
+  .btn { background: var(--wb-btn); border: 1px solid var(--wb-btn-bdr); color: var(--wb-btn-fg); border-radius: 0; padding: 6px 11px; font-size: 12.5px; cursor: pointer; text-decoration: none; }
+  .btn:hover { filter: brightness(1.08); color: var(--wb-text); }
+  .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; padding: 16px 24px 0; }
+  .kpi { background: var(--wb-panel); border: 1px solid var(--wb-line); border-radius: 0; padding: 12px 16px; }
+  .kpi .l { font: 500 11px var(--font-mono, monospace); letter-spacing: .6px; text-transform: uppercase; color: var(--wb-dim); }
+  .kpi .v { font: 600 30px/1.1 var(--font-display, inherit); letter-spacing: -.5px; margin-top: 4px; }
+  .kpi .v.ok { color: var(--wb-ok); } .kpi .v.al { color: var(--wb-al); }
+  .kpi .s { font-size: 11.5px; color: var(--wb-dim); margin-top: 2px; }
+  .kpi svg { width: 100%; height: 36px; display: block; margin-top: 6px; }
+  .body { flex: 1; display: grid; grid-template-columns: 1fr 300px; gap: 16px; padding: 16px 24px 24px; min-height: 0; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); align-content: start; overflow: auto; padding-right: 4px; }
+  .tile { text-decoration: none; position: relative; background: var(--wb-panel); border: 1px solid var(--wb-line); border-left: 4px solid var(--wb-unk); border-radius: 0; padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .tile.ok { border-left-color: var(--wb-ok); }
+  .tile.al { border-left-color: var(--wb-al); background: linear-gradient(180deg, rgba(255,90,90,.16), rgba(255,90,90,.06)), var(--wb-panel); animation: pulse 2.2s ease-in-out infinite; }
+  .tile.off { opacity: .55; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,90,90,0); } 50% { box-shadow: 0 0 0 3px rgba(255,90,90,.25); } }
+  .head { display: flex; align-items: center; gap: 10px; }
+  .ico { width: 34px; height: 34px; border-radius: 0; display: inline-flex; align-items: center; justify-content: center; flex: none; background: var(--wb-line); }
+  .ico svg { width: 20px; height: 20px; }
+  .ico.rabbitmq { background: rgba(255,102,0,.16); } .ico.redis { background: rgba(220,56,45,.18); } .ico.http { background: rgba(42,139,212,.18); }
+  .title { flex: 1; min-width: 0; }
+  .name { font: 500 15px var(--font-display, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .target { font: 400 11px var(--font-mono, monospace); color: var(--wb-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .badge { font: 600 11px var(--font-mono, monospace); letter-spacing: .6px; padding: 3px 8px; border-radius: 0; flex: none; }
+  .badge.ok { background: rgba(34,195,139,.18); color: var(--wb-ok); } .badge.al { background: rgba(255,90,90,.2); color: var(--wb-al); } .badge.unk, .badge.off { background: var(--wb-line); color: var(--wb-dim); }
+  .metric { display: flex; align-items: baseline; gap: 8px; }
+  .metric b { font: 600 28px/1 var(--font-display, inherit); letter-spacing: -.5px; }
+  .metric span { font-size: 12px; color: var(--wb-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .metric.al b, .metric.al span { color: var(--wb-al); }
+  .spark { width: 100%; height: 44px; display: block; }
+  .beat { display: grid; grid-template-columns: repeat(30, 1fr); gap: 2px; height: 8px; }
+  .beat i { display: block; border-radius: 0; background: var(--wb-line); }
+  .beat i.ok { background: var(--wb-ok); } .beat i.al { background: var(--wb-al); }
+  .foot { display: flex; justify-content: space-between; font-size: 11px; color: var(--wb-dim); }
+  .rail { background: var(--wb-panel); border: 1px solid var(--wb-line); border-radius: 0; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; }
+  .rail h3 { margin: 0; font: 500 12px var(--font-mono, monospace); letter-spacing: .6px; text-transform: uppercase; color: var(--wb-dim); }
+  .inc { border-left: 3px solid var(--wb-al); padding: 6px 10px; background: rgba(255,90,90,.08); border-radius: 0; }
+  .inc .n { font-weight: 500; font-size: 13px; }
+  .inc .r { font-size: 11.5px; color: var(--wb-tip-al); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .inc .t { font: 11px var(--font-mono, monospace); color: var(--wb-dim); margin-top: 2px; }
+  .calm { color: var(--wb-ok); font-size: 13px; display: flex; align-items: center; gap: 8px; }
+  .calm::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--wb-ok); }
+  .empty { grid-column: 1 / -1; color: var(--wb-dim); text-align: center; padding: 60px; }
+  .ov { position: fixed; inset: 0; background: rgba(5,10,20,.55); display: none; align-items: center; justify-content: center; padding: 24px; z-index: 50; }
+  .ov.on { display: flex; }
+  .dlg { width: min(960px, 100%); max-height: 92vh; display: flex; flex-direction: column; background: var(--wb-panel); border: 1px solid var(--wb-line); color: var(--wb-text); }
+  .dlg-h { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--wb-line); }
+  .dlg-h .name { font: 500 17px var(--font-display, inherit); }
+  .dlg-h .target { font: 400 11.5px var(--font-mono, monospace); color: var(--wb-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dlg-x { background: none; border: none; color: var(--wb-dim); font-size: 22px; cursor: pointer; line-height: 1; padding: 0 4px; }
+  .dlg-b { padding: 14px 18px 18px; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .stat { background: var(--wb-bg); border: 1px solid var(--wb-line); padding: 10px 12px; }
+  .stat .l { font: 500 10.5px var(--font-mono, monospace); letter-spacing: .6px; text-transform: uppercase; color: var(--wb-dim); }
+  .stat .v { font: 600 20px var(--font-display, inherit); margin-top: 2px; }
+  .stat .s { font-size: 11px; color: var(--wb-dim); }
+  .bigchart .spark { height: 120px; }
+  table.hist { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .hist th { text-align: left; font: 500 10.5px var(--font-mono, monospace); letter-spacing: .5px; text-transform: uppercase; color: var(--wb-dim); padding: 6px 8px; border-bottom: 1px solid var(--wb-line); }
+  .hist td { padding: 7px 8px; border-bottom: 1px solid var(--wb-line); vertical-align: top; }
+  .hist td.mono { font: 400 12px var(--font-mono, monospace); color: var(--wb-dim); white-space: nowrap; }
+  .hist tr.f td { background: rgba(255,90,90,.08); } .hist tr.f td.d { color: var(--wb-al); }
+  .hist td.d { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .peek-head { font-size: 12.5px; color: var(--wb-dim); }
+  .eq-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; font-size: 12px; color: var(--wb-dim); }
+  .eq-tools input { width: 56px; background: var(--wb-bg); border: 1px solid var(--wb-line); color: var(--wb-text); padding: 4px 6px; font: inherit; margin: 0 4px; }
+  .btn.danger { color: var(--wb-al); border-color: var(--wb-al); }
+  .msg { border: 1px solid var(--wb-line); background: var(--wb-bg); margin-top: 6px; }
+  .msg summary { display: flex; gap: 10px; align-items: center; padding: 7px 10px; cursor: pointer; font-size: 12px; list-style: none; }
+  .msg summary::-webkit-details-marker { display: none; }
+  .msg .n { font: 500 11px var(--font-mono, monospace); color: #5FB0EA; flex: none; } .msg .mt { color: var(--wb-dim); flex: none; white-space: nowrap; }
+  .msg .pv { font: 400 11.5px var(--font-mono, monospace); color: var(--wb-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .msg pre { margin: 0; padding: 10px 12px; border-top: 1px solid var(--wb-line); font: 400 11.5px/1.5 var(--font-mono, monospace); white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; }
+  .err { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); background: #C9372C; color: #fff; padding: 8px 14px; border-radius: 0; font-size: 12.5px; display: none; }
+  @media (max-width: 1100px) { .body { grid-template-columns: 1fr; } .rail { order: -1; max-height: 160px; } .kpis { grid-template-columns: repeat(3, 1fr); } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="ico-rabbitmq" viewBox="0 0 24 24"><path fill="#FF6600" d="M21 9h-6.3a.7.7 0 0 1-.7-.7V2.7a.7.7 0 0 0-.7-.7h-2.6a.7.7 0 0 0-.7.7v5.6a.7.7 0 0 1-.7.7H7.3a.7.7 0 0 1-.7-.7V2.7A.7.7 0 0 0 5.9 2H3.3a.7.7 0 0 0-.7.7V21.3c0 .4.3.7.7.7H21a.7.7 0 0 0 .7-.7V9.7A.7.7 0 0 0 21 9zm-3.5 8.2a1.3 1.3 0 0 1-1.3 1.3h-2.4a1.3 1.3 0 0 1-1.3-1.3v-2.4a1.3 1.3 0 0 1 1.3-1.3h2.4a1.3 1.3 0 0 1 1.3 1.3z"/></symbol>
+  <symbol id="ico-redis" viewBox="0 0 24 24"><g fill="#E3473C"><path d="M12 3 2.5 7.2 12 11.4l9.5-4.2z"/><path d="M2.5 10.4 12 14.6l9.5-4.2v2.3L12 16.9 2.5 12.7z" opacity=".85"/><path d="M2.5 15.6 12 19.8l9.5-4.2v2.3L12 22.1 2.5 17.9z" opacity=".7"/></g></symbol>
+  <symbol id="ico-http" viewBox="0 0 24 24"><g fill="none" stroke="#5FB0EA" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></g></symbol>
+</defs></svg>
+
+<header class="top">
+  <div class="brand"><!-- MM_LOGO -->Midleman <span style="color:var(--wb-dim);font-weight:400">· Wallboard</span></div>
+  <div class="clock" id="clock">--:--:--</div>
+  <button class="btn" onclick="toggleTheme()" id="themeBtn" title="Switch light / dark">Light</button>
+  <button class="btn" onclick="toggleFs()" id="fsBtn">Full screen</button>
+  <a class="btn" href="/dashboard#monitors">Dashboard</a>
+</header>
+
+<section class="kpis" id="kpis"></section>
+
+<div class="body">
+  <main class="grid" id="grid"><div class="empty">Loading monitors…</div></main>
+  <aside class="rail" id="rail"><h3>Active alerts</h3><div class="calm">All clear</div></aside>
+</div>
+<div class="ov" id="ov" onclick="if(event.target===this)closeDetail()">
+  <div class="dlg">
+    <div class="dlg-h">
+      <span class="ico" id="dIco"></span>
+      <div style="flex:1;min-width:0"><div class="name"><span id="dName"></span> <span class="badge" id="dBadge"></span></div><div class="target" id="dTarget"></div></div>
+      <select class="btn" id="dPeekWhich" style="display:none"><option value="error">error queue</option><option value="main" id="dPeekMain">queue</option></select>
+      <button class="btn" id="dPeekBtn" onclick="peek()" style="display:none">Peek messages</button>
+      <a class="btn" id="dDash" href="#">Open in dashboard</a>
+      <button class="dlg-x" onclick="closeDetail()" aria-label="Close">&times;</button>
+    </div>
+    <div class="dlg-b">
+      <div class="stats" id="dStats"></div>
+      <div class="bigchart" id="dChart"></div>
+      <div id="dPeek" style="display:none"></div>
+      <table class="hist"><thead><tr><th>Time</th><th>Result</th><th>Value</th><th>Took</th><th>Detail</th></tr></thead><tbody id="dRows"></tbody></table>
+    </div>
+  </div>
+</div>
+<div class="err" id="err"></div>
+
+<script>
+  // Theme: start from the dashboard's saved preference (midleman_theme), remember the board's own choice.
+  const THEME_KEY = 'midleman_theme', WB_THEME_KEY = 'mm_wallboard_theme';
+  function resolveTheme() {
+    const own = localStorage.getItem(WB_THEME_KEY); if (own === 'light' || own === 'dark') return own;
+    const pref = localStorage.getItem(THEME_KEY);
+    if (pref === 'light' || pref === 'dark') return pref;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  function applyTheme(t) { document.documentElement.setAttribute('data-theme', t); const b = document.getElementById('themeBtn'); if (b) b.textContent = t === 'dark' ? 'Light' : 'Dark'; }
+  function toggleTheme() { const t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'; localStorage.setItem(WB_THEME_KEY, t); applyTheme(t); }
+  applyTheme(resolveTheme());
+  const KIND = { rabbitmq: 'RabbitMQ queue', redis: 'Redis', http: 'HTTP endpoint' };
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  function ago(ts) {
+    if (!ts) return '—';
+    const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+    if (s < 60) return s + ' s'; const m = Math.round(s / 60); if (m < 60) return m + ' min';
+    const h = Math.round(m / 60); return h < 48 ? h + ' h' : Math.round(h / 24) + ' d';
+  }
+  const target = m => m.type === 'http' ? m.method + ' ' + m.url : m.type === 'redis' ? 'redis://' + m.host + ':' + m.port + '/' + m.db : m.queue + ' @ ' + m.apiUrl.replace(/^https?:\/\//, '');
+
+  /** Area sparkline of numeric history values; red dots where a check failed. */
+  function spark(hist, color, W = 300, H = 44) { // also used at 900×120 inside the detail
+    const pts = (hist || []).filter(h => typeof h.value === 'number');
+    if (pts.length < 2) return `<svg class="spark" viewBox="0 0 ${W} ${H}"><line x1="0" y1="${H - 1}" x2="${W}" y2="${H - 1}" stroke="var(--wb-line)"/></svg>`;
+    const vals = pts.map(p => p.value); const min = Math.min(0, ...vals), max = Math.max(...vals) || 1; const span = (max - min) || 1;
+    const x = i => (i * W / (pts.length - 1)).toFixed(1), y = v => (H - 4 - ((v - min) / span) * (H - 10)).toFixed(1);
+    const line = pts.map((p, i) => `${x(i)},${y(p.value)}`).join(' ');
+    const area = `0,${H} ${line} ${W},${H}`;
+    const dots = pts.map((p, i) => p.ok ? '' : `<circle cx="${x(i)}" cy="${y(p.value)}" r="2.5" fill="var(--wb-al)"/>`).join('');
+    return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><polygon points="${area}" fill="${color}" opacity=".15"/><polyline points="${line}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke"/>${dots}</svg>`;
+  }
+  /** Heartbeat strip: one cell per check, last 30, oldest left. */
+  function beat(hist) {
+    const h = (hist || []).slice(-30); const pad = 30 - h.length;
+    return `<div class="beat">${'<i></i>'.repeat(pad)}${h.map(c => `<i class="${c.ok ? 'ok' : 'al'}" title="${new Date(c.at).toLocaleTimeString()}"></i>`).join('')}</div>`;
+  }
+  function headline(m, s) {
+    if (m.type === 'rabbitmq') {
+      const last = s.lastActivityAt ? ago(s.lastActivityAt) : null;
+      const perMin = (s.history || []).slice(-6).reduce((a, h) => a + Math.max(0, h.value || 0), 0);
+      const eq = s.errorQueue && s.errorQueue.messages ? `${s.errorQueue.messages} in error queue` : '';
+      return { big: last ? last : '—', unit: last ? 'since last message' : 'no messages seen', aux: [perMin ? perMin + ' msgs in last 6 checks' : '', eq].filter(Boolean).join(' · ') };
+    }
+    if (m.type === 'redis' && s.redis) {
+      const r = s.redis;
+      return { big: r.memoryPct !== null ? r.memoryPct + '%' : bytes(r.usedMemory), unit: r.memoryPct !== null ? 'memory used' : 'memory (no limit)', aux: [s.lastValue != null ? s.lastValue + ' ms' : '', r.clients + ' clients', r.hitRatio !== null ? r.hitRatio + '% hits' : ''].filter(Boolean).join(' · ') };
+    }
+    return { big: s.lastValue != null ? s.lastValue : '—', unit: s.lastValue != null ? 'ms' : '', aux: '' };
+  }
+  const bytes = b => b >= 1 << 30 ? (b / (1 << 30)).toFixed(2) + ' GB' : b >= 1 << 20 ? (b / (1 << 20)).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB';
+
+  let LAST = [], OPEN = null;
+  const fmt = (v, unit) => Math.round(v) + ' ' + unit;
+  function openDetail(name) {
+    const m = LAST.find(x => x.name === name); if (!m) return;
+    OPEN = name;
+    const s = m.status || {}, state = s.state || 'unknown', al = state === 'alert', unit = m.type === 'rabbitmq' ? 'msgs' : 'ms';
+    const h = s.history || [], fails = h.filter(x => !x.ok).length, vals = h.map(x => x.value).filter(v => typeof v === 'number');
+    const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null, max = vals.length ? Math.max(...vals) : null;
+    document.getElementById('dIco').className = 'ico ' + m.type; document.getElementById('dIco').innerHTML = `<svg><use href="#ico-${m.type}"/></svg>`;
+    document.getElementById('dName').textContent = m.name;
+    const cls = al ? 'al' : state === 'ok' ? 'ok' : state === 'disabled' ? 'off' : 'unk';
+    const b = document.getElementById('dBadge'); b.className = 'badge ' + cls; b.textContent = al ? 'ALERT' : state === 'ok' ? 'OK' : state.toUpperCase();
+    document.getElementById('dTarget').textContent = target(m);
+    document.getElementById('dDash').href = '/dashboard#monitors/' + encodeURIComponent(m.name);
+    document.getElementById('dPeekBtn').style.display = m.type === 'rabbitmq' ? '' : 'none';
+    document.getElementById('dPeekWhich').style.display = m.type === 'rabbitmq' ? '' : 'none';
+    const mo = document.getElementById('dPeekMain'), busy = s.consumers === null || s.consumers > 0; mo.disabled = busy; mo.textContent = busy ? `queue (${s.consumers ?? '?'} consumers — peek disabled)` : 'queue (no consumers)'; if (busy) document.getElementById('dPeekWhich').value = 'error';
+    const stat = (l, v, sub) => `<div class="stat"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${sub || ''}</div></div>`;
+    document.getElementById('dStats').innerHTML =
+      stat('Checks kept', h.length, h.length ? 'since ' + new Date(h[0].at).toLocaleTimeString() : '') +
+      stat('Failed', `<span style="color:${fails ? 'var(--wb-al)' : 'inherit'}">${fails}</span>`, h.length ? Math.round(100 * (h.length - fails) / h.length) + '% ok' : '') +
+      stat(unit === 'ms' ? 'Avg latency' : 'Avg msgs / check', avg === null ? '—' : fmt(avg, unit), max === null ? '' : 'max ' + fmt(max, unit)) +
+      (s.errorQueue ? stat('Error queue', s.errorQueue.messages === null ? '—' : `<span style="color:${s.errorQueue.messages ? 'var(--wb-al)' : 'inherit'}">${s.errorQueue.messages}</span>`, esc(s.errorQueue.name)) : '') +
+      stat(al ? 'Alerting for' : 'Last check', al && s.alertSince ? ago(s.alertSince) : ago(s.lastCheckAt) + ' ago', al && s.alertSince ? 'since ' + new Date(s.alertSince).toLocaleTimeString() : '');
+    const r = s.redis;
+    if (r) document.getElementById('dStats').innerHTML +=
+      stat('Memory', r.memoryPct !== null ? r.memoryPct + '%' : bytes(r.usedMemory), r.memoryPct !== null ? bytes(r.usedMemory) + ' of ' + bytes(r.maxMemory) : 'no maxmemory set') +
+      stat('Clients', r.clients, r.blockedClients ? r.blockedClients + ' blocked' : 'none blocked') +
+      stat('Hit ratio', r.hitRatio !== null ? r.hitRatio + '%' : '—', r.hits + ' hits · ' + r.misses + ' misses') +
+      stat('Evicted / rejected', `<span style="color:${r.evictedKeys || r.rejectedConnections ? 'var(--wb-al)' : 'inherit'}">${r.evictedKeys} / ${r.rejectedConnections}</span>`, 'since server start') +
+      stat('Persistence', `<span style="color:${r.rdbStatus !== 'ok' ? 'var(--wb-al)' : 'inherit'}">${esc(r.rdbStatus)}</span>`, 'v' + esc(r.version) + ' ' + esc(r.role) + (r.linkStatus ? ' · link ' + esc(r.linkStatus) : ''));
+    document.getElementById('dChart').innerHTML = spark(h, al ? 'var(--wb-al)' : 'var(--wb-ok)', 900, 120);
+    document.getElementById('dRows').innerHTML = h.length ? [...h].reverse().map(x => `<tr class="${x.ok ? '' : 'f'}"><td class="mono">${new Date(x.at).toLocaleString()}</td><td><span class="badge ${x.ok ? 'ok' : 'al'}">${x.ok ? 'OK' : 'FAIL'}</span></td><td class="mono">${typeof x.value === 'number' ? fmt(x.value, unit) : '—'}</td><td class="mono">${typeof x.ms === 'number' ? x.ms + ' ms' : '—'}</td><td class="d" title="${esc(x.error || '')}">${x.error ? esc(x.error) : '<span style="color:var(--wb-dim)">healthy</span>'}</td></tr>`).join('')
+      : '<tr><td colspan="5" style="text-align:center;color:var(--wb-dim);padding:20px">No checks recorded yet.</td></tr>';
+    document.getElementById('ov').classList.add('on');
+  }
+  function closeDetail() { document.getElementById('ov').classList.remove('on'); OPEN = null; const p = document.getElementById('dPeek'); p.style.display = 'none'; p.innerHTML = ''; }
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
+  async function errorOp(op, all) {
+    const m = LAST.find(x => x.name === OPEN); if (!m) return;
+    const n = all ? 'all' : Math.max(1, parseInt(document.getElementById('eqN')?.value || '1', 10) || 1);
+    const eq = m.status?.errorQueue?.name || (m.queue + '_error');
+    const what = all ? `ALL messages in "${eq}"` : `the first ${n} message(s) in "${eq}"`;
+    if (!confirm(op === 'requeue' ? `Move ${what} back to "${m.queue}"?\n\nIf the cause is not fixed they will fail again.` : `Permanently delete ${what}?\n\nThis cannot be undone.`)) return;
+    const res = await fetch(`/admin/monitors/${encodeURIComponent(OPEN)}/error-queue/${op}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: n }) });
+    const d = await res.json().catch(() => ({}));
+    const el = document.getElementById('err'); el.style.display = 'block'; el.style.background = res.status >= 400 || d.error ? '#C9372C' : '#1D9E75';
+    el.textContent = res.status >= 400 ? (d.error || 'Operation failed') : `${op === 'requeue' ? 'Requeued' : 'Discarded'} ${d.processed} message(s)` + (d.remaining != null ? ` · ${d.remaining} left` : '') + (d.error ? ` · stopped: ${d.error}` : '');
+    setTimeout(() => { el.style.display = 'none'; el.style.background = ''; }, 6000);
+    await load(); if (OPEN) peek();
+  }
+  async function peek() {
+    const box = document.getElementById('dPeek'), btn = document.getElementById('dPeekBtn');
+    box.style.display = ''; box.innerHTML = '<div class="peek-head">Reading queue…</div>'; btn.disabled = true;
+    try {
+      const which = document.getElementById('dPeekWhich').style.display !== 'none' ? document.getElementById('dPeekWhich').value : 'main';
+      const res = await fetch(`/admin/monitors/${encodeURIComponent(OPEN)}/peek?count=10&which=${which}`, { cache: 'no-store' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { box.innerHTML = `<div class="peek-head" style="color:var(--wb-al)">${esc(d.error || 'Peek failed')}</div>`; return; }
+      if (!d.messages.length) { box.innerHTML = `<div class="peek-head">Queue <b>${esc(d.queue)}</b> is empty right now.</div>`; return; }
+      const tools = d.which === 'error' ? `<div class="eq-tools"><label>First <input type="number" id="eqN" min="1" max="1000" value="${Math.min(d.messages.length, 10)}"></label>
+          <button class="btn" onclick="errorOp('requeue',false)">Requeue first N</button><button class="btn" onclick="errorOp('requeue',true)">Requeue all</button>
+          <button class="btn" onclick="errorOp('discard',false)">Discard first N</button><button class="btn danger" onclick="errorOp('discard',true)">Purge all</button>
+          <a class="btn" href="/admin/monitors/${encodeURIComponent(OPEN)}/error-queue/export?count=500" download>Export JSON</a></div>` : '';
+      box.innerHTML = tools + `<div class="peek-head">Next ${d.messages.length} message(s) in <b>${esc(d.queue)}</b> — read without consuming (marked redelivered).</div>` +
+        d.messages.map((m, i) => { let pretty = m.payload; try { pretty = JSON.stringify(JSON.parse(m.payload), null, 2); } catch {}
+          const meta = [m.timestamp ? new Date(m.timestamp).toLocaleString() : null, m.routingKey ? 'key ' + m.routingKey : null, m.bytes + ' B', m.redelivered ? 'redelivered' : null].filter(Boolean).join(' · ');
+          return `<details class="msg"${i === 0 ? ' open' : ''}><summary><span class="n">#${i + 1}</span><span class="mt">${esc(meta)}</span><span class="pv">${esc(m.payload.slice(0, 110))}</span></summary><pre>${esc(pretty)}${m.truncated ? '\n… (truncated)' : ''}</pre></details>`; }).join('');
+    } catch (e) { box.innerHTML = `<div class="peek-head" style="color:var(--wb-al)">${esc(e.message || e)}</div>`; }
+    finally { btn.disabled = false; }
+  }
+
+  async function load() {
+    try {
+      const res = await fetch('/admin/monitors', { cache: 'no-store' });
+      if (res.status === 401) { location.href = '/dashboard'; return; }
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      LAST = (await res.json()).monitors || [];
+      render(LAST);
+      if (OPEN) { const keepPeek = document.getElementById('dPeek').innerHTML; openDetail(OPEN); document.getElementById('dPeek').innerHTML = keepPeek; document.getElementById('dPeek').style.display = keepPeek ? '' : 'none'; }
+      document.getElementById('err').style.display = 'none';
+    } catch (e) { const el = document.getElementById('err'); el.textContent = 'Cannot reach Midleman: ' + (e.message || e); el.style.display = 'block'; }
+  }
+
+  function render(list) {
+    const st = m => m.status?.state || 'unknown';
+    const ok = list.filter(m => st(m) === 'ok').length, al = list.filter(m => st(m) === 'alert').length;
+    const checks = list.flatMap(m => m.status?.history || []);
+    const avail = checks.length ? Math.round(100 * checks.filter(c => c.ok).length / checks.length) : null;
+    const lat = list.filter(m => m.type !== 'rabbitmq' && typeof m.status?.lastValue === 'number').map(m => m.status.lastValue);
+    const avgLat = lat.length ? Math.round(lat.reduce((a, b) => a + b, 0) / lat.length) : null;
+    const last = Math.max(0, ...list.map(m => m.status?.lastCheckAt || 0));
+    // Global failure timeline: per time-bucket, share of failing checks across all monitors.
+    const buckets = 40, now = Date.now(), win = 60 * 60 * 1000, bs = win / buckets, agg = Array.from({ length: buckets }, () => ({ n: 0, bad: 0 }));
+    for (const c of checks) { const i = Math.floor((c.at - (now - win)) / bs); if (i >= 0 && i < buckets) { agg[i].n++; if (!c.ok) agg[i].bad++; } }
+    const tl = `<svg viewBox="0 0 ${buckets * 6} 36" preserveAspectRatio="none">${agg.map((b, i) => `<rect x="${i * 6}" y="${b.n ? 4 : 30}" width="4.5" height="${b.n ? 32 : 2}" rx="1" fill="${!b.n ? 'var(--wb-line)' : b.bad ? 'var(--wb-al)' : 'var(--wb-ok)'}" opacity="${b.n && b.bad ? Math.min(1, .5 + b.bad / b.n) : 1}"/>`).join('')}</svg>`;
+    document.getElementById('kpis').innerHTML = `
+      <div class="kpi"><div class="l">Alerting</div><div class="v ${al ? 'al' : ''}">${al}</div><div class="s">of ${list.length} monitors</div></div>
+      <div class="kpi"><div class="l">Healthy</div><div class="v ok">${ok}</div><div class="s">${list.length - ok - al} pending / disabled</div></div>
+      <div class="kpi"><div class="l">Availability</div><div class="v ${avail !== null && avail < 99 ? 'al' : 'ok'}">${avail === null ? '—' : avail + '%'}</div><div class="s">of recent checks</div></div>
+      <div class="kpi"><div class="l">Avg latency</div><div class="v">${avgLat === null ? '—' : avgLat + '<span style="font-size:14px;color:var(--wb-dim)"> ms</span>'}</div><div class="s">HTTP + Redis</div></div>
+      <div class="kpi"><div class="l">Last hour</div>${tl}<div class="s">last check ${last ? ago(last) + ' ago' : '—'}</div></div>`;
+    document.title = (al ? `(${al}) ` : '') + 'Midleman · Wallboard';
+
+    const grid = document.getElementById('grid');
+    if (!list.length) { grid.innerHTML = '<div class="empty">No monitors configured.</div>'; }
+    else {
+      const order = { alert: 0, ok: 1, unknown: 2, disabled: 3 };
+      list.sort((a, b) => (order[st(a)] ?? 9) - (order[st(b)] ?? 9) || a.name.localeCompare(b.name));
+      grid.innerHTML = list.map(m => {
+        const s = m.status || {}; const state = st(m);
+        const cls = state === 'alert' ? 'al' : state === 'ok' ? 'ok' : state === 'disabled' ? 'off' : 'unk';
+        const h = headline(m, s);
+        const metric = state === 'alert'
+          ? `<div class="metric al"><b>ALERT</b><span title="${esc(s.lastError || '')}">${esc(s.lastError || '')}</span></div>`
+          : `<div class="metric"><b>${esc(h.big)}</b><span>${esc(h.unit)}${h.aux ? ' · ' + esc(h.aux) : ''}</span></div>`;
+        return `<a class="tile ${cls}" href="#" onclick="openDetail('${esc(m.name).replace(/'/g, "\\'")}');return false" title="Open details">
+          <div class="head"><span class="ico ${m.type}"><svg><use href="#ico-${m.type}"/></svg></span>
+            <div class="title"><div class="name">${esc(m.name)}</div><div class="target" title="${esc(target(m))}">${esc(target(m))}</div></div>
+            <span class="badge ${cls}">${state === 'alert' ? 'ALERT' : state === 'ok' ? 'OK' : state === 'disabled' ? 'OFF' : 'PENDING'}</span></div>
+          ${metric}
+          ${spark(s.history, state === 'alert' ? 'var(--wb-al)' : 'var(--wb-ok)')}
+          ${beat(s.history)}
+          <div class="foot"><span>${KIND[m.type] || m.type}${s.alertSince ? ' · alerting for ' + ago(s.alertSince) : ''}</span><span>checked ${ago(s.lastCheckAt)} ago</span></div>
+        </a>`;
+      }).join('');
+    }
+
+    const rail = document.getElementById('rail');
+    const inc = list.filter(m => st(m) === 'alert').sort((a, b) => (a.status.alertSince || 0) - (b.status.alertSince || 0));
+    rail.innerHTML = '<h3>Active alerts</h3>' + (inc.length
+      ? inc.map(m => `<div class="inc"><div class="n">${esc(m.name)}</div><div class="r" title="${esc(m.status.lastError || '')}">${esc(m.status.lastError || '')}</div><div class="t">since ${m.status.alertSince ? new Date(m.status.alertSince).toLocaleTimeString() + ' · ' + ago(m.status.alertSince) : '—'}</div></div>`).join('')
+      : '<div class="calm">All clear</div>');
+  }
+
+  const tick = () => document.getElementById('clock').textContent = new Date().toLocaleTimeString(undefined, { hour12: false });
+  function toggleFs() { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.(); }
+  document.addEventListener('fullscreenchange', () => { document.getElementById('fsBtn').textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen'; });
+  tick(); setInterval(tick, 1000); load(); setInterval(load, 10000);
+</script>
+</body>
+</html>

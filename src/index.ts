@@ -1,8 +1,8 @@
 // MUST stay the first import: the module self-installs the console patch and
 // process-level handlers on evaluation, so keeping it first is what guarantees
 // no other module's top-level code throws before the feed is listening.
-import { getAppIconUrl, prefetchAppIcon, iconSourceUri } from './auth/app-icon';
-import { queryErrors as queryErrorFeed, getErrorStats, getError as getErrorEntry, ackErrors, clearErrors } from './core/error-feed';
+import { getAppIcon, prefetchAppIcon, iconSourceUri } from './auth/app-icon';
+import { queryErrors as queryErrorFeed, getErrorStats, getError as getErrorEntry, ackErrors, clearErrors, flushErrorBuffer } from './core/error-feed';
 
 import { loadConfig, reloadEnvFile, loadProxyProfiles, loadTcpUdpProfiles } from './core/config';
 import { UnauthorizedError, type ProxyProfile } from './core/types';
@@ -25,7 +25,7 @@ import { initFive9Sessions, shutdownFive9Sessions, listFive9Sessions, deleteFive
 import { initTelemetry, shutdownTelemetry, getTelemetryConfig, getMetricsSnapshot } from './telemetry/telemetry';
 import { initRequestLog, shutdownRequestLog, queryRequestLogs, getRequestLogDetail, getRequestLogStats, getRequestLogChart, getRequestLogBreakdown, getPurgeStatus, startPurge, compactDatabase, type RequestLogEntry, type PurgeOptions } from './telemetry/request-log';
 import { replayProxyRequest, ReplayError } from './proxy/replay';
-import { withTheme, dashboardAssetVersion, FAVICON_DATA_URI } from './core/ui-theme';
+import { withTheme, dashboardAssetVersion, FAVICON_DATA_URI, LOGO_GLYPH_SVG } from './core/ui-theme';
 import { normalizeCorsInput } from './core/cors';
 import { initLogSettings, getLogSettings, saveLogSettings, registerLogModeResolver, isLogMode, type LogMode } from './telemetry/log-settings';
 import { initSipLog, shutdownSipLog, querySipLogs, getSipLogDetail, getSipLogStats } from './telemetry/sip-log';
@@ -45,6 +45,7 @@ listNotificationRules, createNotificationRule, updateNotificationRule, deleteNot
 timingSafeEqualStr,
 type NotificationSeverity, type NotificationChannel } from './auth/auth';
 import { emitNotificationEvent, dispatchTestToGroup } from './core/notifications';
+import { listMonitors, getMonitor, upsertMonitor, deleteMonitor, publicMonitor, validateMonitorInput, runCheck, peekQueue, listRabbitQueues, errorQueueName, requeueErrorMessages, discardErrorMessages, exportErrorMessages, startMonitorScheduler, stopMonitorScheduler } from './core/monitors';
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
 import { initConsentPages, listConsentPages, getConsentPage, createConsentPage, updateConsentPage, deleteConsentPage, findConsentPageOauthReferences } from './auth/consent-pages';
 import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin, runLdapSync, getLastLdapSyncReport } from './auth/ldap';
@@ -275,6 +276,40 @@ const SECURITY_HEADERS: Record<string, string> = {
 };
 
 /** Shorthand for JSON responses */
+// ── Secrets never travel back to the browser in plaintext ──
+// GET handlers replace stored secrets with SECRET_MASK; POST handlers treat the
+// mask (or an empty value) as "keep what is stored". Header values are masked by
+// name so an Authorization/API-key header on a webhook destination is covered.
+const SECRET_MASK = '••••••••';
+const SECRET_HEADER_RE = /authorization|api[-_]?key|token|secret|password|cookie|x-auth/i;
+function isSecretHeader(name: string, flagged?: string[]): boolean {
+    return SECRET_HEADER_RE.test(name) || !!flagged?.some(f => f.toLowerCase() === name.toLowerCase());
+}
+function redactTargets<T>(targets: T[]): T[] {
+    return targets.map(t => {
+        if (!t || typeof t !== 'object' || !(t as any).customHeaders) return t;
+        const h: Record<string, string> = {};
+        for (const [k, v] of Object.entries((t as any).customHeaders as Record<string, string>)) h[k] = isSecretHeader(k, (t as any).secretHeaders) && v ? SECRET_MASK : v;
+        return { ...(t as any), customHeaders: h } as T;
+    });
+}
+function restoreTargetSecrets<T>(targets: T[], prevTargets: unknown[]): T[] {
+    return targets.map(t => {
+        if (!t || typeof t !== 'object' || !(t as any).customHeaders) return t;
+        const url = (t as any).url;
+        const prev = prevTargets.find(p => p && typeof p === 'object' && (p as any).url === url) as any;
+        const h: Record<string, string> = {};
+        for (const [k, v] of Object.entries((t as any).customHeaders as Record<string, string>)) {
+            if (v === SECRET_MASK) { const old = prev?.customHeaders?.[k]; if (old) h[k] = old; }
+            else h[k] = v;
+        }
+        // "Secret" is one-way: keep every name previously flagged, add the new ones.
+        const flagged = new Set<string>([...(prev?.secretHeaders || []), ...(((t as any).secretHeaders as string[] | undefined) || [])].map(x => x.toLowerCase()));
+        const secretHeaders = Object.keys(h).filter(k => flagged.has(k.toLowerCase()));
+        return { ...(t as any), customHeaders: h, ...(secretHeaders.length ? { secretHeaders } : {}) } as T;
+    });
+}
+
 function jsonRes(status: number, body: Record<string, unknown>): Response {
     return new Response(JSON.stringify(body), {
         status,
@@ -447,6 +482,7 @@ if (five9Connectors.length > 0) {
 // Resume any persistent-retry entries left over from the previous run.
 startPendingRetryScheduler();
 startSilenceAlertScheduler();
+startMonitorScheduler();
 
 // TCP/UDP proxies are started AFTER the main HTTP server below — they may run
 // ACME HTTP-01 which needs the main server to be already listening on :80.
@@ -538,6 +574,18 @@ const PUBLIC_PATHS: RegExp[] = [
     /^\/auth\/reset$/,
     /^\/(logo\.png|favicon\.(ico|png))$/,
 ];
+/** Queue lists (DLQ / pending retry) ship at most this many rows; `total` has the full count. */
+function queueListLimit(url: URL): number {
+    const n = Number(url.searchParams.get('limit'));
+    return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), 2000) : 500;
+}
+
+function countByWebhook(entries: { webhookName: string }[]): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const e of entries) out[e.webhookName] = (out[e.webhookName] || 0) + 1;
+    return out;
+}
+
 function publicLinkBase(req: Request): string {
     if (PUBLIC_URL) return PUBLIC_URL;
     const reqHost = req.headers.get('host') || `localhost:${config.port}`;
@@ -1130,6 +1178,14 @@ const server = Bun.serve({
                 }
             }
 
+            // Wallboard: full-screen operations board for the monitors (same session as the dashboard;
+            // the page redirects to /dashboard when /admin/monitors answers 401).
+            if (url.pathname === '/wallboard' || url.pathname === '/wallboard/') {
+                const html = withTheme(readFileSync(resolve(import.meta.dir, 'views/wallboard.html'), 'utf-8'))
+                    .replace('<!-- MM_LOGO -->', LOGO_GLYPH_SVG);
+                return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+            }
+
             if (url.pathname === '/dashboard' || url.pathname === '/dashboard/') {
                 const htmlPath = resolve(import.meta.dir, 'views/dashboard.html');
                 let html = readFileSync(htmlPath, 'utf-8');
@@ -1713,11 +1769,19 @@ const server = Bun.serve({
                         const s = status.find(s => s.name === w.name);
                         return {
                             name: w.name,
-                            targets: w.targets,
+                            targets: redactTargets(w.targets),
                             port: s?.port ?? w.port,
                             hasAuth: !!w.authToken,
+                            hasAuthToken: !!w.authToken,
                             retry: w.retry,
                             allowedIps: w.allowedIps || [],
+                            // The edit form is populated from this list, so every
+                            // editable field must be here or saving silently resets it.
+                            allowPrivateTargets: w.allowPrivateTargets !== false,
+                            targetAllowedCidrs: w.targetAllowedCidrs || [],
+                            silenceAlert: w.silenceAlert,
+                            logMode: w.logMode || '',
+                            testPayload: w.testPayload,
                             running: s?.running ?? false,
                             active: s?.active ?? 0,
                             npmProxyHostId: w.npmProxyHostId,
@@ -1743,15 +1807,19 @@ const server = Bun.serve({
                 // ── Dead Letter Queue ──
                 if (url.pathname === '/admin/webhooks/dlq' && req.method === 'GET') {
                     const nameFilter = url.searchParams.get('webhook') || undefined;
-                    const queue = getDeadLetterQueue();
-                    const filtered = nameFilter ? queue.filter(e => e.webhookName === nameFilter) : queue;
-                    const safeEntries = filtered.map(e => ({
+                    const requestIdFilter = url.searchParams.get('requestId') || undefined;
+                    let filtered = getDeadLetterQueue();
+                    if (nameFilter) filtered = filtered.filter(e => e.webhookName === nameFilter);
+                    if (requestIdFilter) filtered = filtered.filter(e => e.requestId === requestIdFilter);
+                    // ?summary=1 → counts only (sidebar badges poll this; no rows shipped).
+                    if (url.searchParams.get('summary') === '1') return jsonRes(200, { byWebhook: countByWebhook(filtered), total: filtered.length });
+                    const total = filtered.length;
+                    const safeEntries = filtered.slice(0, queueListLimit(url)).map(e => ({
                         id: e.id,
                         webhookName: e.webhookName,
                         requestId: e.requestId,
                         targetUrl: e.targetUrl,
                         method: e.method,
-                        bodyPreview: e.bodyPreview,
                         bodySize: e.bodySize,
                         path: e.path,
                         clientIp: e.clientIp,
@@ -1760,7 +1828,7 @@ const server = Bun.serve({
                         failedAt: e.failedAt,
                         retrying: e.retrying,
                     }));
-                    return jsonRes(200, { queue: safeEntries, total: safeEntries.length });
+                    return jsonRes(200, { queue: safeEntries, total });
                 }
 
                 if (url.pathname === '/admin/webhooks/dlq/retry-all' && req.method === 'POST') {
@@ -1800,13 +1868,14 @@ const server = Bun.serve({
                     let queue = getPendingRetryQueue();
                     if (nameFilter) queue = queue.filter(e => e.webhookName === nameFilter);
                     if (requestIdFilter) queue = queue.filter(e => e.requestId === requestIdFilter);
-                    const safeEntries = queue.map(e => ({
+                    if (url.searchParams.get('summary') === '1') return jsonRes(200, { byWebhook: countByWebhook(queue), total: queue.length });
+                    const total = queue.length;
+                    const safeEntries = queue.slice(0, queueListLimit(url)).map(e => ({
                         id: e.id,
                         webhookName: e.webhookName,
                         requestId: e.requestId,
                         targetUrl: e.targetUrl,
                         method: e.method,
-                        bodyPreview: e.bodyPreview,
                         bodySize: e.bodySize,
                         path: e.path,
                         clientIp: e.clientIp,
@@ -1821,7 +1890,7 @@ const server = Bun.serve({
                         notifyEmail: e.persistentRetry.notifyEmail || '',
                         maxAttemptsPerMinute: e.persistentRetry.maxAttemptsPerMinute ?? 10,
                     }));
-                    return jsonRes(200, { queue: safeEntries, total: safeEntries.length });
+                    return jsonRes(200, { queue: safeEntries, total });
                 }
 
                 if (url.pathname === '/admin/webhooks/pending-retry/cancel-all' && req.method === 'POST') {
@@ -1857,7 +1926,7 @@ const server = Bun.serve({
                     return jsonRes(200, {
                         webhook: {
                             name: webhook.name,
-                            targets: webhook.targets,
+                            targets: redactTargets(webhook.targets),
                             port: webhook.port,
                             // Never return the inbound auth token in plaintext — it is a
                             // shared secret. The form only sends a new value when the admin
@@ -1932,6 +2001,8 @@ const server = Bun.serve({
                         // Preserve the existing inbound auth token when the form did not
                         // submit a new one (it is no longer sent back to the client).
                         if (!webhookWithPort.authToken && prev.authToken) webhookWithPort.authToken = prev.authToken;
+                        // Masked header values (Authorization etc.) come back as SECRET_MASK — restore the stored ones.
+                        webhookWithPort.targets = restoreTargetSecrets(webhookWithPort.targets, prev.targets);
                         if (prev.npmProxyHostId !== undefined) webhookWithPort.npmProxyHostId = prev.npmProxyHostId;
                         if (prev.npmOriginalForwardHost) webhookWithPort.npmOriginalForwardHost = prev.npmOriginalForwardHost;
                         if (prev.npmOriginalForwardPort !== undefined) webhookWithPort.npmOriginalForwardPort = prev.npmOriginalForwardPort;
@@ -2003,7 +2074,8 @@ const server = Bun.serve({
                         gocontact: {
                             baseUrl: c.gocontact.baseUrl,
                             username: c.gocontact.username,
-                            hashKey: c.gocontact.hashKey,
+                            hashKey: c.gocontact.hashKey ? SECRET_MASK : '',
+                            hasHashKey: !!c.gocontact.hashKey,
                             domainUuid: c.gocontact.domainUuid || '',
                             language: c.gocontact.language || 'en',
                             timestampOffsetHours: c.gocontact.timestampOffsetHours ?? 1,
@@ -2166,7 +2238,7 @@ const server = Bun.serve({
                             baseUrl: input.gocontact.baseUrl ? String(input.gocontact.baseUrl) : '',
                             username: String(input.gocontact.username),
                             password: String(input.gocontact.password),
-                            hashKey: input.gocontact.hashKey ? String(input.gocontact.hashKey) : '',
+                            hashKey: input.gocontact.hashKey && input.gocontact.hashKey !== SECRET_MASK ? String(input.gocontact.hashKey) : '',
                             domainUuid: input.gocontact.domainUuid ? String(input.gocontact.domainUuid).trim() : undefined,
                             language: input.gocontact.language ? String(input.gocontact.language) : undefined,
                             timestampOffsetHours: typeof input.gocontact.timestampOffsetHours === 'number' ? input.gocontact.timestampOffsetHours : undefined,
@@ -2254,6 +2326,8 @@ const server = Bun.serve({
                     let assignedPort: number;
                     try { assignedPort = await assignConnectorPort(connector.name, portToUse, config.port, excludePorts); }
                     catch (err) { return jsonRes(400, { error: err instanceof Error ? err.message : String(err) }); }
+                    // GET redacts the hash key, so an unchanged form posts it back blank — keep the stored one.
+                    if (prev && !connector.gocontact.hashKey && prev.gocontact?.hashKey) connector.gocontact.hashKey = prev.gocontact.hashKey;
                     const connectorWithPort = { ...connector, port: assignedPort };
 
                     if (existingIdx >= 0) connectors[existingIdx] = connectorWithPort;
@@ -2518,7 +2592,7 @@ const server = Bun.serve({
                     return jsonRes(200, {
                         port: config.port,
                         targetUrl: config.targetUrl || '',
-                        authToken: config.authToken || '',
+                        authToken: config.authToken ? SECRET_MASK : '',
                         forwardPath: config.forwardPath,
                     });
                 }
@@ -2548,10 +2622,10 @@ const server = Bun.serve({
                         profile: {
                             name: profile.name,
                             targetUrl: profile.targetUrl,
-                            apiKey: profile.apiKey,
+                            apiKey: profile.apiKey ? SECRET_MASK : '',
                             authHeader: profile.authHeader,
                             authPrefix: profile.authPrefix || '',
-                            accessKey: profile.accessKey || '',
+                            accessKey: profile.accessKey ? SECRET_MASK : '',
                             authMode: profile.authMode || 'none',
                             require2fa: !!profile.require2fa,
                             isWebApp: !!profile.isWebApp,
@@ -2636,10 +2710,10 @@ const server = Bun.serve({
                         name: (input.name as string).toLowerCase(),
                         targetUrl: (input.targetUrl as string).replace(/\/$/, ''),
                     };
-                    if (input.apiKey) profile.apiKey = input.apiKey as string;
+                    if (input.apiKey && input.apiKey !== SECRET_MASK) profile.apiKey = input.apiKey as string;
                     if (input.authHeader) profile.authHeader = input.authHeader as string;
                     if (input.authPrefix) profile.authPrefix = input.authPrefix as string;
-                    if (input.accessKey) profile.accessKey = input.accessKey as string;
+                    if (input.accessKey && input.accessKey !== SECRET_MASK) profile.accessKey = input.accessKey as string;
                     if (input.authMode && ['none', 'accessKey', 'login'].includes(input.authMode as string)) {
                         profile.authMode = input.authMode as 'none' | 'accessKey' | 'login';
                     }
@@ -4284,8 +4358,9 @@ const server = Bun.serve({
                 if (url.pathname === '/admin/oauth-clients/app-icon' && req.method === 'GET') {
                     // ?uri= may repeat (all redirect URIs, in order): local ones are skipped.
                     const uris = url.searchParams.getAll('uri').map(u => u.trim()).filter(Boolean);
-                    const source = iconSourceUri(uris);
-                    return jsonRes(200, { iconUrl: source ? await getAppIconUrl([source], 4000) : '', source: source || '' });
+                    // All candidates are tried (site hosts first, API hosts last); the one that has an icon wins.
+                    const icon = await getAppIcon(uris, 4000);
+                    return jsonRes(200, { iconUrl: icon.url, source: icon.origin || iconSourceUri(uris) || '' });
                 }
 
                 if (url.pathname === '/admin/oauth-clients' && req.method === 'POST') {
@@ -4590,6 +4665,94 @@ const server = Bun.serve({
 
                 // ── TCP/UDP Proxy CRUD ───────────────────────────────────────────────────
 
+                // ── Monitors (RabbitMQ queues, HTTP endpoints) ──
+                if (url.pathname === '/admin/monitors' && req.method === 'GET') {
+                    return jsonRes(200, { monitors: listMonitors().map(publicMonitor) });
+                }
+                if (url.pathname === '/admin/monitors/rabbit-queues' && req.method === 'POST') {
+                    // Browse a broker's queues from the monitor form. Credentials come in the body;
+                    // a blank password with `monitor` set reuses that saved monitor's password.
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
+                    if (typeof body?.apiUrl !== 'string' || !/^https?:\/\/\S+$/.test(body.apiUrl.trim())) return jsonRes(400, { error: '"apiUrl" must be an http(s) URL' });
+                    let password: string | undefined = typeof body.password === 'string' && body.password ? body.password : undefined;
+                    if (!password && typeof body.monitor === 'string') { const saved = getMonitor(body.monitor.toLowerCase()); if (saved && saved.type === 'rabbitmq') password = saved.password; }
+                    try {
+                        const queues = await listRabbitQueues(body.apiUrl, typeof body.vhost === 'string' && body.vhost ? body.vhost : undefined, typeof body.username === 'string' && body.username ? body.username : undefined, password, body.allowPrivate !== false);
+                        return jsonRes(200, { queues });
+                    } catch (e) {
+                        return jsonRes(502, { error: e instanceof Error ? e.message : String(e) });
+                    }
+                }
+                if (url.pathname === '/admin/monitors' && req.method === 'POST') {
+                    let body: unknown;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
+                    const v = validateMonitorInput(body);
+                    if ('error' in v) return jsonRes(400, { error: v.error });
+                    // `passwordFrom`: reuse another saved monitor's password (same broker) — it is never sent to the browser.
+                    const from = typeof (body as any)?.passwordFrom === 'string' ? getMonitor((body as any).passwordFrom.toLowerCase()) : undefined;
+                    if (v.monitor.type !== 'http' && !v.monitor.password && from && from.type === v.monitor.type && from.password) v.monitor.password = from.password;
+                    const { created } = upsertMonitor(v.monitor);
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: created ? 'monitor.create' : 'monitor.update', targetType: 'monitor', targetId: v.monitor.name, details: { type: v.monitor.type }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    void runCheck(v.monitor).catch(() => {});
+                    return jsonRes(200, { status: created ? 'created' : 'updated', monitor: publicMonitor(v.monitor) });
+                }
+                {
+                    const mm = url.pathname.match(/^\/admin\/monitors\/([^/]+)(\/check|\/peek|\/error-queue\/(?:requeue|discard|export))?$/);
+                    if (mm) {
+                        const name = decodeURIComponent(mm[1]).toLowerCase();
+                        const m = getMonitor(name);
+                        if (!m) return jsonRes(404, { error: `Monitor "${name}" not found` });
+                        if (mm[2] === '/peek' && req.method === 'GET') {
+                            if (m.type !== 'rabbitmq') return jsonRes(400, { error: 'Only RabbitMQ monitors can peek messages' });
+                            try {
+                                const which = url.searchParams.get('which') === 'error' ? 'error' : 'main';
+                                const messages = await peekQueue(m, parseInt(url.searchParams.get('count') || '10', 10) || 10, which);
+                                return jsonRes(200, { messages, queue: which === 'error' ? errorQueueName(m) : m.queue, which });
+                            } catch (e) {
+                                return jsonRes(502, { error: e instanceof Error ? e.message : String(e) });
+                            }
+                        }
+                        if (mm[2] && mm[2].startsWith('/error-queue/')) {
+                            if (m.type !== 'rabbitmq') return jsonRes(400, { error: 'Only RabbitMQ monitors have an error queue' });
+                            const op = mm[2].split('/')[2];
+                            const me = getAuthedAdmin(req);
+                            const audit = (details: Record<string, unknown>) => logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'monitor.error_queue.' + op, targetType: 'monitor', targetId: m.name, details: { errorQueue: errorQueueName(m), ...details }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                            try {
+                                if (op === 'export' && req.method === 'GET') {
+                                    const messages = await exportErrorMessages(m, parseInt(url.searchParams.get('count') || '500', 10) || 500);
+                                    audit({ exported: messages.length });
+                                    return new Response(JSON.stringify({ monitor: m.name, queue: errorQueueName(m), exportedAt: new Date().toISOString(), messages }, null, 2), {
+                                        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="${errorQueueName(m).replace(/[^\w.-]+/g, '_')}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}.json"` } });
+                                }
+                                if ((op === 'requeue' || op === 'discard') && req.method === 'POST') {
+                                    let body: any = {};
+                                    try { body = await req.json(); } catch { /* defaults */ }
+                                    const count: number | 'all' = body?.count === 'all' ? 'all' : Math.max(1, Math.min(1000, parseInt(String(body?.count ?? '1'), 10) || 1));
+                                    const r = op === 'requeue' ? await requeueErrorMessages(m, count) : await discardErrorMessages(m, count);
+                                    audit({ requested: count, processed: r.processed, remaining: r.remaining, error: r.error });
+                                    void runCheck(m).catch(() => {});
+                                    return jsonRes(r.error ? 207 : 200, { ...r });
+                                }
+                            } catch (e) {
+                                return jsonRes(502, { error: e instanceof Error ? e.message : String(e) });
+                            }
+                        }
+                        if (mm[2] === '/check' && req.method === 'POST') {
+                            const status = await runCheck(m);
+                            return jsonRes(200, { status });
+                        }
+                        if (!mm[2] && req.method === 'GET') return jsonRes(200, { monitor: publicMonitor(m) });
+                        if (!mm[2] && req.method === 'DELETE') {
+                            deleteMonitor(name);
+                            const me = getAuthedAdmin(req);
+                            logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'monitor.delete', targetType: 'monitor', targetId: name, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                            return jsonRes(200, { status: 'deleted' });
+                        }
+                    }
+                }
+
                 if (url.pathname === '/admin/tcpudp' && req.method === 'GET') {
                     const status = getSipServerStatus();
                     const list = config.tcpUdpProfiles.map(p => {
@@ -4606,7 +4769,7 @@ const server = Bun.serve({
                             acmeEmail: p.acmeEmail,
                             acmeStaging: !!p.acmeStaging,
                             allowedIps: p.allowedIps || [],
-                            authToken: p.authToken,
+                            hasAuthToken: !!p.authToken,
                             sipPublicHost: p.sipPublicHost,
                             allowSelfSignedUpstream: !!p.allowSelfSignedUpstream,
                             rtpRelay: !!p.rtpRelay,
@@ -4684,7 +4847,7 @@ const server = Bun.serve({
                         upstreamTransport: ((input.upstreamTransport as string) ?? 'udp') as 'tcp' | 'udp',
                         certId,
                         allowedIps: Array.isArray(input.allowedIps) ? input.allowedIps as string[] : undefined,
-                        authToken: input.authToken as string | undefined,
+                        authToken: ((input.authToken as string | undefined) && input.authToken !== SECRET_MASK ? input.authToken as string : undefined) ?? existingProfile?.authToken,
                         sipPublicHost: input.sipPublicHost as string | undefined,
                         allowSelfSignedUpstream: input.allowSelfSignedUpstream === true,
                         rtpRelay: input.rtpRelay === true,
@@ -4993,6 +5156,7 @@ const shutdown = async (signal: string) => {
     await stopAllSipServers();
     stopPendingRetryScheduler();
     stopSilenceAlertScheduler();
+    stopMonitorScheduler();
     await stopAllWebhooks();
     await stopAllConnectors();
     await stopAllFive9Connectors();
@@ -5012,6 +5176,7 @@ const shutdown = async (signal: string) => {
     flushDlqSync(); // persist any pending DLQ changes before exit
     await shutdownTelemetry();
     shutdownRequestLog();
+    flushErrorBuffer();
     shutdownSipLog();
     shutdownConnLog();
     shutdownConnectorSessions();

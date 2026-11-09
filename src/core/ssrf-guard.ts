@@ -34,6 +34,48 @@ export class SsrfBlockedError extends Error {
     }
 }
 
+/** Transient DNS failure — NOT a policy block; callers may retry. */
+export class DnsResolutionError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'DnsResolutionError';
+    }
+}
+
+// Resolver results are cached so a flaky upstream DNS (EAI_AGAIN from the
+// Docker embedded resolver is the usual culprit) does not fail deliveries that
+// resolved fine a minute ago. A fresh hit is reused for DNS_CACHE_TTL_MS; on
+// resolver failure a stale hit (up to DNS_STALE_MAX_MS) is used instead of
+// giving up — the addresses were validated against the policy when cached.
+const DNS_CACHE_TTL_MS = 60_000;
+const DNS_STALE_MAX_MS = 6 * 60 * 60_000;
+const DNS_RETRY_DELAYS_MS = [200, 600, 1500];
+const dnsCache = new Map<string, { addrs: string[]; at: number }>();
+
+async function resolveWithRetry(host: string): Promise<string[]> {
+    const cached = dnsCache.get(host);
+    if (cached && Date.now() - cached.at < DNS_CACHE_TTL_MS) return cached.addrs;
+    let lastErr: unknown;
+    for (let i = 0; i <= DNS_RETRY_DELAYS_MS.length; i++) {
+        if (i > 0) await new Promise(r => setTimeout(r, DNS_RETRY_DELAYS_MS[i - 1]));
+        try {
+            const addrs = (await lookup(host, { all: true })).map(a => a.address);
+            if (addrs.length) { dnsCache.set(host, { addrs, at: Date.now() }); return addrs; }
+            lastErr = new Error('no addresses');
+        } catch (err) {
+            lastErr = err;
+            const code = (err as any)?.code;
+            // Definitive answers (name does not exist) are not worth retrying.
+            if (code === 'ENOTFOUND') break;
+        }
+    }
+    if (cached && Date.now() - cached.at < DNS_STALE_MAX_MS) {
+        console.warn(`🌐 [dns] resolver failing for "${host}" (${(lastErr as any)?.code || lastErr}); using cached address(es) from ${Math.round((Date.now() - cached.at) / 1000)}s ago`);
+        return cached.addrs;
+    }
+    throw new DnsResolutionError(`DNS resolution failed for "${host}": ${lastErr instanceof Error ? lastErr.message : lastErr}`);
+}
+
 function ipv4ToInt(ip: string): number | null {
     const parts = ip.split('.').map(Number);
     if (parts.length !== 4 || parts.some(p => isNaN(p) || p < 0 || p > 255)) return null;
@@ -167,14 +209,8 @@ export async function assertResolvedHostAllowed(rawUrl: string, override?: SsrfP
     // IP literal already fully checked syntactically.
     if (isIP(host)) return;
 
-    let addrs: { address: string }[];
-    try {
-        addrs = await lookup(host, { all: true });
-    } catch (err) {
-        throw new SsrfBlockedError(`DNS resolution failed for "${host}": ${err instanceof Error ? err.message : err}`);
-    }
-    if (!addrs.length) throw new SsrfBlockedError(`no addresses resolved for "${host}"`);
-    for (const { address } of addrs) {
+    const addrs = await resolveWithRetry(host);
+    for (const address of addrs) {
         const reason = blockedReason(address, policy);
         if (reason) throw new SsrfBlockedError(`${host} resolves to ${reason}`);
     }

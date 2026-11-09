@@ -3,8 +3,8 @@
   <aside class="sidebar" id="sidebar">
     <!-- Brand + collapse toggle -->
     <div class="sidebar-header">
-      <a class="sidebar-brand" href="/dashboard">
-        <span class="mm-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12h6.5"/><circle cx="12" cy="12" r="3.3"/><path d="M15 10.4 21.5 5.5"/><path d="M15.4 12H22"/><path d="M15 13.6 21.5 18.5"/></svg></span>
+      <a class="sidebar-brand" href="/dashboard" onclick="if (document.body.classList.contains('sidebar-collapsed')) { event.preventDefault(); toggleSidebar(); }" title="Midleman">
+        <span class="mm-mark" aria-hidden="true"><svg viewBox="0 0 64 64" aria-hidden="true"><polygon points="14,8 26,16 18,24" fill="#1E6FAE"/><polygon points="50,8 38,16 46,24" fill="#1E6FAE"/><polygon points="18,24 26,16 38,16 46,24 48,46 32,58 16,46" fill="#2A8BD4"/><polygon points="16,46 18,24 8,40" fill="#1E6FAE"/><polygon points="48,46 46,24 56,40" fill="#1E6FAE"/><polygon points="26,16 38,16 32,22" fill="#1E6FAE"/><polygon points="22,40 32,58 42,40 32,46" fill="#5FB0EA"/><circle cx="25" cy="29" r="6" fill="#fff"/><circle cx="39" cy="29" r="6" fill="#fff"/><circle cx="25.8" cy="29.5" r="2.8" fill="#1E6FAE"/><circle cx="38.2" cy="29.5" r="2.8" fill="#1E6FAE"/><polygon points="29.5,35 34.5,35 32,40" fill="#1E6FAE"/><polygon points="26,58 30,58 28,62" fill="#1E6FAE"/><polygon points="34,58 38,58 36,62" fill="#1E6FAE"/></svg></span>
         <span class="sidebar-brand-name">Midleman</span>
       </a>
       <button class="sidebar-collapse-btn" onclick="toggleSidebar()" id="sidebarCollapseBtn" aria-label="Toggle sidebar">
@@ -85,6 +85,13 @@
         <span class="sidebar-link-label">Webhooks</span>
         <span class="sidebar-badge" id="navWebhookBadge">0</span>
       </button>
+      <button class="sidebar-link" data-page="monitors" data-tooltip="Monitors" onclick="navigate('monitors')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+        </svg>
+        <span class="sidebar-link-label">Monitors</span>
+        <span class="sidebar-badge" id="navMonitorBadge">0</span>
+      </button>
 
       <div class="sidebar-section-label">Settings</div>
       <button class="sidebar-link" data-page="notifications" data-tooltip="Notification groups & rules" onclick="navigate('notifications')">
@@ -159,25 +166,19 @@
       </div>
     </nav>
 
-    <div class="sidebar-footer">
-      <div class="sidebar-status">
-        <span class="status-dot offline" id="navDot"></span>
-        <span class="sidebar-status-text" id="navStatus">Connecting...</span>
-        <span class="sidebar-status-text" id="navUptime" style="color:var(--text3);margin-left:auto;font-size:11px"></span>
-      </div>
-      <div class="sidebar-user">
-        <div class="sidebar-user-avatar" id="navUserAvatar">M</div>
-        <div class="sidebar-user-info">
-          <div class="sidebar-user-name" id="navUser">—</div>
-          <div class="sidebar-user-role">Administrator</div>
-        </div>
-      </div>
-      <button class="sidebar-link sidebar-logout" data-tooltip="Sign out" onclick="openLogoutModal()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- One quiet row: status dot · user · uptime · sign out. The dot's title
+         carries the status text; the ids stay so the existing JS keeps filling them. -->
+    <div class="sidebar-footer" id="sidebarFooter">
+      <span class="status-dot offline" id="navDot"></span>
+      <span class="sidebar-status-text sr-only" id="navStatus">Connecting...</span>
+      <span class="sidebar-user-avatar sr-only" id="navUserAvatar">M</span>
+      <span class="sidebar-user-name" id="navUser">—</span>
+      <span class="sidebar-uptime" id="navUptime"></span>
+      <button class="sidebar-logout" data-tooltip="Sign out" title="Sign out" aria-label="Sign out" onclick="openLogoutModal()">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
           <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
         </svg>
-        <span class="sidebar-link-label">Sign out</span>
       </button>
     </div>
   </aside>
@@ -278,54 +279,18 @@
         </div>
       </div>
 
-      <!-- Quick metrics -->
-      <div class="card" id="ovQuickMetricsCard">
+      <!-- Monitors at a glance -->
+      <div class="card" id="ovMonitorsCard">
         <div class="card-header">
-          <h3>Activity</h3>
-          <button class="btn btn-sm btn-ghost" onclick="navigate('requests')">View all &rarr;</button>
+          <h3>Monitors</h3>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span id="ovMonitorsSummary" style="font-size:12px;color:var(--text3);margin-right:6px"></span>
+            <a class="btn btn-sm btn-ghost" href="/wallboard" target="_blank" rel="noopener">Wallboard</a>
+            <button class="btn btn-sm btn-ghost" onclick="navigate('monitors')">View all &rarr;</button>
+          </div>
         </div>
-        <div class="card-body" id="ovQuickMetrics">
-          <div style="color:var(--text3);font-size:14px;text-align:center;padding:20px">Loading...</div>
-        </div>
-      </div>
-
-      <!-- Recent requests live feed -->
-      <div class="card">
-        <div class="card-header">
-          <h3>Recent Requests</h3>
-          <span style="font-size:12px;color:var(--text3);font-family:'JetBrains Mono',monospace"
-            id="ovFeedCount"></span>
-        </div>
-        <div class="card-body" style="padding:0;overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:13px">
-            <thead>
-              <tr style="background:var(--surface2);text-align:left">
-                <th
-                  style="padding:8px 12px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">
-                  Time</th>
-                <th
-                  style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">
-                  Type</th>
-                <th
-                  style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">
-                  Method</th>
-                <th
-                  style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">
-                  Path</th>
-                <th
-                  style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">
-                  Status</th>
-                <th
-                  style="padding:8px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">
-                  Duration</th>
-              </tr>
-            </thead>
-            <tbody id="ovRecentBody">
-              <tr>
-                <td colspan="6" style="padding:30px;text-align:center;color:var(--text3)">Waiting for requests...</td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="card-body" style="padding:0" id="ovMonitorsBody">
+          <div style="color:var(--text3);font-size:13px;text-align:center;padding:24px">Loading...</div>
         </div>
       </div>
     </div>
@@ -735,6 +700,171 @@
       </div>
     </div>
 
+    <!-- ═══ MONITORS ═══ -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+      <symbol id="mon-ico-rabbitmq" viewBox="0 0 24 24"><path fill="#FF6600" d="M21 9h-6.3a.7.7 0 0 1-.7-.7V2.7a.7.7 0 0 0-.7-.7h-2.6a.7.7 0 0 0-.7.7v5.6a.7.7 0 0 1-.7.7H7.3a.7.7 0 0 1-.7-.7V2.7A.7.7 0 0 0 5.9 2H3.3a.7.7 0 0 0-.7.7V21.3c0 .4.3.7.7.7H21a.7.7 0 0 0 .7-.7V9.7A.7.7 0 0 0 21 9zm-3.5 8.2a1.3 1.3 0 0 1-1.3 1.3h-2.4a1.3 1.3 0 0 1-1.3-1.3v-2.4a1.3 1.3 0 0 1 1.3-1.3h2.4a1.3 1.3 0 0 1 1.3 1.3z"/></symbol>
+      <symbol id="mon-ico-redis" viewBox="0 0 24 24"><g fill="#DC382D"><path d="M12 3 2.5 7.2 12 11.4l9.5-4.2z"/><path d="M2.5 10.4 12 14.6l9.5-4.2v2.3L12 16.9 2.5 12.7z" opacity=".85"/><path d="M2.5 15.6 12 19.8l9.5-4.2v2.3L12 22.1 2.5 17.9z" opacity=".7"/></g></symbol>
+      <symbol id="mon-ico-http" viewBox="0 0 24 24"><g fill="none" stroke="#2A8BD4" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></g></symbol>
+    </defs></svg>
+    <div class="page" id="pageMonitors">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h2>Monitors</h2>
+          <p>Watch RabbitMQ queues, Redis servers and HTTP endpoints; alerts go through <a href="#" onclick="navigate('notifications');return false" style="color:var(--accent);text-decoration:none">Notifications</a> (rule pattern <code style="background:var(--surface2);padding:1px 4px;border-radius:3px;font-size:11px">monitor.*</code>).</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <a class="btn btn-sm" href="/wallboard" target="_blank" rel="noopener" title="Open the full-screen operations board in a new tab">Wallboard</a>
+          <button class="btn btn-primary btn-sm" onclick="openMonitorModal()">+ New Monitor</button>
+        </div>
+      </div>
+      <div id="monitorListBody" class="mon-grid"><div class="mon-empty">Loading...</div></div>
+    </div>
+
+    <!-- ═══ MONITOR DETAIL (history) ═══ -->
+    <div id="monitorDetailModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px" onclick="if(event.target===this)closeMonitorDetail()">
+      <div class="mm-dialog" style="max-width:860px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column;max-height:92vh">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">
+          <span class="mon-ico" id="mdIcon"><svg><use href="#mon-ico-http"/></svg></span>
+          <div style="flex:1;min-width:0">
+            <h3 style="margin:0;font-size:16px;display:flex;align-items:center;gap:10px"><span id="mdName"></span><span id="mdState"></span></h3>
+            <div id="mdTarget" style="font:400 12px var(--font-mono);color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+          </div>
+          <select class="mm-input" id="mdPeekWhich" style="display:none;width:auto;padding:4px 26px 4px 8px;font-size:12px"><option value="error">error queue</option><option value="main" id="mdPeekMain">queue</option></select>
+          <button class="btn btn-sm" id="mdPeekBtn" onclick="mdPeek()" style="display:none" title="Read the next messages without consuming them">Peek messages</button>
+          <button class="btn btn-sm" onclick="mdCheckNow()">Check now</button>
+          <button class="btn btn-sm" onclick="mdEdit()">Edit</button>
+          <button onclick="closeMonitorDetail()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">&times;</button>
+        </div>
+        <div style="padding:14px 22px 0;display:grid;grid-template-columns:repeat(4,1fr);gap:10px" id="mdStats"></div>
+        <div style="padding:12px 22px 0"><div id="mdChart"></div></div>
+        <div id="mdPeek" style="display:none;padding:12px 22px 0"></div>
+        <div style="padding:12px 22px 18px;overflow:auto;min-height:0">
+          <table class="md-table"><thead><tr><th>Time</th><th>Result</th><th>Value</th><th>Took</th><th>Detail</th></tr></thead><tbody id="mdRows"></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ MONITOR MODAL ═══ -->
+    <div id="monitorModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div class="mm-dialog" style="max-width:640px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column;max-height:92vh">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+          <div>
+            <h3 style="margin:0;font-size:16px" id="monitorModalTitle">New monitor</h3>
+            <p style="margin:4px 0 0;font-size:12.5px;color:var(--text2)">Checked on an interval; alerts once per episode, re-alerts after the cooldown.</p>
+          </div>
+          <button onclick="closeMonitorModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">&times;</button>
+        </div>
+        <div style="padding:16px 22px;display:flex;flex-direction:column;gap:16px;overflow-y:auto">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label class="mm-label">Name *</label>
+              <input class="mm-input" id="monName" type="text" placeholder="prt-emis-payments">
+            </div>
+            <div>
+              <label class="mm-label">Type</label>
+              <select class="mm-input" id="monType" onchange="monitorTypeChanged()">
+                <option value="rabbitmq">RabbitMQ queue</option>
+                <option value="http">HTTP endpoint</option>
+                <option value="redis">Redis server</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label class="mm-label">Description</label>
+            <input class="mm-input" id="monDescription" type="text" placeholder="(optional — included in the alert)">
+          </div>
+
+          <!-- RabbitMQ -->
+          <div id="monRabbitFields" class="mm-group"><div class="mm-group-title">RabbitMQ</div>
+            <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+              <div><label class="mm-label">Management API URL *</label><input class="mm-input" id="monApiUrl" type="text" placeholder="http://10.11.1.200:15672"></div>
+              <div><label class="mm-label">vhost</label><input class="mm-input" id="monVhost" type="text" placeholder="/"></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+              <div><label class="mm-label">Queue *</label><div style="display:flex;gap:6px"><input class="mm-input" id="monQueue" type="text" placeholder="emis.taag.payments" style="flex:1"><button type="button" class="btn btn-sm" onclick="monBrowseQueues()" title="List the queues on this broker" style="white-space:nowrap">Browse</button></div><div id="monQueuePick" style="display:none"></div></div>
+              <div><label class="mm-label">Username</label><input class="mm-input" id="monUsername" type="text" autocomplete="off"></div>
+              <div><label class="mm-label">Password</label><input class="mm-input" id="monPassword" type="password" autocomplete="new-password"></div>
+            </div>
+            <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;align-items:start">
+              <div>
+                <label class="mm-label">Alert on (combine as needed)</label>
+                <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px;color:var(--text)">
+                  <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="mm-switch" id="monAlertSilence" onchange="monitorTypeChanged()"> Silence — no messages published for N minutes <span style="color:var(--text3)">(payment / business queues)</span></label>
+                  <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="mm-switch" id="monAlertMessages"> Messages — alert when anything is published <span style="color:var(--text3)">(error / DLQ queues only — on a busy queue this fires constantly)</span></label>
+                  <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="mm-switch" id="monAlertHealth"> Broker health — RabbitMQ aliveness-test on this vhost fails</label>
+                </div>
+              </div>
+              <div id="monSilenceWrap"><label class="mm-label">Silence (minutes)</label><input class="mm-input" id="monSilenceMinutes" type="number" min="1" value="30"></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end">
+              <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);padding-bottom:8px"><input type="checkbox" class="mm-switch" id="monWatchError" checked onchange="monitorTypeChanged()"> Also watch the dead-letter queue <span style="color:var(--text3)">(new messages there always alert)</span></label>
+              <div id="monErrorQueueWrap"><label class="mm-label">Dead-letter queue</label><input class="mm-input" id="monErrorQueue" type="text" placeholder="(default: &lt;queue&gt;_error)"></div>
+            </div>
+          </div>
+
+          <!-- HTTP -->
+          <div id="monHttpFields" class="mm-group" style="display:none"><div class="mm-group-title">HTTP</div>
+            <div style="display:grid;grid-template-columns:100px 1fr;gap:10px">
+              <div><label class="mm-label">Method</label><select class="mm-input" id="monMethod"><option>GET</option><option>HEAD</option><option>POST</option></select></div>
+              <div><label class="mm-label">URL *</label><input class="mm-input" id="monUrl" type="text" placeholder="https://api.example.com/health"></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+              <div><label class="mm-label">Expected status</label><input class="mm-input" id="monExpectStatus" type="text" placeholder="2xx" value="2xx"></div>
+              <div><label class="mm-label">Timeout (ms)</label><input class="mm-input" id="monTimeoutMs" type="number" min="500" value="10000"></div>
+              <div><label class="mm-label">Max latency (ms, 0 = off)</label><input class="mm-input" id="monMaxLatencyMs" type="number" min="0" value="0"></div>
+            </div>
+            <div><label class="mm-label">Body must contain</label><input class="mm-input" id="monBodyContains" type="text" placeholder="(optional)"></div>
+            <div><label class="mm-label">Headers (one per line, Name: value)</label><textarea class="mm-input" id="monHeaders" rows="2" placeholder="Authorization: Bearer …"></textarea></div>
+          </div>
+
+          <!-- Redis -->
+          <div id="monRedisFields" class="mm-group" style="display:none"><div class="mm-group-title">Redis</div>
+            <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px">
+              <div><label class="mm-label">Host *</label><input class="mm-input" id="monRedisHost" type="text" placeholder="10.11.1.200"></div>
+              <div><label class="mm-label">Port</label><input class="mm-input" id="monRedisPort" type="number" min="1" max="65535" value="6379"></div>
+              <div><label class="mm-label">DB</label><input class="mm-input" id="monRedisDb" type="number" min="0" max="15" value="0"></div>
+            </div>
+            <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;align-items:end">
+              <div><label class="mm-label">Password</label><input class="mm-input" id="monRedisPassword" type="password" autocomplete="new-password"></div>
+              <div><label class="mm-label">Max latency (ms, 0 = off)</label><input class="mm-input" id="monRedisMaxLatencyMs" type="number" min="0" value="0"></div>
+              <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);padding-bottom:8px"><input type="checkbox" class="mm-switch" id="monRedisTls"> TLS</label>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+              <div><label class="mm-label">Memory alert (% of maxmemory, 0 = off)</label><input class="mm-input" id="monRedisMaxMemoryPct" type="number" min="0" max="100" value="85"></div>
+              <div><label class="mm-label">Max clients (0 = off)</label><input class="mm-input" id="monRedisMaxClients" type="number" min="0" value="0"></div>
+              <div><label class="mm-label">Replica lag (s, 0 = off)</label><input class="mm-input" id="monRedisMaxReplicaLagSec" type="number" min="0" value="60"></div>
+            </div>
+            <div class="mm-field-hint">Always alerts on: restart, evicted keys, rejected connections, failed RDB/AOF persistence, replica link down.</div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+            <div><label class="mm-label">Check every (seconds)</label><input class="mm-input" id="monIntervalSeconds" type="number" min="10" value="60"></div>
+            <div><label class="mm-label">Cooldown (minutes)</label><input class="mm-input" id="monCooldownMinutes" type="number" min="1" value="60"></div>
+            <div style="display:flex;flex-direction:column;gap:6px;justify-content:flex-end">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text)"><input type="checkbox" class="mm-switch" id="monEnabled" checked> Enabled</label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text)"><input type="checkbox" class="mm-switch" id="monAllowPrivate" checked> Allow private IPs</label>
+            </div>
+          </div>
+          <div>
+            <label class="mm-label">Only alert during these hours (Africa/Luanda) — all empty = any time</label>
+            <div style="display:grid;grid-template-columns:40px 1fr 40px 1fr;gap:6px 8px;align-items:center">
+              <span style="font-size:12px;color:var(--text2)">Mon</span><input class="mm-input" id="monDay1" type="text" placeholder="07:00-22:00">
+              <span style="font-size:12px;color:var(--text2)">Tue</span><input class="mm-input" id="monDay2" type="text" placeholder="07:00-22:00">
+              <span style="font-size:12px;color:var(--text2)">Wed</span><input class="mm-input" id="monDay3" type="text" placeholder="07:00-22:00">
+              <span style="font-size:12px;color:var(--text2)">Thu</span><input class="mm-input" id="monDay4" type="text" placeholder="07:00-22:00">
+              <span style="font-size:12px;color:var(--text2)">Fri</span><input class="mm-input" id="monDay5" type="text" placeholder="07:00-22:00">
+              <span style="font-size:12px;color:var(--text2)">Sat</span><input class="mm-input" id="monDay6" type="text" placeholder="(empty = no alerts)">
+              <span style="font-size:12px;color:var(--text2)">Sun</span><input class="mm-input" id="monDay0" type="text" placeholder="(empty = no alerts)">
+            </div>
+          </div>
+        </div>
+        <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn btn-sm" onclick="closeMonitorModal()">Cancel</button>
+          <button class="btn btn-primary btn-sm" onclick="saveMonitor()" id="monitorSaveBtn">Save</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ WEBHOOK DESTINATIONS (drill-in from a webhook's row) ═══ -->
     <div class="page" id="pageWebhookDestinations">
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
@@ -774,22 +904,11 @@
           <span id="wDestinationsSummary" style="display:none">No destinations configured</span>
           <button class="btn btn-sm wd-add-dest" onclick="addWebhookTarget(''); openDestinationEditor(webhookTargetState.length - 1)">+ Add destination</button>
         </div>
-        <div class="card-body" style="padding:0;overflow-x:auto">
-          <table class="wd-table" style="width:100%;border-collapse:collapse;font-size:13px">
-            <thead>
-              <tr style="text-align:left">
-                <th style="padding:8px 12px">On</th>
-                <th style="padding:8px">Destination</th>
-                <th style="padding:8px">Sends when</th>
-                <th style="padding:8px">Retry</th>
-                <th style="padding:8px">Test payload</th>
-                <th style="padding:8px 12px"></th>
-              </tr>
-            </thead>
-            <tbody id="wDestinationsContainer">
-              <tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No destinations.</td></tr>
-            </tbody>
-          </table>
+        <div class="wd-grid wd-grid-head">
+          <span>Destination</span><span>Sends when</span><span>Retry</span><span>Test</span><span></span><span></span>
+        </div>
+        <div id="wDestinationsContainer">
+          <div class="wd-empty">No destinations.</div>
         </div>
       </div>
     </div>
@@ -1917,20 +2036,19 @@
             </tbody>
           </table>
         </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-top:1px solid var(--border);font-size:12.5px;color:var(--text2);gap:10px;flex-wrap:wrap">
-          <div style="display:flex;align-items:center;gap:8px">
-            <span>Page size</span>
-            <select id="npmHostsPageSize" onchange="onNpmPageSizeChange()" style="padding:4px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">
+        <div class="mm-pager">
+          <label class="mm-pager-size">Rows per page
+            <select id="npmHostsPageSize" onchange="onNpmPageSizeChange()">
               <option value="10">10</option>
               <option value="25" selected>25</option>
               <option value="50">50</option>
               <option value="100">100</option>
             </select>
-          </div>
-          <div style="display:flex;align-items:center;gap:6px">
-            <button class="btn btn-sm" id="npmHostsPrev" onclick="changeNpmPage(-1)">Prev</button>
-            <span id="npmHostsPageInfo" style="padding:0 8px"></span>
-            <button class="btn btn-sm" id="npmHostsNext" onclick="changeNpmPage(1)">Next</button>
+          </label>
+          <div class="mm-pager-nav">
+            <span id="npmHostsPageInfo" class="mm-pager-info"></span>
+            <button class="btn btn-ghost btn-sm" id="npmHostsPrev" onclick="changeNpmPage(-1)" aria-label="Previous page">‹ Prev</button>
+            <button class="btn btn-ghost btn-sm" id="npmHostsNext" onclick="changeNpmPage(1)" aria-label="Next page">Next ›</button>
           </div>
         </div>
       </div>
@@ -3270,6 +3388,18 @@
                   <input type="email" id="wSilenceEmail" placeholder="(leave empty to use central rules only)"
                     style="width:100%;padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none">
                   <div class="mm-field-hint">Optional</div>
+                </div>
+              </div>
+              <div>
+                <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:3px">Only alert during these hours (Africa/Luanda) — all empty = any time</label>
+                <div style="display:grid;grid-template-columns:40px 1fr 40px 1fr;gap:6px 8px;align-items:center">
+                  <span style="font-size:12px;color:var(--text2)">Mon</span><input class="wz-input" id="wSilenceDay1" type="text" placeholder="07:00-22:00">
+                  <span style="font-size:12px;color:var(--text2)">Tue</span><input class="wz-input" id="wSilenceDay2" type="text" placeholder="07:00-22:00">
+                  <span style="font-size:12px;color:var(--text2)">Wed</span><input class="wz-input" id="wSilenceDay3" type="text" placeholder="07:00-22:00">
+                  <span style="font-size:12px;color:var(--text2)">Thu</span><input class="wz-input" id="wSilenceDay4" type="text" placeholder="07:00-22:00">
+                  <span style="font-size:12px;color:var(--text2)">Fri</span><input class="wz-input" id="wSilenceDay5" type="text" placeholder="07:00-22:00">
+                  <span style="font-size:12px;color:var(--text2)">Sat</span><input class="wz-input" id="wSilenceDay6" type="text" placeholder="(empty = no alerts)">
+                  <span style="font-size:12px;color:var(--text2)">Sun</span><input class="wz-input" id="wSilenceDay0" type="text" placeholder="(empty = no alerts)">
                 </div>
               </div>
               <div style="font-size:10px;color:var(--text3);line-height:1.5">

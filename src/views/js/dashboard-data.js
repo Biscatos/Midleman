@@ -389,15 +389,16 @@ async function fetchRequestLogStats() {
   try {
     const res = await api('/admin/requests/stats'); if (!res.ok) return;
     const s = await res.json();
-    document.getElementById('navReqBadge').textContent = fmtNum(s.total);
+    document.getElementById('navReqBadge').textContent = (s.approx ? '~' : '') + fmtNum(s.total);
     const sizeBadge = document.getElementById('navLogSizeBadge'); if (sizeBadge) sizeBadge.textContent = (s.fileSizeMB || s.dbSizeMB || 0) + ' MB';
     const el = document.getElementById('ovQuickMetrics');
+    if (!el) return;
     if (s.total === 0) {
       el.innerHTML = '<div style="color:var(--text3);font-size:14px;text-align:center;padding:20px">No requests recorded yet.</div>';
     } else {
       el.innerHTML = `
     <div class="metrics-row">
-      <div class="metric-box"><div class="metric-val">${fmtNum(s.total)}</div><div class="metric-lbl">Total Requests</div></div>
+      <div class="metric-box"><div class="metric-val">${s.approx ? '~' : ''}${fmtNum(s.total)}</div><div class="metric-lbl">Total Requests</div></div>
       <div class="metric-box"><div class="metric-val">${s.dbSizeMB || 0} MB</div><div class="metric-lbl">Log Size</div></div>
       <div class="metric-box"><div class="metric-val">${s.oldest ? new Date(s.oldest + 'Z').toLocaleDateString() : '-'}</div><div class="metric-lbl">Since</div></div>
       <div class="metric-box"><div class="metric-val">${s.newest ? new Date(s.newest + 'Z').toLocaleTimeString() : '-'}</div><div class="metric-lbl">Last Request</div></div>
@@ -415,6 +416,7 @@ async function fetchRecentRequests() {
     fetchRequestLogStats();
     const tbody = document.getElementById('ovRecentBody');
     const count = document.getElementById('ovFeedCount');
+    if (!tbody) return;
     count.textContent = data.total + ' total';
     if (reqs.length === 0) {
       tbody.innerHTML = '<tr><td colspan="6" style="padding:30px;text-align:center;color:var(--text3)">No requests yet.</td></tr>';
@@ -1012,14 +1014,19 @@ async function openProfileModal(profile = null) {
   proxyWiz.open(!!profile, { title: profile ? 'Edit Proxy — ' + (profile.name || '') : 'New Proxy' });
   document.getElementById('pName').value = profile ? profile.name : ''; document.getElementById('pName').disabled = !!profile;
   document.getElementById('pTargetUrl').value = profile ? profile.targetUrl : '';
-  document.getElementById('pApiKey').value = profile ? (profile.apiKey || '') : '';
+  // Secrets come back masked from the API; show them as "kept" and only send a value when retyped.
+  const SECRET_MASK = '••••••••';
+  const isMasked = v => v === SECRET_MASK;
+  document.getElementById('pApiKey').value = profile && !isMasked(profile.apiKey) ? (profile.apiKey || '') : '';
+  document.getElementById('pApiKey').placeholder = profile && isMasked(profile.apiKey) ? '(kept — type to replace)' : '';
   document.getElementById('pAuthHeader').value = profile ? (profile.authHeader || '') : '';
   document.getElementById('pAuthPrefix').value = profile ? (profile.authPrefix || '') : '';
   // Auto-open the upstream-auth section if any of those fields has a value.
   const hasUpstreamAuth = !!(profile && (profile.apiKey || profile.authHeader || profile.authPrefix));
   document.getElementById('pUpstreamAuthToggle').checked = hasUpstreamAuth;
   toggleUpstreamAuthSection();
-  document.getElementById('pAccessKey').value = profile ? (profile.accessKey || '') : '';
+  document.getElementById('pAccessKey').value = profile && !isMasked(profile.accessKey) ? (profile.accessKey || '') : '';
+  document.getElementById('pAccessKey').placeholder = profile && isMasked(profile.accessKey) ? '(kept — type to replace)' : '';
   document.getElementById('pAuthMode').value = profile ? (profile.authMode || 'none') : 'none';
   if (typeof mmSyncSeg === 'function') mmSyncSeg('pAuthMode');
   document.getElementById('pRequire2fa').checked = profile ? !!profile.require2fa : false;
@@ -2301,27 +2308,19 @@ async function fetchWebhooks() {
   try {
     const [wRes, dlqRes, prRes] = await Promise.all([
       api('/admin/webhooks'),
-      api('/admin/webhooks/dlq'),
-      api('/admin/webhooks/pending-retry'),
+      api('/admin/webhooks/dlq?summary=1'),
+      api('/admin/webhooks/pending-retry?summary=1'),
     ]);
     if (!wRes.ok) return;
     const d = await wRes.json();
     _allWebhooks = d.webhooks || [];
 
     if (dlqRes.ok) {
-      const dlqData = await dlqRes.json();
-      _dlqByWebhook = {};
-      for (const e of (dlqData.queue || [])) {
-        _dlqByWebhook[e.webhookName] = (_dlqByWebhook[e.webhookName] || 0) + 1;
-      }
+      _dlqByWebhook = (await dlqRes.json()).byWebhook || {};
     }
 
     if (prRes.ok) {
-      const prData = await prRes.json();
-      _pendingByWebhook = {};
-      for (const e of (prData.queue || [])) {
-        _pendingByWebhook[e.webhookName] = (_pendingByWebhook[e.webhookName] || 0) + 1;
-      }
+      _pendingByWebhook = (await prRes.json()).byWebhook || {};
     }
 
     filterWebhooks();
@@ -2930,7 +2929,8 @@ function openConnectorModal(connector = null) {
   document.getElementById('cnGoUsername').value = connector?.gocontact?.username || '';
   document.getElementById('cnGoPassword').value = '';
   document.getElementById('cnGoPassword').placeholder = connector?.gocontact?.hasPassword ? '(kept — type to replace)' : '';
-  document.getElementById('cnGoHashKey').value = connector?.gocontact?.hashKey || '';
+  document.getElementById('cnGoHashKey').value = connector?.gocontact?.hasHashKey ? '' : (connector?.gocontact?.hashKey || '');
+  document.getElementById('cnGoHashKey').placeholder = connector?.gocontact?.hasHashKey ? '(kept — type to replace)' : '';
   document.getElementById('cnGoDomainUuid').value = connector?.gocontact?.domainUuid || '';
   // GoContact mode + Webchat API fields
   const go = connector?.gocontact || {};
@@ -3225,7 +3225,7 @@ function renderDlqEntries() {
     return;
   }
   document.getElementById('dlqRetryAllBtn').style.display = '';
-  c.innerHTML = _dlqEntries.map(e => `
+  c.innerHTML = _dlqEntries.slice(0, 200).map(e => `
     <div id="dlq-${esc(e.id)}" style="border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-bottom:8px;background:var(--surface2)">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="font-family:'SF Mono',Monaco,monospace;font-size:12px;color:var(--accent2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.targetUrl)}">${esc(e.method)} ${esc(e.targetUrl)}</span>
@@ -3270,7 +3270,9 @@ async function dlqRetryOne(id) {
 // ─── Pending Retry Modal ─────────────────────────────────────────────────────
 let _prModalWebhook = null;
 let _prEntries = [];
+let _prTotal = 0;
 let _prSelected = new Set(); // ids selected for bulk cancel
+const PR_RENDER_MAX = 200; // rows drawn at once; "Cancel all" still covers the whole queue
 
 async function openPendingRetryModal(webhookName) {
   _prModalWebhook = webhookName || null;
@@ -3294,6 +3296,7 @@ async function refreshPendingRetryModal() {
     const res = await api(url);
     const d = await res.json();
     _prEntries = d.queue || [];
+    _prTotal = d.total || _prEntries.length;
     // Drop selected ids that no longer exist after the refresh.
     const live = new Set(_prEntries.map(e => e.id));
     _prSelected = new Set([..._prSelected].filter(id => live.has(id)));
@@ -3313,7 +3316,7 @@ function renderPendingRetryEntries() {
 
   // Group entries by destination (targetUrl) — each group is one "destinatário".
   const groups = new Map();
-  for (const e of _prEntries) {
+  for (const e of _prEntries.slice(0, PR_RENDER_MAX)) {
     if (!groups.has(e.targetUrl)) groups.set(e.targetUrl, []);
     groups.get(e.targetUrl).push(e);
   }
@@ -3377,7 +3380,11 @@ function renderPendingRetryEntries() {
     return `<div style="margin-bottom:14px">${header}${items}</div>`;
   }).join('');
 
-  c.innerHTML = toolbar + groupsHtml;
+  const shown = Math.min(_prEntries.length, PR_RENDER_MAX);
+  const more = _prTotal > shown
+    ? `<div style="padding:10px;text-align:center;font-size:12px;color:var(--text3)">Showing ${shown} of ${_prTotal} pending retries. Use <em>Cancel all</em> to clear the whole queue.</div>`
+    : '';
+  c.innerHTML = toolbar + groupsHtml + more;
 }
 
 function prToggleOne(id, checked) {
@@ -3568,7 +3575,7 @@ let aceEditors = {};
 
 function getAceTheme() {
     const theme = document.documentElement.getAttribute('data-theme') || 'dark';
-    return theme === 'dark' ? 'ace/theme/twilight' : 'ace/theme/chrome';
+    return theme === 'dark' ? 'ace/theme/tomorrow_night' : 'ace/theme/tomorrow';
 }
 
 function updateAceThemes() {
@@ -3593,7 +3600,8 @@ function initAceEditors() {
             theme: getAceTheme(),
             value: t.bodyTemplate || '',
             fontSize: 12,
-            fontFamily: "'Consolas','Monaco','Courier New',monospace",
+            fontFamily: "'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
+            showFoldWidgets: false,
             showPrintMargin: false,
             maxLines: 20,
             minLines: 3,
@@ -3804,7 +3812,8 @@ function openBodyEditor(index) {
             mode: 'ace/mode/json',
             theme: getAceTheme(),
             fontSize: 14,
-            fontFamily: "'Consolas','Monaco','Courier New',monospace",
+            fontFamily: "'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
+            showFoldWidgets: false,
             showPrintMargin: false,
             wrap: true,
             tabSize: 2,
@@ -4143,8 +4152,9 @@ function addWebhookTarget(target = "") {
   } else {
     const headersArr = [];
     if (target.customHeaders) {
+        const flagged = (target.secretHeaders || []).map(x => x.toLowerCase());
         for (const [k, v] of Object.entries(target.customHeaders)) {
-            headersArr.push({ key: k, value: v });
+            headersArr.push({ key: k, value: v, secret: flagged.includes(k.toLowerCase()) });
         }
     }
     const filterArr = (target.filter || []).map(c => ({
@@ -4285,6 +4295,26 @@ function addWebhookTargetHeader(index) {
   renderDestinationEditor(index);
 }
 
+/** Lock icon per header: auto (by name) or flagged → locked and not revertible; otherwise click to mark. */
+function _wdHeaderLock(i, hI, h) {
+  const auto = _wdSecretHeader(h.key);
+  const locked = auto || h.secret;
+  const title = auto ? 'Secret by name — always masked' : h.secret ? 'Marked as secret — cannot be reverted' : 'Mark as secret (masked everywhere; cannot be undone)';
+  const icon = locked
+    ? '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'
+    : '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>';
+  return `<button type="button" class="wd-icon-btn${locked ? ' wd-locked' : ''}" ${locked ? 'disabled' : `onclick="markWebhookTargetHeaderSecret(${i}, ${hI})"`} title="${title}" aria-label="${title}">${icon}</button>`;
+}
+async function markWebhookTargetHeaderSecret(index, hIndex) {
+  const h = webhookTargetState[index]?.customHeaders?.[hIndex];
+  if (!h) return;
+  const ok = await showConfirm({ title: 'Mark header as secret', message: `Mask "${h.key || 'this header'}" everywhere?`, detail: 'The value will only be shown as •••••••• from now on. This cannot be reverted.', confirmText: 'Mark as secret', danger: true });
+  if (!ok) return;
+  h.secret = true;
+  webhookFormDirty = true;
+  renderDestinationEditor(index);
+}
+
 function removeWebhookTargetHeader(index, hIndex) {
   webhookTargetState[index].customHeaders.splice(hIndex, 1);
   webhookFormDirty = true;
@@ -4364,7 +4394,7 @@ function renderWebhookTargets() {
     ? `${webhookTargetState.length} destination${webhookTargetState.length === 1 ? '' : 's'} · ${enabledN} enabled`
     : 'No destinations yet';
   if (webhookTargetState.length === 0) {
-    container.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">No destinations yet. Click "+ Add destination".</td></tr>';
+    container.innerHTML = '<div class="wd-empty">No destinations yet. Click "+ Add destination".</div>';
     return;
   }
   const payload = _wdPayload();
@@ -4393,23 +4423,29 @@ function renderWebhookTargets() {
       const ev = _wdEvaluate(t, payload);
       sample = ev.deliver ? '<span class="wd-ok">✓ Would send</span>' : '<span class="wd-skip">Skipped</span>';
     }
+    const n = (t.customHeaders || []).filter(h => h.key).length;
+    const shapeBits = custom
+      ? ['custom', t.customBody && t.bodyTemplate ? 'body template' : '', n ? `${n} header${n === 1 ? '' : 's'}` : '', t.forwardHeaders ? 'fwd headers' : ''].filter(Boolean)
+      : [];
+    const whenText = active.length
+      ? esc(_wdConditionText(active[0])) + (active.length > 1 ? ` <span class="wd-muted">${t.filterMode === 'any' ? 'or' : 'and'} +${active.length - 1}</span>` : '')
+      : '<span class="wd-muted">Always</span>';
+    const retryText = t.persistentRetryOpen ? 'Persistent' : t.retryOpen ? `${t.retry?.maxRetries ?? 3}× ${t.retry?.backoff === 'fixed' ? 'fixed' : 'exp.'}` : '<span class="wd-muted">Default</span>';
     return `
-    <tr class="${on ? '' : 'wd-off'}">
-      <td style="padding:10px 12px;width:56px"><input type="checkbox" class="mm-switch" ${on ? 'checked' : ''} onchange="toggleWebhookTargetEnabled(${i}, this.checked)" aria-label="Destination enabled" title="${on ? 'Enabled — click to pause deliveries' : 'Paused — click to resume deliveries'}"></td>
-      <td style="padding:10px 8px;max-width:420px">
-        <div class="wd-url" title="${esc(t.url)}">${custom ? `<span class="wd-method">${esc(t.method || 'POST')}</span> ` : ''}${t.url ? esc(t.url) : '<span class="wd-muted">(no URL)</span>'}</div>
-        <div class="wd-chips">${chips}</div>
-      </td>
-      <td style="padding:10px 8px;max-width:280px">${when}</td>
-      <td style="padding:10px 8px">${retry}</td>
-      <td style="padding:10px 8px">${sample}</td>
-      <td style="padding:10px 12px;text-align:right;white-space:nowrap">
-        <button class="btn btn-sm" onclick="openDestinationEditor(${i})">Edit</button>
-        <button class="wd-icon-btn wd-danger" onclick="removeWebhookTarget(${i})" title="Remove destination" aria-label="Remove destination">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-        </button>
-      </td>
-    </tr>`;
+    <div class="wd-grid wd-row ${on ? '' : 'wd-off'}">
+      <div class="wd-cell-dest" title="${esc(t.url)}" onclick="openDestinationEditor(${i})">
+        <div class="wd-url"><span class="wd-method">${esc(custom ? (t.method || 'POST') : 'POST')}</span>${t.url ? esc(t.url) : '<span class="wd-muted">(no URL)</span>'}</div>
+        ${shapeBits.length ? `<div class="wd-shape">${esc(shapeBits.join(' · '))}</div>` : ''}
+      </div>
+      <div class="wd-cell">${whenText}</div>
+      <div class="wd-cell">${retryText}</div>
+      <div class="wd-cell">${sample}</div>
+      <div class="wd-cell" style="text-align:center"><input type="checkbox" class="mm-switch" ${on ? 'checked' : ''} onchange="toggleWebhookTargetEnabled(${i}, this.checked)" aria-label="Destination enabled" title="${on ? 'Enabled — click to pause deliveries' : 'Paused — click to resume deliveries'}"></div>
+      <div class="wd-cell wd-cell-actions">
+        <button class="wd-icon-btn" onclick="openDestinationEditor(${i})" title="Edit destination" aria-label="Edit destination"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+        <button class="wd-icon-btn wd-danger" onclick="removeWebhookTarget(${i})" title="Remove destination" aria-label="Remove destination"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button>
+      </div>
+    </div>`;
   }).join('');
 }
 
@@ -4500,9 +4536,10 @@ function renderDestinationEditorMarkup(i) {
       <div class="wd-hdr-row">
         <input type="text" placeholder="Header" value="${esc(h.key)}" oninput="updateWebhookTargetHeader(${i}, ${hI}, 'key', this.value)" aria-label="Header name" class="wd-mono">
         <div style="min-width:0">
-          <input type="text" placeholder="Value — templates allowed" value="${esc(h.value)}" oninput="updateWebhookTargetHeader(${i}, ${hI}, 'value', this.value)" aria-label="Header value" class="wd-mono" style="width:100%">
+          <input type="text" placeholder="${h.value === '••••••••' ? '•••••••• (kept — type to replace)' : 'Value — templates allowed'}" value="${h.value === '••••••••' ? '' : esc(h.value)}" oninput="updateWebhookTargetHeader(${i}, ${hI}, 'value', this.value || '••••••••')" aria-label="Header value" class="wd-mono" style="width:100%">
           <div id="previewHeader_${i}_${hI}" class="wd-inline-preview" style="display:none"></div>
         </div>
+        ${_wdHeaderLock(i, hI, h)}
         <button type="button" class="wd-icon-btn" onclick="removeWebhookTargetHeader(${i}, ${hI})" title="Remove header" aria-label="Remove header">&times;</button>
       </div>`).join('');
 
@@ -4552,7 +4589,7 @@ function renderDestinationEditorMarkup(i) {
         <label class="wd-switch-label"><input class="mm-switch" type="checkbox" ${t.forwardHeaders ? 'checked' : ''} onchange="updateWebhookTargetField(${i}, 'forwardHeaders', this.checked)"> Forward incoming headers</label>
       </div>
       <div class="wd-hdrs">
-        <div class="wd-hdr-row wd-hdr-head"><span>Header</span><span>Value · templates allowed</span><span></span></div>
+        <div class="wd-hdr-row wd-hdr-head"><span>Header</span><span>Value · templates allowed</span><span></span><span></span></div>
         ${headerRows}
         <button type="button" class="wd-add wd-add-row" onclick="addWebhookTargetHeader(${i})">+ Add header</button>
       </div>
@@ -4792,6 +4829,10 @@ function openWebhookModal(webhook = null) {
   document.getElementById('wSilenceSection').style.display = saEnabled ? 'flex' : 'none';
   document.getElementById('wSilenceThreshold').value = sa?.thresholdMinutes ?? 15;
   document.getElementById('wSilenceEmail').value = sa?.notifyEmail ?? '';
+  for (let d = 0; d <= 6; d++) {
+    const day = (sa?.weekly || []).find(w => w.day === d);
+    document.getElementById('wSilenceDay' + d).value = day ? bhRangesToText(day.ranges) : '';
+  }
 
   // Adopted-from-NPM banner
   const banner = document.getElementById('wAdoptedBanner');
@@ -4891,6 +4932,8 @@ async function saveWebhook() {
           }
           dest.method = t.method || 'POST';
           dest.customHeaders = headersObj;
+          const secretNames = (t.customHeaders || []).filter(h => h.secret && h.key.trim()).map(h => h.key.trim());
+          if (secretNames.length) dest.secretHeaders = secretNames;
           dest.forwardHeaders = t.forwardHeaders;
           dest.bodyTemplate = (t.customBody && t.bodyTemplate.trim()) ? t.bodyTemplate.trim() : undefined;
           dest.dropEmpty = (t.customBody && t.dropEmpty) ? true : undefined;
@@ -4936,7 +4979,14 @@ async function saveWebhook() {
     if (!thr || thr < 1) return toast('Silence threshold must be at least 1 minute', 'error');
     // notifyEmail is now optional — when empty, the silence alert relies
     // entirely on the central notifications pipeline (rules → groups).
-    body.silenceAlert = { enabled: true, thresholdMinutes: thr, notifyEmail: email };
+    const weekly = [];
+    try {
+      for (let d = 0; d <= 6; d++) {
+        const ranges = bhParseDayText(document.getElementById('wSilenceDay' + d).value, BH_DAY_LABELS[d]);
+        if (ranges.length) weekly.push({ day: d, ranges });
+      }
+    } catch (e) { return toast('Silence alert hours: ' + e.message, 'error'); }
+    body.silenceAlert = { enabled: true, thresholdMinutes: thr, notifyEmail: email, weekly };
   } else {
     body.silenceAlert = { enabled: false, thresholdMinutes: 15, notifyEmail: '' };
   }
@@ -5013,7 +5063,7 @@ async function fetchRequestLogs() {
     const sres = await api('/admin/requests/stats'); if (sres.ok) {
       const s = await sres.json();
       document.getElementById('reqLogStats').textContent = s.total + ' total | ' + (s.dbSizeMB || 0) + ' MB';
-      document.getElementById('navReqBadge').textContent = fmtNum(s.total);
+      document.getElementById('navReqBadge').textContent = (s.approx ? '~' : '') + fmtNum(s.total);
     }
   } catch { }
 }
@@ -5270,7 +5320,7 @@ async function loadFanoutDeliveries(reqId) {
   try {
     const [fRes, dlqRes, prRes] = await Promise.all([
       api('/admin/requests?limit=100&type=webhook-fanout&requestId=' + encodeURIComponent(reqId)),
-      api('/admin/webhooks/dlq'),
+      api('/admin/webhooks/dlq?requestId=' + encodeURIComponent(reqId)),
       api('/admin/webhooks/pending-retry?requestId=' + encodeURIComponent(reqId)),
     ]);
     if (!fRes.ok) throw new Error('Failed to load fanouts');
@@ -11724,9 +11774,11 @@ function updateOauthClientLogoPreview() {
   const seq = ++_oauthLogoSeq;
   _oauthLogoTimer = setTimeout(async () => {
     try {
-      const res = await api('/admin/oauth-clients/app-icon?uri=' + encodeURIComponent(first));
+      // Send every redirect URI: the server picks the origin that actually has an icon.
+      const res = await api('/admin/oauth-clients/app-icon?' + uris.map(u => 'uri=' + encodeURIComponent(u)).join('&'));
       const data = await res.json();
       if (seq !== _oauthLogoSeq) return;
+      if (src && data.source) src.textContent = 'Detected from ' + data.source;
       box.textContent = initials;
       if (!/^https?:\/\//i.test(data.iconUrl || '')) return;
       const img = document.createElement('img');
@@ -11774,3 +11826,430 @@ document.addEventListener('keydown', (e) => {
 });
 document.addEventListener('change', (e) => { if (e.target && e.target.id) mmSyncSeg(e.target.id); });
 document.querySelectorAll('.mm-seg[data-seg-for]').forEach(seg => mmSyncSeg(seg.dataset.segFor));
+
+// ─── Monitors ────────────────────────────────────────────────────────────────
+let _allMonitors = [];
+
+async function fetchMonitors() {
+  try {
+    const res = await api('/admin/monitors');
+    if (!res.ok) return;
+    _allMonitors = (await res.json()).monitors || [];
+    renderMonitors();
+    const badge = document.getElementById('navMonitorBadge');
+    if (badge) badge.textContent = _allMonitors.length;
+  } catch { }
+}
+
+/** "4 ms · mem 120 MB (12%) · 7 clients · 98% hits" from the last INFO. */
+function _monRedisLine(s) {
+  const r = s.redis; if (!r) return s.lastValue != null ? s.lastValue + ' ms' : '—';
+  const mem = _monBytes(r.usedMemory) + (r.memoryPct !== null ? ` (${r.memoryPct}%)` : '');
+  return [s.lastValue != null ? s.lastValue + ' ms' : null, 'mem ' + mem, r.clients + ' clients', r.hitRatio !== null ? r.hitRatio + '% hits' : null].filter(Boolean).join(' · ');
+}
+function _monUptime(sec) { return sec >= 86400 ? Math.floor(sec / 86400) + 'd ' + Math.floor(sec % 86400 / 3600) + 'h' : sec >= 3600 ? Math.floor(sec / 3600) + 'h ' + Math.floor(sec % 3600 / 60) + 'm' : Math.floor(sec / 60) + 'm'; }
+function _monBytes(b) { return b >= 1 << 30 ? (b / (1 << 30)).toFixed(2) + ' GB' : b >= 1 << 20 ? (b / (1 << 20)).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB'; }
+function monitorTarget(m) {
+  if (m.type === 'http') return `${m.method} ${m.url}`;
+  if (m.type === 'redis') return `redis://${m.host}:${m.port}/${m.db}`;
+  return `${m.queue} (${[].concat(m.alertOn).join('+')}) @ ${m.apiUrl}`;
+}
+
+function _monAgo(ts) {
+  if (!ts) return '—';
+  const sec = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (sec < 60) return sec + ' s ago';
+  const min = Math.round(sec / 60);
+  if (min < 60) return min + ' min ago';
+  const h = Math.round(min / 60);
+  return h < 48 ? h + ' h ago' : Math.round(h / 24) + ' d ago';
+}
+
+/** Interactive mini chart of the last checks: area + line, failures as red dots, min/max
+ *  labels, and a hover tooltip (time · value · ok/fail) driven by delegated mousemove. */
+function _monSpark(history, alert, unit) {
+  const pts = (history || []).filter(h => typeof h.value === 'number');
+  if (pts.length < 2) return '<div class="mon-chart mon-chart-empty">Collecting data…</div>';
+  const W = 300, H = 56, padT = 6, padB = 6;
+  const vals = pts.map(h => h.value);
+  const min = Math.min(0, ...vals), max = Math.max(...vals) || 1, span = (max - min) || 1;
+  const x = i => (i * W / (pts.length - 1)).toFixed(1);
+  const y = v => (H - padB - ((v - min) / span) * (H - padT - padB)).toFixed(1);
+  const line = pts.map((h, i) => `${x(i)},${y(h.value)}`).join(' ');
+  const color = alert ? 'var(--red)' : 'var(--green)';
+  const fails = pts.map((h, i) => h.ok ? '' : `<circle cx="${x(i)}" cy="${y(h.value)}" r="2.6" fill="var(--red)" stroke="var(--surface)" stroke-width="1"/>`).join('');
+  const data = esc(JSON.stringify(pts.map(h => [h.at, h.value, h.ok ? 1 : 0])));
+  return `<div class="mon-chart" data-pts="${data}" data-unit="${esc(unit)}">
+    <span class="mon-ax mon-ax-max">${_monFmt(max, unit)}</span><span class="mon-ax mon-ax-min">${_monFmt(min, unit)}</span>
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <line x1="0" y1="${y(min)}" x2="${W}" y2="${y(min)}" stroke="var(--border)" stroke-width="1" vector-effect="non-scaling-stroke"/>
+      <polygon points="0,${H - padB} ${line} ${W},${H - padB}" fill="${color}" opacity=".12"/>
+      <polyline points="${line}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+      ${fails}
+      <line class="mon-cursor" x1="0" y1="0" x2="0" y2="${H}" stroke="var(--text3)" stroke-width="1" vector-effect="non-scaling-stroke" style="display:none"/>
+      <circle class="mon-cursor-dot" r="3" fill="${color}" stroke="var(--surface)" stroke-width="1.5" style="display:none"/>
+    </svg>
+    <div class="mon-tip" style="display:none"></div>
+  </div>`;
+}
+// ── Monitor detail: what happened at every check ──
+let _mdName = null;
+function openMonitorDetail(name) {
+  const m = _allMonitors.find(x => x.name === name);
+  if (!m) return;
+  _mdName = name;
+  const s = m.status || {}; const alert = s.state === 'alert'; const unit = m.type === 'rabbitmq' ? 'msgs' : 'ms';
+  const g = id => document.getElementById(id);
+  g('mdIcon').className = 'mon-ico mon-ico-' + m.type; g('mdIcon').innerHTML = `<svg><use href="#mon-ico-${m.type}"/></svg>`;
+  g('mdName').textContent = m.name;
+  g('mdState').innerHTML = s.state === 'ok' ? '<span class="mm-chip ok">OK</span>' : alert ? '<span class="mm-chip err">ALERT</span>' : `<span class="mm-chip">${esc(s.state || 'pending')}</span>`;
+  g('mdTarget').textContent = monitorTarget(m);
+  const h = s.history || []; const fails = h.filter(x => !x.ok).length;
+  const vals = h.map(x => x.value).filter(v => typeof v === 'number');
+  const avg = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+  const max = vals.length ? Math.max(...vals) : null;
+  const stat = (l, v, sub) => `<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:10px 12px"><div style="font-size:11px;color:var(--text3)">${l}</div><div style="font-size:18px;font-weight:500">${v}</div>${sub ? `<div style="font-size:11px;color:var(--text3)">${sub}</div>` : ''}</div>`;
+  g('mdStats').style.gridTemplateColumns = s.errorQueue ? 'repeat(5,1fr)' : 'repeat(4,1fr)';
+  g('mdStats').innerHTML =
+    stat('Checks kept', h.length, h.length ? `since ${new Date(h[0].at).toLocaleTimeString()}` : '') +
+    stat('Failed', `<span style="color:${fails ? 'var(--red)' : 'inherit'}">${fails}</span>`, h.length ? Math.round(100 * (h.length - fails) / h.length) + '% ok' : '') +
+    stat(unit === 'ms' ? 'Avg latency' : 'Avg msgs / check', avg === null ? '—' : _monFmt(avg, unit), max === null ? '' : 'max ' + _monFmt(max, unit)) +
+    (s.errorQueue ? stat('Error queue', s.errorQueue.messages === null ? '<span style="color:var(--text3)">not found</span>' : `<span style="color:${s.errorQueue.messages ? 'var(--red)' : 'inherit'}">${s.errorQueue.messages}</span>`, esc(s.errorQueue.name)) : '') +
+    stat(alert ? 'Alerting for' : 'Last check', alert && s.alertSince ? _monAgo(s.alertSince).replace(' ago', '') : _monAgo(s.lastCheckAt), s.lastError && !alert ? '' : (alert ? 'since ' + new Date(s.alertSince || Date.now()).toLocaleTimeString() : ''));
+  const r = s.redis;
+  if (r) g('mdStats').innerHTML +=
+    stat('Memory', r.memoryPct !== null ? `<span style="color:${r.memoryPct > (m.maxMemoryPct || 100) ? 'var(--red)' : 'inherit'}">${r.memoryPct}%</span>` : _monBytes(r.usedMemory), r.memoryPct !== null ? `${_monBytes(r.usedMemory)} of ${_monBytes(r.maxMemory)}` : 'no maxmemory set') +
+    stat('Clients', r.clients, r.blockedClients ? `${r.blockedClients} blocked` : 'none blocked') +
+    stat('Hit ratio', r.hitRatio !== null ? r.hitRatio + '%' : '—', `${r.hits} hits · ${r.misses} misses`) +
+    stat('Evicted / rejected', `<span style="color:${r.evictedKeys || r.rejectedConnections ? 'var(--red)' : 'inherit'}">${r.evictedKeys} / ${r.rejectedConnections}</span>`, 'since server start') +
+    stat('Persistence', `<span style="color:${r.rdbStatus !== 'ok' || (r.aofStatus && r.aofStatus !== 'ok') ? 'var(--red)' : 'inherit'}">${esc(r.rdbStatus)}</span>`, (r.aofStatus ? 'AOF ' + esc(r.aofStatus) + ' · ' : '') + `up ${_monUptime(r.uptimeSec)} · v${esc(r.version)} ${esc(r.role)}${r.linkStatus ? ' · link ' + esc(r.linkStatus) : ''}`);
+  g('mdChart').innerHTML = _monSpark(h, alert, unit).replace('class="mon-chart', 'class="mon-chart md-chart');
+  g('mdRows').innerHTML = h.length ? [...h].reverse().map(x => `<tr class="${x.ok ? '' : 'is-fail'}">
+      <td class="mono">${new Date(x.at).toLocaleString()}</td>
+      <td>${x.ok ? '<span class="mm-chip ok">OK</span>' : '<span class="mm-chip err">FAIL</span>'}</td>
+      <td class="mono">${typeof x.value === 'number' ? _monFmt(x.value, unit) : '—'}</td>
+      <td class="mono">${typeof x.ms === 'number' ? x.ms + ' ms' : '—'}</td>
+      <td class="detail" title="${esc(x.error || '')}">${x.error ? esc(x.error) : '<span style="color:var(--text3)">healthy</span>'}</td>
+    </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:24px">No checks recorded yet.</td></tr>';
+  g('mdPeekBtn').style.display = m.type === 'rabbitmq' ? '' : 'none';
+  g('mdPeekWhich').style.display = m.type === 'rabbitmq' ? '' : 'none';
+  const mainOpt = g('mdPeekMain'); const busy = s.consumers === null || s.consumers > 0;
+  mainOpt.disabled = busy; mainOpt.textContent = busy ? `queue (${s.consumers ?? '?'} consumer${s.consumers === 1 ? '' : 's'} — peek disabled)` : 'queue (no consumers)';
+  if (busy) g('mdPeekWhich').value = 'error';
+  if (!document.getElementById('monitorDetailModal').style.display || document.getElementById('monitorDetailModal').style.display === 'none') { const pk = g('mdPeek'); pk.style.display = 'none'; pk.innerHTML = ''; }
+  g('monitorDetailModal').style.display = 'flex';
+}
+function closeMonitorDetail() { document.getElementById('monitorDetailModal').style.display = 'none'; _mdName = null; }
+async function mdPeek() {
+  const box = document.getElementById('mdPeek'); const btn = document.getElementById('mdPeekBtn');
+  box.style.display = ''; box.innerHTML = '<div style="color:var(--text3);font-size:12.5px">Reading queue…</div>'; btn.disabled = true;
+  try {
+    const which = document.getElementById('mdPeekWhich').style.display !== 'none' ? document.getElementById('mdPeekWhich').value : 'main';
+    const res = await api(`/admin/monitors/${encodeURIComponent(_mdName)}/peek?count=10&which=${which}`);
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { box.innerHTML = `<div class="md-peek-err">${esc(d.error || 'Peek failed')}</div>`; return; }
+    if (!d.messages.length) { box.innerHTML = `<div class="md-peek-head">Queue <b>${esc(d.queue)}</b> is empty right now.</div>`; return; }
+    const tools = d.which === 'error' ? `<div class="md-eq-tools">
+        <label>First <input type="number" id="mdEqN" min="1" max="1000" value="${Math.min(d.messages.length, 10)}"></label>
+        <button class="btn btn-sm" onclick="mdErrorOp('requeue', false)" title="Pop the first N from the error queue and republish them to the main queue">Requeue first N</button>
+        <button class="btn btn-sm" onclick="mdErrorOp('requeue', true)">Requeue all</button>
+        <span class="md-eq-sep"></span>
+        <button class="btn btn-sm" onclick="mdErrorOp('discard', false)">Discard first N</button>
+        <button class="btn btn-sm md-danger" onclick="mdErrorOp('discard', true)">Purge all</button>
+        <span class="md-eq-sep"></span>
+        <a class="btn btn-sm" href="/admin/monitors/${encodeURIComponent(_mdName)}/error-queue/export?count=500" download>Export JSON</a>
+      </div>` : '';
+    box.innerHTML = tools + `<div class="md-peek-head">Next ${d.messages.length} message(s) in <b>${esc(d.queue)}</b> — read without consuming (RabbitMQ marks them <i>redelivered</i>).</div>` +
+      d.messages.map((m, i) => {
+        let pretty = m.payload; try { pretty = JSON.stringify(JSON.parse(m.payload), null, 2); } catch {}
+        const meta = [m.timestamp ? new Date(m.timestamp).toLocaleString() : null, m.routingKey ? 'key ' + m.routingKey : null, m.bytes + ' B', m.redelivered ? 'redelivered' : null].filter(Boolean).join(' · ');
+        return `<details class="md-msg"${i === 0 ? ' open' : ''}><summary><span class="md-msg-n">#${i + 1}</span><span class="md-msg-meta">${esc(meta)}</span><span class="md-msg-preview">${esc(m.payload.slice(0, 110))}</span></summary><pre>${esc(pretty)}${m.truncated ? '\n… (truncated)' : ''}</pre>${m.headers && Object.keys(m.headers).length ? `<div class="md-msg-h">headers: <code>${esc(JSON.stringify(m.headers))}</code></div>` : ''}</details>`;
+      }).join('');
+  } catch (e) { box.innerHTML = `<div class="md-peek-err">${esc(e.message || e)}</div>`; }
+  finally { btn.disabled = false; }
+}
+async function mdCheckNow() { if (!_mdName) return; await checkMonitorNow(_mdName); openMonitorDetail(_mdName); }
+function mdEdit() { const n = _mdName; closeMonitorDetail(); editMonitor(n); }
+async function mdErrorOp(op, all) {
+  const m = _allMonitors.find(x => x.name === _mdName); if (!m) return;
+  const n = all ? 'all' : Math.max(1, parseInt(document.getElementById('mdEqN')?.value || '1', 10) || 1);
+  const eq = m.status?.errorQueue?.name || (m.queue + '_error');
+  const what = all ? `ALL messages in "${eq}"` : `the first ${n} message(s) in "${eq}"`;
+  const ok = await showConfirm(op === 'requeue'
+    ? { title: 'Requeue to ' + m.queue, message: `Move ${what} back to "${m.queue}"?`, detail: 'They are removed from the error queue and republished with their original properties (x-death headers dropped). If the cause is not fixed they will fail again and come back here.', confirmText: 'Requeue' }
+    : { title: all ? 'Purge error queue' : 'Discard messages', message: `Permanently delete ${what}?`, detail: 'This cannot be undone. Export first if you may need them.', confirmText: all ? 'Purge all' : 'Discard', danger: true });
+  if (!ok) return;
+  const res = await api(`/admin/monitors/${encodeURIComponent(_mdName)}/error-queue/${op}`, { method: 'POST', body: JSON.stringify({ count: n }) });
+  const d = await res.json().catch(() => ({}));
+  if (res.status >= 400) return toast(d.error || 'Operation failed', 'error');
+  toast(`${op === 'requeue' ? 'Requeued' : 'Discarded'} ${d.processed} message(s)` + (d.remaining != null ? ` · ${d.remaining} left in error queue` : '') + (d.error ? ` · stopped: ${d.error}` : ''), d.error ? 'error' : 'success');
+  await fetchMonitors(); if (_mdName) { openMonitorDetail(_mdName); mdPeek(); }
+}
+function _monFmt(v, unit) { return unit === 'ms' ? Math.round(v) + ' ms' : Math.round(v) + (unit ? ' ' + unit : ''); }
+// One delegated handler for every card chart: nearest sample under the pointer.
+document.addEventListener('mousemove', ev => {
+  const chart = ev.target.closest && ev.target.closest('.mon-chart[data-pts]');
+  document.querySelectorAll('.mon-chart.is-hover').forEach(c => { if (c !== chart) { c.classList.remove('is-hover'); c.querySelector('.mon-tip').style.display = 'none'; c.querySelectorAll('.mon-cursor, .mon-cursor-dot').forEach(e => e.style.display = 'none'); } });
+  if (!chart) return;
+  const pts = JSON.parse(chart.dataset.pts); const r = chart.getBoundingClientRect();
+  const i = Math.max(0, Math.min(pts.length - 1, Math.round((ev.clientX - r.left) / r.width * (pts.length - 1))));
+  const [at, val, ok] = pts[i];
+  const vals = pts.map(p => p[1]); const min = Math.min(0, ...vals), max = Math.max(...vals) || 1, span = (max - min) || 1;
+  const W = 300, H = 56, cx = i * W / (pts.length - 1), cy = H - 6 - ((val - min) / span) * (H - 12);
+  const cur = chart.querySelector('.mon-cursor'), dot = chart.querySelector('.mon-cursor-dot'), tip = chart.querySelector('.mon-tip');
+  cur.setAttribute('x1', cx); cur.setAttribute('x2', cx); cur.style.display = '';
+  dot.setAttribute('cx', cx); dot.setAttribute('cy', cy); dot.style.display = '';
+  tip.innerHTML = `<b>${_monFmt(val, chart.dataset.unit)}</b> · ${new Date(at).toLocaleTimeString()} <span class="${ok ? 'ok' : 'al'}">${ok ? 'OK' : 'FAIL'}</span>`;
+  tip.style.display = '';
+  const left = Math.max(0, Math.min(r.width - tip.offsetWidth, (cx / W) * r.width - tip.offsetWidth / 2));
+  tip.style.left = left + 'px';
+  chart.classList.add('is-hover');
+});
+
+/** Overview card: one compact row per monitor (icon · name · reading · state). */
+function renderOverviewMonitors() {
+  const body = document.getElementById('ovMonitorsBody');
+  if (!body) return;
+  const sum = document.getElementById('ovMonitorsSummary');
+  const al = _allMonitors.filter(m => m.status?.state === 'alert').length;
+  if (sum) sum.textContent = _allMonitors.length ? `${al ? al + ' alerting · ' : ''}${_allMonitors.length - al} ok` : '';
+  if (!_allMonitors.length) { body.innerHTML = '<div style="color:var(--text3);font-size:13px;text-align:center;padding:24px">No monitors yet — <a href="#" onclick="navigate(\'monitors\');return false" style="color:var(--accent)">create one</a>.</div>'; return; }
+  const order = { alert: 0, ok: 1, unknown: 2, disabled: 3 };
+  const list = [..._allMonitors].sort((a, b) => (order[a.status?.state] ?? 9) - (order[b.status?.state] ?? 9) || a.name.localeCompare(b.name));
+  body.innerHTML = list.map(m => {
+    const s = m.status || {}; const alert = s.state === 'alert';
+    const chip = s.state === 'ok' ? '<span class="mm-chip ok">OK</span>' : alert ? '<span class="mm-chip err">ALERT</span>' : s.state === 'disabled' ? '<span class="mm-chip">Disabled</span>' : '<span class="mm-chip">Pending</span>';
+    const reading = alert ? (s.lastError || 'alerting')
+      : m.type === 'rabbitmq' ? (s.lastActivityAt ? 'last message ' + _monAgo(s.lastActivityAt) : 'no messages seen yet') + (s.errorQueue && s.errorQueue.messages ? ` · ${s.errorQueue.messages} in error queue` : '')
+      : m.type === 'redis' ? _monRedisLine(s)
+      : (s.lastValue != null ? s.lastValue + ' ms' : '—');
+    return `<div class="ovm-row${alert ? ' is-alert' : ''}" onclick="openMonitorDetail('${esc(m.name)}')" role="button" tabindex="0" title="Open details">
+      <span class="mon-ico mon-ico-${m.type}" style="width:28px;height:28px;border-radius:7px"><svg style="width:16px;height:16px"><use href="#mon-ico-${m.type}"/></svg></span>
+      <div class="ovm-main"><div class="ovm-name">${esc(m.name)}</div><div class="ovm-target">${esc(monitorTarget(m))}</div></div>
+      <div class="ovm-reading${alert ? ' is-alert' : ''}" title="${esc(reading)}">${esc(reading)}</div>
+      ${_monSpark(s.history, alert, m.type === 'rabbitmq' ? 'msgs' : 'ms').replace('class="mon-chart', 'class="mon-chart ovm-chart')}
+      <div class="ovm-when">${_monAgo(s.lastCheckAt)}</div>
+      ${chip}
+    </div>`;
+  }).join('');
+}
+
+function renderMonitors() {
+  renderOverviewMonitors();
+  if (_mdName && document.getElementById('monitorDetailModal').style.display === 'flex') openMonitorDetail(_mdName);
+  const c = document.getElementById('monitorListBody');
+  if (!c) return;
+  if (_allMonitors.length === 0) { c.innerHTML = '<div class="mon-empty">No monitors yet. Click "+ New Monitor".</div>'; return; }
+  c.innerHTML = _allMonitors.map(m => {
+    const s = m.status || {};
+    const alert = s.state === 'alert';
+    const chip = s.state === 'ok' ? '<span class="mm-chip ok">OK</span>'
+      : alert ? '<span class="mm-chip err">ALERT</span>'
+      : s.state === 'disabled' ? '<span class="mm-chip">Disabled</span>'
+      : '<span class="mm-chip">Pending</span>';
+    const typeLabel = m.type === 'http' ? 'HTTP endpoint' : m.type === 'redis' ? 'Redis server' : 'RabbitMQ queue';
+    const reading = m.type === 'rabbitmq'
+      ? (s.lastActivityAt ? 'Last message ' + _monAgo(s.lastActivityAt) : 'No messages seen yet')
+      : m.type === 'redis' ? _monRedisLine(s)
+      : (s.lastValue != null ? s.lastValue + ' ms' : '—');
+    const eq = s.errorQueue;
+    const eqBadge = eq ? (eq.messages === null
+      ? `<span class="mon-eq mon-eq-missing" title="Dead-letter queue ${esc(eq.name)} not found">${esc(eq.name)}: not found</span>`
+      : `<span class="mon-eq${eq.messages ? ' has' : ''}" title="${esc(eq.name)}">${eq.messages} in error queue</span>`) : '';
+    const foot = alert && s.lastError
+      ? `<span class="mon-err" title="${esc(s.lastError)}">${esc(s.lastError)}</span>`
+      : `<span>${esc(reading)}${eqBadge ? ' · ' + eqBadge : ''}</span>`;
+    return `<div class="mon-card${alert ? ' is-alert' : ''}${s.state === 'disabled' ? ' is-off' : ''}">
+  <div class="mon-head" style="cursor:pointer" onclick="openMonitorDetail('${esc(m.name)}')" title="Open details">
+    <span class="mon-ico mon-ico-${m.type}"><svg><use href="#mon-ico-${m.type}"/></svg></span>
+    <div class="mon-title">
+      <div class="mon-name">${esc(m.name)}</div>
+      <div class="mon-type">${typeLabel}${m.description ? ' · ' + esc(m.description) : ''}</div>
+    </div>
+    ${chip}
+  </div>
+  <div class="mon-target" title="${esc(monitorTarget(m))}">${esc(monitorTarget(m))}</div>
+  ${_monSpark(s.history, alert, m.type === 'rabbitmq' ? 'msgs' : 'ms')}
+  <div class="mon-foot">
+    ${foot}
+    <span class="mon-when">checked ${_monAgo(s.lastCheckAt)}</span>
+  </div>
+  <div class="mon-actions">
+    <button class="wd-icon-btn" onclick="checkMonitorNow('${esc(m.name)}')" title="Run the check now" aria-label="Check now"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg></button>
+    <button class="wd-icon-btn" onclick="editMonitor('${esc(m.name)}')" title="Edit" aria-label="Edit"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+    <button class="wd-icon-btn wd-danger" onclick="deleteMonitor('${esc(m.name)}')" title="Delete" aria-label="Delete"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button>
+  </div>
+</div>`;
+  }).join('');
+}
+
+/** Fill the queue picker from the broker named in the form (uses the saved password when the field is blank on edit). */
+async function monBrowseQueues() {
+  const g = id => document.getElementById(id);
+  const box = g('monQueuePick'); box.style.display = ''; box.innerHTML = '<div class="mon-pick-note">Loading queues…</div>';
+  try {
+    const res = await api('/admin/monitors/rabbit-queues', { method: 'POST', body: JSON.stringify({
+      apiUrl: g('monApiUrl').value.trim(), vhost: g('monVhost').value.trim() || undefined, username: g('monUsername').value.trim() || undefined,
+      password: g('monPassword').value || undefined, monitor: g('monName').value.trim().toLowerCase() || undefined, allowPrivate: g('monAllowPrivate').checked }) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { box.innerHTML = `<div class="mon-pick-note" style="color:var(--red)">${esc(d.error || 'Could not list queues')}</div>`; return; }
+    if (!d.queues.length) { box.innerHTML = '<div class="mon-pick-note">No queues visible to this user.</div>'; return; }
+    const isErr = q => /error|err|dead|dlq|dlx|fail|reject/i.test(q.name);
+    const rows = [...d.queues].sort((a, b) => (isErr(b) - isErr(a)) || a.name.localeCompare(b.name));
+    box.innerHTML = `<div class="mon-pick">${rows.map(q => `<button type="button" class="mon-pick-row${isErr(q) ? ' is-err' : ''}" onclick="monPickQueue('${esc(q.name).replace(/'/g, "\\'")}', '${esc(q.vhost).replace(/'/g, "\\'")}')">
+        <span class="mon-pick-name">${esc(q.name)}</span>${isErr(q) ? '<span class="mm-chip err" style="font-size:10px">error queue?</span>' : ''}
+        <span class="mon-pick-meta">${q.messages} msg${q.messages === 1 ? '' : 's'} · ${q.consumers} consumer${q.consumers === 1 ? '' : 's'}${q.vhost !== '/' ? ' · ' + esc(q.vhost) : ''}</span></button>`).join('')}</div>`;
+  } catch (e) { box.innerHTML = `<div class="mon-pick-note" style="color:var(--red)">${esc(e.message || e)}</div>`; }
+}
+function monPickQueue(name, vhost) {
+  document.getElementById('monQueue').value = name;
+  if (vhost && vhost !== '/') document.getElementById('monVhost').value = vhost;
+  const box = document.getElementById('monQueuePick'); box.style.display = 'none'; box.innerHTML = '';
+  // An error/DLQ queue wants the "messages" mode; a business queue wants "silence".
+  if (/error|err|dead|dlq|dlx|fail|reject/i.test(name)) { document.getElementById('monAlertMessages').checked = true; document.getElementById('monAlertSilence').checked = false; monitorTypeChanged(); }
+}
+
+function monitorTypeChanged() {
+  const type = document.getElementById('monType').value;
+  document.getElementById('monRabbitFields').style.display = type === 'rabbitmq' ? 'flex' : 'none';
+  document.getElementById('monHttpFields').style.display = type === 'http' ? 'flex' : 'none';
+  document.getElementById('monRedisFields').style.display = type === 'redis' ? 'flex' : 'none';
+  document.getElementById('monSilenceWrap').style.visibility = document.getElementById('monAlertSilence').checked ? 'visible' : 'hidden';
+  document.getElementById('monErrorQueueWrap').style.visibility = document.getElementById('monWatchError').checked ? 'visible' : 'hidden';
+}
+
+function openMonitorModal(m) {
+  const g = id => document.getElementById(id);
+  g('monitorModalTitle').textContent = m ? `Edit monitor — ${m.name}` : 'New monitor';
+  g('monName').value = m?.name || '';
+  g('monName').disabled = !!m;
+  g('monType').value = m?.type || 'rabbitmq';
+  g('monDescription').value = m?.description || '';
+  g('monApiUrl').value = m?.apiUrl || '';
+  g('monVhost').value = m?.vhost || '';
+  g('monQueue').value = m?.queue || '';
+  g('monUsername').value = m?.username || '';
+  g('monPassword').value = '';
+  g('monPassword').placeholder = m?.hasPassword ? '(kept — type to replace)' : '';
+  const alertOn = m ? [].concat(m.alertOn || []) : ['silence'];
+  g('monAlertSilence').checked = alertOn.includes('silence');
+  g('monAlertMessages').checked = alertOn.includes('messages');
+  g('monAlertHealth').checked = alertOn.includes('health');
+  g('monSilenceMinutes').value = m?.silenceMinutes ?? 30;
+  g('monWatchError').checked = m ? m.watchErrorQueue !== false : true;
+  g('monErrorQueue').value = m?.errorQueue || '';
+  g('monMethod').value = m?.method || 'GET';
+  g('monUrl').value = m?.url || '';
+  g('monExpectStatus').value = m?.expectStatus || '2xx';
+  g('monTimeoutMs').value = m?.timeoutMs ?? 10000;
+  g('monMaxLatencyMs').value = m?.maxLatencyMs ?? 0;
+  g('monBodyContains').value = m?.bodyContains || '';
+  g('monHeaders').value = m?.headers ? Object.entries(m.headers).map(([k, v]) => `${k}: ${v}`).join('\n') : '';
+  g('monRedisHost').value = m?.host || '';
+  g('monRedisPort').value = m?.port ?? 6379;
+  g('monRedisDb').value = m?.db ?? 0;
+  g('monRedisPassword').value = '';
+  g('monRedisPassword').placeholder = (m?.type === 'redis' && m?.hasPassword) ? '(kept — type to replace)' : '';
+  g('monRedisMaxLatencyMs').value = m?.type === 'redis' ? (m.maxLatencyMs ?? 0) : 0;
+  g('monRedisMaxMemoryPct').value = m?.type === 'redis' ? (m.maxMemoryPct ?? 85) : 85;
+  g('monRedisMaxClients').value = m?.type === 'redis' ? (m.maxClients ?? 0) : 0;
+  g('monRedisMaxReplicaLagSec').value = m?.type === 'redis' ? (m.maxReplicaLagSec ?? 60) : 60;
+  g('monRedisTls').checked = !!m?.tls;
+  g('monIntervalSeconds').value = m?.intervalSeconds ?? 60;
+  g('monCooldownMinutes').value = m?.cooldownMinutes ?? 60;
+  g('monEnabled').checked = m ? m.enabled !== false : true;
+  g('monAllowPrivate').checked = m ? m.allowPrivate !== false : true;
+  for (let d = 0; d <= 6; d++) {
+    const day = (m?.weekly || []).find(w => w.day === d);
+    g('monDay' + d).value = day ? bhRangesToText(day.ranges) : '';
+  }
+  monitorTypeChanged();
+  const pk = g('monQueuePick'); pk.style.display = 'none'; pk.innerHTML = '';
+  g('monitorModal').style.display = 'flex';
+}
+
+function closeMonitorModal() {
+  document.getElementById('monitorModal').style.display = 'none';
+}
+
+async function saveMonitor() {
+  const g = id => document.getElementById(id).value;
+  const type = g('monType');
+  const body = {
+    name: g('monName').trim().toLowerCase(),
+    type,
+    description: g('monDescription').trim(),
+    intervalSeconds: parseInt(g('monIntervalSeconds'), 10),
+    cooldownMinutes: parseInt(g('monCooldownMinutes'), 10),
+    enabled: document.getElementById('monEnabled').checked,
+    allowPrivate: document.getElementById('monAllowPrivate').checked,
+  };
+  const weekly = [];
+  try {
+    for (let d = 0; d <= 6; d++) {
+      const ranges = bhParseDayText(g('monDay' + d), BH_DAY_LABELS[d]);
+      if (ranges.length) weekly.push({ day: d, ranges });
+    }
+  } catch (e) { return toast('Hours: ' + e.message, 'error'); }
+  body.weekly = weekly;
+  if (type === 'rabbitmq') {
+    Object.assign(body, {
+      apiUrl: g('monApiUrl').trim(), vhost: g('monVhost').trim() || undefined, queue: g('monQueue').trim(),
+      username: g('monUsername').trim() || undefined, password: g('monPassword') || undefined,
+      alertOn: [['silence', 'monAlertSilence'], ['messages', 'monAlertMessages'], ['health', 'monAlertHealth']].filter(([, id]) => document.getElementById(id).checked).map(([v]) => v),
+      watchErrorQueue: document.getElementById('monWatchError').checked, errorQueue: g('monErrorQueue').trim() || undefined,
+      silenceMinutes: parseInt(g('monSilenceMinutes'), 10),
+    });
+  } else if (type === 'redis') {
+    Object.assign(body, {
+      host: g('monRedisHost').trim(), port: parseInt(g('monRedisPort'), 10) || 6379, db: parseInt(g('monRedisDb'), 10) || 0,
+      password: g('monRedisPassword') || undefined, maxLatencyMs: parseInt(g('monRedisMaxLatencyMs'), 10) || 0,
+      maxMemoryPct: parseInt(g('monRedisMaxMemoryPct'), 10) || 0, maxClients: parseInt(g('monRedisMaxClients'), 10) || 0, maxReplicaLagSec: parseInt(g('monRedisMaxReplicaLagSec'), 10) || 0,
+      tls: document.getElementById('monRedisTls').checked,
+    });
+  } else {
+    const headers = {};
+    g('monHeaders').split('\n').map(s => s.trim()).filter(Boolean).forEach(line => {
+      const i = line.indexOf(':');
+      if (i > 0) headers[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+    });
+    Object.assign(body, {
+      url: g('monUrl').trim(), method: g('monMethod'), expectStatus: g('monExpectStatus').trim() || '2xx',
+      timeoutMs: parseInt(g('monTimeoutMs'), 10), maxLatencyMs: parseInt(g('monMaxLatencyMs'), 10) || 0,
+      bodyContains: g('monBodyContains') || undefined, headers: Object.keys(headers).length ? headers : undefined,
+    });
+  }
+  const btn = document.getElementById('monitorSaveBtn');
+  btn.disabled = true;
+  try {
+    const res = await api('/admin/monitors', { method: 'POST', body: JSON.stringify(body) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return toast(d.error || 'Save failed', 'error');
+    toast(`Monitor ${d.status}`);
+    closeMonitorModal();
+    fetchMonitors();
+  } finally { btn.disabled = false; }
+}
+
+function editMonitor(name) {
+  const m = _allMonitors.find(x => x.name === name);
+  if (m) openMonitorModal(m);
+}
+
+async function checkMonitorNow(name) {
+  const res = await api(`/admin/monitors/${encodeURIComponent(name)}/check`, { method: 'POST' });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || 'Check failed', 'error');
+  const ok = d.status?.state === 'ok';
+  toast(ok ? 'Check OK' : `Alert: ${d.status?.lastError || 'failing'}`, ok ? 'success' : 'error');
+  fetchMonitors();
+}
+
+async function deleteMonitor(name) {
+  const ok = await showConfirm({ title: 'Delete monitor', message: `Delete monitor "${name}"?`, confirmText: 'Delete', danger: true });
+  if (!ok) return;
+  const res = await api(`/admin/monitors/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  if (!res.ok) return toast('Delete failed', 'error');
+  toast('Monitor deleted');
+  fetchMonitors();
+}

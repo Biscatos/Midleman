@@ -1,11 +1,14 @@
 // Discovers the icon of an OAuth client app, the way sign-in screens of large
 // identity providers show "Sign in to continue to <app>" with the app's logo.
 //
-// Source: the origin of the client's first registered redirect URI that is not
-// a local development address (localhost, 127.x, ::1 are skipped). The home
-// page HTML is read for <link rel="apple-touch-icon"> / <link rel="icon">
-// (largest declared size wins), falling back to /favicon.ico. Results are
-// cached per origin so the sign-in page never waits on the network twice.
+// Source: the origins of the client's registered redirect URIs that are not
+// local development addresses (localhost, 127.x, ::1 are skipped). API-looking
+// hosts (api.*, api-*, *-api) rarely serve a page with an icon, so they are
+// tried last. Every candidate's home page HTML is read for
+// <link rel="apple-touch-icon"> / <link rel="icon"> (largest declared size
+// wins); when none is declared, /favicon.ico is probed. The first origin that
+// actually has an icon wins. Results are cached per origin so the sign-in
+// page never waits on the network twice.
 // Only the discovered URL is returned; the browser loads the image itself
 // (the template drops a broken <img> and shows the initials instead).
 
@@ -15,7 +18,7 @@ const FETCH_TIMEOUT_MS = 4000;
 const MAX_HTML_BYTES = 256 * 1024;
 
 const cache = new Map<string, { url: string; at: number; ok: boolean }>();
-const inflight = new Map<string, Promise<string>>();
+const inflight = new Map<string, Promise<{ url: string; ok: boolean }>>();
 
 /** Development hosts never carry the app's real icon (and are not reachable
  *  from the server anyway): localhost, *.localhost, loopback, 0.0.0.0. */
@@ -25,15 +28,29 @@ export function isLocalHost(hostname: string): boolean {
         || /^127\./.test(h) || h === '::ffff:127.0.0.1';
 }
 
-/** The first redirect URI that points at a real host; local development URIs are skipped. */
-export function iconSourceUri(redirectUris: string[]): string | null {
+/** Hosts that are almost certainly an API rather than the app's site. */
+function looksLikeApiHost(hostname: string): boolean {
+    const first = hostname.toLowerCase().split('.')[0];
+    return first === 'api' || first.startsWith('api-') || first.endsWith('-api') || first.startsWith('api.');
+}
+
+/** Redirect URIs on real hosts, in preference order: site-looking hosts first,
+ *  API-looking hosts last, original order otherwise. Local development URIs are skipped. */
+export function iconSourceUris(redirectUris: string[]): string[] {
+    const site: string[] = [], api: string[] = [];
     for (const uri of redirectUris || []) {
         try {
             const u = new URL(uri);
-            if ((u.protocol === 'https:' || u.protocol === 'http:') && !isLocalHost(u.hostname)) return uri;
+            if ((u.protocol !== 'https:' && u.protocol !== 'http:') || isLocalHost(u.hostname)) continue;
+            (looksLikeApiHost(u.hostname) ? api : site).push(uri);
         } catch { /* not a URL */ }
     }
-    return null;
+    return [...site, ...api];
+}
+
+/** The preferred redirect URI for the app's home/icon (see iconSourceUris). */
+export function iconSourceUri(redirectUris: string[]): string | null {
+    return iconSourceUris(redirectUris)[0] ?? null;
 }
 
 function originOf(uri: string): string | null {
@@ -87,7 +104,19 @@ function pickIcon(html: string, base: string): string {
     return /^https?:\/\//i.test(best) ? best : '';
 }
 
-async function discover(origin: string): Promise<string> {
+/** Does /favicon.ico actually exist and look like an image? */
+async function probeFavicon(url: string): Promise<boolean> {
+    try {
+        const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers: { 'User-Agent': 'Midleman-OIDC/1.0 (app icon discovery)' } });
+        const type = (res.headers.get('content-type') || '').toLowerCase();
+        return res.ok && (type.startsWith('image/') || type.includes('icon') || type === 'application/octet-stream');
+    } catch {
+        return false;
+    }
+}
+
+/** { url, ok }: ok = an icon really exists at url (declared in <head>, or /favicon.ico answers). */
+async function discover(origin: string): Promise<{ url: string; ok: boolean }> {
     const fallback = origin + '/favicon.ico';
     try {
         const res = await fetch(origin + '/', {
@@ -96,40 +125,52 @@ async function discover(origin: string): Promise<string> {
             headers: { 'Accept': 'text/html', 'User-Agent': 'Midleman-OIDC/1.0 (app icon discovery)' },
         });
         const type = res.headers.get('content-type') || '';
-        if (!res.ok || !type.includes('html')) return fallback;
-        // Relative hrefs resolve against the final URL after redirects.
-        return pickIcon(await readHead(res), res.url || origin + '/') || fallback;
-    } catch {
-        return fallback;
-    }
+        if (res.ok && type.includes('html')) {
+            // Relative hrefs resolve against the final URL after redirects.
+            const declared = pickIcon(await readHead(res), res.url || origin + '/');
+            if (declared) return { url: declared, ok: true };
+        }
+    } catch { /* fall through to the favicon probe */ }
+    return { url: fallback, ok: await probeFavicon(fallback) };
 }
 
-function resolveOrigin(origin: string): Promise<string> {
+function resolveOrigin(origin: string): Promise<{ url: string; ok: boolean }> {
     const hit = cache.get(origin);
-    if (hit && Date.now() - hit.at < (hit.ok ? OK_TTL_MS : FAIL_TTL_MS)) return Promise.resolve(hit.url);
+    if (hit && Date.now() - hit.at < (hit.ok ? OK_TTL_MS : FAIL_TTL_MS)) return Promise.resolve({ url: hit.url, ok: hit.ok });
     let p = inflight.get(origin);
     if (!p) {
-        p = discover(origin).then(url => {
-            cache.set(origin, { url, at: Date.now(), ok: !url.endsWith('/favicon.ico') });
+        p = discover(origin).then(r => {
+            cache.set(origin, { url: r.url, at: Date.now(), ok: r.ok });
             inflight.delete(origin);
-            return url;
+            return r;
         });
         inflight.set(origin, p);
     }
     return p;
 }
 
-/** Icon URL for a client, from its first redirect URI. Waits at most `waitMs`
- *  for a first discovery (then answers with /favicon.ico and keeps discovering). */
+/** Icon for a client: the first redirect-URI origin (site hosts before API hosts)
+ *  that really has one. Waits at most `waitMs`, then answers with the preferred
+ *  origin's /favicon.ico while discovery keeps going in the background. */
+export async function getAppIcon(redirectUris: string[], waitMs = 1500): Promise<{ url: string; origin: string }> {
+    const origins = [...new Set(iconSourceUris(redirectUris).map(originOf).filter((o): o is string => !!o))];
+    if (!origins.length) return { url: '', origin: '' };
+    const fallback = { url: origins[0] + '/favicon.ico', origin: origins[0] };
+    const all = Promise.all(origins.map(o => resolveOrigin(o))).then(results => {
+        const i = results.findIndex(r => r.ok);
+        return i >= 0 ? { url: results[i].url, origin: origins[i] } : fallback;
+    });
+    return Promise.race([all, new Promise<{ url: string; origin: string }>(r => setTimeout(() => r(fallback), waitMs))]);
+}
+
+/** Icon URL only (see getAppIcon). */
 export async function getAppIconUrl(redirectUris: string[], waitMs = 1500): Promise<string> {
-    const origin = originOf(iconSourceUri(redirectUris) || '');
-    if (!origin) return '';
-    const fallback = origin + '/favicon.ico';
-    return Promise.race([resolveOrigin(origin), new Promise<string>(r => setTimeout(() => r(fallback), waitMs))]);
+    return (await getAppIcon(redirectUris, waitMs)).url;
 }
 
 /** Warm the cache when a client is created or its redirect URIs change. */
 export function prefetchAppIcon(redirectUris: string[]): void {
-    const origin = originOf(iconSourceUri(redirectUris) || '');
-    if (origin) { cache.delete(origin); void resolveOrigin(origin); }
+    for (const origin of new Set(iconSourceUris(redirectUris).map(originOf).filter((o): o is string => !!o))) {
+        cache.delete(origin); void resolveOrigin(origin);
+    }
 }
