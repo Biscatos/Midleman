@@ -174,11 +174,12 @@ async function tunnelLoop(n: number): Promise<void> {
             ws.binaryType = 'arraybuffer';
             const mux = new Mux({ send: d => { if (ws.readyState === 1) ws.send(d); }, buffered: () => ws.bufferedAmount });
             // Midleman pings every 15 s: 45 s of silence means the path is dead even if TCP has not noticed
-            let seen = Date.now();
-            const watchdog = setInterval(() => { if (Date.now() - seen > 45_000) { try { (ws as any).terminate ? (ws as any).terminate() : ws.close(); } catch {} } }, 10_000);
-            ws.onopen = () => { backoff = 2000; seen = Date.now(); console.log(`[agent] tunnel #${n} connected (${TUNNEL_ALLOW === 'private' ? 'private targets' : TUNNEL_ALLOW})`); };
+            // monotonic clock: a wall-clock step (NTP, VM time sync) must not look like 45 s of silence
+            let seen = performance.now();
+            const watchdog = setInterval(() => { if (performance.now() - seen > 45_000) { try { (ws as any).terminate ? (ws as any).terminate() : ws.close(); } catch {} } }, 10_000);
+            ws.onopen = () => { backoff = 2000; seen = performance.now(); console.log(`[agent] tunnel #${n} connected (${TUNNEL_ALLOW === 'private' ? 'private targets' : TUNNEL_ALLOW})`); };
             ws.onmessage = (ev) => {
-                seen = Date.now();
+                seen = performance.now();
                 if (typeof ev.data !== 'string') { mux.onBinary(Buffer.from(ev.data as ArrayBuffer)); return; }
                 let c: any; try { c = JSON.parse(ev.data); } catch { return; }
                 if (c.t === 'ping') { mux.ctl({ t: 'pong', ts: c.ts }); return; }

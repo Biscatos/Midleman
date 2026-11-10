@@ -47,7 +47,7 @@ export const tunnelWebSocket = {
         if (list.length >= MAX_CONNS_PER_AGENT) { ws.close(1013, 'too many tunnel connections for this agent'); return; }
         const conn: Conn = { name, ws, since: Date.now(), lastSeen: Date.now(), rttMs: null, remoteIp: ws.data.remoteIp, nextId: 0, mux: new Mux({ send: d => ws.send(d), buffered: () => ws.getBufferedAmount() }) };
         ws.data.conn = conn; list.push(conn); agents.set(name, list);
-        conn.mux.ctl({ t: 'ping', ts: Date.now() });
+        conn.mux.ctl({ t: 'ping', ts: performance.now() });
         console.log(`🔌 [tunnel] agent "${name}" connected from ${ws.data.remoteIp} (${list.length} connection${list.length > 1 ? 's' : ''})`);
     },
     message(ws: ServerWebSocket<TunnelWsData>, msg: string | Buffer) {
@@ -55,22 +55,22 @@ export const tunnelWebSocket = {
         c.lastSeen = Date.now();
         if (typeof msg !== 'string') { c.mux.onBinary(msg); return; }
         let m: any; try { m = JSON.parse(msg); } catch { return; }
-        if (m.t === 'pong') { if (Number.isFinite(m.ts)) c.rttMs = Math.max(0, Date.now() - m.ts); }
+        if (m.t === 'pong') { if (Number.isFinite(m.ts)) c.rttMs = Math.max(0, Math.round(performance.now() - m.ts)); }   // monotonic: immune to clock steps
         else if (m.t === 'ping') c.mux.ctl({ t: 'pong', ts: m.ts });
         else c.mux.onCtl(m);
     },
     drain(ws: ServerWebSocket<TunnelWsData>) { ws.data.conn?.mux.relief(); },
-    close(ws: ServerWebSocket<TunnelWsData>) {
+    close(ws: ServerWebSocket<TunnelWsData>, code: number, reason: string) {
         const c = ws.data.conn; if (!c) return;
         const list = (agents.get(c.name) ?? []).filter(x => x !== c);
         if (list.length) agents.set(c.name, list); else agents.delete(c.name);
         c.mux.destroy('agent disconnected');
-        console.log(`🔌 [tunnel] agent "${c.name}" lost a connection (${list.length} left)`);
+        console.log(`🔌 [tunnel] agent "${c.name}" lost a connection (${list.length} left, code ${code}${reason ? ' ' + reason : ''})`);
     },
 };
 
 /** Round-trip time per connection, and the agent's proof that Midleman is still there. */
-setInterval(() => { const ts = Date.now(); for (const l of agents.values()) for (const c of l) c.mux.ctl({ t: 'ping', ts }); }, 15_000);
+setInterval(() => { const ts = performance.now(); for (const l of agents.values()) for (const c of l) c.mux.ctl({ t: 'ping', ts }); }, 15_000);
 
 /** Upgrade handler: authenticated agent name is passed by the caller (token already checked). Returns undefined when upgraded. */
 export function upgradeTunnel(server: Server<any>, req: Request, agent: string, remoteIp: string): Response | undefined {
