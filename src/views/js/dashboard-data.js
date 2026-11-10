@@ -5171,15 +5171,13 @@ function renderReqDetail(d) {
   const mColor = methodColors[d.method] || 'var(--text2)';
   const durPct = d.durationMs ? Math.min((d.durationMs / 5000) * 100, 100) : 0;
   const durColor = d.durationMs < 200 ? 'var(--green)' : d.durationMs < 1000 ? 'var(--orange)' : 'var(--red)';
-  const typeBadge = d.type === 'proxy'
-    ? `<span class="rdm-badge rdm-badge-proxy" style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:4px;font-size:11px">Proxy${d.profileName ? ' &middot; ' + esc(d.profileName) : ''}</span>`
-    : d.type === 'webhook'
-    ? `<span class="rdm-badge" style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:4px;font-size:11px">Webhook${d.targetName ? ' &middot; ' + esc(d.targetName) : ''}</span>`
-    : `<span class="rdm-badge rdm-badge-target" style="background:var(--blue-bg);color:var(--blue);padding:2px 8px;border-radius:4px;font-size:11px">Target${d.targetName ? ' &middot; ' + esc(d.targetName) : ''}</span>`;
+  const typeBadge = d.type === 'proxy' ? `Proxy${d.profileName ? ' &middot; ' + esc(d.profileName) : ''}`
+    : d.type === 'webhook' ? `Webhook${d.targetName ? ' &middot; ' + esc(d.targetName) : ''}`
+    : `Target${d.targetName ? ' &middot; ' + esc(d.targetName) : ''}`;
   let reqHCount = 0; try { reqHCount = Object.keys(JSON.parse(d.reqHeaders || '{}')).length; } catch { }
   let resHCount = 0; try { resHCount = Object.keys(JSON.parse(d.resHeaders || '{}')).length; } catch { }
 
-  document.getElementById('reqDetailTitle').innerHTML = `<span style="color:${mColor};font-weight:700">${esc(d.method)}</span> <span style="font-weight:400;color:var(--text2)">${esc(d.path)}</span>`;
+  document.getElementById('reqDetailTitle').innerHTML = `<span style="font-weight:600">${esc(d.method)}</span> <span style="font-weight:400;color:var(--text2)">${esc(d.path)}</span>`;
   const actions = document.getElementById('reqDetailActions');
   if (actions) {
     const canResend = (d.type === 'proxy' || d.type === 'target') && d.profileName;
@@ -5901,6 +5899,12 @@ function docsCopyForAI(section) {
 
 function _docsClipboard(text, msg, el) { return mmCopy(text, el, el ? undefined : msg); }
 
+/** App favicon (discovered from the redirect URIs) with a letter fallback when the host has none. */
+function _appIconHtml(c) {
+  const letter = '<span class="oc-ico oc-ico-letter">' + esc((c.name || '?').trim().charAt(0).toUpperCase()) + '</span>';
+  if (!c.iconUrl) return letter;
+  return '<img class="oc-ico" src="' + esc(c.iconUrl) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML=' + JSON.stringify(letter).replace(/"/g, '&quot;') + '">';
+}
 function renderOauthClients(clients) {
   const tbody = document.getElementById('oauthClientListBody');
   if (!clients.length) {
@@ -5917,7 +5921,7 @@ function renderOauthClients(clients) {
     const cid = JSON.stringify(c.clientId).replace(/"/g, '&quot;');
     const cname = JSON.stringify(c.name).replace(/"/g, '&quot;');
     return '<tr style="border-top:1px solid var(--border)">' +
-      '<td style="padding:10px 12px;font-weight:500">' + esc(c.name) + '</td>' +
+      '<td style="padding:10px 12px;font-weight:500"><span class="oc-name">' + _appIconHtml(c) + '<span>' + esc(c.name) + '</span></span></td>' +
       '<td style="padding:10px 8px;font-family:\'SF Mono\',ui-monospace,monospace;font-size:11.5px;color:var(--text2);word-break:break-all;max-width:200px">' + esc(c.clientId) + '</td>' +
       '<td style="padding:10px 8px;font-family:\'SF Mono\',ui-monospace,monospace;font-size:11px;color:var(--text2)">' + uris + '</td>' +
       '<td style="padding:10px 8px;color:var(--text3);font-size:11.5px">' + esc(created) + '</td>' +
@@ -12023,7 +12027,7 @@ function monRenderCriticalPick(m) {
   box.style.display = ''; txt.style.display = 'none';
   hint.textContent = `${seen.length} container(s) seen by the agent. Marked ones alert; the rest are informational.`;
   box.innerHTML = names.map(n => { const c = seen.find(x => x.name === n); const bad = c && (c.status !== 'running' || c.health === 'unhealthy');
-    return `<label class="mon-crit-row${crit.has(n) ? ' is-on' : ''}"><input type="checkbox" class="mm-switch" ${crit.has(n) ? 'checked' : ''} onchange="monCriticalToggled(this, '${esc(n).replace(/'/g, "\'")}')"><span class="mon-crit-name">${esc(n)}</span><span class="mon-crit-meta">${c ? `<span class="mm-chip ${bad ? 'err' : 'ok'}" style="font-size:10px">${esc(c.status)}</span> ${esc(c.image)}` : '<span class="mm-chip" style="font-size:10px">not on host</span>'}</span></label>`; }).join('');
+    return `<label class="mon-crit-row${crit.has(n) ? ' is-on' : ''}"><input type="checkbox" class="mm-switch" ${crit.has(n) ? 'checked' : ''} onchange="monCriticalToggled(this, '${esc(n).replace(/'/g, "\\'")}')"><span class="mon-crit-name">${esc(n)}</span><span class="mon-crit-meta">${c ? `<span class="mm-chip ${bad ? 'err' : 'ok'}" style="font-size:10px">${esc(c.status)}</span> ${esc(c.image)}` : '<span class="mm-chip" style="font-size:10px">not on host</span>'}</span></label>`; }).join('');
 }
 function monCriticalToggled(cb, name) {
   const txt = document.getElementById('monSrvCritical'); const list = new Set(txt.value.split(',').map(x => x.trim()).filter(Boolean));
@@ -12059,7 +12063,7 @@ function _agentInstallHtml(name, token) {
   -e MIDLEMAN_URL=${base} -e AGENT_NAME=${name} -e AGENT_TOKEN=${token || '<token — shown once on create; use "Rotate token" to get a new one>'} \\
   registry.biscatos.com/midleman/api-midleman:latest bun run src/agent/index.ts`;
   return `<div class="md-peek-head">Run on the server (outbound only — no port to open). <code>MIDLEMAN_URL</code> must be <b>https://</b> — the public hostname that fronts the Report port (${window.REPORT_PORT || 8444}); plain http is only accepted from the LAN. The container runs read-only with no capabilities and only reads the Docker socket.</div><pre class="md-ctr-log md-install">${esc(cmd)}</pre>
-    <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-sm" onclick="navigator.clipboard.writeText(${JSON.stringify(cmd).replace(/"/g, '&quot;')}).then(()=>toast('Copied','success'))">Copy</button>${token ? '' : `<button class="btn btn-sm" onclick="mdRotateToken()">Rotate token</button>`}<button class="btn btn-sm" style="margin-left:auto" onclick="document.getElementById('mdContainers').innerHTML='';openMonitorDetail(_mdName)">Back to containers</button></div>`;
+    <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-sm" data-copy="${esc(cmd)}" onclick="mmCopyFrom(this)">Copy</button>${token ? '' : `<button class="btn btn-sm" onclick="mdRotateToken()">Rotate token</button>`}<button class="btn btn-sm" style="margin-left:auto" onclick="document.getElementById('mdContainers').innerHTML='';openMonitorDetail(_mdName)">Back to containers</button></div>`;
 }
 function mdInstall() { const box = document.getElementById('mdContainers'); box.style.display = ''; box.innerHTML = _agentInstallHtml(_mdName, null); }
 async function mdRotateToken() {
@@ -12187,6 +12191,26 @@ function renderMonitors() {
 }
 
 /** Fill the queue picker from the broker named in the form (uses the saved password when the field is blank on edit). */
+/** Browse needs the broker URL and credentials (a saved monitor keeps its password, so the field may stay blank on edit). */
+function monBrowseState() {
+  const g = id => document.getElementById(id);
+  const editingSaved = g('monName').disabled && _allMonitors.some(m => m.name === g('monName').value.trim().toLowerCase() && m.hasPassword);
+  const ready = /^https?:\/\/\S+$/.test(g('monApiUrl').value.trim()) && g('monUsername').value.trim() && (g('monPassword').value || editingSaved);
+  const btn = g('monBrowseBtn'); btn.disabled = !ready; btn.title = ready ? 'List the queues on this broker' : 'Fill the API URL, username and password first';
+}
+let _monQueues = [];
+function monFilterQueues() {
+  const box = document.getElementById('monQueuePick'); if (!_monQueues.length || box.style.display === 'none') return;
+  const q = document.getElementById('monQueue').value.trim().toLowerCase();
+  const isErr = n => /error|err|dead|dlq|dlx|fail|reject/i.test(n);
+  const rows = _monQueues.filter(x => !q || x.name.toLowerCase().includes(q));
+  box.innerHTML = `<div class="mon-pick-head"><span>${rows.length} of ${_monQueues.length} queue${_monQueues.length === 1 ? '' : 's'}${q ? ` matching "${esc(q)}"` : ''}</span><button type="button" class="mon-pick-close" onclick="monCloseQueues()" aria-label="Close">&times;</button></div>` +
+    (rows.length ? `<div class="mon-pick">${rows.map(x => `<button type="button" class="mon-pick-row${isErr(x.name) ? ' is-err' : ''}" onclick="monPickQueue('${esc(x.name).replace(/'/g, "\\'")}', '${esc(x.vhost).replace(/'/g, "\\'")}')">
+        <span class="mon-pick-name">${esc(x.name)}</span>${isErr(x.name) ? '<span class="mon-pick-tag">error queue</span>' : ''}
+        <span class="mon-pick-meta">${x.messages.toLocaleString()} msg${x.messages === 1 ? '' : 's'} · ${x.consumers} consumer${x.consumers === 1 ? '' : 's'}${x.vhost !== '/' ? ' · ' + esc(x.vhost) : ''}</span></button>`).join('')}</div>`
+     : '<div class="mon-pick-note">No queue matches.</div>');
+}
+function monCloseQueues() { const box = document.getElementById('monQueuePick'); box.style.display = 'none'; box.innerHTML = ''; }
 async function monBrowseQueues() {
   const g = id => document.getElementById(id);
   const box = g('monQueuePick'); box.style.display = ''; box.innerHTML = '<div class="mon-pick-note">Loading queues…</div>';
@@ -12197,17 +12221,14 @@ async function monBrowseQueues() {
     const d = await res.json().catch(() => ({}));
     if (!res.ok) { box.innerHTML = `<div class="mon-pick-note" style="color:var(--red)">${esc(d.error || 'Could not list queues')}</div>`; return; }
     if (!d.queues.length) { box.innerHTML = '<div class="mon-pick-note">No queues visible to this user.</div>'; return; }
-    const isErr = q => /error|err|dead|dlq|dlx|fail|reject/i.test(q.name);
-    const rows = [...d.queues].sort((a, b) => (isErr(b) - isErr(a)) || a.name.localeCompare(b.name));
-    box.innerHTML = `<div class="mon-pick">${rows.map(q => `<button type="button" class="mon-pick-row${isErr(q) ? ' is-err' : ''}" onclick="monPickQueue('${esc(q.name).replace(/'/g, "\\'")}', '${esc(q.vhost).replace(/'/g, "\\'")}')">
-        <span class="mon-pick-name">${esc(q.name)}</span>${isErr(q) ? '<span class="mm-chip err" style="font-size:10px">error queue?</span>' : ''}
-        <span class="mon-pick-meta">${q.messages} msg${q.messages === 1 ? '' : 's'} · ${q.consumers} consumer${q.consumers === 1 ? '' : 's'}${q.vhost !== '/' ? ' · ' + esc(q.vhost) : ''}</span></button>`).join('')}</div>`;
+    _monQueues = [...d.queues].sort((a, b) => a.name.localeCompare(b.name)); // alphabetical; error queues are dimmed, not pulled to the top
+    monFilterQueues();
   } catch (e) { box.innerHTML = `<div class="mon-pick-note" style="color:var(--red)">${esc(e.message || e)}</div>`; }
 }
 function monPickQueue(name, vhost) {
   document.getElementById('monQueue').value = name;
   if (vhost && vhost !== '/') document.getElementById('monVhost').value = vhost;
-  const box = document.getElementById('monQueuePick'); box.style.display = 'none'; box.innerHTML = '';
+  monCloseQueues();
   // An error/DLQ queue wants the "messages" mode; a business queue wants "silence".
   if (/error|err|dead|dlq|dlx|fail|reject/i.test(name)) { document.getElementById('monAlertMessages').checked = true; document.getElementById('monAlertSilence').checked = false; monitorTypeChanged(); }
 }
@@ -12277,7 +12298,8 @@ function openMonitorModal(m) {
   }
   bhRefreshPickers('monDay');
   monitorTypeChanged();
-  const pk = g('monQueuePick'); pk.style.display = 'none'; pk.innerHTML = '';
+  const pk = g('monQueuePick'); pk.style.display = 'none'; pk.innerHTML = ''; _monQueues = [];
+  monBrowseState();
   g('monitorModal').style.display = 'flex';
 }
 

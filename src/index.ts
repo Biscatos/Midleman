@@ -662,12 +662,51 @@ console.log(`   Docs: http://localhost:${reportApiServer.port}/reports/docs?apiK
 
 // ─── Main HTTP server ───────────────────────────────────────────────────────
 
+// ─── Response compression ───────────────────────────────────────────────────
+// The dashboard is ~1.3 MB of HTML/JS/CSS per first load; gzip brings it to ~250 KB,
+// which is the difference between "instant" and "several seconds" over a WAN link.
+// Static assets are compressed once and memoised by URL (they carry ?v=<hash>).
+const GZIP_TYPES = /^(text\/|application\/(json|javascript|xml))/;
+const gzipCache = new Map<string, { etag: string | null; body: Uint8Array }>();
+async function compressed(req: Request, res: Response, url: URL): Promise<Response> {
+    if (req.method !== 'GET' && req.method !== 'POST') return res;
+    if (!/\bgzip\b/.test(req.headers.get('accept-encoding') || '')) return res;
+    if (res.status !== 200 || res.headers.has('content-encoding') || !res.body) return res;
+    const type = res.headers.get('content-type') || '';
+    if (!GZIP_TYPES.test(type) || res.headers.get('content-type')?.includes('event-stream')) return res;
+    const isStatic = url.searchParams.has('v') && /^\/dashboard\/(js|css)\//.test(url.pathname);
+    const key = isStatic ? url.pathname + url.search : '';
+    let body: Uint8Array;
+    if (isStatic && gzipCache.has(key)) body = gzipCache.get(key)!.body;
+    else {
+        const raw = new Uint8Array(await res.arrayBuffer());
+        if (raw.byteLength < 1024) return new Response(raw, { status: res.status, headers: res.headers });
+        body = Bun.gzipSync(raw, { level: 6 });
+        if (isStatic) gzipCache.set(key, { etag: null, body });
+    }
+    const headers = new Headers(res.headers);
+    headers.set('Content-Encoding', 'gzip'); headers.set('Vary', 'Accept-Encoding'); headers.delete('Content-Length');
+    return new Response(body as any, { status: res.status, headers });
+}
+
 const server = Bun.serve({
     port: config.port,
     idleTimeout: 0,
     maxRequestBodySize: 50 * 1024 * 1024, // 50MB
 
     async fetch(req: Request, srv): Promise<Response> {
+        const res = await handle(req, srv);
+        try { return await compressed(req, res, new URL(req.url)); } catch { return res; }
+    },
+
+    error(error) {
+        console.error('Server error:', error);
+        return jsonRes(500, { error: 'Internal Server Error', message: 'An unexpected error occurred' });
+    },
+});
+
+async function handle(req: Request, srv: any): Promise<Response> {
+    {
         rememberPeerIp(req, srv?.requestIP?.(req)?.address ?? null);
         // ── ACME HTTP-01 challenge — must respond before any auth or shutdown check ──
         const url0 = new URL(req.url);
@@ -4397,7 +4436,10 @@ const server = Bun.serve({
                 }
 
                 if (url.pathname === '/admin/oauth-clients' && req.method === 'GET') {
-                    return jsonRes(200, { clients: listOauthClients() });
+                    // Each client carries its app icon (same discovery as the sign-in page; cached per origin,
+                    // short wait so the list never stalls on a slow host).
+                    const clients = await Promise.all(listOauthClients().map(async c => ({ ...c, iconUrl: (await getAppIcon(c.redirectUris || [], 300)).url })));
+                    return jsonRes(200, { clients });
                 }
 
                 // Sign-in logo preview for the client modal: discovered from the first redirect URI.
@@ -5172,13 +5214,8 @@ const server = Bun.serve({
         } finally {
             activeRequests--;
         }
-    },
-
-    error(error) {
-        console.error('Server error:', error);
-        return jsonRes(500, { error: 'Internal Server Error', message: 'An unexpected error occurred' });
-    },
-});
+    }
+}
 
 console.log(`\n✨ Admin server on http://localhost:${server.port}`);
 console.log(`💚 Health check: http://localhost:${server.port}/health`);

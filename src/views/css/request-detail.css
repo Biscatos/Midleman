@@ -554,3 +554,37 @@
 #reqDetailModal.is-fullscreen .rdm-panel::after { display: none; }
 #reqDetailModal.is-fullscreen .rdm-body { padding-left: max(24px, calc((100% - 1280px) / 2)); padding-right: max(24px, calc((100% - 1280px) / 2)); }
 #reqDetailModal.is-fullscreen .rdm-code-block pre { max-height: 60vh; }
+
+/* ── Request detail header: flat, quiet, aligned with the rest of the app ──
+   Overrides the tinted hero / boxed metadata / pill tabs above. */
+.rdm-hero, .rdm-hero.rdm-st-ok, .rdm-hero.rdm-st-redirect, .rdm-hero.rdm-st-client, .rdm-hero.rdm-st-server, .rdm-hero.rdm-st-unknown {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 0; padding: 14px 18px; margin-bottom: 0; border-bottom: none;
+}
+.rdm-hero-main { gap: 12px; }
+.rdm-status-code { font-size: 22px; font-weight: 600; letter-spacing: -0.3px; }
+.rdm-status-text { font-size: 13.5px; font-weight: 500; margin-bottom: 1px; }
+.rdm-status-meta { font-size: 12px; color: var(--text2); }
+.rdm-status-meta .rdm-badge { background: none !important; color: var(--text2) !important; padding: 0 !important; border-radius: 0 !important; font: 400 12px var(--font-mono) !important; letter-spacing: 0; }
+.rdm-hero-metrics { gap: 28px; }
+.rdm-metric { min-width: 0; }
+.rdm-metric-val { font-size: 14px; font-weight: 500; margin-bottom: 1px; font-variant-numeric: tabular-nums; }
+.rdm-metric-lbl { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--text3); }
+.rdm-perf-bar { display: none; }
+
+.rdm-meta-grid { gap: 0; margin-bottom: 16px; border: 1px solid var(--border); background: var(--surface); }
+.rdm-meta-item { background: none; border: none; border-radius: 0; padding: 9px 18px; border-bottom: 1px solid var(--border); align-items: center; gap: 12px; transition: none; }
+.rdm-meta-item:nth-child(odd):not(.rdm-meta-wide) { border-right: 1px solid var(--border); }
+.rdm-meta-item:hover { border-color: var(--border); }
+.rdm-meta-grid .rdm-meta-item:last-child { border-bottom: none; }
+.rdm-meta-item > div:first-child { display: flex; align-items: baseline; gap: 14px; min-width: 0; }
+.rdm-meta-lbl { font-size: 12px; text-transform: none; letter-spacing: 0; color: var(--text3); margin: 0; flex: none; width: 84px; }
+.rdm-meta-val { font-size: 13px; min-width: 0; }
+.rdm-mono-val { font-size: 12.5px; }
+.rdm-copy-btn { border-radius: 0; color: var(--text2); padding: 3px 8px; }
+.rdm-copy-btn:hover { background: var(--surface2); color: var(--text); border-color: var(--border); }
+
+.rdm-error-banner { border-radius: 0; border: 1px solid var(--border); border-left: 3px solid var(--red); background: var(--surface); color: var(--text); }
+
+/* Tabs keep the app-wide tab style from dashboard.css (accent on selection ground). */
+.rdm-tabs { background: none; padding: 0; border-radius: 0; gap: 4px; }
+.rdm-tabs .rdm-tab { flex: none; }
