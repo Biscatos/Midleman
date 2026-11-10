@@ -46,7 +46,11 @@ timingSafeEqualStr,
 type NotificationSeverity, type NotificationChannel } from './auth/auth';
 import { emitNotificationEvent, dispatchTestToGroup } from './core/notifications';
 import { isPrivateOrLoopbackV4 } from './core/ssrf-guard';
-import { listMonitors, getMonitor, upsertMonitor, deleteMonitor, publicMonitor, validateMonitorInput, runCheck, peekQueue, listRabbitQueues, errorQueueName, requeueErrorMessages, discardErrorMessages, exportErrorMessages, startMonitorScheduler, stopMonitorScheduler, agentMonitorForToken, agentSourceAllowed, agentReportTooSoon, ingestAgentReport, serverErrors, newAgentToken, hashAgentToken, type AgentReport } from './core/monitors';
+import { listWallboardKeys, createWallboardKey, revokeWallboardKey, verifyWallboardKey } from './core/wallboard-keys';
+import { numbersSeen as metaNumbersSeen, exportNumbersSeen, importNumbersSeen, META_EVENT_KINDS } from './core/meta-router';
+import { listMonitors, getMonitor, upsertMonitor, deleteMonitor, publicMonitor, validateMonitorInput, runCheck, peekQueue, listRabbitQueues, errorQueueName, requeueErrorMessages, discardErrorMessages, exportErrorMessages, startMonitorScheduler, stopMonitorScheduler, agentMonitorForToken, agentSourceAllowed, agentReportTooSoon, ingestAgentReport, serverErrors, newAgentToken, hashAgentToken, listIncidents, type AgentReport } from './core/monitors';
+import { getReportSettings, saveReportSettings, buildWeeklyReport, sendWeeklyReport, reportSchedulerTick } from './core/monitor-report';
+import { listTrafficResources } from './telemetry/request-log';
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
 import { initConsentPages, listConsentPages, getConsentPage, createConsentPage, updateConsentPage, deleteConsentPage, findConsentPageOauthReferences } from './auth/consent-pages';
 import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin, runLdapSync, getLastLdapSyncReport } from './auth/ldap';
@@ -57,7 +61,7 @@ import { isNpmCertVolumePresent, startCertWatcher, onCertReloaded } from './cert
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleOauthSmsOtp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
 import { resolveClientIp, getTrustProxyConfig } from './core/ip-filter';
 import { initReportFeeds, handleReportRequest } from './reports/server';
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import QRCode from 'qrcode';
 import { resolve } from 'path';
 
@@ -484,6 +488,14 @@ if (five9Connectors.length > 0) {
 startPendingRetryScheduler();
 startSilenceAlertScheduler();
 startMonitorScheduler();
+{   // numbers seen on Meta webhooks survive restarts (small file, saved every 5 min and on shutdown)
+    const metaFile = resolve(process.env.DATA_DIR || resolve(process.cwd(), 'data'), 'meta-numbers.json');
+    try { if (existsSync(metaFile)) importNumbersSeen(JSON.parse(readFileSync(metaFile, 'utf-8'))); } catch {}
+    const saveMeta = () => { try { writeFileSync(metaFile, JSON.stringify(exportNumbersSeen()), 'utf-8'); } catch {} };
+    setInterval(saveMeta, 5 * 60_000);
+    process.on('beforeExit', saveMeta);
+}
+setInterval(() => { void reportSchedulerTick().catch(e => console.warn('[monitors] report tick:', e?.message || e)); }, 60_000);
 
 // TCP/UDP proxies are started AFTER the main HTTP server below — they may run
 // ACME HTTP-01 which needs the main server to be already listening on :80.
@@ -1268,9 +1280,30 @@ async function handle(req: Request, srv: any): Promise<Response> {
             // Wallboard: full-screen operations board for the monitors (same session as the dashboard;
             // the page redirects to /dashboard when /admin/monitors answers 401).
             if (url.pathname === '/wallboard' || url.pathname === '/wallboard/') {
+                const ip = reqClientIp(req);
+                const k = url.searchParams.get('k');
+                if (k) {
+                    // Share link opened: exchange the key for a cookie scoped to /wallboard and drop it from the URL
+                    // (so it does not sit in the address bar, history or screenshots).
+                    if (!checkRateLimit('wbkey:' + ip, 20)) return new Response('Too many attempts', { status: 429 });
+                    const rec = verifyWallboardKey(k, ip);
+                    if (!rec) { recordFailedAttempt('wbkey:' + ip); return new Response('This wallboard link is not valid (revoked, expired or not allowed from this network).', { status: 403, headers: { 'Content-Type': 'text/plain; charset=utf-8' } }); }
+                    const maxAge = rec.expiresAt ? Math.max(60, Math.floor((rec.expiresAt - Date.now()) / 1000)) : 365 * 86400;
+                    return new Response(null, { status: 302, headers: { Location: '/wallboard', 'Set-Cookie': `mm_wb=${k}; HttpOnly; SameSite=Lax; Path=/wallboard; Max-Age=${maxAge}${isSecureRequest(req) ? '; Secure' : ''}` } });
+                }
+                const admin = !!getAuthedAdmin(req);
+                const shared = !admin && !!verifyWallboardKey(parseCookies(req).mm_wb, ip);
+                if (!admin && !shared) return new Response(null, { status: 302, headers: { Location: '/dashboard' } });
                 const html = withTheme(readFileSync(resolve(import.meta.dir, 'views/wallboard.html'), 'utf-8'))
-                    .replace('<!-- MM_LOGO -->', LOGO_GLYPH_SVG);
+                    .replace('<!-- MM_LOGO -->', LOGO_GLYPH_SVG)
+                    .replace('</head>', `<script>window.WB_MODE=${JSON.stringify(admin ? 'admin' : 'shared')};</script></head>`);
                 return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+            }
+            // Read-only board data: admin session or a valid share key (cookie set above).
+            if (url.pathname === '/wallboard/data' && req.method === 'GET') {
+                const ip = reqClientIp(req);
+                if (!getAuthedAdmin(req) && !verifyWallboardKey(parseCookies(req).mm_wb, ip)) return jsonRes(401, { error: 'unauthorized' });
+                return jsonRes(200, { monitors: listMonitors().map(publicMonitor) });
             }
 
             if (url.pathname === '/dashboard' || url.pathname === '/dashboard/') {
@@ -1860,6 +1893,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             port: s?.port ?? w.port,
                             hasAuth: !!w.authToken,
                             hasAuthToken: !!w.authToken,
+                            meta: { enabled: !!w.meta?.enabled, hasAppSecret: !!w.meta?.appSecret },
                             retry: w.retry,
                             allowedIps: w.allowedIps || [],
                             // The edit form is populated from this list, so every
@@ -2004,6 +2038,14 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     return removed ? jsonRes(200, { status: 'dismissed' }) : jsonRes(404, { error: 'Not found' });
                 }
 
+                // Phone numbers / WABAs seen on a Meta-mode webhook (for the destination editor).
+                {
+                    const mn = url.pathname.match(/^\/admin\/webhooks\/([^/]+)\/meta-numbers$/);
+                    if (mn && req.method === 'GET') {
+                        const name = decodeURIComponent(mn[1]).toLowerCase();
+                        return jsonRes(200, { numbers: metaNumbersSeen(name), kinds: META_EVENT_KINDS });
+                    }
+                }
                 if (url.pathname.startsWith('/admin/webhooks/') && req.method === 'GET') {
                     const name = decodeURIComponent(url.pathname.split('/')[3] || '');
                     if (!name) return jsonRes(400, { error: 'Webhook name required' });
@@ -2019,6 +2061,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             // shared secret. The form only sends a new value when the admin
                             // types one; otherwise the existing token is preserved on save.
                             hasAuthToken: !!webhook.authToken,
+                            meta: { enabled: !!webhook.meta?.enabled, hasAppSecret: !!webhook.meta?.appSecret },
                             retry: webhook.retry,
                             allowedIps: webhook.allowedIps || [],
                             allowPrivateTargets: webhook.allowPrivateTargets !== false,
@@ -2052,6 +2095,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         port: configuredPort,
                     };
                     if (input.authToken) webhook.authToken = input.authToken as string;
+                    if (input.meta && typeof input.meta === 'object') { const mi = input.meta as any; webhook.meta = { enabled: mi.enabled === true, ...(typeof mi.appSecret === 'string' && mi.appSecret ? { appSecret: mi.appSecret } : {}) }; }
                     if (input.retry && typeof input.retry === 'object') webhook.retry = input.retry as import('./core/types').WebhookRetryConfig;
                     if (Array.isArray(input.allowedIps) && input.allowedIps.length) webhook.allowedIps = input.allowedIps as string[];
                     if (typeof input.allowPrivateTargets === 'boolean') webhook.allowPrivateTargets = input.allowPrivateTargets;
@@ -2088,6 +2132,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         // Preserve the existing inbound auth token when the form did not
                         // submit a new one (it is no longer sent back to the client).
                         if (!webhookWithPort.authToken && prev.authToken) webhookWithPort.authToken = prev.authToken;
+                        if (webhookWithPort.meta && !webhookWithPort.meta.appSecret && prev.meta?.appSecret) webhookWithPort.meta.appSecret = prev.meta.appSecret;
                         // Masked header values (Authorization etc.) come back as SECRET_MASK — restore the stored ones.
                         webhookWithPort.targets = restoreTargetSecrets(webhookWithPort.targets, prev.targets);
                         if (prev.npmProxyHostId !== undefined) webhookWithPort.npmProxyHostId = prev.npmProxyHostId;
@@ -4758,6 +4803,69 @@ async function handle(req: Request, srv: any): Promise<Response> {
                 // ── Monitors (RabbitMQ queues, HTTP endpoints) ──
                 if (url.pathname === '/admin/monitors' && req.method === 'GET') {
                     return jsonRes(200, { monitors: listMonitors().map(publicMonitor) });
+                }
+                // ── Incidents, traffic resources, weekly report ──
+                if (url.pathname === '/admin/monitors/incidents' && req.method === 'GET') {
+                    const days = Math.min(Math.max(parseInt(url.searchParams.get('days') || '7', 10) || 7, 1), 90);
+                    return jsonRes(200, { incidents: listIncidents({ since: Date.now() - days * 86_400_000, monitor: url.searchParams.get('monitor') || undefined, limit: Math.min(parseInt(url.searchParams.get('limit') || '200', 10) || 200, 2000) }) });
+                }
+                if (url.pathname === '/admin/monitors/traffic-resources' && req.method === 'GET') {
+                    return jsonRes(200, { resources: listTrafficResources() });
+                }
+                if (url.pathname === '/admin/monitors/report-settings' && req.method === 'GET') {
+                    return jsonRes(200, { settings: getReportSettings(), smtpConfigured: isSmtpConfigured() });
+                }
+                if (url.pathname === '/admin/monitors/report-settings' && req.method === 'POST') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
+                    const emails = Array.isArray(body?.emails) ? body.emails.filter((x: unknown): x is string => typeof x === 'string').map((x: string) => x.trim()).filter(Boolean) : [];
+                    for (const e of emails) if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return jsonRes(400, { error: `"${e}" is not a valid email` });
+                    const dayOfWeek = Number(body?.dayOfWeek), hour = Number(body?.hour);
+                    if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) return jsonRes(400, { error: '"dayOfWeek" must be 0–6' });
+                    if (!Number.isInteger(hour) || hour < 0 || hour > 23) return jsonRes(400, { error: '"hour" must be 0–23' });
+                    const settings = saveReportSettings({ enabled: body?.enabled === true, emails: emails.slice(0, 20), dayOfWeek, hour });
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'monitor.report.settings', targetType: 'monitor_report', targetId: 'weekly', details: { enabled: settings.enabled, emails: settings.emails, dayOfWeek, hour }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { settings });
+                }
+                if (url.pathname === '/admin/monitors/report/preview' && req.method === 'GET') {
+                    const r = buildWeeklyReport();
+                    return new Response(r.html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'SAMEORIGIN' } });
+                }
+                if (url.pathname === '/admin/monitors/report/send' && req.method === 'POST') {
+                    const r = await sendWeeklyReport();
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'monitor.report.send', targetType: 'monitor_report', targetId: 'weekly', details: { sent: r.sent, errors: r.errors }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(r.ok ? 200 : 502, r);
+                }
+                // ── Wallboard share links (read-only, no login) ──
+                if (url.pathname === '/admin/wallboard-keys' && req.method === 'GET') {
+                    return jsonRes(200, { keys: listWallboardKeys() });
+                }
+                if (url.pathname === '/admin/wallboard-keys' && req.method === 'POST') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
+                    const name = typeof body?.name === 'string' ? body.name.trim() : '';
+                    if (!name) return jsonRes(400, { error: '"name" is required (e.g. "Helpdesk screen")' });
+                    const days = body.expiresDays === null || body.expiresDays === undefined || body.expiresDays === '' ? null : Number(body.expiresDays);
+                    if (days !== null && (!Number.isFinite(days) || days < 1 || days > 3650)) return jsonRes(400, { error: '"expiresDays" must be 1–3650, or empty for no expiry' });
+                    const cidrs = Array.isArray(body.allowedCidrs) ? body.allowedCidrs.filter((x: unknown): x is string => typeof x === 'string').map((x: string) => x.trim()).filter(Boolean) : [];
+                    for (const c of cidrs) if (!/^\d{1,3}(\.\d{1,3}){3}(\/\d{1,2})?$/.test(c)) return jsonRes(400, { error: `"${c}" is not an IPv4 address or CIDR` });
+                    const me = getAuthedAdmin(req);
+                    const { key, record } = createWallboardKey({ name, expiresAt: days ? Date.now() + days * 86400_000 : null, allowedCidrs: cidrs, createdBy: me?.username });
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'wallboard.key.create', targetType: 'wallboard_key', targetId: record.id, details: { name, expiresAt: record.expiresAt, allowedCidrs: cidrs }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    const out = jsonRes(200, { key: record, url: `${publicLinkBase(req)}/wallboard?k=${key}` });
+                    out.headers.set('X-Sensitive', '1'); // one-time secret: never compressed
+                    return out;
+                }
+                {
+                    const wk = url.pathname.match(/^\/admin\/wallboard-keys\/([a-f0-9]{12})$/);
+                    if (wk && req.method === 'DELETE') {
+                        if (!revokeWallboardKey(wk[1])) return jsonRes(404, { error: 'Key not found' });
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'wallboard.key.revoke', targetType: 'wallboard_key', targetId: wk[1], ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { status: 'revoked' });
+                    }
                 }
                 if (url.pathname === '/admin/monitors/rabbit-queues' && req.method === 'POST') {
                     // Browse a broker's queues from the monitor form. Credentials come in the body;

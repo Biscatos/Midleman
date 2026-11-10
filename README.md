@@ -118,6 +118,22 @@ Purges run hourly in 5 000-row batches and never block traffic. Deleted rows onl
 
 ---
 
+## Monitoring
+
+Monitors are a first-class resource (dashboard → Monitors): RabbitMQ queues (silence, messages, dead-letter `_error` queue, broker health), HTTP endpoints, Redis (INFO-based: memory, evictions, persistence, replication), databases (PostgreSQL, MySQL/MariaDB, SQL Server: connections, long queries, lock waits, deadlocks, replication lag), Docker hosts (via the agent below) and the traffic of Midleman's own webhooks/proxies (error rate, latency). Alerts go through the notification rules (`monitor.*`); incidents are kept for the weekly report; the wallboard (`/wallboard`) can be shared read-only with the helpdesk ("Share wallboard").
+
+### Docker host agent
+
+Runs on each server, outbound only — nothing to open on the server. Create a **Server** monitor; the dashboard shows the `docker run` command with the one-time token. See `docker-compose.agent.yml`. For servers outside the LAN, `MIDLEMAN_URL` must be `https://` (front the Report port 8444 with your reverse proxy / tunnel) and the monitor can be limited to the server's egress IP.
+
+### A second pair of eyes
+
+The monitors run inside Midleman, so the host that runs Midleman cannot alert about itself being down. Run `docker-compose.watcher.yml` on another host (a small cloud VM) and point an HTTP monitor from each instance at the other's `/health`. Each instance needs its own SMTP/SMS settings.
+
+### Weekly report
+
+Monitors → **Weekly report**: availability per monitor, incidents, noisiest containers and traffic health for the last 7 days, emailed on the chosen weekday/hour (Africa/Luanda), with *Preview* and *Send now*.
+
 ## TCP/UDP SIP Proxy
 
 Midleman can terminate TLS from cloud carriers (e.g. Meta WhatsApp Business Calling API) and forward SIP signalling to a private FusionPBX/FreeSWITCH with full RTP media relay.

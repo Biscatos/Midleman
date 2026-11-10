@@ -32,6 +32,7 @@
     "@opentelemetry/semantic-conventions": "^1.40.0",
     "acme-client": "^5.4.0",
     "ldapts": "^7.3.0",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "tedious": "18"
   }
 }

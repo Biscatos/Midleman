@@ -26,6 +26,8 @@ import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 /** Seam for tests: swap the notification sink without SMTP/SMS. */
 export const sink = { emit: emitNotificationEvent };
 import { assertResolvedHostAllowed, ipInCidrs } from './ssrf-guard';
+import { getTrafficWindow } from '../telemetry/request-log';
+import { Connection as TdsConnection, Request as TdsRequest } from 'tedious';
 import { isWithinBusinessHours, validateWeekly, type DaySchedule } from './business-hours';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -149,7 +151,58 @@ export interface ServerSnapshot {
     containers: (Omit<AgentContainer, 'errors'> & { errorsInWindow: number; lastError: { at: number; line: string } | null })[];
 }
 
-export type Monitor = RabbitMqMonitor | HttpMonitor | RedisMonitor | ServerMonitor;
+export type DbEngine = 'postgres' | 'mysql' | 'mssql';
+export interface DatabaseMonitor extends MonitorBase {
+    type: 'database';
+    engine: DbEngine;
+    host: string;
+    port: number;
+    database: string;
+    username: string;
+    password?: string;
+    tls: boolean;
+    /** Alert when SELECT 1 takes longer than this (0 = ignore). */
+    maxLatencyMs: number;
+    /** Alert when connections / max_connections exceeds this % (0 = ignore). */
+    maxConnectionsPct: number;
+    /** One-shot alert when a query has been running longer than this (0 = ignore). */
+    maxLongQuerySec: number;
+    /** Replica only: alert when replication lag exceeds this (0 = ignore). */
+    maxReplicaLagSec: number;
+}
+export interface DbInfo {
+    engine: DbEngine; version: string;
+    connections: number; maxConnections: number | null; connectionsPct: number | null;
+    longestQuerySec: number; waitingLocks: number;
+    replica: boolean; replicaLagSec: number | null;
+    sizeBytes: number | null; deadlocks: number | null;
+}
+
+export interface TrafficMonitor extends MonitorBase {
+    type: 'traffic';
+    source: 'webhook' | 'proxy';
+    /** Webhook or proxy profile name as it appears in the request log. */
+    resource: string;
+    /** Sliding window (multiple of 30 min). */
+    windowMinutes: number;
+    /** Below this many requests in the window the error rate is not judged. */
+    minRequests: number;
+    /** Alert when (5xx + no response) / total exceeds this % (0 = ignore). */
+    maxErrorPct: number;
+    /** Alert when the average duration exceeds this (0 = ignore). */
+    maxAvgMs: number;
+}
+export interface TrafficInfo { total: number; errors: number; errorPct: number | null; avgMs: number | null; windowMinutes: number }
+
+/** One alert episode (or one-shot event) — the raw material of the weekly report. */
+export interface Incident {
+    id: string; monitor: string; type: Monitor['type'];
+    kind: 'episode' | 'event';
+    startedAt: number; endedAt: number | null;
+    detail: string;
+}
+
+export type Monitor = RabbitMqMonitor | HttpMonitor | RedisMonitor | ServerMonitor | DatabaseMonitor | TrafficMonitor;
 
 export interface MonitorStatus {
     state: 'ok' | 'alert' | 'unknown' | 'disabled';
@@ -172,6 +225,10 @@ export interface MonitorStatus {
     redis: RedisInfo | null;
     /** server: last agent report. */
     server: ServerSnapshot | null;
+    /** database: last readings. */
+    db: DbInfo | null;
+    /** traffic: last window. */
+    traffic: TrafficInfo | null;
 }
 const HISTORY_MAX = 60;
 
@@ -213,7 +270,7 @@ export function upsertMonitor(m: Monitor): { created: boolean } {
     const idx = monitors.findIndex(x => x.name === m.name);
     if (idx >= 0) {
         const prev = monitors[idx];
-        if ((m.type === 'rabbitmq' || m.type === 'redis') && prev.type === m.type && !m.password && prev.password) m.password = prev.password;
+        if ((m.type === 'rabbitmq' || m.type === 'redis' || m.type === 'database') && prev.type === m.type && !m.password && prev.password) m.password = prev.password;
         if (m.type === 'server' && prev.type === 'server' && !m.agentTokenHash) m.agentTokenHash = prev.agentTokenHash;
         monitors[idx] = m;
     } else {
@@ -236,7 +293,7 @@ export function deleteMonitor(name: string): boolean {
 /** Shape safe to send to the dashboard (no password). */
 export function publicMonitor(m: Monitor): Record<string, unknown> {
     const o = { ...(m as unknown as Record<string, unknown>) };
-    if (m.type === 'rabbitmq' || m.type === 'redis') { delete o.password; o.hasPassword = !!m.password; }
+    if (m.type === 'rabbitmq' || m.type === 'redis' || m.type === 'database') { delete o.password; o.hasPassword = !!m.password; }
     if (m.type === 'server') { delete o.agentTokenHash; o.hasToken = !!m.agentTokenHash; }
     return { ...o, status: getStatus(m.name) };
 }
@@ -369,7 +426,36 @@ export function validateMonitorInput(input: unknown): { error: string } | { moni
         } };
     }
 
-    return { error: '"type" must be "rabbitmq", "http", "redis" or "server"' };
+    if (i.type === 'database') {
+        const engine = i.engine;
+        if (engine !== 'postgres' && engine !== 'mysql' && engine !== 'mssql') return { error: '"engine" must be "postgres", "mysql" or "mssql"' };
+        if (typeof i.host !== 'string' || !i.host.trim()) return { error: '"host" is required' };
+        const port = num('port', 1, 65535, engine === 'postgres' ? 5432 : engine === 'mysql' ? 3306 : 1433);
+        if (typeof port === 'string') return { error: port };
+        if (typeof i.database !== 'string' || !i.database.trim()) return { error: '"database" is required' };
+        if (typeof i.username !== 'string' || !i.username.trim()) return { error: '"username" is required' };
+        if (i.password !== undefined && i.password !== null && typeof i.password !== 'string') return { error: '"password" must be a string' };
+        const maxLatencyMs = num('maxLatencyMs', 0, 120000, 0); if (typeof maxLatencyMs === 'string') return { error: maxLatencyMs };
+        const maxConnectionsPct = num('maxConnectionsPct', 0, 100, 85); if (typeof maxConnectionsPct === 'string') return { error: maxConnectionsPct };
+        const maxLongQuerySec = num('maxLongQuerySec', 0, 86400, 60); if (typeof maxLongQuerySec === 'string') return { error: maxLongQuerySec };
+        const maxReplicaLagSec = num('maxReplicaLagSec', 0, 86400, 60); if (typeof maxReplicaLagSec === 'string') return { error: maxReplicaLagSec };
+        return { monitor: {
+            ...base, type: 'database', engine, host: (i.host as string).trim(), port, database: (i.database as string).trim(), username: (i.username as string).trim(),
+            password: (i.password as string | undefined) || undefined, tls: i.tls === true, maxLatencyMs, maxConnectionsPct, maxLongQuerySec, maxReplicaLagSec,
+        } };
+    }
+
+    if (i.type === 'traffic') {
+        if (i.source !== 'webhook' && i.source !== 'proxy') return { error: '"source" must be "webhook" or "proxy"' };
+        if (typeof i.resource !== 'string' || !i.resource.trim()) return { error: '"resource" (webhook or proxy name) is required' };
+        const windowMinutes = num('windowMinutes', 30, 1440, 30); if (typeof windowMinutes === 'string') return { error: windowMinutes };
+        const minRequests = num('minRequests', 1, 1_000_000, 10); if (typeof minRequests === 'string') return { error: minRequests };
+        const maxErrorPct = num('maxErrorPct', 0, 100, 5); if (typeof maxErrorPct === 'string') return { error: maxErrorPct };
+        const maxAvgMs = num('maxAvgMs', 0, 600000, 0); if (typeof maxAvgMs === 'string') return { error: maxAvgMs };
+        return { monitor: { ...base, type: 'traffic', source: i.source, resource: (i.resource as string).trim(), windowMinutes: Math.ceil(windowMinutes / 30) * 30, minRequests, maxErrorPct, maxAvgMs } };
+    }
+
+    return { error: '"type" must be "rabbitmq", "http", "redis", "server", "database" or "traffic"' };
 }
 
 export function newAgentToken(): string { return 'mma_' + randomBytes(32).toString('base64url'); }
@@ -377,22 +463,101 @@ export function hashAgentToken(token: string): string { return createHash('sha25
 
 // ─── Runtime state & checks ─────────────────────────────────────────────────
 
-interface State extends MonitorStatus { checking: boolean; /** dead-letter queue publish counter at the previous check */ errPublished: number | null; /** redis counters at the previous check (restart / eviction / rejection detection) */ redisPrev: { evicted: number; rejected: number; uptime: number } | null; /** server: bursts detected when a report arrived, consumed by the next runCheck */ pendingBursts: string[]; /** server: captured log lines, newest last (max ERRORS_MAX) */ serverErrors: { at: number; container: string; line: string }[]; /** server: exception classes already seen per container */ seenErrorKinds: Map<string, Set<string>>; /** server: previous report's restart counters */ serverPrev: Map<string, { restartCount: number; oomKilled: boolean; running: boolean }> }
+interface State extends MonitorStatus { checking: boolean; /** dead-letter queue publish counter at the previous check */ errPublished: number | null; /** redis counters at the previous check (restart / eviction / rejection detection) */ redisPrev: { evicted: number; rejected: number; uptime: number } | null; /** server: bursts detected when a report arrived, consumed by the next runCheck */ pendingBursts: string[]; /** server: captured log lines, newest last (max ERRORS_MAX) */ serverErrors: { at: number; container: string; line: string }[]; /** server: exception classes already seen per container */ seenErrorKinds: Map<string, Set<string>>; /** server: previous report's restart counters */ serverPrev: Map<string, { restartCount: number; oomKilled: boolean; running: boolean }>; /** database: deadlock counter at the previous check */ dbPrev: { deadlocks: number | null } | null; /** server: error lines per day per container (14 days) — for the weekly report */ errorDaily: Record<string, Record<string, number>>; /** incident open for the current alert episode */ openIncident: string | null }
 const ERRORS_MAX = 300;
 const states = new Map<string, State>();
 
 function stateOf(name: string): State {
     let s = states.get(name);
     if (!s) {
-        s = { state: 'unknown', lastCheckAt: null, lastError: null, lastValue: null, lastActivityAt: null, alertSince: null, lastAlertAt: null, history: [], errorQueue: null, consumers: null, redis: null, server: null, checking: false, errPublished: null, redisPrev: null, pendingBursts: [], serverErrors: [], seenErrorKinds: new Map(), serverPrev: new Map() };
+        s = { state: 'unknown', lastCheckAt: null, lastError: null, lastValue: null, lastActivityAt: null, alertSince: null, lastAlertAt: null, history: [], errorQueue: null, consumers: null, redis: null, server: null, db: null, traffic: null, checking: false, errPublished: null, redisPrev: null, pendingBursts: [], serverErrors: [], seenErrorKinds: new Map(), serverPrev: new Map(), dbPrev: null, errorDaily: {}, openIncident: null };
         states.set(name, s);
     }
     return s;
 }
 
+// ─── State persistence & incidents ──────────────────────────────────────────
+// Runtime state survives a restart (no blank charts, no duplicate alert, no "new error" for
+// exceptions already seen). Written every minute by the scheduler and on shutdown.
+
+const STATE_FILE = resolve(DATA_DIR, 'monitor-state.json');
+const INCIDENTS_FILE = resolve(DATA_DIR, 'monitor-incidents.json');
+const INCIDENTS_MAX = 5000;
+let incidents: Incident[] | null = null;
+
+export function saveStates(): void {
+    try {
+        const out: Record<string, unknown> = {};
+        for (const [name, st] of states) {
+            if (!getMonitor(name)) continue;
+            const { checking: _c, pendingBursts: _p, seenErrorKinds, serverPrev, ...rest } = st;
+            out[name] = { ...rest, seenErrorKinds: Object.fromEntries([...seenErrorKinds].map(([k, v]) => [k, [...v]])), serverPrev: Object.fromEntries(serverPrev) };
+        }
+        if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+        writeFileSync(STATE_FILE, JSON.stringify(out), 'utf-8');
+    } catch (e) { console.warn('⚠️  Could not persist monitor state:', e instanceof Error ? e.message : e); }
+}
+function loadStates(): void {
+    try {
+        if (!existsSync(STATE_FILE)) return;
+        const raw = JSON.parse(readFileSync(STATE_FILE, 'utf-8')) as Record<string, any>;
+        let n = 0;
+        for (const [name, v] of Object.entries(raw)) {
+            if (!getMonitor(name)) continue;
+            const st = stateOf(name);
+            Object.assign(st, v, {
+                checking: false, pendingBursts: [],
+                seenErrorKinds: new Map(Object.entries(v.seenErrorKinds || {}).map(([k, arr]) => [k, new Set(arr as string[])])),
+                serverPrev: new Map(Object.entries(v.serverPrev || {})),
+                history: Array.isArray(v.history) ? v.history.slice(-HISTORY_MAX) : [],
+                errorDaily: v.errorDaily || {},
+            });
+            n++;
+        }
+        if (n) console.log(`📡 [monitors] Restored state for ${n} monitor(s)`);
+    } catch (e) { console.warn('⚠️  Could not restore monitor state:', e instanceof Error ? e.message : e); }
+}
+
+function loadIncidents(): Incident[] {
+    if (incidents) return incidents;
+    try { incidents = existsSync(INCIDENTS_FILE) ? JSON.parse(readFileSync(INCIDENTS_FILE, 'utf-8')) : []; if (!Array.isArray(incidents)) incidents = []; }
+    catch { incidents = []; }
+    return incidents!;
+}
+function persistIncidents(): void {
+    try { if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true }); writeFileSync(INCIDENTS_FILE, JSON.stringify(loadIncidents()), 'utf-8'); }
+    catch (e) { console.warn('⚠️  Could not persist incidents:', e instanceof Error ? e.message : e); }
+}
+function recordIncident(m: Monitor, kind: Incident['kind'], detail: string, at: number): Incident {
+    const list = loadIncidents();
+    const inc: Incident = { id: randomBytes(6).toString('hex'), monitor: m.name, type: m.type, kind, startedAt: at, endedAt: kind === 'event' ? at : null, detail: detail.slice(0, 500) };
+    list.push(inc);
+    if (list.length > INCIDENTS_MAX) list.splice(0, list.length - INCIDENTS_MAX);
+    persistIncidents();
+    return inc;
+}
+function closeIncident(id: string | null, at: number): void {
+    if (!id) return;
+    const inc = loadIncidents().find(i => i.id === id);
+    if (inc && inc.endedAt === null) { inc.endedAt = at; persistIncidents(); }
+}
+/** Incidents newest first; `since` filters by start or still-open. */
+export function listIncidents(opts: { since?: number; monitor?: string; limit?: number } = {}): Incident[] {
+    let list = loadIncidents();
+    if (opts.monitor) list = list.filter(i => i.monitor === opts.monitor);
+    if (opts.since) list = list.filter(i => i.startedAt >= opts.since! || i.endedAt === null || (i.endedAt && i.endedAt >= opts.since!));
+    return list.slice().reverse().slice(0, opts.limit ?? 500);
+}
+/** Error lines per day per container across all server monitors, for the report. */
+export function errorDailyAll(): { monitor: string; day: string; container: string; count: number }[] {
+    const out: { monitor: string; day: string; container: string; count: number }[] = [];
+    for (const [name, st] of states) for (const [day, byC] of Object.entries(st.errorDaily)) for (const [container, count] of Object.entries(byC)) out.push({ monitor: name, day, container, count });
+    return out;
+}
+
 export function getStatus(name: string): MonitorStatus {
     const m = getMonitor(name);
-    const { checking: _c, errPublished: _e, redisPrev: _r, pendingBursts: _b, serverErrors: _se, seenErrorKinds: _k, serverPrev: _sp, ...s } = stateOf(name);
+    const { checking: _c, errPublished: _e, redisPrev: _r, pendingBursts: _b, serverErrors: _se, seenErrorKinds: _k, serverPrev: _sp, dbPrev: _d, errorDaily: _ed, openIncident: _oi, ...s } = stateOf(name);
     if (m && !m.enabled) return { ...s, state: 'disabled' };
     return s;
 }
@@ -545,7 +710,7 @@ async function checkRabbit(m: RabbitMqMonitor, s: State): Promise<{ fail: string
 }
 
 async function notify(m: Monitor, kind: 'alert' | 'recovered', detail: string): Promise<void> {
-    const target = m.type === 'http' ? `${m.method} ${m.url}` : m.type === 'redis' ? `redis ${m.host}:${m.port}/${m.db}` : m.type === 'server' ? `docker host ${m.name}` : `queue ${m.queue} @ ${m.apiUrl}`;
+    const target = m.type === 'http' ? `${m.method} ${m.url}` : m.type === 'redis' ? `redis ${m.host}:${m.port}/${m.db}` : m.type === 'server' ? `docker host ${m.name}` : m.type === 'database' ? `${m.engine} ${m.host}:${m.port}/${m.database}` : m.type === 'traffic' ? `${m.source} ${m.resource}` : `queue ${m.queue} @ ${m.apiUrl}`;
     const category = `monitor.${m.type}.${kind === 'alert' ? 'alert' : 'recovered'}`;
     // Silence on a payments queue is a warning; everything else (down, errors arriving) is critical.
     const severity = kind === 'recovered' ? 'info' : (m.type === 'rabbitmq' && /^no messages/.test(detail) ? 'warning' : 'critical');
@@ -747,6 +912,7 @@ export async function ingestAgentReport(m: ServerMonitor, r: AgentReport): Promi
     for (const c of r.containers) {
         const { errors, ...rest } = c;
         for (const e of errors) s.serverErrors.push({ at: e.at || now, container: c.name, line: e.line.slice(0, 500) });
+        if (errors.length) { const day = new Date(now).toISOString().slice(0, 10); (s.errorDaily[day] ||= {})[c.name] = (s.errorDaily[day][c.name] || 0) + errors.length; }
         if (watchedContainer(m, c.name)) {
             const prev = s.serverPrev.get(c.name);
             if (prev && c.restartCount > prev.restartCount) s.pendingBursts.push(`container "${c.name}" restarted (${c.restartCount - prev.restartCount}×, total ${c.restartCount})${c.oomKilled ? ' — OOM killed' : ''}${c.exitCode ? ` exit ${c.exitCode}` : ''}`);
@@ -767,6 +933,7 @@ export async function ingestAgentReport(m: ServerMonitor, r: AgentReport): Promi
         containers.push({ ...rest, errorsInWindow: mine.filter(e => now - e.at <= windowMs).length, lastError: mine.length ? { at: mine[mine.length - 1].at, line: mine[mine.length - 1].line } : null });
     }
     if (s.serverErrors.length > ERRORS_MAX) s.serverErrors.splice(0, s.serverErrors.length - ERRORS_MAX);
+    for (const day of Object.keys(s.errorDaily)) if (Date.now() - Date.parse(day) > 15 * 86_400_000) delete s.errorDaily[day];
     s.server = { at: now, host: r.host, containers: containers.sort((a, b) => a.name.localeCompare(b.name)) };
     s.lastActivityAt = now;
     return runCheck(m);
@@ -812,6 +979,114 @@ function checkServer(m: ServerMonitor, s: State): { fail: string | null; burst: 
     return { fail: text || null, burst, value };
 }
 
+// ─── Database (Postgres / MySQL / SQL Server) ───────────────────────────────
+
+
+/** Run one query per engine and read the first row; `sqlRows` abstracts Bun.SQL (pg/mysql) and tedious (mssql). */
+async function withDb<T>(m: DatabaseMonitor, fn: (q: (sql: string) => Promise<any[]>) => Promise<T>): Promise<T> {
+    if (m.engine === 'mssql') {
+        const conn = new TdsConnection({
+            server: m.host,
+            authentication: { type: 'default', options: { userName: m.username, password: m.password || '' } },
+            options: { port: m.port, database: m.database, encrypt: m.tls, trustServerCertificate: true, connectTimeout: 8000, requestTimeout: 10000, rowCollectionOnRequestCompletion: true },
+        });
+        await new Promise<void>((res, rej) => { conn.on('connect', (err: any) => err ? rej(err) : res()); conn.connect(); });
+        const q = (sql: string) => new Promise<any[]>((res, rej) => {
+            const rows: any[] = [];
+            const r = new TdsRequest(sql, (err: any) => err ? rej(err) : res(rows));
+            r.on('row', (cols: any[]) => { const o: any = {}; for (const c of cols) o[c.metadata.colName] = c.value; rows.push(o); });
+            conn.execSql(r);
+        });
+        try { return await fn(q); } finally { try { conn.close(); } catch {} }
+    }
+    const url = `${m.engine === 'postgres' ? 'postgres' : 'mysql'}://${encodeURIComponent(m.username)}:${encodeURIComponent(m.password || '')}@${m.host}:${m.port}/${encodeURIComponent(m.database)}${m.tls ? (m.engine === 'postgres' ? '?sslmode=require' : '?ssl=true') : ''}`;
+    const sql = new Bun.SQL(url, { max: 1, connectionTimeout: 8, idleTimeout: 10 } as any);
+    try { return await fn(async (text: string) => (await (sql as any).unsafe(text)) as any[]); }
+    finally { try { await sql.close(); } catch {} }
+}
+
+const Q = {
+    postgres: {
+        version: "SELECT version() AS v",
+        conns: "SELECT count(*)::int AS n, (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') AS mx FROM pg_stat_activity WHERE backend_type = 'client backend'",
+        longest: "SELECT coalesce(max(extract(epoch FROM now() - query_start)), 0)::float AS s FROM pg_stat_activity WHERE state = 'active' AND backend_type = 'client backend' AND pid <> pg_backend_pid()",
+        locks: "SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock'",
+        repl: "SELECT pg_is_in_recovery() AS r, CASE WHEN pg_is_in_recovery() THEN extract(epoch FROM now() - pg_last_xact_replay_timestamp())::float END AS lag",
+        size: "SELECT pg_database_size(current_database())::bigint AS b",
+        deadlocks: "SELECT coalesce(sum(deadlocks), 0)::bigint AS d FROM pg_stat_database",
+    },
+    mysql: {
+        version: "SELECT VERSION() AS v",
+        conns: "SELECT (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Threads_connected') AS n, @@max_connections AS mx",
+        longest: "SELECT COALESCE(MAX(TIME), 0) AS s FROM information_schema.PROCESSLIST WHERE COMMAND <> 'Sleep' AND INFO IS NOT NULL AND ID <> CONNECTION_ID()",
+        locks: "SELECT COUNT(*) AS n FROM information_schema.PROCESSLIST WHERE STATE LIKE '%lock%'",
+        repl: "SHOW REPLICA STATUS",
+        size: "SELECT COALESCE(SUM(data_length + index_length), 0) AS b FROM information_schema.TABLES WHERE table_schema = DATABASE()",
+        deadlocks: "SELECT NULL AS d",
+    },
+    mssql: {
+        version: "SELECT @@VERSION AS v",
+        conns: "SELECT (SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE is_user_process = 1) AS n, (SELECT CASE WHEN CAST(value_in_use AS int) = 0 THEN 32767 ELSE CAST(value_in_use AS int) END FROM sys.configurations WHERE name = 'user connections') AS mx",
+        longest: "SELECT ISNULL(MAX(total_elapsed_time), 0) / 1000.0 AS s FROM sys.dm_exec_requests WHERE session_id <> @@SPID AND session_id > 50 AND status IN ('running', 'runnable', 'suspended')",
+        locks: "SELECT COUNT(*) AS n FROM sys.dm_exec_requests WHERE blocking_session_id <> 0",
+        repl: "SELECT CAST(0 AS bit) AS r, NULL AS lag",
+        size: "SELECT CAST(SUM(CAST(size AS bigint)) * 8 * 1024 AS bigint) AS b FROM sys.database_files",
+        deadlocks: "SELECT cntr_value AS d FROM sys.dm_os_performance_counters WHERE counter_name = 'Number of Deadlocks/sec' AND instance_name = '_Total'",
+    },
+} as const;
+
+async function checkDatabase(m: DatabaseMonitor, s: State): Promise<{ fail: string | null; burst: string | null }> {
+    await assertResolvedHostAllowed(`${m.tls ? 'https' : 'http'}://${m.host}:${m.port}/`, { allowPrivate: m.allowPrivate !== false });
+    const q = Q[m.engine];
+    const t0 = Date.now();
+    return withDb(m, async run => {
+        await run('SELECT 1 AS ok');
+        const latency = Date.now() - t0; s.lastValue = latency;
+        const one = async (sql: string) => { try { return (await run(sql))[0] || {}; } catch { return {}; } };
+        const v = await one(q.version), c = await one(q.conns), l = await one(q.longest), k = await one(q.locks), sz = await one(q.size), d = await one(q.deadlocks);
+        let replica = false, lag: number | null = null;
+        try {
+            const r = (await run(q.repl))[0] || {};
+            if (m.engine === 'mysql') { if (Object.keys(r).length) { replica = true; const sb = r.Seconds_Behind_Source ?? r.Seconds_Behind_Master; lag = sb === null || sb === undefined ? null : Number(sb); } }
+            else { replica = r.r === true || r.r === 1; lag = replica && r.lag !== null && r.lag !== undefined ? Number(r.lag) : null; }
+        } catch {}
+        const connections = Number(c.n ?? 0), maxC = c.mx === null || c.mx === undefined ? null : Number(c.mx);
+        const info: DbInfo = {
+            engine: m.engine, version: String(v.v || '?').split('\n')[0].slice(0, 80),
+            connections, maxConnections: maxC, connectionsPct: maxC ? Math.round(1000 * connections / maxC) / 10 : null,
+            longestQuerySec: Math.round(Number(l.s || 0)), waitingLocks: Number(k.n || 0),
+            replica, replicaLagSec: lag === null ? null : Math.round(lag),
+            sizeBytes: sz.b === null || sz.b === undefined ? null : Number(sz.b), deadlocks: d.d === null || d.d === undefined ? null : Number(d.d),
+        };
+        s.db = info;
+        const fails: string[] = [], bursts: string[] = [];
+        if (m.maxLatencyMs > 0 && latency > m.maxLatencyMs) fails.push(`slow: ${latency} ms (max ${m.maxLatencyMs} ms)`);
+        if (m.maxConnectionsPct > 0 && info.connectionsPct !== null && info.connectionsPct > m.maxConnectionsPct) fails.push(`${info.connections} of ${info.maxConnections} connections in use (${info.connectionsPct}%, max ${m.maxConnectionsPct}%)`);
+        if (info.replica && lag === null) fails.push('replica not receiving from primary');
+        else if (m.maxReplicaLagSec > 0 && info.replica && lag !== null && lag > m.maxReplicaLagSec) fails.push(`replica ${Math.round(lag)}s behind primary (max ${m.maxReplicaLagSec}s)`);
+        if (m.maxLongQuerySec > 0 && info.longestQuerySec > m.maxLongQuerySec) bursts.push(`a query has been running for ${info.longestQuerySec}s (max ${m.maxLongQuerySec}s)`);
+        if (info.waitingLocks > 0) bursts.push(`${info.waitingLocks} session(s) waiting on locks`);
+        if (s.dbPrev && info.deadlocks !== null && s.dbPrev.deadlocks !== null && info.deadlocks > s.dbPrev.deadlocks) bursts.push(`${info.deadlocks - s.dbPrev.deadlocks} deadlock(s)`);
+        s.dbPrev = { deadlocks: info.deadlocks };
+        return { fail: fails.join('; ') || null, burst: bursts.join('; ') || null };
+    });
+}
+
+// ─── Traffic (the Midleman request log itself) ──────────────────────────────
+
+function checkTraffic(m: TrafficMonitor, s: State): { fail: string | null; value: number | null } {
+    const w = getTrafficWindow(m.source, m.resource, m.windowMinutes);
+    const errorPct = w.total ? Math.round(1000 * w.errors / w.total) / 10 : null;
+    s.traffic = { total: w.total, errors: w.errors, errorPct, avgMs: w.avgMs, windowMinutes: m.windowMinutes };
+    s.lastActivityAt = w.total ? Date.now() : s.lastActivityAt;
+    const fails: string[] = [];
+    if (w.total >= m.minRequests) {
+        if (m.maxErrorPct > 0 && errorPct !== null && errorPct > m.maxErrorPct) fails.push(`${errorPct}% of ${w.total} requests failed in the last ${m.windowMinutes} min (max ${m.maxErrorPct}%)`);
+        if (m.maxAvgMs > 0 && w.avgMs !== null && w.avgMs > m.maxAvgMs) fails.push(`average ${w.avgMs} ms over ${w.total} requests (max ${m.maxAvgMs} ms)`);
+    }
+    return { fail: fails.join('; ') || null, value: errorPct };
+}
+
 export async function runCheck(m: Monitor): Promise<MonitorStatus> {
     const s = stateOf(m.name);
     if (s.checking) return getStatus(m.name);
@@ -825,6 +1100,8 @@ export async function runCheck(m: Monitor): Promise<MonitorStatus> {
             if (m.type === 'http') fail = await checkHttp(m, s);
             else if (m.type === 'redis') ({ fail, burst } = await checkRedis(m, s));
             else if (m.type === 'server') { const r = checkServer(m, s); fail = r.fail; burst = r.burst; s.lastValue = r.value; }
+            else if (m.type === 'database') ({ fail, burst } = await checkDatabase(m, s));
+            else if (m.type === 'traffic') { const r = checkTraffic(m, s); fail = r.fail; s.lastValue = r.value; }
             else ({ fail, burst, delta } = await checkRabbit(m, s));
         } catch (e: any) {
             // Unreachable target is itself the failure.
@@ -834,6 +1111,7 @@ export async function runCheck(m: Monitor): Promise<MonitorStatus> {
         s.lastCheckAt = now;
         s.lastError = fail || burst;
         s.history.push({ at: now, ok: !fail && !burst, value: m.type === 'rabbitmq' ? Math.max(0, delta) : s.lastValue, error: fail || burst || null, ms: Date.now() - t0 });
+        if (burst) recordIncident(m, 'event', burst, now);
         if (s.history.length > HISTORY_MAX) s.history.splice(0, s.history.length - HISTORY_MAX);
         const inHours = !m.weekly?.length || isWithinBusinessHours(m.weekly, undefined, new Date());
         const cooldownMs = m.cooldownMinutes * 60_000;
@@ -844,13 +1122,14 @@ export async function runCheck(m: Monitor): Promise<MonitorStatus> {
 
         if (fail) {
             s.state = 'alert';
-            if (s.alertSince === null) s.alertSince = now;
+            if (s.alertSince === null) { s.alertSince = now; s.openIncident = recordIncident(m, 'episode', fail, now).id; }
             if (canAlert()) { s.lastAlertAt = now; await notify(m, 'alert', burst ? `${fail}; ${burst}` : fail); }
         } else {
             s.state = burst ? 'alert' : 'ok';
             if (s.alertSince !== null) {
                 const downMin = Math.round((now - s.alertSince) / 60_000);
                 await notify(m, 'recovered', `healthy again after ~${downMin} min`);
+                closeIncident(s.openIncident, now); s.openIncident = null;
                 s.alertSince = null;
                 if (!burst) s.lastAlertAt = null;
             }
@@ -875,15 +1154,18 @@ async function tick(): Promise<void> {
     }
 }
 
+let lastStateSave = 0;
 export function startMonitorScheduler(): void {
     if (timer) return;
     loadMonitors();
-    timer = setInterval(() => { void tick(); }, 10_000);
+    loadStates();
+    timer = setInterval(() => { void tick(); if (Date.now() - lastStateSave > 60_000) { lastStateSave = Date.now(); saveStates(); } }, 10_000);
     void tick();
     console.log(`📡 [monitors] Scheduler started (${monitors.length} monitor(s))`);
 }
 
 export function stopMonitorScheduler(): void {
     if (timer) { clearInterval(timer); timer = null; }
+    saveStates();
     states.clear();
 }

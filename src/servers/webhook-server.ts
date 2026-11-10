@@ -58,6 +58,7 @@ import {
 import { sendMail, isSmtpConfigured } from '../core/smtp';
 import { emitNotificationEvent } from '../core/notifications';
 import { isWithinBusinessHours } from '../core/business-hours';
+import { splitMetaPayload, dedupe as metaDedupe, noteNumbers as metaNoteNumbers, destinationWants, buildMetaPayload, verifyMetaSignature } from '../core/meta-router';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -975,6 +976,28 @@ async function handleWebhookFanout(
         payloadObj = formToObject(url.searchParams);
     }
 
+    // ── Meta Cloud API mode: verify the signature, split the batch per number, drop replays ──
+    let metaUnits: ReturnType<typeof splitMetaPayload> = null;
+    if (webhook.meta?.enabled && !internal) {
+        if (webhook.meta.appSecret) {
+            if (!verifyMetaSignature(webhook.meta.appSecret, bodyBuffer || new Uint8Array(), req.headers.get('x-hub-signature-256'))) {
+                console.warn(`❌ [webhook:${webhook.name}] Meta signature check failed from ${req.headers.get('X-Forwarded-For') || 'unknown'}`);
+                logRequest({ requestId, type: 'webhook', targetName: webhook.name, method: req.method, path: url.pathname + url.search, targetUrl: 'self', clientIp: resolveClientIp(reqPeerIp.get(req), req.headers.get('x-forwarded-for'), getTrustProxyConfig()), reqHeaders: headersToRecord(req.headers), reqBody: bodyStringPreview, reqBodySize: bodyBuffer?.byteLength || 0, resStatus: 401, resStatusText: 'Unauthorized', durationMs: performance.now() - startTime, error: 'X-Hub-Signature-256 mismatch' });
+                return jsonResponse(401, { error: 'Unauthorized', message: 'X-Hub-Signature-256 does not match the configured App Secret' });
+            }
+        }
+        const units = splitMetaPayload(payloadObj);
+        if (units) {
+            metaNoteNumbers(webhook.name, units);
+            metaUnits = metaDedupe(webhook.name, units);
+            if (metaUnits.length === 0) {
+                // Everything in this POST was already delivered (Meta retry) — acknowledge and stop.
+                console.log(`↩️  [webhook:${webhook.name}] Meta replay ignored (${units.length} unit(s) already delivered) - ${requestId}`);
+                return new Response(JSON.stringify({ status: 'Accepted', message: 'duplicate — already delivered', requestId }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+            }
+        }
+    }
+
     const FILTER_BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
     function resolvePath(data: any, path: string): any {
         const parts = path.split('.');
@@ -1080,9 +1103,22 @@ async function handleWebhookFanout(
         let tBody: ArrayBuffer | string | undefined = bodyBuffer;
         let tBodySize = bodyBuffer?.byteLength || 0;
         let tBodyStringPreview = bodyStringPreview;
+        let tPayload = payloadObj;
+
+        // Meta mode: this destination gets only the entries/changes of its numbers and event kinds, in Meta's own shape.
+        if (metaUnits) {
+            const mine = typeof target === 'string' ? metaUnits : metaUnits.filter(u => destinationWants(target, u));
+            if (!mine.length) { console.log(`⏭️  [webhook:${webhook.name}] Skipped ${typeof target === 'string' ? target : target.url} — no routed number/event for this destination`); return; }
+            tPayload = buildMetaPayload(payloadObj, mine);
+            const routed = JSON.stringify(tPayload);
+            tBody = routed; tBodyStringPreview = routed; tBodySize = new TextEncoder().encode(routed).byteLength;
+            tHeaders.set('content-type', 'application/json');
+            tHeaders.delete('content-length');
+            tHeaders.delete('x-hub-signature-256'); // signed for the original batch, not for this slice
+        }
 
         if (typeof target !== 'string' && target.filter && target.filter.length > 0) {
-            const filterResult = matchesFilter(target, payloadObj);
+            const filterResult = matchesFilter(target, tPayload);
             if (!filterResult.matched) {
                 console.log(`⏭️  [webhook:${webhook.name}] Skipped ${target.url} — filter did not match: ${filterResult.reason}`);
                 return;
@@ -1092,7 +1128,7 @@ async function handleWebhookFanout(
         if (typeof target === 'string') {
             tUrl = target;
         } else {
-            tUrl = renderTemplate(target.url, payloadObj, encodeUrlValue);
+            tUrl = renderTemplate(target.url, tPayload, encodeUrlValue);
 
             if (!target.forwardHeaders) {
                 tHeaders = new Headers();
@@ -1102,11 +1138,11 @@ async function handleWebhookFanout(
             if (target.customHeaders) {
                 for (const [k, v] of Object.entries(target.customHeaders)) {
                     // Only render templates if it's dynamic
-                    tHeaders.set(k, renderTemplate(v, payloadObj));
+                    tHeaders.set(k, renderTemplate(v, tPayload));
                 }
             }
             if (target.bodyTemplate) {
-                let rendered = renderTemplate(target.bodyTemplate, payloadObj);
+                let rendered = renderTemplate(target.bodyTemplate, tPayload);
                 if (target.dropEmpty) {
                     try {
                         const parsed = JSON.parse(rendered);

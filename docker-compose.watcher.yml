@@ -1,0 +1,43 @@
+# ─── Midleman "watcher": a second, minimal Midleman that lives somewhere else ───
+# The monitors run inside Midleman, so if the server that hosts Midleman goes down,
+# nobody is left to raise the alarm. This stack runs on another host (a small cloud
+# VM is enough) and does one job: watch the main Midleman, and let the main one
+# watch it back. Both need their own SMTP/SMS settings in Notifications.
+#
+#   MIDLEMAN_TAG=1.134 docker compose -f docker-compose.watcher.yml up -d
+#
+# Then, in THIS instance's dashboard: Monitors → New → HTTP endpoint
+#   url: https://usecurity.ucall.co.ao/health   expect 2xx   every 60 s   cooldown 15 min
+# and in the MAIN instance: Monitors → New → HTTP endpoint pointing at this watcher's /health.
+# Optional: a Server monitor + agent here as well, so the watcher host itself is covered.
+services:
+  midleman-watcher:
+    image: registry.biscatos.com/midleman/api-midleman:${MIDLEMAN_TAG:-latest}
+    container_name: midleman.watcher
+    ports:
+      - "${PORT:-3000}:3000"       # dashboard — put it behind HTTPS (NPM / Cloudflare) before exposing
+    environment:
+      - PORT=3000
+      - TZ=Africa/Luanda
+      - OTEL_ENABLED=false
+      - REQUEST_LOG_RETENTION_DAYS=3
+      - JWT_ISSUER=${WATCHER_PUBLIC_URL:-http://localhost:3000}
+      - PUBLIC_URL=${WATCHER_PUBLIC_URL:-http://localhost:3000}
+    volumes:
+      - midleman-watcher-data:/app/data
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    restart: always
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "2" }
+    healthcheck:
+      test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3000/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  midleman-watcher-data:

@@ -131,6 +131,19 @@ export interface WebhookDestination {
   /** Per-destination persistent retry. When enabled, failures go to the
    *  pending-retry queue (not the DLQ) and are retried indefinitely. */
   persistentRetry?: WebhookPersistentRetry;
+  /** Meta Cloud API routing (only used when the webhook has meta.enabled):
+   *  which phone numbers (phone_number_id, display number or WABA id) and which
+   *  event kinds this destination receives. Empty numbers + catchAll = everything
+   *  nobody else claimed; empty numbers without catchAll = nothing. */
+  metaRoute?: { numbers: string[]; events: MetaRouteEvent[]; catchAll?: boolean };
+}
+export type MetaRouteEvent = 'messages' | 'statuses' | 'templates' | 'account' | 'other';
+
+/** Meta (WhatsApp Cloud API) mode for a webhook: one app-level callback, routed per number. */
+export interface WebhookMetaConfig {
+  enabled: boolean;
+  /** App Secret used to verify X-Hub-Signature-256. Stored server-side only. */
+  appSecret?: string;
 }
 
 /**
@@ -170,6 +183,8 @@ export interface WebhookDistributor {
    *  block (including loopback/metadata) for matching addresses. */
   targetAllowedCidrs?: string[];
   silenceAlert?: WebhookSilenceAlert; // Optional inactivity notifier
+  /** Meta Cloud API mode (signature check, per-number routing, dedupe). */
+  meta?: WebhookMetaConfig;
   /** Request-log capture mode for inbound + fan-out rows; unset = global default. */
   logMode?: 'full' | 'errors-only' | 'off';
   /** Persisted JSON test payload used by the dashboard editor to preview

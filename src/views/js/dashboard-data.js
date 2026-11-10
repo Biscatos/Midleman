@@ -4149,7 +4149,7 @@ function toggleRetrySection() {
 
 function addWebhookTarget(target = "") {
   if (typeof target === 'string') {
-    webhookTargetState.push({ type: 'basic', enabled: true, url: target, method: 'POST', bodyTemplate: '', customBody: false, dropEmpty: false, customHeaders: [], forwardHeaders: false, filter: [], filterMode: 'all', retry: null, retryOpen: false, persistentRetry: null, persistentRetryOpen: false });
+    webhookTargetState.push({ metaRoute: { numbers: [], events: [], catchAll: false }, type: 'basic', enabled: true, url: target, method: 'POST', bodyTemplate: '', customBody: false, dropEmpty: false, customHeaders: [], forwardHeaders: false, filter: [], filterMode: 'all', retry: null, retryOpen: false, persistentRetry: null, persistentRetryOpen: false });
   } else {
     const headersArr = [];
     if (target.customHeaders) {
@@ -4183,6 +4183,7 @@ function addWebhookTarget(target = "") {
       retryOpen: !!target.retry,
       persistentRetry: target.persistentRetry || null,
       persistentRetryOpen: !!(target.persistentRetry && target.persistentRetry.enabled),
+      metaRoute: { numbers: [...(target.metaRoute?.numbers || [])], events: [...(target.metaRoute?.events || [])], catchAll: target.metaRoute?.catchAll === true },
     });
   }
   webhookFormDirty = true;
@@ -4349,6 +4350,79 @@ function _wdEvaluate(t, payload) {
 }
 
 const _WD_OP_LABEL = { eq: '=', neq: '≠', contains: 'contains', in: 'in', exists: 'exists', notExists: 'does not exist' };
+// ─── Meta Cloud API routing (per destination) ───
+let _metaNumbers = null, _metaKinds = null;
+async function loadMetaNumbers(name) {
+  try { const d = await (await api('/admin/webhooks/' + encodeURIComponent(name) + '/meta-numbers')).json(); _metaNumbers = d.numbers || []; _metaKinds = d.kinds || null; }
+  catch { _metaNumbers = []; }
+  if (editingDestinationIndex >= 0) renderDestinationEditor(editingDestinationIndex);
+}
+const META_KINDS_FALLBACK = [
+  { id: 'messages', label: 'Incoming messages', hint: 'text, media, interactive replies, reactions' },
+  { id: 'statuses', label: 'Delivery statuses', hint: 'sent · delivered · read · failed' },
+  { id: 'templates', label: 'Templates', hint: 'approved / rejected / paused, category changes' },
+  { id: 'account', label: 'Account & number', hint: 'account_update, phone_number_quality_update, account_alerts' },
+  { id: 'other', label: 'Everything else', hint: 'any field not listed above' },
+];
+function _metaRouteText(r) {
+  const n = (r.numbers || []).length, ev = (r.events || []);
+  const evTxt = ev.length ? ev.map(e => (_metaKinds || META_KINDS_FALLBACK).find(k => k.id === e)?.label.toLowerCase() || e).join(', ') : 'all events';
+  if (!n && !r.catchAll) return '<span class="wd-muted" style="color:var(--red)">No numbers — receives nothing</span>';
+  return `${n ? `${n} number${n === 1 ? '' : 's'}` : 'catch-all'} <span class="wd-muted">· ${esc(evTxt)}</span>`;
+}
+function renderMetaRouteSection(i, n) {
+  const t = webhookTargetState[i]; const r = t.metaRoute || (t.metaRoute = { numbers: [], events: [], catchAll: false });
+  const kinds = _metaKinds || META_KINDS_FALLBACK;
+  const seen = _metaNumbers || [];
+  const sel = new Set(r.numbers.map(String));
+  const q = (s) => esc(String(s)).replace(/'/g, '&#39;');
+  const numRows = seen.map(x => { const id = x.phoneNumberId || ('waba:' + x.wabaId); const key = x.phoneNumberId || x.wabaId; const on = sel.has(String(key));
+    return `<label class="mr-row${on ? ' is-on' : ''}"><input type="checkbox" class="mm-switch" ${on ? 'checked' : ''} onchange="metaRouteToggleNumber(${i}, '${q(key)}', this.checked)">
+      <span class="mr-num">${x.displayPhone ? '+' + esc(x.displayPhone) : (x.phoneNumberId ? 'id ' + esc(x.phoneNumberId) : 'WABA ' + esc(x.wabaId))}</span>
+      <span class="mr-meta">${x.phoneNumberId ? 'id ' + esc(x.phoneNumberId) + ' · ' : ''}WABA ${esc(x.wabaId)} · ${x.count} event${x.count === 1 ? '' : 's'} · last ${_monAgo(x.lastAt)}</span></label>`; }).join('');
+  const manual = r.numbers.filter(nm => !seen.some(x => String(x.phoneNumberId) === String(nm) || String(x.wabaId) === String(nm) || String(x.displayPhone) === String(nm)));
+  return `
+    <section class="wd-sec">
+      <div class="wd-sec-head">
+        <span class="wd-num">${n}</span><h4>WhatsApp routing</h4><span class="wd-sec-sub">Which numbers and events this destination receives</span>
+        <label class="wd-switch-label" style="margin-left:auto" title="Receives every event that no other destination claimed"><input class="mm-switch" type="checkbox" ${r.catchAll ? 'checked' : ''} onchange="metaRouteField(${i}, 'catchAll', this.checked)"> Catch-all</label>
+      </div>
+      <div class="mr-grid">
+        <div>
+          <div class="wd-label" style="margin-bottom:6px">Phone numbers</div>
+          ${seen.length ? `<div class="mr-list">${numRows}</div>` : '<div class="mm-field-hint" style="margin:0 0 6px">No traffic seen yet on this webhook — numbers appear here automatically after the first events. You can add ids by hand below.</div>'}
+          <div style="display:flex;gap:6px;margin-top:8px"><input class="mm-input" id="mrManual_${i}" type="text" placeholder="phone_number_id, display number or WABA id" style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();metaRouteAddManual(${i})}"><button type="button" class="btn btn-sm" onclick="metaRouteAddManual(${i})">Add</button></div>
+          ${manual.length ? `<div class="mr-chips">${manual.map(nm => `<span class="mr-chip">${esc(nm)} <button type="button" onclick="metaRouteToggleNumber(${i}, '${q(nm)}', false)" aria-label="Remove">&times;</button></span>`).join('')}</div>` : ''}
+        </div>
+        <div>
+          <div class="wd-label" style="margin-bottom:6px">Events <span class="wd-muted" style="font-weight:400">(none marked = all)</span></div>
+          <div class="mr-list">${kinds.map(k => `<label class="mr-row${r.events.includes(k.id) ? ' is-on' : ''}"><input type="checkbox" class="mm-switch" ${r.events.includes(k.id) ? 'checked' : ''} onchange="metaRouteToggleEvent(${i}, '${k.id}', this.checked)"><span class="mr-num">${esc(k.label)}</span><span class="mr-meta">${esc(k.hint)}</span></label>`).join('')}</div>
+        </div>
+      </div>
+      <div class="wd-sec-sub">The destination receives a payload in Meta's own shape containing only its entries, so standard Cloud API code works unchanged. Body templates, if used, see that routed payload.</div>
+    </section>`;
+}
+function metaRouteToggleNumber(i, key, on) {
+  const r = webhookTargetState[i].metaRoute; const k = String(key);
+  r.numbers = on ? [...new Set([...r.numbers.map(String), k])] : r.numbers.filter(x => String(x) !== k);
+  webhookFormDirty = true; renderDestinationEditor(i);
+}
+function metaRouteAddManual(i) {
+  const el = document.getElementById('mrManual_' + i); const v = (el?.value || '').replace(/\s+/g, '').replace(/^\+/, '');
+  if (!/^[0-9]{3,32}$/.test(v)) return toast('Enter digits only: a phone_number_id, a display number or a WABA id', 'error');
+  metaRouteToggleNumber(i, v, true);
+}
+function metaRouteToggleEvent(i, id, on) {
+  const r = webhookTargetState[i].metaRoute;
+  r.events = on ? [...new Set([...r.events, id])] : r.events.filter(x => x !== id);
+  webhookFormDirty = true; renderDestinationEditor(i);
+}
+function metaRouteField(i, k, v) { webhookTargetState[i].metaRoute[k] = v; webhookFormDirty = true; renderDestinationEditor(i); renderWebhookTargets(); }
+function toggleMetaSection() {
+  const on = document.getElementById('wMetaEnabled').checked;
+  document.getElementById('wMetaFields').style.display = on ? '' : 'none';
+  if (typeof renderWebhookTargets === 'function') renderWebhookTargets();
+}
 function _wdConditionText(c) {
   const op = _WD_OP_LABEL[c.op] || c.op;
   return c.op === 'exists' || c.op === 'notExists' ? `${c.path} ${op}` : `${c.path} ${op} ${c.value}`;
@@ -4428,7 +4502,8 @@ function renderWebhookTargets() {
     const shapeBits = custom
       ? ['custom', t.customBody && t.bodyTemplate ? 'body template' : '', n ? `${n} header${n === 1 ? '' : 's'}` : '', t.forwardHeaders ? 'fwd headers' : ''].filter(Boolean)
       : [];
-    const whenText = active.length
+    const mr = document.getElementById('wMetaEnabled')?.checked ? t.metaRoute : null;
+    const whenText = mr ? _metaRouteText(mr) : active.length
       ? esc(_wdConditionText(active[0])) + (active.length > 1 ? ` <span class="wd-muted">${t.filterMode === 'any' ? 'or' : 'and'} +${active.length - 1}</span>` : '')
       : '<span class="wd-muted">Always</span>';
     const retryText = t.persistentRetryOpen ? 'Persistent' : t.retryOpen ? `${t.retry?.maxRetries ?? 3}× ${t.retry?.backoff === 'fixed' ? 'fixed' : 'exp.'}` : '<span class="wd-muted">Default</span>';
@@ -4567,9 +4642,11 @@ function renderDestinationEditorMarkup(i) {
       <div id="previewUrl_${i}" class="wd-inline-preview" style="display:none"></div>
     </section>
 
-    <section class="wd-sec">
+    ${document.getElementById('wMetaEnabled')?.checked ? renderMetaRouteSection(i, num()) : ''}
+
+    <section class="wd-sec" ${document.getElementById('wMetaEnabled')?.checked && !(t.filter || []).length ? 'style="display:none"' : ''}>
       <div class="wd-sec-head">
-        <span class="wd-num">${num()}</span><h4>When to send</h4><span class="wd-sec-sub">No conditions = every payload</span>
+        <span class="wd-num">${document.getElementById('wMetaEnabled')?.checked && !(t.filter || []).length ? '' : num()}</span><h4>When to send</h4><span class="wd-sec-sub">No conditions = every payload</span>
         <span class="wd-sec-sub" style="flex:0 0 auto;margin-left:auto">Match</span>
         <div class="mm-seg wd-seg" role="radiogroup" aria-label="Match mode" style="margin-left:0">
           ${seg(!anyMode, 'All (AND)', `setWebhookTargetMatch(${i}, 'all')`)}${seg(anyMode, 'Any (OR)', `setWebhookTargetMatch(${i}, 'any')`)}
@@ -4797,6 +4874,10 @@ function openWebhookModal(webhook = null) {
     ? '•••••••• (set — leave empty to keep)'
     : '';
   IpTagInput.setValue('wAllowedIps', webhook?.allowedIps || []);
+  document.getElementById('wMetaEnabled').checked = !!webhook?.meta?.enabled;
+  const secEl = document.getElementById('wMetaAppSecret'); secEl.value = ''; secEl.placeholder = webhook?.meta?.hasAppSecret ? '•••••••• (set — leave empty to keep)' : 'empty = accept POSTs as today; set = verify X-Hub-Signature-256';
+  toggleMetaSection();
+  _metaNumbers = null; if (webhook?.meta?.enabled) loadMetaNumbers(webhook.name);
   // Private/internal destinations are allowed by default; checkbox reflects the
   // stored value (true unless explicitly disabled), checked for new webhooks.
   document.getElementById('wAllowPrivateTargets').checked = webhook ? (webhook.allowPrivateTargets !== false) : true;
@@ -4912,9 +4993,10 @@ async function saveWebhook() {
       const hasFilter = filterConditions.length > 0;
 
       const isDisabled = t.enabled === false;
+      const metaOn = document.getElementById('wMetaEnabled').checked;
       // Basic forward with no retry override stays as a plain URL string
       // (a paused destination needs the object form to carry enabled:false).
-      if (t.type === 'basic' && !hasRetryOverride && !hasPersistent && !hasFilter && !isDisabled) {
+      if (t.type === 'basic' && !hasRetryOverride && !hasPersistent && !hasFilter && !isDisabled && !metaOn) {
           targetsRaw.push(t.url.trim());
           continue;
       }
@@ -4941,6 +5023,7 @@ async function saveWebhook() {
           dest.dropEmpty = (t.customBody && t.dropEmpty) ? true : undefined;
       }
       if (isDisabled) dest.enabled = false;
+      if (metaOn) dest.metaRoute = { numbers: (t.metaRoute?.numbers || []).map(x => String(x).trim()).filter(Boolean), events: t.metaRoute?.events || [], catchAll: t.metaRoute?.catchAll === true };
       if (hasFilter) dest.filter = filterConditions;
       if (hasFilter && t.filterMode === 'any') dest.filterMode = 'any';
       if (hasRetryOverride) dest.retry = t.retry;
@@ -4967,6 +5050,7 @@ async function saveWebhook() {
   };
   if (targetsRaw.length === 0) return toast('At least one valid destination is required', 'error');
   const at = document.getElementById('wAuthToken').value.trim(); if (at) body.authToken = at;
+  body.meta = { enabled: document.getElementById('wMetaEnabled').checked }; const sec = document.getElementById('wMetaAppSecret').value.trim(); if (sec) body.meta.appSecret = sec;
   const wIps = IpTagInput.getValue('wAllowedIps'); if (wIps.length) body.allowedIps = wIps;
   body.allowPrivateTargets = document.getElementById('wAllowPrivateTargets').checked;
   body.logMode = document.getElementById('wLogMode').value;
@@ -11850,6 +11934,16 @@ async function fetchMonitors() {
 
 /** "4 ms · mem 120 MB (12%) · 7 clients · 98% hits" from the last INFO. */
 /** "12 containers · 1 down · disk 71% · mem 54%" from the last agent report. */
+/** "12 ms · 23/100 conns (23%) · 1.2 GB · lag 3s" from the last database readings. */
+function _monDbLine(s) {
+  const d = s.db; if (!d) return s.lastValue != null ? s.lastValue + ' ms' : '—';
+  return [s.lastValue != null ? s.lastValue + ' ms' : null, d.maxConnections ? `${d.connections}/${d.maxConnections} conns (${d.connectionsPct}%)` : `${d.connections} conns`, d.sizeBytes != null ? _monBytes(d.sizeBytes) : null, d.replica ? (d.replicaLagSec != null ? `lag ${d.replicaLagSec}s` : 'replica') : null, d.waitingLocks ? `${d.waitingLocks} waiting on locks` : null].filter(Boolean).join(' · ');
+}
+function _monTrafficLine(s) {
+  const t = s.traffic; if (!t) return '—';
+  if (!t.total) return `no requests in the last ${t.windowMinutes} min`;
+  return [`${t.total.toLocaleString()} req`, `${t.errorPct}% errors`, t.avgMs != null ? `avg ${t.avgMs} ms` : null, `${t.windowMinutes} min`].filter(Boolean).join(' · ');
+}
 function _monServerLine(s, m = {}) {
   const r = s.server; if (!r) return 'waiting for the first report…';
   const crit = m.criticalContainers || [];
@@ -11869,6 +11963,8 @@ function _monBytes(b) { return b >= 1 << 30 ? (b / (1 << 30)).toFixed(2) + ' GB'
 function monitorTarget(m) {
   if (m.type === 'http') return `${m.method} ${m.url}`;
   if (m.type === 'redis') return `redis://${m.host}:${m.port}/${m.db}`;
+  if (m.type === 'database') return `${m.engine} ${m.host}:${m.port}/${m.database}`;
+  if (m.type === 'traffic') return `${m.source} ${m.resource} · last ${m.windowMinutes} min`;
   if (m.type === 'server') { const h = m.status?.server?.host; return h?.hostname ? `${h.hostname} · agent every ${m.intervalSeconds}s` : `agent "${m.name}" · every ${m.intervalSeconds}s`; }
   return `${m.queue} (${[].concat(m.alertOn).join('+')}) @ ${m.apiUrl}`;
 }
@@ -11916,7 +12012,7 @@ function openMonitorDetail(name) {
   const m = _allMonitors.find(x => x.name === name);
   if (!m) return;
   _mdName = name;
-  const s = m.status || {}; const alert = s.state === 'alert'; const unit = m.type === 'rabbitmq' ? 'msgs' : m.type === 'server' ? 'errors' : 'ms';
+  const s = m.status || {}; const alert = s.state === 'alert'; const unit = m.type === 'rabbitmq' ? 'msgs' : m.type === 'server' ? 'errors' : m.type === 'traffic' ? '%' : 'ms';
   const g = id => document.getElementById(id);
   g('mdIcon').className = 'mon-ico mon-ico-' + m.type; g('mdIcon').innerHTML = `<svg><use href="#mon-ico-${m.type}"/></svg>`;
   g('mdName').textContent = m.name;
@@ -11931,7 +12027,7 @@ function openMonitorDetail(name) {
   g('mdStats').innerHTML =
     stat('Checks kept', h.length, h.length ? `since ${new Date(h[0].at).toLocaleTimeString()}` : '') +
     stat('Failed', `<span style="color:${fails ? 'var(--red)' : 'inherit'}">${fails}</span>`, h.length ? Math.round(100 * (h.length - fails) / h.length) + '% ok' : '') +
-    stat(unit === 'ms' ? 'Avg latency' : unit === 'errors' ? 'Avg errors / report' : 'Avg msgs / check', avg === null ? '—' : _monFmt(avg, unit), max === null ? '' : 'max ' + _monFmt(max, unit)) +
+    stat(unit === 'ms' ? 'Avg latency' : unit === 'errors' ? 'Avg errors / report' : unit === '%' ? 'Avg error rate' : 'Avg msgs / check', avg === null ? '—' : _monFmt(avg, unit), max === null ? '' : 'max ' + _monFmt(max, unit)) +
     (s.errorQueue ? stat('Error queue', s.errorQueue.messages === null ? '<span style="color:var(--text3)">not found</span>' : `<span style="color:${s.errorQueue.messages ? 'var(--red)' : 'inherit'}">${s.errorQueue.messages}</span>`, esc(s.errorQueue.name)) : '') +
     stat(alert ? 'Alerting for' : 'Last check', alert && s.alertSince ? _monAgo(s.alertSince).replace(' ago', '') : _monAgo(s.lastCheckAt), s.lastError && !alert ? '' : (alert ? 'since ' + new Date(s.alertSince || Date.now()).toLocaleTimeString() : ''));
   const r = s.redis;
@@ -11941,6 +12037,17 @@ function openMonitorDetail(name) {
     stat('Hit ratio', r.hitRatio !== null ? r.hitRatio + '%' : '—', `${r.hits} hits · ${r.misses} misses`) +
     stat('Evicted / rejected', `<span style="color:${r.evictedKeys || r.rejectedConnections ? 'var(--red)' : 'inherit'}">${r.evictedKeys} / ${r.rejectedConnections}</span>`, 'since server start') +
     stat('Persistence', `<span style="color:${r.rdbStatus !== 'ok' || (r.aofStatus && r.aofStatus !== 'ok') ? 'var(--red)' : 'inherit'}">${esc(r.rdbStatus)}</span>`, (r.aofStatus ? 'AOF ' + esc(r.aofStatus) + ' · ' : '') + `up ${_monUptime(r.uptimeSec)} · v${esc(r.version)} ${esc(r.role)}${r.linkStatus ? ' · link ' + esc(r.linkStatus) : ''}`);
+  const dbi = s.db;
+  if (dbi) g('mdStats').innerHTML +=
+    stat('Connections', dbi.maxConnections ? `<span style="color:${dbi.connectionsPct > (m.maxConnectionsPct || 101) ? 'var(--red)' : 'inherit'}">${dbi.connectionsPct}%</span>` : dbi.connections, dbi.maxConnections ? `${dbi.connections} of ${dbi.maxConnections}` : 'no limit read') +
+    stat('Longest query', dbi.longestQuerySec + ' s', dbi.waitingLocks ? `<span style="color:var(--red)">${dbi.waitingLocks} waiting on locks</span>` : 'no lock waits') +
+    stat('Size', dbi.sizeBytes != null ? _monBytes(dbi.sizeBytes) : '—', dbi.deadlocks != null ? `${dbi.deadlocks} deadlocks total` : '') +
+    stat(dbi.replica ? 'Replica lag' : 'Role', dbi.replica ? (dbi.replicaLagSec != null ? dbi.replicaLagSec + ' s' : '<span style="color:var(--red)">no link</span>') : 'primary', esc(dbi.version));
+  const tri = s.traffic;
+  if (tri) g('mdStats').innerHTML +=
+    stat(`Requests (${tri.windowMinutes} min)`, tri.total.toLocaleString(), tri.total < (m.minRequests || 0) ? 'below min — not judged' : '') +
+    stat('Errors', `<span style="color:${tri.errorPct > (m.maxErrorPct || 101) ? 'var(--red)' : 'inherit'}">${tri.errors.toLocaleString()}</span>`, tri.errorPct != null ? tri.errorPct + '% of requests' : '') +
+    stat('Avg duration', tri.avgMs != null ? tri.avgMs + ' ms' : '—', m.maxAvgMs ? `max ${m.maxAvgMs} ms` : '');
   const sv = s.server;
   if (sv) {
     const worst = sv.host.disks.length ? sv.host.disks.reduce((a, d) => d.pct > a.pct ? d : a) : null;
@@ -12162,6 +12269,8 @@ function renderOverviewMonitors() {
       : m.type === 'rabbitmq' ? (s.lastActivityAt ? 'last message ' + _monAgo(s.lastActivityAt) : 'no messages seen yet') + (s.errorQueue && s.errorQueue.messages ? ` · ${s.errorQueue.messages} in error queue` : '')
       : m.type === 'redis' ? _monRedisLine(s)
       : m.type === 'server' ? _monServerLine(s, m)
+      : m.type === 'database' ? _monDbLine(s)
+      : m.type === 'traffic' ? _monTrafficLine(s)
       : (s.lastValue != null ? s.lastValue + ' ms' : '—');
     return `<div class="ovm-row${alert ? ' is-alert' : ''}" onclick="openMonitorDetail('${esc(m.name)}')" role="button" tabindex="0" title="Open details">
       <span class="mon-ico mon-ico-${m.type}" style="width:28px;height:28px;border-radius:7px"><svg style="width:16px;height:16px"><use href="#mon-ico-${m.type}"/></svg></span>
@@ -12187,11 +12296,13 @@ function renderMonitors() {
       : alert ? '<span class="mm-chip err">ALERT</span>'
       : s.state === 'disabled' ? '<span class="mm-chip">Disabled</span>'
       : '<span class="mm-chip">Pending</span>';
-    const typeLabel = m.type === 'http' ? 'HTTP endpoint' : m.type === 'redis' ? 'Redis server' : m.type === 'server' ? 'Docker host' : 'RabbitMQ queue';
+    const typeLabel = m.type === 'http' ? 'HTTP endpoint' : m.type === 'redis' ? 'Redis server' : m.type === 'server' ? 'Docker host' : m.type === 'database' ? ({ postgres: 'PostgreSQL', mysql: 'MySQL', mssql: 'SQL Server' }[m.engine] || 'Database') : m.type === 'traffic' ? 'Traffic' : 'RabbitMQ queue';
     const reading = m.type === 'rabbitmq'
       ? (s.lastActivityAt ? 'Last message ' + _monAgo(s.lastActivityAt) : 'No messages seen yet')
       : m.type === 'redis' ? _monRedisLine(s)
       : m.type === 'server' ? _monServerLine(s, m)
+      : m.type === 'database' ? _monDbLine(s)
+      : m.type === 'traffic' ? _monTrafficLine(s)
       : (s.lastValue != null ? s.lastValue + ' ms' : '—');
     const eq = s.errorQueue;
     const eqBadge = eq ? (eq.messages === null
@@ -12210,7 +12321,7 @@ function renderMonitors() {
     ${chip}
   </div>
   <div class="mon-target" title="${esc(monitorTarget(m))}">${esc(monitorTarget(m))}</div>
-  ${_monSpark(s.history, alert, m.type === 'rabbitmq' ? 'msgs' : m.type === 'server' ? 'errors' : 'ms')}
+  ${_monSpark(s.history, alert, m.type === 'rabbitmq' ? 'msgs' : m.type === 'server' ? 'errors' : m.type === 'traffic' ? '%' : 'ms')}
   <div class="mon-foot">
     ${foot}
     <span class="mon-when">checked ${_monAgo(s.lastCheckAt)}</span>
@@ -12267,12 +12378,99 @@ function monPickQueue(name, vhost) {
   if (/error|err|dead|dlq|dlx|fail|reject/i.test(name)) { document.getElementById('monAlertMessages').checked = true; document.getElementById('monAlertSilence').checked = false; monitorTypeChanged(); }
 }
 
+// ─── Weekly report & incidents ───
+async function openReport() {
+  document.getElementById('reportModal').style.display = 'flex';
+  const hs = document.getElementById('rpHour'); if (!hs.options.length) hs.innerHTML = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, '0')}:00</option>`).join('');
+  const d = await (await api('/admin/monitors/report-settings')).json().catch(() => ({}));
+  const st = d.settings || {};
+  document.getElementById('rpEnabled').checked = !!st.enabled; document.getElementById('rpEmails').value = (st.emails || []).join(', ');
+  document.getElementById('rpDay').value = String(st.dayOfWeek ?? 1); hs.value = String(st.hour ?? 8);
+  document.getElementById('rpStatus').textContent = !d.smtpConfigured ? 'SMTP is not configured — set it up in Notifications first.' : st.lastSentAt ? `Last sent ${_monAgo(st.lastSentAt)}${st.lastError ? ' · ' + st.lastError : ''}` : 'Never sent yet.';
+  const inc = await (await api('/admin/monitors/incidents?days=7&limit=200')).json().catch(() => ({ incidents: [] }));
+  const dur = ms => { const m = Math.round(ms / 60000); return m < 60 ? m + ' min' : m < 1440 ? Math.floor(m / 60) + ' h ' + (m % 60) + ' min' : Math.floor(m / 1440) + ' d'; };
+  const list = inc.incidents || [];
+  document.getElementById('rpIncCount').textContent = `${list.filter(i => i.kind === 'episode').length} incident(s) · ${list.filter(i => i.kind === 'event').length} event(s)`;
+  document.getElementById('rpIncRows').innerHTML = list.length ? list.map(i => `<tr class="${i.endedAt === null ? 'is-fail' : ''}"><td class="mono">${new Date(i.startedAt).toLocaleString()}</td><td style="font-weight:500">${esc(i.monitor)} <span style="font-size:11px;color:var(--text3)">${esc(i.type)}</span></td><td class="mono">${i.kind === 'event' ? '<span style="color:var(--text3)">event</span>' : i.endedAt ? dur(i.endedAt - i.startedAt) : '<span style="color:var(--red)">open</span>'}</td><td class="detail" title="${esc(i.detail)}">${esc(i.detail.slice(0, 160))}</td></tr>`).join('')
+    : '<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:20px">No incidents in the last 7 days.</td></tr>';
+}
+function closeReport() { document.getElementById('reportModal').style.display = 'none'; }
+async function saveReportSettings() {
+  const body = { enabled: document.getElementById('rpEnabled').checked, emails: document.getElementById('rpEmails').value.split(',').map(x => x.trim()).filter(Boolean), dayOfWeek: parseInt(document.getElementById('rpDay').value, 10), hour: parseInt(document.getElementById('rpHour').value, 10) };
+  const res = await api('/admin/monitors/report-settings', { method: 'POST', body: JSON.stringify(body) }); const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || 'Save failed', 'error');
+  toast('Report settings saved');
+}
+async function sendReportNow() {
+  await saveReportSettings();
+  const btn = event?.target; if (btn) btn.disabled = true;
+  try {
+    const res = await api('/admin/monitors/report/send', { method: 'POST' }); const d = await res.json().catch(() => ({}));
+    if (!res.ok) return toast('Report not sent: ' + ((d.errors || []).join('; ') || d.error || 'failed'), 'error');
+    toast(`Report sent to ${d.sent} recipient(s)`); document.getElementById('rpStatus').textContent = 'Sent just now.';
+  } finally { if (btn) btn.disabled = false; }
+}
+
+// ─── Wallboard share links ───
+async function openWbShare() {
+  document.getElementById('wbShareModal').style.display = 'flex';
+  document.getElementById('wbKeyNew').style.display = 'none'; document.getElementById('wbKeyNew').innerHTML = '';
+  await wbLoadKeys();
+}
+function closeWbShare() { document.getElementById('wbShareModal').style.display = 'none'; }
+async function wbLoadKeys() {
+  const res = await api('/admin/wallboard-keys'); const d = await res.json().catch(() => ({}));
+  const rows = document.getElementById('wbKeyRows');
+  const keys = d.keys || [];
+  rows.innerHTML = keys.length ? keys.map(k => `<tr>
+      <td style="font-weight:500">${esc(k.name)}<div style="font-size:11px;color:var(--text3)">${k.createdBy ? 'by ' + esc(k.createdBy) : ''}</div></td>
+      <td class="mono">${new Date(k.createdAt).toLocaleDateString()}</td>
+      <td class="mono" style="color:${k.expiresAt && k.expiresAt < Date.now() ? 'var(--red)' : 'inherit'}">${k.expiresAt ? new Date(k.expiresAt).toLocaleDateString() : 'never'}</td>
+      <td class="mono">${(k.allowedCidrs || []).map(esc).join(', ') || '<span style="color:var(--text3)">any</span>'}</td>
+      <td class="mono">${k.lastUsedAt ? _monAgo(k.lastUsedAt) + (k.lastUsedIp ? ' · ' + esc(k.lastUsedIp.replace(/^::ffff:/, '')) : '') : '<span style="color:var(--text3)">never</span>'}</td>
+      <td style="text-align:right"><button class="btn btn-sm md-danger" onclick="wbRevokeKey('${esc(k.id)}', '${esc(k.name).replace(/'/g, "\\'")}')">Revoke</button></td></tr>`).join('')
+    : '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:20px">No share links yet.</td></tr>';
+}
+async function wbCreateKey() {
+  const name = document.getElementById('wbKeyName').value.trim(); if (!name) return toast('Give the link a name', 'error');
+  const body = { name, expiresDays: document.getElementById('wbKeyDays').value || null, allowedCidrs: document.getElementById('wbKeyCidrs').value.split(',').map(x => x.trim()).filter(Boolean) };
+  const res = await api('/admin/wallboard-keys', { method: 'POST', body: JSON.stringify(body) }); const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || 'Could not create the link', 'error');
+  const box = document.getElementById('wbKeyNew'); box.style.display = '';
+  box.innerHTML = `<div class="mm-field-hint" style="margin-top:10px">Link for <b>${esc(name)}</b> — shown once; copy it now and open it on the screen. Opening it stores a cookie on that browser, so the screen keeps working after a reboot.</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:6px"><input class="mm-input" readonly value="${esc(d.url)}" style="font:400 12px var(--font-mono)" onclick="this.select()"><button class="btn btn-sm" data-copy="${esc(d.url)}" onclick="mmCopyFrom(this)">Copy</button></div>`;
+  document.getElementById('wbKeyName').value = ''; document.getElementById('wbKeyCidrs').value = '';
+  await wbLoadKeys();
+}
+async function wbRevokeKey(id, name) {
+  if (!await showConfirm({ title: 'Revoke link', message: `Revoke the wallboard link "${name}"?`, detail: 'Screens using it stop updating within 10 seconds and show a message asking for a new link.', confirmText: 'Revoke', danger: true })) return;
+  const res = await api('/admin/wallboard-keys/' + encodeURIComponent(id), { method: 'DELETE' }); const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || 'Failed', 'error');
+  toast('Link revoked'); await wbLoadKeys();
+}
+
+function monDbEngineChanged() {
+  const e = document.getElementById('monDbEngine').value, p = document.getElementById('monDbPort');
+  if (!p.dataset.touched) p.value = e === 'postgres' ? 5432 : e === 'mysql' ? 3306 : 1433;
+}
+let _monTrRes = null;
+async function monLoadTrafficResources() {
+  if (!_monTrRes) { try { _monTrRes = (await (await api('/admin/monitors/traffic-resources')).json()).resources || []; } catch { _monTrRes = []; } }
+  monTrafficSourceChanged();
+}
+function monTrafficSourceChanged() {
+  const src = document.getElementById('monTrSource').value;
+  document.getElementById('monTrResources').innerHTML = (_monTrRes || []).filter(r => r.type === src).map(r => `<option value="${esc(r.resource)}">${r.total.toLocaleString()} requests in 7 days</option>`).join('');
+}
 function monitorTypeChanged() {
   const type = document.getElementById('monType').value;
   document.getElementById('monRabbitFields').style.display = type === 'rabbitmq' ? 'flex' : 'none';
   document.getElementById('monHttpFields').style.display = type === 'http' ? 'flex' : 'none';
   document.getElementById('monRedisFields').style.display = type === 'redis' ? 'flex' : 'none';
   document.getElementById('monServerFields').style.display = type === 'server' ? 'flex' : 'none';
+  document.getElementById('monDatabaseFields').style.display = type === 'database' ? 'flex' : 'none';
+  document.getElementById('monTrafficFields').style.display = type === 'traffic' ? 'flex' : 'none';
+  if (type === 'traffic') monLoadTrafficResources();
   document.getElementById('monSilenceWrap').style.visibility = document.getElementById('monAlertSilence').checked ? 'visible' : 'hidden';
   document.getElementById('monErrorQueueWrap').style.visibility = document.getElementById('monWatchError').checked ? 'visible' : 'hidden';
 }
@@ -12322,6 +12520,18 @@ function openMonitorModal(m) {
   g('monSrvCritical').value = m?.type === 'server' ? (m.criticalContainers || []).join(', ') : '';
   monRenderCriticalPick(m);
   g('monSrvCidrs').value = m?.type === 'server' ? (m.allowedSourceCidrs || []).join(', ') : '';
+  const isDb = m?.type === 'database';
+  g('monDbEngine').value = isDb ? m.engine : 'postgres';
+  g('monDbHost').value = isDb ? m.host : ''; g('monDbPort').value = isDb ? m.port : 5432; delete g('monDbPort').dataset.touched;
+  g('monDbName').value = isDb ? m.database : ''; g('monDbUser').value = isDb ? m.username : '';
+  g('monDbPassword').value = ''; g('monDbPassword').placeholder = isDb && m.hasPassword ? '(kept — type to replace)' : '';
+  g('monDbTls').checked = isDb && !!m.tls;
+  g('monDbMaxLatencyMs').value = isDb ? (m.maxLatencyMs ?? 0) : 0; g('monDbMaxConnPct').value = isDb ? (m.maxConnectionsPct ?? 85) : 85;
+  g('monDbMaxLongQuerySec').value = isDb ? (m.maxLongQuerySec ?? 60) : 60; g('monDbMaxReplicaLagSec').value = isDb ? (m.maxReplicaLagSec ?? 60) : 60;
+  const isTr = m?.type === 'traffic';
+  g('monTrSource').value = isTr ? m.source : 'webhook'; g('monTrResource').value = isTr ? m.resource : '';
+  g('monTrWindow').value = isTr ? String(m.windowMinutes) : '30'; g('monTrMinReq').value = isTr ? m.minRequests : 10;
+  g('monTrMaxErrPct').value = isTr ? m.maxErrorPct : 5; g('monTrMaxAvgMs').value = isTr ? m.maxAvgMs : 0;
   g('monIntervalSeconds').value = m?.intervalSeconds ?? 60;
   g('monCooldownMinutes').value = m?.cooldownMinutes ?? 60;
   g('monEnabled').checked = m ? m.enabled !== false : true;
@@ -12368,6 +12578,17 @@ async function saveMonitor() {
       alertOn: [['silence', 'monAlertSilence'], ['messages', 'monAlertMessages'], ['health', 'monAlertHealth']].filter(([, id]) => document.getElementById(id).checked).map(([v]) => v),
       watchErrorQueue: document.getElementById('monWatchError').checked, errorQueue: g('monErrorQueue').trim() || undefined,
       silenceMinutes: parseInt(g('monSilenceMinutes'), 10),
+    });
+  } else if (type === 'database') {
+    Object.assign(body, {
+      engine: g('monDbEngine'), host: g('monDbHost').trim(), port: parseInt(g('monDbPort'), 10) || undefined, database: g('monDbName').trim(), username: g('monDbUser').trim(),
+      password: g('monDbPassword') || undefined, tls: document.getElementById('monDbTls').checked,
+      maxLatencyMs: parseInt(g('monDbMaxLatencyMs'), 10) || 0, maxConnectionsPct: parseInt(g('monDbMaxConnPct'), 10) || 0, maxLongQuerySec: parseInt(g('monDbMaxLongQuerySec'), 10) || 0, maxReplicaLagSec: parseInt(g('monDbMaxReplicaLagSec'), 10) || 0,
+    });
+  } else if (type === 'traffic') {
+    Object.assign(body, {
+      source: g('monTrSource'), resource: g('monTrResource').trim(), windowMinutes: parseInt(g('monTrWindow'), 10) || 30, minRequests: parseInt(g('monTrMinReq'), 10) || 1,
+      maxErrorPct: parseFloat(g('monTrMaxErrPct')) || 0, maxAvgMs: parseInt(g('monTrMaxAvgMs'), 10) || 0,
     });
   } else if (type === 'server') {
     Object.assign(body, {
