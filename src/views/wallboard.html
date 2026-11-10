@@ -37,7 +37,7 @@
   .head { display: flex; align-items: center; gap: 10px; }
   .ico { width: 34px; height: 34px; border-radius: 0; display: inline-flex; align-items: center; justify-content: center; flex: none; background: var(--wb-line); }
   .ico svg { width: 20px; height: 20px; }
-  .ico.rabbitmq { background: rgba(255,102,0,.16); } .ico.redis { background: rgba(220,56,45,.18); } .ico.http { background: rgba(42,139,212,.18); }
+  .ico.rabbitmq { background: rgba(255,102,0,.16); } .ico.redis { background: rgba(220,56,45,.18); } .ico.http { background: rgba(42,139,212,.18); } .ico.server { background: rgba(36,150,237,.2); }
   .title { flex: 1; min-width: 0; }
   .name { font: 500 15px var(--font-display, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .target { font: 400 11px var(--font-mono, monospace); color: var(--wb-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -82,6 +82,7 @@
   .hist tr.f td { background: rgba(255,90,90,.08); } .hist tr.f td.d { color: var(--wb-al); }
   .hist td.d { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .peek-head { font-size: 12.5px; color: var(--wb-dim); }
+  .ctr .dim { font: 400 11px var(--font-mono, monospace); color: var(--wb-dim); }
   .eq-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; font-size: 12px; color: var(--wb-dim); }
   .eq-tools input { width: 56px; background: var(--wb-bg); border: 1px solid var(--wb-line); color: var(--wb-text); padding: 4px 6px; font: inherit; margin: 0 4px; }
   .btn.danger { color: var(--wb-al); border-color: var(--wb-al); }
@@ -99,6 +100,7 @@
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
   <symbol id="ico-rabbitmq" viewBox="0 0 24 24"><path fill="#FF6600" d="M21 9h-6.3a.7.7 0 0 1-.7-.7V2.7a.7.7 0 0 0-.7-.7h-2.6a.7.7 0 0 0-.7.7v5.6a.7.7 0 0 1-.7.7H7.3a.7.7 0 0 1-.7-.7V2.7A.7.7 0 0 0 5.9 2H3.3a.7.7 0 0 0-.7.7V21.3c0 .4.3.7.7.7H21a.7.7 0 0 0 .7-.7V9.7A.7.7 0 0 0 21 9zm-3.5 8.2a1.3 1.3 0 0 1-1.3 1.3h-2.4a1.3 1.3 0 0 1-1.3-1.3v-2.4a1.3 1.3 0 0 1 1.3-1.3h2.4a1.3 1.3 0 0 1 1.3 1.3z"/></symbol>
   <symbol id="ico-redis" viewBox="0 0 24 24"><g fill="#E3473C"><path d="M12 3 2.5 7.2 12 11.4l9.5-4.2z"/><path d="M2.5 10.4 12 14.6l9.5-4.2v2.3L12 16.9 2.5 12.7z" opacity=".85"/><path d="M2.5 15.6 12 19.8l9.5-4.2v2.3L12 22.1 2.5 17.9z" opacity=".7"/></g></symbol>
+  <symbol id="ico-server" viewBox="0 0 24 24"><g fill="none" stroke="#2496ED" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6"/><rect x="3" y="14" width="18" height="6"/><path d="M7 7h.01M7 17h.01M11 7h4M11 17h4"/></g></symbol>
   <symbol id="ico-http" viewBox="0 0 24 24"><g fill="none" stroke="#5FB0EA" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></g></symbol>
 </defs></svg>
 
@@ -130,6 +132,7 @@
       <div class="stats" id="dStats"></div>
       <div class="bigchart" id="dChart"></div>
       <div id="dPeek" style="display:none"></div>
+      <div id="dContainers" style="display:none"></div>
       <table class="hist"><thead><tr><th>Time</th><th>Result</th><th>Value</th><th>Took</th><th>Detail</th></tr></thead><tbody id="dRows"></tbody></table>
     </div>
   </div>
@@ -148,7 +151,7 @@
   function applyTheme(t) { document.documentElement.setAttribute('data-theme', t); const b = document.getElementById('themeBtn'); if (b) b.textContent = t === 'dark' ? 'Light' : 'Dark'; }
   function toggleTheme() { const t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'; localStorage.setItem(WB_THEME_KEY, t); applyTheme(t); }
   applyTheme(resolveTheme());
-  const KIND = { rabbitmq: 'RabbitMQ queue', redis: 'Redis', http: 'HTTP endpoint' };
+  const KIND = { rabbitmq: 'RabbitMQ queue', redis: 'Redis', http: 'HTTP endpoint', server: 'Docker host' };
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   function ago(ts) {
     if (!ts) return '—';
@@ -156,7 +159,7 @@
     if (s < 60) return s + ' s'; const m = Math.round(s / 60); if (m < 60) return m + ' min';
     const h = Math.round(m / 60); return h < 48 ? h + ' h' : Math.round(h / 24) + ' d';
   }
-  const target = m => m.type === 'http' ? m.method + ' ' + m.url : m.type === 'redis' ? 'redis://' + m.host + ':' + m.port + '/' + m.db : m.queue + ' @ ' + m.apiUrl.replace(/^https?:\/\//, '');
+  const target = m => m.type === 'http' ? m.method + ' ' + m.url : m.type === 'redis' ? 'redis://' + m.host + ':' + m.port + '/' + m.db : m.type === 'server' ? ((m.status?.server?.host?.hostname || m.name) + ' · agent every ' + m.intervalSeconds + 's') : m.queue + ' @ ' + m.apiUrl.replace(/^https?:\/\//, '');
 
   /** Area sparkline of numeric history values; red dots where a check failed. */
   function spark(hist, color, W = 300, H = 44) { // also used at 900×120 inside the detail
@@ -181,6 +184,13 @@
       const eq = s.errorQueue && s.errorQueue.messages ? `${s.errorQueue.messages} in error queue` : '';
       return { big: last ? last : '—', unit: last ? 'since last message' : 'no messages seen', aux: [perMin ? perMin + ' msgs in last 6 checks' : '', eq].filter(Boolean).join(' · ') };
     }
+    if (m.type === 'server') {
+      const r = s.server; if (!r) return { big: '—', unit: 'waiting for agent', aux: '' };
+      const crit = m.criticalContainers || [], watched = crit.length ? r.containers.filter(c => crit.includes(c.name)) : r.containers;
+      const down = watched.filter(c => c.status !== 'running' || c.health === 'unhealthy').length + crit.filter(n => !r.containers.some(c => c.name === n)).length;
+      const disk = r.host.disks.length ? Math.max(...r.host.disks.map(d => d.pct)) : null;
+      return { big: down, unit: (crit.length ? 'critical ' : '') + (down === 1 ? 'container down' : 'containers down'), aux: [crit.length ? crit.length + ' critical of ' + r.containers.length : r.containers.length + ' containers', disk !== null ? 'disk ' + disk + '%' : '', r.host.memPct !== null ? 'mem ' + r.host.memPct + '%' : '', (r.containers.reduce((a, c) => a + c.errorsInWindow, 0) || '') && r.containers.reduce((a, c) => a + c.errorsInWindow, 0) + ' errors'].filter(Boolean).join(' · ') };
+    }
     if (m.type === 'redis' && s.redis) {
       const r = s.redis;
       return { big: r.memoryPct !== null ? r.memoryPct + '%' : bytes(r.usedMemory), unit: r.memoryPct !== null ? 'memory used' : 'memory (no limit)', aux: [s.lastValue != null ? s.lastValue + ' ms' : '', r.clients + ' clients', r.hitRatio !== null ? r.hitRatio + '% hits' : ''].filter(Boolean).join(' · ') };
@@ -194,7 +204,7 @@
   function openDetail(name) {
     const m = LAST.find(x => x.name === name); if (!m) return;
     OPEN = name;
-    const s = m.status || {}, state = s.state || 'unknown', al = state === 'alert', unit = m.type === 'rabbitmq' ? 'msgs' : 'ms';
+    const s = m.status || {}, state = s.state || 'unknown', al = state === 'alert', unit = m.type === 'rabbitmq' ? 'msgs' : m.type === 'server' ? 'errors' : 'ms';
     const h = s.history || [], fails = h.filter(x => !x.ok).length, vals = h.map(x => x.value).filter(v => typeof v === 'number');
     const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null, max = vals.length ? Math.max(...vals) : null;
     document.getElementById('dIco').className = 'ico ' + m.type; document.getElementById('dIco').innerHTML = `<svg><use href="#ico-${m.type}"/></svg>`;
@@ -210,7 +220,7 @@
     document.getElementById('dStats').innerHTML =
       stat('Checks kept', h.length, h.length ? 'since ' + new Date(h[0].at).toLocaleTimeString() : '') +
       stat('Failed', `<span style="color:${fails ? 'var(--wb-al)' : 'inherit'}">${fails}</span>`, h.length ? Math.round(100 * (h.length - fails) / h.length) + '% ok' : '') +
-      stat(unit === 'ms' ? 'Avg latency' : 'Avg msgs / check', avg === null ? '—' : fmt(avg, unit), max === null ? '' : 'max ' + fmt(max, unit)) +
+      stat(unit === 'ms' ? 'Avg latency' : unit === 'errors' ? 'Avg errors / report' : 'Avg msgs / check', avg === null ? '—' : fmt(avg, unit), max === null ? '' : 'max ' + fmt(max, unit)) +
       (s.errorQueue ? stat('Error queue', s.errorQueue.messages === null ? '—' : `<span style="color:${s.errorQueue.messages ? 'var(--wb-al)' : 'inherit'}">${s.errorQueue.messages}</span>`, esc(s.errorQueue.name)) : '') +
       stat(al ? 'Alerting for' : 'Last check', al && s.alertSince ? ago(s.alertSince) : ago(s.lastCheckAt) + ' ago', al && s.alertSince ? 'since ' + new Date(s.alertSince).toLocaleTimeString() : '');
     const r = s.redis;
@@ -220,6 +230,19 @@
       stat('Hit ratio', r.hitRatio !== null ? r.hitRatio + '%' : '—', r.hits + ' hits · ' + r.misses + ' misses') +
       stat('Evicted / rejected', `<span style="color:${r.evictedKeys || r.rejectedConnections ? 'var(--wb-al)' : 'inherit'}">${r.evictedKeys} / ${r.rejectedConnections}</span>`, 'since server start') +
       stat('Persistence', `<span style="color:${r.rdbStatus !== 'ok' ? 'var(--wb-al)' : 'inherit'}">${esc(r.rdbStatus)}</span>`, 'v' + esc(r.version) + ' ' + esc(r.role) + (r.linkStatus ? ' · link ' + esc(r.linkStatus) : ''));
+    const sv = s.server, cBox = document.getElementById('dContainers');
+    if (sv) {
+      const worst = sv.host.disks.length ? sv.host.disks.reduce((a, d) => d.pct > a.pct ? d : a) : null;
+      document.getElementById('dStats').innerHTML +=
+        stat('Containers', sv.containers.length, sv.containers.filter(c => c.status === 'running').length + ' running') +
+        stat('Host memory', sv.host.memPct !== null ? sv.host.memPct + '%' : '—', sv.host.memTotal ? 'of ' + bytes(sv.host.memTotal) : '') +
+        stat('Disk', worst ? worst.pct + '%' : '—', worst ? esc(worst.mount) + ' · ' + bytes(worst.used) + ' of ' + bytes(worst.total) : '') +
+        stat('Load', sv.host.load1 != null ? sv.host.load1.toFixed(2) : '—', sv.host.uptimeSec ? 'up ' + Math.floor(sv.host.uptimeSec / 86400) + 'd' : '');
+      cBox.style.display = '';
+      cBox.innerHTML = `<table class="hist ctr"><thead><tr><th>Container</th><th>State</th><th>Restarts</th><th>CPU</th><th>RAM</th><th>Errors</th><th>Last error</th></tr></thead><tbody>` +
+        [...sv.containers].sort((a, b) => ((m.criticalContainers || []).includes(b.name) - (m.criticalContainers || []).includes(a.name)) || a.name.localeCompare(b.name)).map(c => { const crit = (m.criticalContainers || []); const isCrit = crit.includes(c.name); const bad = (c.status !== 'running' || c.health === 'unhealthy') && (isCrit || !crit.length);
+          return `<tr class="${bad ? 'f' : ''}"${!isCrit && crit.length ? ' style="opacity:.55"' : ''}><td>${esc(c.name)}${isCrit ? ' <span style="font-size:10px;letter-spacing:.4px;color:#5FB0EA">CRITICAL</span>' : ''}<div class="dim">${esc(c.image)}</div></td><td><span class="badge ${bad ? 'al' : 'ok'}">${esc(c.status)}${c.health ? ' · ' + esc(c.health) : ''}</span></td><td class="mono">${c.restartCount}</td><td class="mono">${c.cpuPct != null ? c.cpuPct + '%' : '—'}</td><td class="mono">${c.memBytes != null ? bytes(c.memBytes) : '—'}</td><td class="mono" style="color:${c.errorsInWindow ? 'var(--wb-al)' : 'inherit'}">${c.errorsInWindow}</td><td class="d" title="${esc(c.lastError?.line || '')}">${c.lastError ? esc(c.lastError.line.slice(0, 100)) : '—'}</td></tr>`; }).join('') + '</tbody></table>';
+    } else { cBox.style.display = 'none'; cBox.innerHTML = ''; }
     document.getElementById('dChart').innerHTML = spark(h, al ? 'var(--wb-al)' : 'var(--wb-ok)', 900, 120);
     document.getElementById('dRows').innerHTML = h.length ? [...h].reverse().map(x => `<tr class="${x.ok ? '' : 'f'}"><td class="mono">${new Date(x.at).toLocaleString()}</td><td><span class="badge ${x.ok ? 'ok' : 'al'}">${x.ok ? 'OK' : 'FAIL'}</span></td><td class="mono">${typeof x.value === 'number' ? fmt(x.value, unit) : '—'}</td><td class="mono">${typeof x.ms === 'number' ? x.ms + ' ms' : '—'}</td><td class="d" title="${esc(x.error || '')}">${x.error ? esc(x.error) : '<span style="color:var(--wb-dim)">healthy</span>'}</td></tr>`).join('')
       : '<tr><td colspan="5" style="text-align:center;color:var(--wb-dim);padding:20px">No checks recorded yet.</td></tr>';

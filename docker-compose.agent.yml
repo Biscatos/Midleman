@@ -1,0 +1,33 @@
+# Midleman agent — run this on every Docker host you want watched.
+# Outbound only: the host needs no open ports. Create a "Server" monitor in the
+# Midleman dashboard first; it gives you the AGENT_TOKEN once.
+#
+#   MIDLEMAN_URL=https://reports.example.com AGENT_NAME=srv-200 AGENT_TOKEN=mma_... \
+#   docker compose -f docker-compose.agent.yml up -d
+services:
+  midleman-agent:
+    image: registry.biscatos.com/midleman/api-midleman:${MIDLEMAN_TAG:-latest}
+    container_name: midleman-agent
+    command: ["bun", "run", "src/agent/index.ts"]
+    environment:
+      - MIDLEMAN_URL=${MIDLEMAN_URL}          # where /agent/report lives (Report port 8444, or its public hostname)
+      - AGENT_NAME=${AGENT_NAME}              # must equal the Server monitor's name
+      - AGENT_TOKEN=${AGENT_TOKEN}
+      - AGENT_INTERVAL=${AGENT_INTERVAL:-30}
+      - LOG_PATTERN=${LOG_PATTERN:-ERROR|Exception|FATAL|panic}
+      # - LOG_IGNORE=DEBUG|HealthCheck
+      - TZ=Africa/Luanda
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /:/hostfs:ro                          # host disks (read-only); drop this line to skip disk alerts
+    restart: unless-stopped
+    # Least privilege: no capabilities, no writable filesystem, no privilege escalation, bounded resources.
+    read_only: true
+    tmpfs: [ /tmp ]
+    cap_drop: [ ALL ]
+    security_opt: [ no-new-privileges:true ]
+    pids_limit: 64
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "2" }

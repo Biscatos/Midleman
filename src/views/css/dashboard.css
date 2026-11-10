@@ -3959,6 +3959,7 @@ div:has(> div > #errPrev[disabled]):has(> div > #errNext[disabled]),
 .mon-ico-rabbitmq { background: rgba(255, 102, 0, .12); }
 .mon-ico-redis { background: rgba(220, 56, 45, .12); }
 .mon-ico-http { background: var(--accent-bg); }
+.mon-ico-server { background: rgba(36, 150, 237, .12); }
 .mon-title { flex: 1; min-width: 0; }
 .mon-name { font-size: 14px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mon-type { font-size: 11.5px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -4038,3 +4039,32 @@ div:has(> div > #errPrev[disabled]):has(> div > #errNext[disabled]),
 .md-eq-tools input { width: 60px; margin: 0 4px; padding: 4px 6px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font: inherit; }
 .md-eq-sep { width: 1px; height: 18px; background: var(--border); margin: 0 4px; }
 .md-danger { color: var(--red) !important; border-color: var(--red-bdr) !important; }
+
+/* ── Server monitor: containers table, captured log lines, install snippet ── */
+.md-ctr tr { cursor: pointer; } .md-ctr tr:hover td { background: var(--surface2); }
+.md-ctr tr.is-ign td { opacity: .55; }
+.md-ctr-name { font-weight: 500; } .md-ctr-img { font: 400 11px var(--font-mono); color: var(--text3); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.md-ctr-err { display: block; font: 400 11.5px var(--font-mono); color: var(--red); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.md-ctr-when { font-size: 11px; color: var(--text3); }
+.md-ctr-log { margin: 6px 0 0; padding: 10px 12px; border: 1px solid var(--border); background: var(--surface2); font: 400 11.5px/1.55 var(--font-mono); white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; color: var(--text); }
+.md-ctr-ts { color: var(--text3); }
+.md-install { user-select: all; }
+.md-crit { font-size: 10px; font-weight: 500; letter-spacing: .4px; text-transform: uppercase; color: var(--accent); margin-left: 6px; }
+.md-ctr td:first-child { width: 44px; }
+
+/* ── Business-hours picker (switch + from/to) ── */
+.bh-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bh-row .bh-on { display: inline-flex; align-items: center; flex: none; }
+.bh-row .bh-t { flex: 1; min-width: 0; height: var(--control-h); padding: 0 8px; font: 400 12.5px var(--font-mono); }
+.bh-row .bh-dash { color: var(--text3); flex: none; }
+.bh-row.is-off .bh-t, .bh-row.is-off .bh-dash { opacity: .4; }
+.bh-row .bh-t::-webkit-calendar-picker-indicator { opacity: .6; cursor: pointer; }
+
+/* ── Monitor form: pick critical containers from what the agent saw ── */
+.mon-crit-pick { border: 1px solid var(--border); background: var(--surface); max-height: 240px; overflow: auto; }
+.mon-crit-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 12.5px; }
+.mon-crit-row:last-child { border-bottom: none; }
+.mon-crit-row:hover { background: var(--surface2); }
+.mon-crit-row.is-on .mon-crit-name { font-weight: 500; }
+.mon-crit-name { flex: none; min-width: 180px; }
+.mon-crit-meta { flex: 1; min-width: 0; font: 400 11px var(--font-mono); color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; gap: 8px; align-items: center; }

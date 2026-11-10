@@ -2972,6 +2972,7 @@ function openConnectorModal(connector = null) {
     const day = (bh.weekly || []).find(w => w.day === d);
     document.getElementById('cnBhDay' + d).value = day ? bhRangesToText(day.ranges) : '';
   }
+  bhRefreshPickers('cnBhDay');
   connectorBusinessHoursChanged();
   document.getElementById('cnBusinessHoursDetails').open = !!bh.enabled;
   document.getElementById('cnMetaToken').placeholder = connector?.meta?.hasAccessToken ? '(kept — type to replace)' : '';
@@ -4833,6 +4834,7 @@ function openWebhookModal(webhook = null) {
     const day = (sa?.weekly || []).find(w => w.day === d);
     document.getElementById('wSilenceDay' + d).value = day ? bhRangesToText(day.ranges) : '';
   }
+  bhRefreshPickers('wSilenceDay');
 
   // Adopted-from-NPM banner
   const banner = document.getElementById('wAdoptedBanner');
@@ -10098,6 +10100,7 @@ function openFive9Modal(connector = null) {
     const day = (f9bh.weekly || []).find(w => w.day === d);
     document.getElementById('f9BhDay' + d).value = day ? bhRangesToText(day.ranges) : '';
   }
+  bhRefreshPickers('f9BhDay');
   f9BusinessHoursChanged();
   document.getElementById('f9BusinessHoursDetails').open = !!f9bh.enabled;
   // Advanced
@@ -11842,6 +11845,16 @@ async function fetchMonitors() {
 }
 
 /** "4 ms · mem 120 MB (12%) · 7 clients · 98% hits" from the last INFO. */
+/** "12 containers · 1 down · disk 71% · mem 54%" from the last agent report. */
+function _monServerLine(s, m = {}) {
+  const r = s.server; if (!r) return 'waiting for the first report…';
+  const crit = m.criticalContainers || [];
+  const watched = crit.length ? r.containers.filter(c => crit.includes(c.name)) : r.containers;
+  const down = watched.filter(c => c.status !== 'running' || c.health === 'unhealthy').length + crit.filter(n => !r.containers.some(c => c.name === n)).length;
+  const disk = r.host.disks.length ? Math.max(...r.host.disks.map(d => d.pct)) : null;
+  const errs = watched.reduce((a, c) => a + c.errorsInWindow, 0);
+  return [crit.length ? `${crit.length} critical of ${r.containers.length}` : `${r.containers.length} containers`, down ? `${down} down` : 'all running', disk !== null ? `disk ${disk}%` : null, r.host.memPct !== null ? `mem ${r.host.memPct}%` : null, errs ? `${errs} errors` : null].filter(Boolean).join(' · ');
+}
 function _monRedisLine(s) {
   const r = s.redis; if (!r) return s.lastValue != null ? s.lastValue + ' ms' : '—';
   const mem = _monBytes(r.usedMemory) + (r.memoryPct !== null ? ` (${r.memoryPct}%)` : '');
@@ -11852,6 +11865,7 @@ function _monBytes(b) { return b >= 1 << 30 ? (b / (1 << 30)).toFixed(2) + ' GB'
 function monitorTarget(m) {
   if (m.type === 'http') return `${m.method} ${m.url}`;
   if (m.type === 'redis') return `redis://${m.host}:${m.port}/${m.db}`;
+  if (m.type === 'server') { const h = m.status?.server?.host; return h?.hostname ? `${h.hostname} · agent every ${m.intervalSeconds}s` : `agent "${m.name}" · every ${m.intervalSeconds}s`; }
   return `${m.queue} (${[].concat(m.alertOn).join('+')}) @ ${m.apiUrl}`;
 }
 
@@ -11898,7 +11912,7 @@ function openMonitorDetail(name) {
   const m = _allMonitors.find(x => x.name === name);
   if (!m) return;
   _mdName = name;
-  const s = m.status || {}; const alert = s.state === 'alert'; const unit = m.type === 'rabbitmq' ? 'msgs' : 'ms';
+  const s = m.status || {}; const alert = s.state === 'alert'; const unit = m.type === 'rabbitmq' ? 'msgs' : m.type === 'server' ? 'errors' : 'ms';
   const g = id => document.getElementById(id);
   g('mdIcon').className = 'mon-ico mon-ico-' + m.type; g('mdIcon').innerHTML = `<svg><use href="#mon-ico-${m.type}"/></svg>`;
   g('mdName').textContent = m.name;
@@ -11913,7 +11927,7 @@ function openMonitorDetail(name) {
   g('mdStats').innerHTML =
     stat('Checks kept', h.length, h.length ? `since ${new Date(h[0].at).toLocaleTimeString()}` : '') +
     stat('Failed', `<span style="color:${fails ? 'var(--red)' : 'inherit'}">${fails}</span>`, h.length ? Math.round(100 * (h.length - fails) / h.length) + '% ok' : '') +
-    stat(unit === 'ms' ? 'Avg latency' : 'Avg msgs / check', avg === null ? '—' : _monFmt(avg, unit), max === null ? '' : 'max ' + _monFmt(max, unit)) +
+    stat(unit === 'ms' ? 'Avg latency' : unit === 'errors' ? 'Avg errors / report' : 'Avg msgs / check', avg === null ? '—' : _monFmt(avg, unit), max === null ? '' : 'max ' + _monFmt(max, unit)) +
     (s.errorQueue ? stat('Error queue', s.errorQueue.messages === null ? '<span style="color:var(--text3)">not found</span>' : `<span style="color:${s.errorQueue.messages ? 'var(--red)' : 'inherit'}">${s.errorQueue.messages}</span>`, esc(s.errorQueue.name)) : '') +
     stat(alert ? 'Alerting for' : 'Last check', alert && s.alertSince ? _monAgo(s.alertSince).replace(' ago', '') : _monAgo(s.lastCheckAt), s.lastError && !alert ? '' : (alert ? 'since ' + new Date(s.alertSince || Date.now()).toLocaleTimeString() : ''));
   const r = s.redis;
@@ -11923,6 +11937,37 @@ function openMonitorDetail(name) {
     stat('Hit ratio', r.hitRatio !== null ? r.hitRatio + '%' : '—', `${r.hits} hits · ${r.misses} misses`) +
     stat('Evicted / rejected', `<span style="color:${r.evictedKeys || r.rejectedConnections ? 'var(--red)' : 'inherit'}">${r.evictedKeys} / ${r.rejectedConnections}</span>`, 'since server start') +
     stat('Persistence', `<span style="color:${r.rdbStatus !== 'ok' || (r.aofStatus && r.aofStatus !== 'ok') ? 'var(--red)' : 'inherit'}">${esc(r.rdbStatus)}</span>`, (r.aofStatus ? 'AOF ' + esc(r.aofStatus) + ' · ' : '') + `up ${_monUptime(r.uptimeSec)} · v${esc(r.version)} ${esc(r.role)}${r.linkStatus ? ' · link ' + esc(r.linkStatus) : ''}`);
+  const sv = s.server;
+  if (sv) {
+    const worst = sv.host.disks.length ? sv.host.disks.reduce((a, d) => d.pct > a.pct ? d : a) : null;
+    g('mdStats').innerHTML +=
+      stat('Containers', sv.containers.length, `${sv.containers.filter(c => c.status === 'running').length} running`) +
+      stat('Host memory', sv.host.memPct !== null ? `<span style="color:${sv.host.memPct >= (m.memPct || 101) ? 'var(--red)' : 'inherit'}">${sv.host.memPct}%</span>` : '—', sv.host.memTotal ? 'of ' + _monBytes(sv.host.memTotal) : '') +
+      stat('Disk', worst ? `<span style="color:${worst.pct >= (m.diskPct || 101) ? 'var(--red)' : 'inherit'}">${worst.pct}%</span>` : '—', worst ? `${esc(worst.mount)} · ${_monBytes(worst.used)} of ${_monBytes(worst.total)}` : 'mount /:/hostfs:ro to see disks') +
+      stat('Load / uptime', sv.host.load1 != null ? sv.host.load1.toFixed(2) : '—', sv.host.uptimeSec ? 'up ' + _monUptime(sv.host.uptimeSec) : '');
+  }
+  g('mdInstallBtn').style.display = m.type === 'server' ? '' : 'none';
+  const cBox = g('mdContainers');
+  if (cBox.querySelector('.md-install')) { /* keep the install snippet (and its one-time token) across refreshes */ }
+  else if (sv) {
+    cBox.style.display = '';
+    const crit = m.criticalContainers || [];
+    const missing = crit.filter(n => !sv.containers.some(c => c.name === n)).map(n => ({ name: n, image: '(not on host)', status: 'missing', health: null, restartCount: 0, cpuPct: null, memBytes: null, errorsInWindow: 0, lastError: null, oomKilled: false }));
+    const rows = [...missing, ...sv.containers].sort((a, b) => (crit.includes(b.name) - crit.includes(a.name)) || a.name.localeCompare(b.name));
+    cBox.innerHTML = `<div class="md-peek-head" style="display:flex;justify-content:space-between;gap:10px"><span>${crit.length ? `<b>${crit.length}</b> critical container(s) alert; the others are shown for information.` : 'No critical list: every container Docker should keep up alerts. Mark the ones that matter and only those will alert.'}</span></div>
+      <table class="md-table md-ctr"><thead><tr><th title="Only critical containers alert when at least one is marked">Critical</th><th>Container</th><th>State</th><th>Restarts</th><th>CPU</th><th>RAM</th><th>Errors (${m.logWindowMinutes} min)</th><th>Last error</th></tr></thead><tbody>` +
+      rows.map(c => { const isCrit = crit.includes(c.name); const watched = isCrit || !crit.length; const bad = c.status !== 'running' || c.health === 'unhealthy'; const ign = (m.ignoreContainers || []).includes(c.name);
+        const q = esc(c.name).replace(/'/g, "\\'");
+        return `<tr class="${bad && watched && !ign ? 'is-fail' : ''}${ign || (!watched && crit.length) ? ' is-ign' : ''}" onclick="mdContainerErrors('${q}')" title="${esc(c.image)} — click for its error lines">
+        <td onclick="event.stopPropagation()"><input type="checkbox" class="mm-switch" ${isCrit ? 'checked' : ''} onchange="mdToggleCritical('${q}', this.checked)" title="${isCrit ? 'Critical — alerts' : 'Mark as critical'}"></td>
+        <td><div class="md-ctr-name">${esc(c.name)}${isCrit ? ' <span class="md-crit">critical</span>' : ''}</div><div class="md-ctr-img">${esc(c.image)}</div></td>
+        <td><span class="mm-chip ${bad ? 'err' : 'ok'}">${esc(c.status)}${c.health ? ' · ' + esc(c.health) : ''}</span>${c.oomKilled ? ' <span class="mm-chip err">OOM</span>' : ''}${ign ? ' <span class="mm-chip">ignored</span>' : ''}</td>
+        <td class="mono">${c.restartCount}</td><td class="mono">${c.cpuPct != null ? c.cpuPct + '%' : '—'}</td><td class="mono">${c.memBytes != null ? _monBytes(c.memBytes) : '—'}</td>
+        <td class="mono" style="color:${c.errorsInWindow ? 'var(--red)' : 'inherit'}">${c.errorsInWindow}</td>
+        <td class="detail" title="${esc(c.lastError?.line || '')}">${c.lastError ? `<span class="md-ctr-err">${esc(c.lastError.line.slice(0, 120))}</span><span class="md-ctr-when">${_monAgo(c.lastError.at)}</span>` : '<span style="color:var(--text3)">—</span>'}</td></tr>`; }).join('') +
+      `</tbody></table><div id="mdCtrErrors"></div>`;
+  } else if (m.type === 'server') { cBox.style.display = ''; cBox.innerHTML = '<div class="md-peek-head">No report yet. Click <b>Install agent</b> for the command to run on the server.</div>'; }
+  else { cBox.style.display = 'none'; cBox.innerHTML = ''; }
   g('mdChart').innerHTML = _monSpark(h, alert, unit).replace('class="mon-chart', 'class="mon-chart md-chart');
   g('mdRows').innerHTML = h.length ? [...h].reverse().map(x => `<tr class="${x.ok ? '' : 'is-fail'}">
       <td class="mono">${new Date(x.at).toLocaleString()}</td>
@@ -11967,6 +12012,62 @@ async function mdPeek() {
       }).join('');
   } catch (e) { box.innerHTML = `<div class="md-peek-err">${esc(e.message || e)}</div>`; }
   finally { btn.disabled = false; }
+}
+/** Edit form: the containers the agent reported, each with a switch; the hidden text field stays the source of truth for save. */
+function monRenderCriticalPick(m) {
+  const box = document.getElementById('monSrvCriticalPick'), txt = document.getElementById('monSrvCritical'), hint = document.getElementById('monSrvCriticalHint');
+  const seen = m?.type === 'server' ? (m.status?.server?.containers || []) : [];
+  if (!seen.length) { box.style.display = 'none'; box.innerHTML = ''; txt.style.display = ''; hint.textContent = 'The agent has not reported yet — type names now, or come back once it runs and pick them from the list.'; return; }
+  const crit = new Set((m.criticalContainers || []));
+  const names = [...new Set([...seen.map(c => c.name), ...crit])].sort((a, b) => (crit.has(b) - crit.has(a)) || a.localeCompare(b));
+  box.style.display = ''; txt.style.display = 'none';
+  hint.textContent = `${seen.length} container(s) seen by the agent. Marked ones alert; the rest are informational.`;
+  box.innerHTML = names.map(n => { const c = seen.find(x => x.name === n); const bad = c && (c.status !== 'running' || c.health === 'unhealthy');
+    return `<label class="mon-crit-row${crit.has(n) ? ' is-on' : ''}"><input type="checkbox" class="mm-switch" ${crit.has(n) ? 'checked' : ''} onchange="monCriticalToggled(this, '${esc(n).replace(/'/g, "\'")}')"><span class="mon-crit-name">${esc(n)}</span><span class="mon-crit-meta">${c ? `<span class="mm-chip ${bad ? 'err' : 'ok'}" style="font-size:10px">${esc(c.status)}</span> ${esc(c.image)}` : '<span class="mm-chip" style="font-size:10px">not on host</span>'}</span></label>`; }).join('');
+}
+function monCriticalToggled(cb, name) {
+  const txt = document.getElementById('monSrvCritical'); const list = new Set(txt.value.split(',').map(x => x.trim()).filter(Boolean));
+  cb.checked ? list.add(name) : list.delete(name); txt.value = [...list].join(', ');
+  cb.closest('.mon-crit-row').classList.toggle('is-on', cb.checked);
+}
+/** Add/remove a container from the server's critical list (saves the monitor; token and password fields stay untouched). */
+async function mdToggleCritical(container, on) {
+  const m = _allMonitors.find(x => x.name === _mdName); if (!m) return;
+  const list = new Set(m.criticalContainers || []); on ? list.add(container) : list.delete(container);
+  const { status: _s, hasToken: _t, ...body } = m; body.criticalContainers = [...list];
+  const res = await api('/admin/monitors', { method: 'POST', body: JSON.stringify(body) });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || 'Save failed', 'error');
+  toast(on ? `${container} marked critical` : `${container} no longer critical`);
+  await fetchMonitors(); if (_mdName) openMonitorDetail(_mdName);
+}
+async function mdContainerErrors(container) {
+  const box = document.getElementById('mdCtrErrors'); if (!box) return;
+  box.innerHTML = '<div class="md-peek-head">Loading…</div>';
+  const res = await api(`/admin/monitors/${encodeURIComponent(_mdName)}/errors?container=${encodeURIComponent(container)}&limit=100`);
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) { box.innerHTML = `<div class="md-peek-err">${esc(d.error || 'Failed')}</div>`; return; }
+  box.innerHTML = `<div class="md-peek-head" style="margin-top:10px">Last ${d.errors.length} error line(s) captured from <b>${esc(container)}</b> (newest first)</div>` +
+    (d.errors.length ? `<pre class="md-ctr-log">${d.errors.map(e => `<span class="md-ctr-ts">${new Date(e.at).toLocaleString()}</span> ${esc(e.line)}`).join('\n')}</pre>` : '<div style="color:var(--text3);font-size:12.5px">Nothing matched the log pattern yet.</div>');
+}
+/** Install command for this server's agent. The token is only shown when minted (create / rotate). */
+function _agentInstallHtml(name, token) {
+  const base = 'https://' + location.hostname + ':' + (window.REPORT_PORT || 8444);
+  const cmd = `docker run -d --name midleman-agent --restart unless-stopped \\
+  --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --pids-limit 64 --memory 128m \\
+  -v /var/run/docker.sock:/var/run/docker.sock:ro -v /:/hostfs:ro \\
+  -e MIDLEMAN_URL=${base} -e AGENT_NAME=${name} -e AGENT_TOKEN=${token || '<token — shown once on create; use "Rotate token" to get a new one>'} \\
+  registry.biscatos.com/midleman/api-midleman:latest bun run src/agent/index.ts`;
+  return `<div class="md-peek-head">Run on the server (outbound only — no port to open). <code>MIDLEMAN_URL</code> must be <b>https://</b> — the public hostname that fronts the Report port (${window.REPORT_PORT || 8444}); plain http is only accepted from the LAN. The container runs read-only with no capabilities and only reads the Docker socket.</div><pre class="md-ctr-log md-install">${esc(cmd)}</pre>
+    <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-sm" onclick="navigator.clipboard.writeText(${JSON.stringify(cmd).replace(/"/g, '&quot;')}).then(()=>toast('Copied','success'))">Copy</button>${token ? '' : `<button class="btn btn-sm" onclick="mdRotateToken()">Rotate token</button>`}<button class="btn btn-sm" style="margin-left:auto" onclick="document.getElementById('mdContainers').innerHTML='';openMonitorDetail(_mdName)">Back to containers</button></div>`;
+}
+function mdInstall() { const box = document.getElementById('mdContainers'); box.style.display = ''; box.innerHTML = _agentInstallHtml(_mdName, null); }
+async function mdRotateToken() {
+  if (!await showConfirm({ title: 'Rotate agent token', message: `Generate a new token for "${_mdName}"?`, detail: 'The running agent keeps working only until you restart it with the new token.', confirmText: 'Rotate' })) return;
+  const res = await api(`/admin/monitors/${encodeURIComponent(_mdName)}/rotate-token`, { method: 'POST' });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || 'Failed', 'error');
+  document.getElementById('mdContainers').innerHTML = _agentInstallHtml(_mdName, d.token);
 }
 async function mdCheckNow() { if (!_mdName) return; await checkMonitorNow(_mdName); openMonitorDetail(_mdName); }
 function mdEdit() { const n = _mdName; closeMonitorDetail(); editMonitor(n); }
@@ -12022,6 +12123,7 @@ function renderOverviewMonitors() {
     const reading = alert ? (s.lastError || 'alerting')
       : m.type === 'rabbitmq' ? (s.lastActivityAt ? 'last message ' + _monAgo(s.lastActivityAt) : 'no messages seen yet') + (s.errorQueue && s.errorQueue.messages ? ` · ${s.errorQueue.messages} in error queue` : '')
       : m.type === 'redis' ? _monRedisLine(s)
+      : m.type === 'server' ? _monServerLine(s, m)
       : (s.lastValue != null ? s.lastValue + ' ms' : '—');
     return `<div class="ovm-row${alert ? ' is-alert' : ''}" onclick="openMonitorDetail('${esc(m.name)}')" role="button" tabindex="0" title="Open details">
       <span class="mon-ico mon-ico-${m.type}" style="width:28px;height:28px;border-radius:7px"><svg style="width:16px;height:16px"><use href="#mon-ico-${m.type}"/></svg></span>
@@ -12047,10 +12149,11 @@ function renderMonitors() {
       : alert ? '<span class="mm-chip err">ALERT</span>'
       : s.state === 'disabled' ? '<span class="mm-chip">Disabled</span>'
       : '<span class="mm-chip">Pending</span>';
-    const typeLabel = m.type === 'http' ? 'HTTP endpoint' : m.type === 'redis' ? 'Redis server' : 'RabbitMQ queue';
+    const typeLabel = m.type === 'http' ? 'HTTP endpoint' : m.type === 'redis' ? 'Redis server' : m.type === 'server' ? 'Docker host' : 'RabbitMQ queue';
     const reading = m.type === 'rabbitmq'
       ? (s.lastActivityAt ? 'Last message ' + _monAgo(s.lastActivityAt) : 'No messages seen yet')
       : m.type === 'redis' ? _monRedisLine(s)
+      : m.type === 'server' ? _monServerLine(s, m)
       : (s.lastValue != null ? s.lastValue + ' ms' : '—');
     const eq = s.errorQueue;
     const eqBadge = eq ? (eq.messages === null
@@ -12069,7 +12172,7 @@ function renderMonitors() {
     ${chip}
   </div>
   <div class="mon-target" title="${esc(monitorTarget(m))}">${esc(monitorTarget(m))}</div>
-  ${_monSpark(s.history, alert, m.type === 'rabbitmq' ? 'msgs' : 'ms')}
+  ${_monSpark(s.history, alert, m.type === 'rabbitmq' ? 'msgs' : m.type === 'server' ? 'errors' : 'ms')}
   <div class="mon-foot">
     ${foot}
     <span class="mon-when">checked ${_monAgo(s.lastCheckAt)}</span>
@@ -12114,6 +12217,7 @@ function monitorTypeChanged() {
   document.getElementById('monRabbitFields').style.display = type === 'rabbitmq' ? 'flex' : 'none';
   document.getElementById('monHttpFields').style.display = type === 'http' ? 'flex' : 'none';
   document.getElementById('monRedisFields').style.display = type === 'redis' ? 'flex' : 'none';
+  document.getElementById('monServerFields').style.display = type === 'server' ? 'flex' : 'none';
   document.getElementById('monSilenceWrap').style.visibility = document.getElementById('monAlertSilence').checked ? 'visible' : 'hidden';
   document.getElementById('monErrorQueueWrap').style.visibility = document.getElementById('monWatchError').checked ? 'visible' : 'hidden';
 }
@@ -12155,6 +12259,14 @@ function openMonitorModal(m) {
   g('monRedisMaxClients').value = m?.type === 'redis' ? (m.maxClients ?? 0) : 0;
   g('monRedisMaxReplicaLagSec').value = m?.type === 'redis' ? (m.maxReplicaLagSec ?? 60) : 60;
   g('monRedisTls').checked = !!m?.tls;
+  g('monSrvLogErrors').value = m?.type === 'server' ? (m.logErrorsPerWindow ?? 5) : 5;
+  g('monSrvLogWindow').value = m?.type === 'server' ? (m.logWindowMinutes ?? 5) : 5;
+  g('monSrvDiskPct').value = m?.type === 'server' ? (m.diskPct ?? 90) : 90;
+  g('monSrvMemPct').value = m?.type === 'server' ? (m.memPct ?? 90) : 90;
+  g('monSrvIgnore').value = m?.type === 'server' ? (m.ignoreContainers || []).join(', ') : '';
+  g('monSrvCritical').value = m?.type === 'server' ? (m.criticalContainers || []).join(', ') : '';
+  monRenderCriticalPick(m);
+  g('monSrvCidrs').value = m?.type === 'server' ? (m.allowedSourceCidrs || []).join(', ') : '';
   g('monIntervalSeconds').value = m?.intervalSeconds ?? 60;
   g('monCooldownMinutes').value = m?.cooldownMinutes ?? 60;
   g('monEnabled').checked = m ? m.enabled !== false : true;
@@ -12163,6 +12275,7 @@ function openMonitorModal(m) {
     const day = (m?.weekly || []).find(w => w.day === d);
     g('monDay' + d).value = day ? bhRangesToText(day.ranges) : '';
   }
+  bhRefreshPickers('monDay');
   monitorTypeChanged();
   const pk = g('monQueuePick'); pk.style.display = 'none'; pk.innerHTML = '';
   g('monitorModal').style.display = 'flex';
@@ -12200,6 +12313,14 @@ async function saveMonitor() {
       watchErrorQueue: document.getElementById('monWatchError').checked, errorQueue: g('monErrorQueue').trim() || undefined,
       silenceMinutes: parseInt(g('monSilenceMinutes'), 10),
     });
+  } else if (type === 'server') {
+    Object.assign(body, {
+      logErrorsPerWindow: parseInt(g('monSrvLogErrors'), 10) || 0, logWindowMinutes: parseInt(g('monSrvLogWindow'), 10) || 5,
+      diskPct: parseInt(g('monSrvDiskPct'), 10) || 0, memPct: parseInt(g('monSrvMemPct'), 10) || 0,
+      ignoreContainers: g('monSrvIgnore').split(',').map(x => x.trim()).filter(Boolean),
+      criticalContainers: g('monSrvCritical').split(',').map(x => x.trim()).filter(Boolean),
+      allowedSourceCidrs: g('monSrvCidrs').split(',').map(x => x.trim()).filter(Boolean),
+    });
   } else if (type === 'redis') {
     Object.assign(body, {
       host: g('monRedisHost').trim(), port: parseInt(g('monRedisPort'), 10) || 6379, db: parseInt(g('monRedisDb'), 10) || 0,
@@ -12227,7 +12348,9 @@ async function saveMonitor() {
     if (!res.ok) return toast(d.error || 'Save failed', 'error');
     toast(`Monitor ${d.status}`);
     closeMonitorModal();
-    fetchMonitors();
+    await fetchMonitors();
+    // A new server monitor: show the install command with the token now — it is never shown again.
+    if (d.token) { openMonitorDetail(body.name); const box = document.getElementById('mdContainers'); box.style.display = ''; box.innerHTML = _agentInstallHtml(body.name, d.token); }
   } finally { btn.disabled = false; }
 }
 
@@ -12253,3 +12376,42 @@ async function deleteMonitor(name) {
   toast('Monitor deleted');
   fetchMonitors();
 }
+
+// ─── Business-hours picker ────────────────────────────────────────────────────
+// Progressive enhancement over the per-day text inputs (monDay#, wSilenceDay#,
+// cnBhDay#, f9BhDay#): the text field is hidden and driven by a switch + two
+// time pickers, so the save/parse code above keeps reading the same inputs.
+// shortcut: one range per day in the picker; a saved day with several ranges falls back to the text field, keep until someone needs split shifts.
+const BH_PICK_RE = /^(monDay|wSilenceDay|cnBhDay|f9BhDay)[0-6]$/;
+function bhEnhance(input) {
+  if (input.dataset.bh) return;
+  input.dataset.bh = '1';
+  const row = document.createElement('div'); row.className = 'bh-row';
+  row.innerHTML = `<label class="bh-on" title="Alerts on this day"><input type="checkbox" class="mm-switch"></label>
+    <input type="time" class="mm-input bh-t" step="300"><span class="bh-dash">–</span><input type="time" class="mm-input bh-t" step="300">`;
+  input.insertAdjacentElement('afterend', row);
+  input.classList.add('bh-text');
+  const [on, from, to] = [row.querySelector('input[type=checkbox]'), ...row.querySelectorAll('input[type=time]')];
+  const push = () => {
+    if (!on.checked) { input.value = ''; }
+    else { if (!from.value) from.value = '07:00'; if (!to.value) to.value = '22:00'; input.value = `${from.value}-${to.value}`; }
+    row.classList.toggle('is-off', !on.checked);
+    from.disabled = to.disabled = !on.checked;
+  };
+  on.addEventListener('change', push); from.addEventListener('change', push); to.addEventListener('change', push);
+  input._bhPull = () => {
+    const parts = input.value.split(',').map(s => s.trim()).filter(Boolean);
+    const multi = parts.length > 1;
+    input.style.display = multi ? '' : 'none'; row.style.display = multi ? 'none' : '';
+    if (multi) return;
+    const m = /^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/.exec(parts[0] || '');
+    on.checked = !!m; from.value = m ? m[1].padStart(5, '0') : ''; to.value = m ? m[2].padStart(5, '0') : '';
+    row.classList.toggle('is-off', !on.checked); from.disabled = to.disabled = !on.checked;
+  };
+  input._bhPull();
+}
+/** Re-read the text inputs after code fills them (openMonitorModal etc.). */
+function bhRefreshPickers(prefix) {
+  for (let d = 0; d <= 6; d++) { const el = document.getElementById(prefix + d); if (el) { bhEnhance(el); el._bhPull(); } }
+}
+document.addEventListener('DOMContentLoaded', () => { document.querySelectorAll('input[type=text]').forEach(el => { if (BH_PICK_RE.test(el.id)) bhEnhance(el); }); });
