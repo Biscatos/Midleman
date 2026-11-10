@@ -16,6 +16,9 @@ services:
       - AGENT_INTERVAL=${AGENT_INTERVAL:-30}
       - LOG_PATTERN=${LOG_PATTERN:-ERROR|Exception|FATAL|panic}
       # - LOG_IGNORE=DEBUG|HealthCheck
+      # Reverse tunnel: lets Midleman reach services on THIS server's network (Redis, databases) through the agent.
+      #   private (default) = loopback / RFC1918 / container names only · off = disabled · explicit list = host:port,host:port
+      # - TUNNEL_ALLOW=private
       - TZ=Africa/Luanda
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro

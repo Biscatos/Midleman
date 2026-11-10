@@ -27,6 +27,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 export const sink = { emit: emitNotificationEvent };
 import { assertResolvedHostAllowed, ipInCidrs } from './ssrf-guard';
 import { getTrafficWindow } from '../telemetry/request-log';
+import { tunnelLocalPort } from './agent-tunnel';
 import { Connection as TdsConnection, Request as TdsRequest } from 'tedious';
 import { isWithinBusinessHours, validateWeekly, type DaySchedule } from './business-hours';
 
@@ -44,6 +45,8 @@ interface MonitorBase {
     weekly?: DaySchedule[];
     /** Allow private/internal IPs as targets (default true — monitors usually watch internal infra). */
     allowPrivate?: boolean;
+    /** Reach the target through this Docker-host agent's reverse tunnel (its network, not ours). */
+    via?: string;
 }
 
 export type RabbitAlert = 'silence' | 'messages' | 'health';
@@ -325,7 +328,9 @@ export function validateMonitorInput(input: unknown): { error: string } | { moni
         cooldownMinutes,
         weekly: Array.isArray(i.weekly) && i.weekly.length ? i.weekly as DaySchedule[] : undefined,
         allowPrivate: i.allowPrivate !== false,
+        via: typeof i.via === 'string' && i.via.trim() ? i.via.trim().toLowerCase() : undefined,
     };
+    if (base.via && !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(base.via)) return { error: '"via" must be the name of a Server monitor (agent)' };
 
     if (i.type === 'rabbitmq') {
         if (typeof i.apiUrl !== 'string' || !/^https?:\/\/\S+$/.test(i.apiUrl.trim())) return { error: '"apiUrl" must be an http(s) URL' };
@@ -570,10 +575,29 @@ function statusMatches(expect: string, status: number): boolean {
 }
 
 /** Returns a failure reason, or null when healthy. */
+/** Direct: SSRF policy applies. Via an agent: a local bridged port (the agent's TUNNEL_ALLOW decides what it reaches). */
+async function resolveTarget(m: MonitorBase, host: string, port: number, scheme: string): Promise<{ host: string; port: number }> {
+    if (m.via) return { host: '127.0.0.1', port: await tunnelLocalPort(m.via, host, port) };
+    await assertResolvedHostAllowed(`${scheme}://${host}:${port}/`, { allowPrivate: m.allowPrivate !== false });
+    return { host, port };
+}
+/** Rewrite an http(s) URL to go through the tunnel; returns the URL to fetch plus the Host header to keep. */
+async function resolveUrl(m: MonitorBase, raw: string): Promise<{ url: string; host: string | null; tls: boolean }> {
+    if (!m.via) { await assertResolvedHostAllowed(raw, { allowPrivate: m.allowPrivate !== false }); return { url: raw, host: null, tls: false }; }
+    const u = new URL(raw);
+    const port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80);
+    const local = await tunnelLocalPort(m.via, u.hostname, port);
+    const out = new URL(raw); out.hostname = '127.0.0.1'; out.port = String(local);
+    return { url: out.toString(), host: u.host, tls: u.protocol === 'https:' };
+}
+
 async function checkHttp(m: HttpMonitor, s: State): Promise<string | null> {
-    await assertResolvedHostAllowed(m.url, { allowPrivate: m.allowPrivate !== false });
+    const r = await resolveUrl(m, m.url);
+    const headers: Record<string, string> = { ...(m.headers || {}) };
+    if (r.host) headers.Host = r.host;
     const t0 = Date.now();
-    const res = await fetch(m.url, { method: m.method, headers: m.headers, signal: AbortSignal.timeout(m.timeoutMs), redirect: 'manual' });
+    // shortcut: HTTPS through a tunnel skips certificate validation (the cert is for the real host, we dial 127.0.0.1); fine for health checks, revisit if the body is sensitive.
+    const res = await fetch(r.url, { method: m.method, headers, signal: AbortSignal.timeout(m.timeoutMs), redirect: 'manual', ...(r.tls ? { tls: { rejectUnauthorized: false } } : {}) } as any);
     const latency = Date.now() - t0;
     s.lastValue = latency;
     if (!statusMatches(m.expectStatus, res.status)) return `HTTP ${res.status} (expected ${m.expectStatus})`;
@@ -606,10 +630,9 @@ const fmtBytes = (b: number) => b >= 1 << 30 ? (b / (1 << 30)).toFixed(2) + ' GB
 
 /** fail = episodic (down / slow / memory / clients / persistence / replication); burst = one-shot (restart, evictions, rejected connections). */
 async function checkRedis(m: RedisMonitor, s: State): Promise<{ fail: string | null; burst: string | null }> {
-    // Host policy applies here too (same rules as HTTP targets).
-    await assertResolvedHostAllowed(`${m.tls ? 'https' : 'http'}://${m.host}:${m.port}/`, { allowPrivate: m.allowPrivate !== false });
+    const tgt = await resolveTarget(m, m.host, m.port, m.tls ? 'https' : 'http');
     const auth = m.password ? `:${encodeURIComponent(m.password)}@` : '';
-    const url = `${m.tls ? 'rediss' : 'redis'}://${auth}${m.host}:${m.port}/${m.db}`;
+    const url = `${m.tls ? 'rediss' : 'redis'}://${auth}${tgt.host}:${tgt.port}/${m.db}`;
     const client = new RedisClient(url, { connectionTimeout: 5000, autoReconnect: false, enableOfflineQueue: false });
     const t0 = Date.now();
     try {
@@ -652,9 +675,11 @@ async function checkRabbit(m: RabbitMqMonitor, s: State): Promise<{ fail: string
     const vhost = encodeURIComponent(m.vhost || '/');
     const headers: Record<string, string> = {};
     if (m.username) headers.Authorization = 'Basic ' + Buffer.from(`${m.username}:${m.password || ''}`).toString('base64');
+    const apiBase = await resolveUrl(m, m.apiUrl.replace(/\/+$/, ''));
+    if (apiBase.host) headers.Host = apiBase.host;
     const get = async (path: string) => {
-        const url = `${m.apiUrl}${path}`;
-        await assertResolvedHostAllowed(url, { allowPrivate: m.allowPrivate !== false });
+        const url = `${apiBase.url.replace(/\/+$/, '')}${path}`;
+        if (!m.via) await assertResolvedHostAllowed(url, { allowPrivate: m.allowPrivate !== false });
         const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
         if (!res.ok) throw new Error(`management API HTTP ${res.status} on ${path}`);
         return res.json() as Promise<any>;
@@ -1035,8 +1060,9 @@ const Q = {
     },
 } as const;
 
-async function checkDatabase(m: DatabaseMonitor, s: State): Promise<{ fail: string | null; burst: string | null }> {
-    await assertResolvedHostAllowed(`${m.tls ? 'https' : 'http'}://${m.host}:${m.port}/`, { allowPrivate: m.allowPrivate !== false });
+async function checkDatabase(m0: DatabaseMonitor, s: State): Promise<{ fail: string | null; burst: string | null }> {
+    const tgt = await resolveTarget(m0, m0.host, m0.port, m0.tls ? 'https' : 'http');
+    const m: DatabaseMonitor = tgt.host === m0.host && tgt.port === m0.port ? m0 : { ...m0, host: tgt.host, port: tgt.port };
     const q = Q[m.engine];
     const t0 = Date.now();
     return withDb(m, async run => {

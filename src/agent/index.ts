@@ -142,6 +142,70 @@ async function tick(): Promise<void> {
     console.log(`[agent] ${new Date().toISOString()} sent ${containers.length} containers, ${down} down, ${errs} error lines`);
 }
 
+// ─── Reverse tunnel (FRP-style, no extra setup) ─────────────────────────────
+// Midleman asks this agent to connect to host:port on OUR network and relays the
+// bytes over an outbound WebSocket. What we are willing to reach is decided HERE:
+//   TUNNEL_ALLOW=private  (default) → loopback, RFC1918/CGNAT and container names (no dots) only
+//   TUNNEL_ALLOW=10.0.0.5:6379,db.internal:5432 → exactly these targets
+//   TUNNEL_ALLOW=off → tunnels disabled
+const TUNNEL_ALLOW = (process.env.TUNNEL_ALLOW || 'private').trim();
+const TUNNEL_MAX_STREAMS = Math.max(1, Number(process.env.TUNNEL_MAX_STREAMS) || 64);
+function tunnelAllowed(host: string, port: number): boolean {
+    if (TUNNEL_ALLOW === 'off') return false;
+    if (TUNNEL_ALLOW === 'private') {
+        const h = host.toLowerCase();
+        return h === 'localhost' || h === 'host.docker.internal' || !h.includes('.') || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|169\.254\.)/.test(h) || /\.(internal|local|lan|docker)$/.test(h);
+    }
+    return TUNNEL_ALLOW.split(',').map(x => x.trim()).filter(Boolean).some(x => x === `${host}:${port}` || x === host);
+}
+async function tunnelLoop(): Promise<void> {
+    if (TUNNEL_ALLOW === 'off') { console.log('[agent] tunnels disabled (TUNNEL_ALLOW=off)'); return; }
+    const wsUrl = URL_BASE.replace(/^http/, 'ws') + '/agent/tunnel';
+    let backoff = 2000;
+    for (;;) {
+        const streams = new Map<number, any>();
+        try {
+            await new Promise<void>((resolve) => {
+                const ws = new WebSocket(wsUrl, { headers: { Authorization: `Bearer ${TOKEN}`, 'X-Agent-Name': NAME } } as any);
+                ws.binaryType = 'arraybuffer';
+                const send = (o: any) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); };
+                const ping = setInterval(() => send({ t: 'ping' }), 30_000);
+                ws.onopen = () => { backoff = 2000; console.log(`[agent] tunnel connected (${TUNNEL_ALLOW === 'private' ? 'private targets' : TUNNEL_ALLOW})`); };
+                ws.onmessage = (ev) => {
+                    if (typeof ev.data === 'string') {
+                        let c: any; try { c = JSON.parse(ev.data); } catch { return; }
+                        if (c.t === 'pong') return;
+                        if (c.t === 'open') {
+                            const host = String(c.host || ''), port = Number(c.port);
+                            if (!host || !Number.isInteger(port) || port < 1 || port > 65535) return send({ t: 'error', id: c.id, msg: 'bad target' });
+                            if (!tunnelAllowed(host, port)) { console.warn(`[agent] tunnel refused ${host}:${port} (TUNNEL_ALLOW=${TUNNEL_ALLOW})`); return send({ t: 'error', id: c.id, msg: `target ${host}:${port} not allowed by this agent (TUNNEL_ALLOW)` }); }
+                            if (streams.size >= TUNNEL_MAX_STREAMS) return send({ t: 'error', id: c.id, msg: 'too many open tunnel streams' });
+                            Bun.connect({
+                                hostname: host, port,
+                                socket: {
+                                    open(sock) { streams.set(c.id, sock); send({ t: 'opened', id: c.id }); },
+                                    data(_sock, data) { if (ws.readyState !== 1) return; const f = Buffer.allocUnsafe(4 + data.length); f.writeUInt32BE(c.id, 0); Buffer.from(data).copy(f, 4); ws.send(f); },
+                                    close() { if (streams.delete(c.id)) send({ t: 'close', id: c.id }); },
+                                    error(_sock, err) { streams.delete(c.id); send({ t: 'error', id: c.id, msg: err.message }); },
+                                    connectError(_sock, err) { send({ t: 'error', id: c.id, msg: `connect ${host}:${port}: ${err.message}` }); },
+                                },
+                            }).catch((err: any) => send({ t: 'error', id: c.id, msg: `connect ${host}:${port}: ${err?.message || err}` }));
+                        } else if (c.t === 'close') { const s = streams.get(c.id); if (s) { streams.delete(c.id); try { s.end(); } catch {} } }
+                        return;
+                    }
+                    const buf = Buffer.from(ev.data as ArrayBuffer);
+                    if (buf.length < 4) return;
+                    const s = streams.get(buf.readUInt32BE(0)); if (s) s.write(buf.subarray(4));
+                };
+                ws.onerror = () => {};
+                ws.onclose = (ev) => { clearInterval(ping); for (const s of streams.values()) { try { s.end(); } catch {} } streams.clear(); console.warn(`[agent] tunnel closed (${ev.code}) — reconnecting in ${backoff / 1000}s`); resolve(); };
+            });
+        } catch (e: any) { console.warn(`[agent] tunnel error: ${e?.message || e}`); }
+        await Bun.sleep(backoff); backoff = Math.min(backoff * 2, 60_000);
+    }
+}
+void tunnelLoop();
+
 console.log(`[agent] ${NAME} → ${URL_BASE} every ${INTERVAL}s (pattern /${PATTERN.source}/i)`);
 for (;;) {
     try { await tick(); } catch (e: any) { console.error(`[agent] ${e.message}`); } // never die on one bad cycle; Midleman alerts if we go silent

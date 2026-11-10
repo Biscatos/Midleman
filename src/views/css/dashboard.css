@@ -3961,7 +3961,9 @@ div:has(> div > #errPrev[disabled]):has(> div > #errNext[disabled]),
 .mon-ico-redis { background: rgba(220, 56, 45, .12); }
 .mon-ico-http { background: var(--accent-bg); }
 .mon-ico-server { background: rgba(36, 150, 237, .12); }
-.mon-ico-database { background: rgba(51, 103, 145, .12); }
+.mon-ico-database, .mon-ico-postgres { background: rgba(51, 103, 145, .12); }
+.mon-ico-mysql { background: rgba(0, 117, 143, .12); }
+.mon-ico-mssql { background: rgba(204, 41, 39, .10); }
 .mon-ico-traffic { background: var(--accent-bg); }
 .mon-title { flex: 1; min-width: 0; }
 .mon-name { font-size: 14px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -4135,3 +4137,25 @@ body.sidebar-collapsed .sidebar-link .sidebar-ext-icon { display: none !importan
 /* Collapsed: the hidden brand name must not leave its flex gap behind, or the owl sits 5px left of the icon column */
 body.sidebar-collapsed .sidebar-brand { gap: 0; }
 body.sidebar-collapsed .sidebar-brand-name { display: none; }
+
+/* ── Monitor modal: type picker tiles ── */
+.mon-types { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.mon-type { display: flex; align-items: center; gap: 10px; padding: 9px 10px; text-align: left; background: var(--surface); border: 1px solid var(--border); cursor: pointer; font: inherit; color: var(--text); }
+.mon-type:hover { background: var(--surface2); }
+.mon-type.is-on { border-color: var(--accent); background: var(--accent-sel, var(--accent-bg)); }
+.mon-type .mon-ico { width: 30px; height: 30px; flex: none; } .mon-type .mon-ico svg { width: 17px; height: 17px; }
+.mon-type b { display: block; font-size: 13px; font-weight: 500; } .mon-type small { display: block; font-size: 11px; color: var(--text3); margin-top: 1px; }
+.mon-types.is-locked .mon-type:not(.is-on) { opacity: .4; cursor: not-allowed; }
+
+/* ── Monitor form: database engine picker ── */
+.mon-engines { display: flex; gap: 6px; }
+.mon-engine { width: var(--control-h); height: var(--control-h); display: inline-flex; align-items: center; justify-content: center; background: var(--surface2); border: 1px solid var(--border); cursor: pointer; padding: 0; }
+.mon-engine svg { width: 20px; height: 20px; }
+.mon-engine:hover { background: var(--surface); }
+.mon-engine.is-on { border-color: var(--accent); background: var(--accent-sel, var(--accent-bg)); }
+
+/* ── Select panel: search box for long lists ── */
+.mm-select-search { position: sticky; top: -4px; margin: -4px -4px 4px; padding: 6px; background: var(--surface); border-bottom: 1px solid var(--border); z-index: 1; }
+.mm-select-search input { width: 100%; height: 28px; padding: 0 8px; box-sizing: border-box; background: var(--surface2); border: 1px solid var(--border); color: var(--text); font: 400 12.5px var(--font-sans); outline: none; }
+.mm-select-search input:focus { border-color: var(--accent); }
+.mm-select-empty { padding: 10px; color: var(--text3); text-align: center; font-size: 12px; }

@@ -48,6 +48,7 @@ import { emitNotificationEvent, dispatchTestToGroup } from './core/notifications
 import { isPrivateOrLoopbackV4 } from './core/ssrf-guard';
 import { listWallboardKeys, createWallboardKey, revokeWallboardKey, verifyWallboardKey } from './core/wallboard-keys';
 import { numbersSeen as metaNumbersSeen, exportNumbersSeen, importNumbersSeen, META_EVENT_KINDS } from './core/meta-router';
+import { tunnelWebSocket, upgradeTunnel, tunnelAgents, tunnelBridges } from './core/agent-tunnel';
 import { listMonitors, getMonitor, upsertMonitor, deleteMonitor, publicMonitor, validateMonitorInput, runCheck, peekQueue, listRabbitQueues, errorQueueName, requeueErrorMessages, discardErrorMessages, exportErrorMessages, startMonitorScheduler, stopMonitorScheduler, agentMonitorForToken, agentSourceAllowed, agentReportTooSoon, ingestAgentReport, serverErrors, newAgentToken, hashAgentToken, listIncidents, type AgentReport } from './core/monitors';
 import { getReportSettings, saveReportSettings, buildWeeklyReport, sendWeeklyReport, reportSchedulerTick } from './core/monitor-report';
 import { listTrafficResources } from './telemetry/request-log';
@@ -653,14 +654,30 @@ async function handleAgentReport(req: Request): Promise<Response> {
     return jsonRes(200, { status: status.state, intervalSeconds: m.intervalSeconds });
 }
 
+/** GET /agent/tunnel — the agent's reverse-tunnel WebSocket. Same token, same source rules as /agent/report. */
+function handleTunnelUpgrade(req: Request, srv: any): Response | undefined {
+    const ip = reqClientIp(req);
+    if (!isSecureRequest(req) && !isPrivateOrLoopbackV4(ip)) return jsonRes(426, { error: 'unauthorized' });
+    if (!checkRateLimit('agent:' + ip, AGENT_FAILS_PER_IP)) return jsonRes(429, { error: 'too many requests' });
+    const auth = req.headers.get('authorization') || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    const name = (req.headers.get('x-agent-name') || '').trim().toLowerCase();
+    const m = name && name.length <= 64 ? agentMonitorForToken(name, token) : null;
+    if (!m || !agentSourceAllowed(m, ip)) { recordFailedAttempt('agent:' + ip); return jsonRes(401, { error: 'unauthorized' }); }
+    if (!m.enabled) return jsonRes(403, { error: 'monitor disabled' });
+    return upgradeTunnel(srv, req, name, ip);
+}
+
 const reportPortRaw = process.env.REPORT_PORT ?? '8444';
 const reportApiServer = Bun.serve({
     port: parseInt(reportPortRaw, 10),
     idleTimeout: 0,
     maxRequestBodySize: 1 * 1024 * 1024, // 1MB — consumer API only
-    async fetch(req: Request, srv): Promise<Response> {
+    websocket: tunnelWebSocket,
+    async fetch(req: Request, srv): Promise<Response | undefined> {
         rememberPeerIp(req, srv?.requestIP?.(req)?.address ?? null); // the agent handler needs the real peer for its HTTPS / lockout / allowlist checks
         const url = new URL(req.url);
+        if (url.pathname === '/agent/tunnel') return handleTunnelUpgrade(req, srv);
         if (url.pathname === '/agent/report') return handleAgentReport(req);
         if (!url.pathname.startsWith('/reports/')) {
             return new Response('Not Found', { status: 404 });
@@ -707,8 +724,10 @@ const server = Bun.serve({
     port: config.port,
     idleTimeout: 0,
     maxRequestBodySize: 50 * 1024 * 1024, // 50MB
+    websocket: tunnelWebSocket,
 
-    async fetch(req: Request, srv): Promise<Response> {
+    async fetch(req: Request, srv): Promise<Response | undefined> {
+        if (new URL(req.url).pathname === '/agent/tunnel') { rememberPeerIp(req, srv?.requestIP?.(req)?.address ?? null); return handleTunnelUpgrade(req, srv); }
         const res = await handle(req, srv);
         try { return await compressed(req, res, new URL(req.url)); } catch { return res; }
     },
@@ -4808,6 +4827,9 @@ async function handle(req: Request, srv: any): Promise<Response> {
                 if (url.pathname === '/admin/monitors/incidents' && req.method === 'GET') {
                     const days = Math.min(Math.max(parseInt(url.searchParams.get('days') || '7', 10) || 7, 1), 90);
                     return jsonRes(200, { incidents: listIncidents({ since: Date.now() - days * 86_400_000, monitor: url.searchParams.get('monitor') || undefined, limit: Math.min(parseInt(url.searchParams.get('limit') || '200', 10) || 200, 2000) }) });
+                }
+                if (url.pathname === '/admin/monitors/tunnels' && req.method === 'GET') {
+                    return jsonRes(200, { agents: tunnelAgents(), bridges: tunnelBridges() });
                 }
                 if (url.pathname === '/admin/monitors/traffic-resources' && req.method === 'GET') {
                     return jsonRes(200, { resources: listTrafficResources() });

@@ -11961,6 +11961,9 @@ function _monRedisLine(s) {
 function _monUptime(sec) { return sec >= 86400 ? Math.floor(sec / 86400) + 'd ' + Math.floor(sec % 86400 / 3600) + 'h' : sec >= 3600 ? Math.floor(sec / 3600) + 'h ' + Math.floor(sec % 3600 / 60) + 'm' : Math.floor(sec / 60) + 'm'; }
 function _monBytes(b) { return b >= 1 << 30 ? (b / (1 << 30)).toFixed(2) + ' GB' : b >= 1 << 20 ? (b / (1 << 20)).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB'; }
 function monitorTarget(m) {
+  const t = _monitorTargetRaw(m); return m.via ? `${t} · via ${m.via}` : t;
+}
+function _monitorTargetRaw(m) {
   if (m.type === 'http') return `${m.method} ${m.url}`;
   if (m.type === 'redis') return `redis://${m.host}:${m.port}/${m.db}`;
   if (m.type === 'database') return `${m.engine} ${m.host}:${m.port}/${m.database}`;
@@ -12014,7 +12017,7 @@ function openMonitorDetail(name) {
   _mdName = name;
   const s = m.status || {}; const alert = s.state === 'alert'; const unit = m.type === 'rabbitmq' ? 'msgs' : m.type === 'server' ? 'errors' : m.type === 'traffic' ? '%' : 'ms';
   const g = id => document.getElementById(id);
-  g('mdIcon').className = 'mon-ico mon-ico-' + m.type; g('mdIcon').innerHTML = `<svg><use href="#mon-ico-${m.type}"/></svg>`;
+  g('mdIcon').className = 'mon-ico mon-ico-' + _monIco(m); g('mdIcon').innerHTML = `<svg><use href="#mon-ico-${_monIco(m)}"/></svg>`;
   g('mdName').textContent = m.name;
   g('mdState').innerHTML = s.state === 'ok' ? '<span class="mm-chip ok">OK</span>' : alert ? '<span class="mm-chip err">ALERT</span>' : `<span class="mm-chip">${esc(s.state || 'pending')}</span>`;
   g('mdTarget').textContent = monitorTarget(m);
@@ -12273,7 +12276,7 @@ function renderOverviewMonitors() {
       : m.type === 'traffic' ? _monTrafficLine(s)
       : (s.lastValue != null ? s.lastValue + ' ms' : '—');
     return `<div class="ovm-row${alert ? ' is-alert' : ''}" onclick="openMonitorDetail('${esc(m.name)}')" role="button" tabindex="0" title="Open details">
-      <span class="mon-ico mon-ico-${m.type}" style="width:28px;height:28px;border-radius:7px"><svg style="width:16px;height:16px"><use href="#mon-ico-${m.type}"/></svg></span>
+      <span class="mon-ico mon-ico-${_monIco(m)}" style="width:28px;height:28px;border-radius:7px"><svg style="width:16px;height:16px"><use href="#mon-ico-${_monIco(m)}"/></svg></span>
       <div class="ovm-main"><div class="ovm-name">${esc(m.name)}</div><div class="ovm-target">${esc(monitorTarget(m))}</div></div>
       <div class="ovm-reading${alert ? ' is-alert' : ''}" title="${esc(reading)}">${esc(reading)}</div>
       ${_monSpark(s.history, alert, m.type === 'rabbitmq' ? 'msgs' : 'ms').replace('class="mon-chart', 'class="mon-chart ovm-chart')}
@@ -12313,10 +12316,10 @@ function renderMonitors() {
       : `<span>${esc(reading)}${eqBadge ? ' · ' + eqBadge : ''}</span>`;
     return `<div class="mon-card${alert ? ' is-alert' : ''}${s.state === 'disabled' ? ' is-off' : ''}">
   <div class="mon-head" style="cursor:pointer" onclick="openMonitorDetail('${esc(m.name)}')" title="Open details">
-    <span class="mon-ico mon-ico-${m.type}"><svg><use href="#mon-ico-${m.type}"/></svg></span>
+    <span class="mon-ico mon-ico-${_monIco(m)}"><svg><use href="#mon-ico-${_monIco(m)}"/></svg></span>
     <div class="mon-title">
       <div class="mon-name">${esc(m.name)}</div>
-      <div class="mon-type">${typeLabel}${m.description ? ' · ' + esc(m.description) : ''}</div>
+      ${m.description ? `<div class="mon-type">${esc(m.description)}</div>` : ''}
     </div>
     ${chip}
   </div>
@@ -12449,7 +12452,13 @@ async function wbRevokeKey(id, name) {
   toast('Link revoked'); await wbLoadKeys();
 }
 
+/** Icon id for a monitor: databases show their engine's mark, everything else its type. */
+function _monIco(m) { return m.type === 'database' && m.engine ? m.engine : m.type; }
+function monPickEngine(e) { document.getElementById('monDbEngine').value = e; monDbEngineChanged(); }
 function monDbEngineChanged() {
+  const cur = document.getElementById('monDbEngine').value;
+  document.querySelectorAll('#monDbEngines .mon-engine').forEach(b => b.classList.toggle('is-on', b.dataset.engine === cur));
+  const ico = document.getElementById('monTypeIco'); if (ico && document.getElementById('monType').value === 'database') { ico.className = 'mon-ico mon-ico-' + cur; ico.innerHTML = `<svg style="width:22px;height:22px"><use href="#mon-ico-${cur}"/></svg>`; }
   const e = document.getElementById('monDbEngine').value, p = document.getElementById('monDbPort');
   if (!p.dataset.touched) p.value = e === 'postgres' ? 5432 : e === 'mysql' ? 3306 : 1433;
 }
@@ -12458,18 +12467,57 @@ async function monLoadTrafficResources() {
   if (!_monTrRes) { try { _monTrRes = (await (await api('/admin/monitors/traffic-resources')).json()).resources || []; } catch { _monTrRes = []; } }
   monTrafficSourceChanged();
 }
-function monTrafficSourceChanged() {
+/** The select lists what exists in Midleman (webhooks or HTTP proxies), with 7-day traffic beside each. */
+async function monTrafficSourceChanged(keep) {
   const src = document.getElementById('monTrSource').value;
-  document.getElementById('monTrResources').innerHTML = (_monTrRes || []).filter(r => r.type === src).map(r => `<option value="${esc(r.resource)}">${r.total.toLocaleString()} requests in 7 days</option>`).join('');
+  const sel = document.getElementById('monTrResource'), hint = document.getElementById('monTrResourceHint');
+  const current = keep !== undefined ? keep : sel.value;
+  if (src === 'webhook' && !_allWebhooks.length) { try { _allWebhooks = (await (await api('/admin/webhooks')).json()).webhooks || []; } catch {} }
+  if (src === 'proxy' && !(_allProfiles || []).length) { try { _allProfiles = (await (await api('/admin/profiles')).json()).profiles || []; } catch {} }
+  const names = src === 'webhook' ? _allWebhooks.map(w => w.name) : (_allProfiles || []).map(p => p.name);
+  const seen = new Map((_monTrRes || []).filter(r => r.type === src).map(r => [r.resource, r.total]));
+  const all = [...new Set([...names, ...(current ? [current] : [])])].sort();
+  sel.innerHTML = all.length ? all.map(n => `<option value="${esc(n)}" ${n === current ? 'selected' : ''}>${esc(n)}${seen.has(n) ? ` — ${seen.get(n).toLocaleString()} requests in 7 days` : (names.includes(n) ? ' — no traffic yet' : ' — not found in Midleman')}</option>`).join('')
+    : `<option value="">No ${src === 'webhook' ? 'webhooks' : 'HTTP proxies'} configured yet</option>`;
+  if (!current && all.length) sel.value = all[0];
+  hint.textContent = src === 'webhook' ? 'Counts inbound deliveries to the webhook (5xx and no-response count as errors).' : 'Counts requests through the proxy (5xx and no-response count as errors).';
+}
+/** Connected tunnel agents for the "Reach through an agent" selector (keeps a saved but offline agent selectable). */
+async function monLoadTunnelAgents(current) {
+  const sel = document.getElementById('monVia'); if (!sel) return;
+  let agents = [];
+  try { agents = (await (await api('/admin/monitors/tunnels')).json()).agents || []; } catch {}
+  const names = new Set(agents.map(a => a.name));
+  const servers = _allMonitors.filter(m => m.type === 'server').map(m => m.name);
+  const opts = ['<option value="">Direct — Midleman connects itself</option>'];
+  for (const n of [...new Set([...servers, ...names, ...(current ? [current] : [])])].sort()) opts.push(`<option value="${esc(n)}" ${n === current ? 'selected' : ''}>${esc(n)} ${names.has(n) ? '· tunnel connected' : '· tunnel offline'}</option>`);
+  sel.innerHTML = opts.join('');
+}
+const MON_TYPE_DESC = {
+  rabbitmq: 'Watches a queue through the management API: silence, new messages, the dead-letter queue and broker health.',
+  http: 'Calls an endpoint on an interval: down, unexpected status, slow response, missing text.',
+  redis: 'PING plus INFO: memory, evictions, clients, persistence, replication, restarts.',
+  database: 'Connections, long queries, lock waits, deadlocks, size and replication for PostgreSQL, MySQL or SQL Server.',
+  server: 'A Docker host reported by the agent: containers, restarts, OOM kills, log errors, disk and memory.',
+  traffic: 'Error rate and latency of one of your webhooks or proxies, from the request log.',
+};
+function monPickType(type) {
+  const sel = document.getElementById('monType'); if (sel.disabled) return;
+  sel.value = type; monitorTypeChanged();
 }
 function monitorTypeChanged() {
   const type = document.getElementById('monType').value;
+  document.querySelectorAll('#monTypeTiles .mon-type').forEach(b => { b.classList.toggle('is-on', b.dataset.type === type); b.setAttribute('aria-checked', String(b.dataset.type === type)); });
+  const icoId = type === 'database' ? (document.getElementById('monDbEngine')?.value || 'postgres') : type;
+  const ico = document.getElementById('monTypeIco'); if (ico) { ico.className = 'mon-ico mon-ico-' + icoId; ico.innerHTML = `<svg style="width:22px;height:22px"><use href="#mon-ico-${icoId}"/></svg>`; }
+  const desc = document.getElementById('monTypeDesc'); if (desc) desc.textContent = MON_TYPE_DESC[type] || '';
   document.getElementById('monRabbitFields').style.display = type === 'rabbitmq' ? 'flex' : 'none';
   document.getElementById('monHttpFields').style.display = type === 'http' ? 'flex' : 'none';
   document.getElementById('monRedisFields').style.display = type === 'redis' ? 'flex' : 'none';
   document.getElementById('monServerFields').style.display = type === 'server' ? 'flex' : 'none';
   document.getElementById('monDatabaseFields').style.display = type === 'database' ? 'flex' : 'none';
   document.getElementById('monTrafficFields').style.display = type === 'traffic' ? 'flex' : 'none';
+  document.getElementById('monViaWrap').style.display = ['redis', 'database', 'http', 'rabbitmq'].includes(type) ? '' : 'none';
   if (type === 'traffic') monLoadTrafficResources();
   document.getElementById('monSilenceWrap').style.visibility = document.getElementById('monAlertSilence').checked ? 'visible' : 'hidden';
   document.getElementById('monErrorQueueWrap').style.visibility = document.getElementById('monWatchError').checked ? 'visible' : 'hidden';
@@ -12480,7 +12528,7 @@ function openMonitorModal(m) {
   g('monitorModalTitle').textContent = m ? `Edit monitor — ${m.name}` : 'New monitor';
   g('monName').value = m?.name || '';
   g('monName').disabled = !!m;
-  g('monType').value = m?.type || 'rabbitmq';
+  g('monType').value = m?.type || 'rabbitmq'; g('monType').disabled = !!m; document.getElementById('monTypeTiles').classList.toggle('is-locked', !!m);
   g('monDescription').value = m?.description || '';
   g('monApiUrl').value = m?.apiUrl || '';
   g('monVhost').value = m?.vhost || '';
@@ -12521,7 +12569,7 @@ function openMonitorModal(m) {
   monRenderCriticalPick(m);
   g('monSrvCidrs').value = m?.type === 'server' ? (m.allowedSourceCidrs || []).join(', ') : '';
   const isDb = m?.type === 'database';
-  g('monDbEngine').value = isDb ? m.engine : 'postgres';
+  g('monDbEngine').value = isDb ? m.engine : 'postgres'; monDbEngineChanged();
   g('monDbHost').value = isDb ? m.host : ''; g('monDbPort').value = isDb ? m.port : 5432; delete g('monDbPort').dataset.touched;
   g('monDbName').value = isDb ? m.database : ''; g('monDbUser').value = isDb ? m.username : '';
   g('monDbPassword').value = ''; g('monDbPassword').placeholder = isDb && m.hasPassword ? '(kept — type to replace)' : '';
@@ -12529,13 +12577,14 @@ function openMonitorModal(m) {
   g('monDbMaxLatencyMs').value = isDb ? (m.maxLatencyMs ?? 0) : 0; g('monDbMaxConnPct').value = isDb ? (m.maxConnectionsPct ?? 85) : 85;
   g('monDbMaxLongQuerySec').value = isDb ? (m.maxLongQuerySec ?? 60) : 60; g('monDbMaxReplicaLagSec').value = isDb ? (m.maxReplicaLagSec ?? 60) : 60;
   const isTr = m?.type === 'traffic';
-  g('monTrSource').value = isTr ? m.source : 'webhook'; g('monTrResource').value = isTr ? m.resource : '';
+  g('monTrSource').value = isTr ? m.source : 'webhook'; monTrafficSourceChanged(isTr ? m.resource : '');
   g('monTrWindow').value = isTr ? String(m.windowMinutes) : '30'; g('monTrMinReq').value = isTr ? m.minRequests : 10;
   g('monTrMaxErrPct').value = isTr ? m.maxErrorPct : 5; g('monTrMaxAvgMs').value = isTr ? m.maxAvgMs : 0;
   g('monIntervalSeconds').value = m?.intervalSeconds ?? 60;
   g('monCooldownMinutes').value = m?.cooldownMinutes ?? 60;
   g('monEnabled').checked = m ? m.enabled !== false : true;
   g('monAllowPrivate').checked = m ? m.allowPrivate !== false : true;
+  monLoadTunnelAgents(m?.via || '');
   for (let d = 0; d <= 6; d++) {
     const day = (m?.weekly || []).find(w => w.day === d);
     g('monDay' + d).value = day ? bhRangesToText(day.ranges) : '';
@@ -12562,6 +12611,7 @@ async function saveMonitor() {
     cooldownMinutes: parseInt(g('monCooldownMinutes'), 10),
     enabled: document.getElementById('monEnabled').checked,
     allowPrivate: document.getElementById('monAllowPrivate').checked,
+    via: g('monVia') || undefined,
   };
   const weekly = [];
   try {
@@ -12587,7 +12637,7 @@ async function saveMonitor() {
     });
   } else if (type === 'traffic') {
     Object.assign(body, {
-      source: g('monTrSource'), resource: g('monTrResource').trim(), windowMinutes: parseInt(g('monTrWindow'), 10) || 30, minRequests: parseInt(g('monTrMinReq'), 10) || 1,
+      source: g('monTrSource'), resource: g('monTrResource'), windowMinutes: parseInt(g('monTrWindow'), 10) || 30, minRequests: parseInt(g('monTrMinReq'), 10) || 1,
       maxErrorPct: parseFloat(g('monTrMaxErrPct')) || 0, maxAvgMs: parseInt(g('monTrMaxAvgMs'), 10) || 0,
     });
   } else if (type === 'server') {

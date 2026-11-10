@@ -588,3 +588,6 @@
 /* Tabs keep the app-wide tab style from dashboard.css (accent on selection ground). */
 .rdm-tabs { background: none; padding: 0; border-radius: 0; gap: 4px; }
 .rdm-tabs .rdm-tab { flex: none; }
+
+/* Request detail header: same white surface as every other modal header (was surface2 grey) */
+.rdm-header { background: var(--surface); padding: 16px 22px; }

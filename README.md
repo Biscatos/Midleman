@@ -126,6 +126,10 @@ Monitors are a first-class resource (dashboard → Monitors): RabbitMQ queues (s
 
 Runs on each server, outbound only — nothing to open on the server. Create a **Server** monitor; the dashboard shows the `docker run` command with the one-time token. See `docker-compose.agent.yml`. For servers outside the LAN, `MIDLEMAN_URL` must be `https://` (front the Report port 8444 with your reverse proxy / tunnel) and the monitor can be limited to the server's egress IP.
 
+### Reverse tunnels through the agent
+
+A monitor can reach a service that is not exposed to Midleman — a Redis or database on a cloud server's private network — **through that server's agent**: pick "Reach through an agent" in the monitor form. The agent keeps an outbound WebSocket to Midleman and connects to the target on its own network; nothing is opened on the server (FRP-style, zero extra setup). What the agent is willing to reach is decided on the agent: `TUNNEL_ALLOW=private` (default: loopback, RFC1918/CGNAT and container names), an explicit `host:port` list, or `off`.
+
 ### A second pair of eyes
 
 The monitors run inside Midleman, so the host that runs Midleman cannot alert about itself being down. Run `docker-compose.watcher.yml` on another host (a small cloud VM) and point an HTTP monitor from each instance at the other's `/health`. Each instance needs its own SMTP/SMS settings.
