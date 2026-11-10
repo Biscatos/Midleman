@@ -64,6 +64,15 @@
         <span class="sidebar-link-label">Http Proxies</span>
         <span class="sidebar-badge" id="navProfileBadge">0</span>
       </button>
+      <button class="sidebar-link" data-page="tunnels" data-tooltip="Tunnels" onclick="navigate('tunnels')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="6" cy="19" r="3"/>
+          <path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/>
+          <circle cx="18" cy="5" r="3"/>
+        </svg>
+        <span class="sidebar-link-label">Tunnels</span>
+        <span class="sidebar-badge" id="navTunnelBadge">0</span>
+      </button>
       <button class="sidebar-link" data-page="webhooks" data-tooltip="Webhooks" onclick="navigate('webhooks')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="6" cy="6" r="2"/>
@@ -1128,6 +1137,88 @@
         </div>
 
         <p class="docs-pointer">Integration guide: <a href="#" onclick="docsGo('five9');return false">Docs → Five9 connector</a>.</p>
+      </div>
+    </div>
+
+    <!-- ═══ TUNNELS ═══ -->
+    <div class="page" id="pageTunnels">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h2>Tunnels</h2>
+          <p>A Midleman port that reaches a service inside an agent's network — the remote server opens nothing. Use it from the LAN as if the service were local.</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchTunnels(); })">Reload</button>
+          <button class="btn btn-primary btn-sm" onclick="openTunnelModal()">+ Tunnel</button>
+        </div>
+      </div>
+      <div class="mm-filterbar">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <label class="mm-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="text" id="tunnelSearch" placeholder="Search name, agent, target, port..." oninput="renderTunnels()"></label>
+          </div>
+      </div>
+      <div class="card">
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table id="tunnelTable" style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--surface2);text-align:left;white-space:nowrap">
+                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th><th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Status</th><th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Agent</th><th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Remote target</th><th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Listens on</th><th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Allowed from</th><th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase;text-align:right">Connections</th><th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase;text-align:right">Sent / received</th><th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Last used</th><th style="padding:10px 12px"></th>
+              </tr>
+            </thead>
+            <tbody id="tunnelListBody">
+              <tr><td colspan="10" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ TUNNEL MODAL ═══ -->
+    <div id="tunnelModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div class="mm-dialog" style="max-width:680px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column;max-height:92vh">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px">
+          <div style="flex:1;min-width:0">
+            <h3 style="margin:0;font-size:16px" id="tunnelModalTitle">New tunnel</h3>
+            <p style="margin:3px 0 0;font-size:12.5px;color:var(--text2)">The agent dials the target on its own network; Midleman listens on a port here. Nothing is opened on the remote server.</p>
+          </div>
+          <button onclick="closeTunnelModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">&times;</button>
+        </div>
+        <div style="padding:16px 22px;display:flex;flex-direction:column;gap:14px;overflow-y:auto">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div><label class="mm-label">Name *</label><input class="mm-input" id="tunName" type="text" placeholder="redis-cloud" autocomplete="off" spellcheck="false"></div>
+            <div><label class="mm-label">Agent *</label><select class="mm-input" id="tunAgent" data-search></select></div>
+          </div>
+          <div>
+            <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+              <div><label class="mm-label">Remote host *</label><input class="mm-input" id="tunHost" type="text" placeholder="127.0.0.1, 10.0.0.5 or a container name" autocomplete="off" spellcheck="false"></div>
+              <div><label class="mm-label">Remote port *</label><input class="mm-input" id="tunPort" type="number" min="1" max="65535" placeholder="6379"></div>
+            </div>
+            <div class="mm-field-hint">As seen from the agent. The agent only dials what its own <code>TUNNEL_ALLOW</code> permits (default: private addresses and container names).</div>
+          </div>
+          <div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+              <div><label class="mm-label">Midleman port</label><input class="mm-input" id="tunListenPort" type="number" min="1024" max="65535" placeholder="automatic"></div>
+              <div><label class="mm-label">Connection limit</label><input class="mm-input" id="tunMax" type="number" min="1" max="10000" placeholder="100"></div>
+              <div class="mm-switch-cell"><label><input type="checkbox" class="mm-switch" id="tunEnabled" checked> Enabled</label></div>
+            </div>
+            <div class="mm-field-hint" id="tunPortHint"></div>
+          </div>
+          <div>
+            <label class="mm-label">Allowed from</label>
+            <input class="mm-input" id="tunAllowedIps" type="text" placeholder="10.11.1.0/24, 10.11.2.15" autocomplete="off" spellcheck="false">
+            <div class="mm-field-hint">IPv4 addresses or networks that may connect, comma separated. Empty = only Midleman itself (<code>127.0.0.1</code>); the port is not reachable from the network.</div>
+          </div>
+          <div><label class="mm-label">Description</label><input class="mm-input" id="tunDescription" type="text" maxlength="200" placeholder="What this tunnel is for"></div>
+          <div class="mm-group" id="tunActivity" style="display:none">
+            <div class="mm-group-title">Activity since Midleman started</div>
+            <div id="tunActivitySummary" style="font-size:12.5px;color:var(--text2);display:flex;flex-direction:column;gap:4px"></div>
+            <div class="md-ctr-scroll" style="max-height:220px"><table class="md-table"><thead><tr><th>Time</th><th>From</th><th>Duration</th><th>Sent</th><th>Received</th><th>Detail</th></tr></thead><tbody id="tunRecentRows"></tbody></table></div>
+          </div>
+        </div>
+        <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn btn-sm" onclick="closeTunnelModal()">Cancel</button>
+          <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Saving…', saveTunnel)">Save</button>
+        </div>
       </div>
     </div>
 

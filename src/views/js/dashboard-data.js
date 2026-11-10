@@ -12202,7 +12202,7 @@ function mdContainerBack() { _mdCtr = null; const box = document.getElementById(
 function _agentInstallHtml(name, token) {
   const base = 'https://' + location.hostname + ':' + (window.REPORT_PORT || 8444);
   const cmd = `docker run -d --name midleman-agent --restart unless-stopped \\
-  --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --pids-limit 64 --memory 128m \\
+  --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --pids-limit 64 --memory 256m \\
   -v /var/run/docker.sock:/var/run/docker.sock:ro -v /:/hostfs:ro \\
   -e MIDLEMAN_URL=${base} -e AGENT_NAME=${name} -e AGENT_TOKEN=${token || '<token — shown once on create; use "Rotate token" to get a new one>'} \\
   registry.biscatos.com/midleman/api-midleman:latest bun run src/agent/index.ts`;
@@ -12742,3 +12742,128 @@ function bhRefreshPickers(prefix) {
   for (let d = 0; d <= 6; d++) { const el = document.getElementById(prefix + d); if (el) { bhEnhance(el); el._bhPull(); } }
 }
 document.addEventListener('DOMContentLoaded', () => { document.querySelectorAll('input[type=text]').forEach(el => { if (BH_PICK_RE.test(el.id)) bhEnhance(el); }); });
+
+// ─── Tunnels (Traffic → Tunnels) ─────────────────────────────────────────────
+let _tunnels = [], _tunAgents = [], _tunPortStart = 4000, _tunEditing = null;
+const TUN_STATUS = { online: ['ok', 'Online'], offline: ['warn', 'Agent offline'], error: ['err', 'Error'], disabled: ['', 'Disabled'] };
+
+async function fetchTunnels() {
+  try {
+    const d = await (await api('/admin/tunnels')).json();
+    _tunnels = d.tunnels || []; _tunAgents = d.agents || []; _tunPortStart = d.portRangeStart || 4000;
+  } catch { return; }
+  const b = document.getElementById('navTunnelBadge'); if (b) b.textContent = _tunnels.length;
+  renderTunnels();
+}
+/** What a client types: the dashboard's own host when the port is open to the network, loopback otherwise. */
+function _tunAddr(t) { return (t.allowedIps.length ? location.hostname : '127.0.0.1') + ':' + t.listenPort; }
+
+function renderTunnels() {
+  const c = document.getElementById('tunnelListBody'); if (!c) return;
+  const q = (document.getElementById('tunnelSearch').value || '').trim().toLowerCase();
+  const list = _tunnels.filter(t => !q || [t.name, t.description, t.agent, t.host + ':' + t.port, t.listenPort].join(' ').toLowerCase().includes(q));
+  if (!list.length) { c.innerHTML = `<tr><td colspan="10" style="padding:40px;text-align:center;color:var(--text3)">${_tunnels.length ? 'No tunnel matches the search.' : 'No tunnels yet. Click "+ Tunnel".'}</td></tr>`; return; }
+  const mono = 'font-family:var(--font-mono);font-size:12px;white-space:nowrap';
+  c.innerHTML = list.map(t => {
+    const [cls, label] = TUN_STATUS[t.status] || ['', t.status];
+    const why = t.status === 'error' ? t.error : t.status === 'offline' ? `Agent "${t.agent}" has no tunnel connection` : t.lastError ? `Last error ${_monAgo(t.lastError.at)}: ${t.lastError.msg}` : '';
+    const ag = _tunAgents.find(a => a.name === t.agent);
+    const rtt = ag && ag.connected && ag.rttMs != null ? ` <span style="color:var(--text3)">· ${ag.rttMs} ms</span>` : '';
+    const from = !t.allowedIps.length ? '<span style="color:var(--text3)">Midleman only</span>'
+      : t.allowedIps.length === 1 ? `<span style="${mono};color:var(--text2)">${esc(t.allowedIps[0])}</span>`
+      : `<span class="mm-chip" title="${esc(t.allowedIps.join(', '))}">${t.allowedIps.length} networks</span>`;
+    const refused = t.rejected ? ` <span class="mm-chip warn" title="${esc(`Last refused: ${t.lastRejected.ip} — ${t.lastRejected.why}, ${_monAgo(t.lastRejected.at)}`)}">${t.rejected} refused</span>` : '';
+    const addr = _tunAddr(t), n = esc(t.name);
+    return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
+  <td style="padding:8px 12px;font-weight:600;white-space:nowrap" title="${esc(t.description)}">${n}</td>
+  <td style="padding:8px;white-space:nowrap"><span class="mm-chip ${cls}" title="${esc(why)}">${label}</span></td>
+  <td style="padding:8px;white-space:nowrap">${esc(t.agent)}${rtt}</td>
+  <td style="padding:8px;${mono};color:var(--text2)">${esc(t.host)}:${t.port}</td>
+  <td style="padding:8px;${mono};color:var(--accent2);cursor:pointer" title="Click to copy" onclick="mmCopy('${addr}', this, 'Copied: ${addr}')">${addr}</td>
+  <td style="padding:8px;white-space:nowrap">${from}${refused}</td>
+  <td style="padding:8px;${mono};text-align:right" title="${t.total} since Midleman started">${t.active} <span style="color:var(--text3)">/ ${t.maxConnections}</span></td>
+  <td style="padding:8px;${mono};text-align:right;color:var(--text2)">${fmtBytes(t.bytesUp)} <span style="color:var(--text3)">/</span> ${fmtBytes(t.bytesDown)}</td>
+  <td style="padding:8px;white-space:nowrap;color:var(--text2)">${_monAgo(t.lastUsed)}</td>
+  <td style="padding:8px 12px;text-align:right;white-space:nowrap">
+    <input type="checkbox" class="mm-switch" ${t.enabled ? 'checked' : ''} title="${t.enabled ? 'Enabled' : 'Disabled'}" aria-label="Enable ${n}" onchange="tunnelToggle('${n}', this)" style="margin-right:10px">
+    <button data-name="${n}" onclick="tunnelMenu(event, this)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:2px 10px;cursor:pointer;color:var(--text2);font-size:18px;line-height:1.2;letter-spacing:1px;vertical-align:middle" title="Actions">&#8942;</button>
+  </td>
+</tr>`;
+  }).join('');
+}
+
+function tunnelMenu(e, btn) {
+  e.stopPropagation();
+  const t = _tunnels.find(x => x.name === btn.dataset.name); if (!t) return;
+  showActionMenu(btn, [
+    { label: 'Test target', fn: () => tunnelTest(t.name) },
+    { label: 'Copy address', fn: () => mmCopy(_tunAddr(t), null, 'Copied: ' + _tunAddr(t)) },
+    { label: 'Edit', fn: () => openTunnelModal(t.name) },
+    '---',
+    { label: 'Delete', fn: () => tunnelDelete(t.name), danger: true },
+  ]);
+}
+
+async function _tunErr(res, fallback) { try { return (await res.json()).error || fallback; } catch { return fallback; } }
+
+async function tunnelToggle(name, el) {
+  const res = await api('/admin/tunnels/' + encodeURIComponent(name), { method: 'PUT', body: JSON.stringify({ enabled: el.checked }) });
+  if (!res.ok) { el.checked = !el.checked; toast(await _tunErr(res, 'Could not change the tunnel'), 'error'); }
+  await fetchTunnels();
+}
+
+async function tunnelTest(name) {
+  toast(`Testing ${name}…`, 'info');
+  try {
+    const r = await (await api('/admin/tunnels/' + encodeURIComponent(name) + '/test', { method: 'POST' })).json();
+    toast(r.ok ? `${name}: target answered in ${r.ms} ms` : `${name}: ${r.error || 'target unreachable'}`, r.ok ? 'success' : 'error');
+  } catch { toast(`${name}: test failed`, 'error'); }
+}
+
+async function tunnelDelete(name) {
+  if (!await showConfirm({ title: 'Delete tunnel', message: `Delete tunnel "${name}"?`, detail: 'Its port stops listening and open connections through it are closed.', confirmText: 'Delete' })) return;
+  const res = await api('/admin/tunnels/' + encodeURIComponent(name), { method: 'DELETE' });
+  if (!res.ok) toast(await _tunErr(res, 'Could not delete the tunnel'), 'error'); else toast(`Tunnel "${name}" deleted`);
+  await fetchTunnels();
+}
+
+function openTunnelModal(name) {
+  const g = id => document.getElementById(id);
+  const t = _tunEditing = name ? _tunnels.find(x => x.name === name) || null : null;
+  g('tunnelModalTitle').textContent = t ? `Edit tunnel — ${t.name}` : 'New tunnel';
+  g('tunName').value = t?.name || ''; g('tunName').disabled = !!t;
+  const names = [...new Set([..._tunAgents.map(a => a.name), ...(t ? [t.agent] : [])])].sort();
+  g('tunAgent').innerHTML = (names.length ? '' : '<option value="">No server monitor yet — create one in Monitors</option>') + names.map(n => {
+    const a = _tunAgents.find(x => x.name === n);
+    return `<option value="${esc(n)}" ${n === t?.agent ? 'selected' : ''}>${esc(n)} ${a?.connected ? '· connected' + (a.rttMs != null ? ` · ${a.rttMs} ms` : '') : '· tunnel offline'}</option>`;
+  }).join('');
+  g('tunHost').value = t?.host || ''; g('tunPort').value = t?.port || '';
+  g('tunListenPort').value = t?.listenPort || ''; g('tunMax').value = t?.maxConnections || '';
+  g('tunEnabled').checked = t ? t.enabled : true;
+  g('tunAllowedIps').value = (t?.allowedIps || []).join(', ');
+  g('tunDescription').value = t?.description || '';
+  g('tunPortHint').innerHTML = `Empty port = first free one from <code>${_tunPortStart}</code>. It must be a port the Midleman container publishes (the compose file publishes <code>4000-4050</code>).`;
+  g('tunActivity').style.display = t ? '' : 'none';
+  if (t) {
+    const line = (k, v) => `<div><span style="color:var(--text3)">${k}</span> ${v}</div>`;
+    g('tunActivitySummary').innerHTML = line('Connections', `${t.total} total · ${t.active} open · ${t.rejected} refused`)
+      + (t.lastRejected ? line('Last refused', `${esc(t.lastRejected.ip)} — ${esc(t.lastRejected.why)}, ${_monAgo(t.lastRejected.at)}`) : '')
+      + (t.error ? line('Listener', `<span style="color:var(--red)">${esc(t.error)}</span>`) : '')
+      + (t.lastError ? line('Last error', `<span style="color:var(--red)">${esc(t.lastError.msg)}</span>, ${_monAgo(t.lastError.at)}`) : '');
+    g('tunRecentRows').innerHTML = t.recent.length ? t.recent.map(r => `<tr class="${r.error ? 'is-fail' : ''}"><td class="mono">${new Date(r.at).toLocaleString()}</td><td class="mono">${esc(r.ip)}</td><td class="mono">${r.ms < 1000 ? r.ms + ' ms' : (r.ms / 1000).toFixed(1) + ' s'}</td><td class="mono">${fmtBytes(r.up)}</td><td class="mono">${fmtBytes(r.down)}</td><td class="detail" title="${esc(r.error || '')}">${esc(r.error || 'closed')}</td></tr>`).join('')
+      : '<tr><td colspan="6" style="color:var(--text3);text-align:center;padding:14px">No connection finished yet.</td></tr>';
+  }
+  g('tunnelModal').style.display = 'flex';
+  setTimeout(() => g(t ? 'tunHost' : 'tunName').focus(), 30);
+}
+function closeTunnelModal() { document.getElementById('tunnelModal').style.display = 'none'; fetchTunnels(); }
+
+async function saveTunnel() {
+  const v = id => document.getElementById(id).value.trim();
+  const body = { name: v('tunName'), agent: v('tunAgent'), host: v('tunHost'), port: Number(v('tunPort')), listenPort: v('tunListenPort') ? Number(v('tunListenPort')) : '', maxConnections: v('tunMax') ? Number(v('tunMax')) : '', enabled: document.getElementById('tunEnabled').checked, allowedIps: v('tunAllowedIps'), description: v('tunDescription') };
+  const res = await api('/admin/tunnels' + (_tunEditing ? '/' + encodeURIComponent(_tunEditing.name) : ''), { method: _tunEditing ? 'PUT' : 'POST', body: JSON.stringify(body) });
+  if (!res.ok) { toast(await _tunErr(res, 'Could not save the tunnel'), 'error'); return; }
+  const t = (await res.json()).tunnel;
+  toast(`Tunnel "${t.name}" saved — listening on port ${t.listenPort}`);
+  closeTunnelModal();
+}

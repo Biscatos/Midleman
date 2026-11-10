@@ -5,7 +5,7 @@
 // (read-only) and, when /hostfs is mounted, the host's disks.
 //
 //   docker run -d --name midleman-agent --restart unless-stopped \
-//     --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --pids-limit 64 --memory 128m \
+//     --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --pids-limit 64 --memory 256m \
 //     -v /var/run/docker.sock:/var/run/docker.sock:ro -v /:/hostfs:ro \
 //     -e MIDLEMAN_URL=https://reports.example.com -e AGENT_NAME=srv-200 -e AGENT_TOKEN=mma_... \
 //     registry.biscatos.com/midleman/api-midleman:<tag> bun run src/agent/index.ts
@@ -14,8 +14,11 @@
 //      AGENT_INTERVAL seconds (default 30), LOG_PATTERN regex (default ERROR|Exception|FATAL|panic),
 //      LOG_IGNORE regex (optional), DOCKER_SOCK (default /var/run/docker.sock),
 //      SKIP_CONTAINERS comma list (default: this agent's own container).
+//      TUNNEL_ALLOW private | host:port list | off, TUNNEL_CONNS parallel connections (default 2),
+//      TUNNEL_MAX_STREAMS (default 512), TUNNEL_WINDOW_MB per-stream window (default 2, same on both sides).
 
 import { hostname } from 'os';
+import { Mux, muxSocket, TUNNEL_PROTO, TUNNEL_WINDOW } from '../core/tunnel-mux';
 
 const URL_BASE = (process.env.MIDLEMAN_URL || '').replace(/\/+$/, '');
 const TOKEN = process.env.AGENT_TOKEN || '';
@@ -149,7 +152,10 @@ async function tick(): Promise<void> {
 //   TUNNEL_ALLOW=10.0.0.5:6379,db.internal:5432 → exactly these targets
 //   TUNNEL_ALLOW=off → tunnels disabled
 const TUNNEL_ALLOW = (process.env.TUNNEL_ALLOW || 'private').trim();
-const TUNNEL_MAX_STREAMS = Math.max(1, Number(process.env.TUNNEL_MAX_STREAMS) || 64);
+const TUNNEL_MAX_STREAMS = Math.max(1, Number(process.env.TUNNEL_MAX_STREAMS) || 512);
+/** Parallel WebSockets to Midleman (1–8). */
+const TUNNEL_CONNS = Math.min(8, Math.max(1, Number(process.env.TUNNEL_CONNS) || 2));
+let tunnelStreams = 0;
 function tunnelAllowed(host: string, port: number): boolean {
     if (TUNNEL_ALLOW === 'off') return false;
     if (TUNNEL_ALLOW === 'private') {
@@ -158,53 +164,55 @@ function tunnelAllowed(host: string, port: number): boolean {
     }
     return TUNNEL_ALLOW.split(',').map(x => x.trim()).filter(Boolean).some(x => x === `${host}:${port}` || x === host);
 }
-async function tunnelLoop(): Promise<void> {
-    if (TUNNEL_ALLOW === 'off') { console.log('[agent] tunnels disabled (TUNNEL_ALLOW=off)'); return; }
-    const wsUrl = URL_BASE.replace(/^http/, 'ws') + '/agent/tunnel';
+/** One outbound WebSocket; TUNNEL_CONNS of these run side by side so one slow TCP path does not stall every stream. */
+async function tunnelLoop(n: number): Promise<void> {
+    const wsUrl = URL_BASE.replace(/^http/, 'ws') + `/agent/tunnel?v=${TUNNEL_PROTO}`;
     let backoff = 2000;
     for (;;) {
-        const streams = new Map<number, any>();
-        try {
-            await new Promise<void>((resolve) => {
-                const ws = new WebSocket(wsUrl, { headers: { Authorization: `Bearer ${TOKEN}`, 'X-Agent-Name': NAME } } as any);
-                ws.binaryType = 'arraybuffer';
-                const send = (o: any) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); };
-                const ping = setInterval(() => send({ t: 'ping' }), 30_000);
-                ws.onopen = () => { backoff = 2000; console.log(`[agent] tunnel connected (${TUNNEL_ALLOW === 'private' ? 'private targets' : TUNNEL_ALLOW})`); };
-                ws.onmessage = (ev) => {
-                    if (typeof ev.data === 'string') {
-                        let c: any; try { c = JSON.parse(ev.data); } catch { return; }
-                        if (c.t === 'pong') return;
-                        if (c.t === 'open') {
-                            const host = String(c.host || ''), port = Number(c.port);
-                            if (!host || !Number.isInteger(port) || port < 1 || port > 65535) return send({ t: 'error', id: c.id, msg: 'bad target' });
-                            if (!tunnelAllowed(host, port)) { console.warn(`[agent] tunnel refused ${host}:${port} (TUNNEL_ALLOW=${TUNNEL_ALLOW})`); return send({ t: 'error', id: c.id, msg: `target ${host}:${port} not allowed by this agent (TUNNEL_ALLOW)` }); }
-                            if (streams.size >= TUNNEL_MAX_STREAMS) return send({ t: 'error', id: c.id, msg: 'too many open tunnel streams' });
-                            Bun.connect({
-                                hostname: host, port,
-                                socket: {
-                                    open(sock) { streams.set(c.id, sock); send({ t: 'opened', id: c.id }); },
-                                    data(_sock, data) { if (ws.readyState !== 1) return; const f = Buffer.allocUnsafe(4 + data.length); f.writeUInt32BE(c.id, 0); Buffer.from(data).copy(f, 4); ws.send(f); },
-                                    close() { if (streams.delete(c.id)) send({ t: 'close', id: c.id }); },
-                                    error(_sock, err) { streams.delete(c.id); send({ t: 'error', id: c.id, msg: err.message }); },
-                                    connectError(_sock, err) { send({ t: 'error', id: c.id, msg: `connect ${host}:${port}: ${err.message}` }); },
-                                },
-                            }).catch((err: any) => send({ t: 'error', id: c.id, msg: `connect ${host}:${port}: ${err?.message || err}` }));
-                        } else if (c.t === 'close') { const s = streams.get(c.id); if (s) { streams.delete(c.id); try { s.end(); } catch {} } }
-                        return;
-                    }
-                    const buf = Buffer.from(ev.data as ArrayBuffer);
-                    if (buf.length < 4) return;
-                    const s = streams.get(buf.readUInt32BE(0)); if (s) s.write(buf.subarray(4));
-                };
-                ws.onerror = () => {};
-                ws.onclose = (ev) => { clearInterval(ping); for (const s of streams.values()) { try { s.end(); } catch {} } streams.clear(); console.warn(`[agent] tunnel closed (${ev.code}) — reconnecting in ${backoff / 1000}s`); resolve(); };
-            });
-        } catch (e: any) { console.warn(`[agent] tunnel error: ${e?.message || e}`); }
-        await Bun.sleep(backoff); backoff = Math.min(backoff * 2, 60_000);
+        await new Promise<void>((resolve) => {
+            const ws = new WebSocket(wsUrl, { headers: { Authorization: `Bearer ${TOKEN}`, 'X-Agent-Name': NAME } } as any);
+            ws.binaryType = 'arraybuffer';
+            const mux = new Mux({ send: d => { if (ws.readyState === 1) ws.send(d); }, buffered: () => ws.bufferedAmount });
+            // Midleman pings every 15 s: 45 s of silence means the path is dead even if TCP has not noticed
+            let seen = Date.now();
+            const watchdog = setInterval(() => { if (Date.now() - seen > 45_000) { try { (ws as any).terminate ? (ws as any).terminate() : ws.close(); } catch {} } }, 10_000);
+            ws.onopen = () => { backoff = 2000; seen = Date.now(); console.log(`[agent] tunnel #${n} connected (${TUNNEL_ALLOW === 'private' ? 'private targets' : TUNNEL_ALLOW})`); };
+            ws.onmessage = (ev) => {
+                seen = Date.now();
+                if (typeof ev.data !== 'string') { mux.onBinary(Buffer.from(ev.data as ArrayBuffer)); return; }
+                let c: any; try { c = JSON.parse(ev.data); } catch { return; }
+                if (c.t === 'ping') { mux.ctl({ t: 'pong', ts: c.ts }); return; }
+                if (c.t !== 'open') { mux.onCtl(c); return; }
+                const id = Number(c.id), host = String(c.host || ''), port = Number(c.port);
+                const refuse = (msg: string) => mux.ctl({ t: 'error', id, msg });
+                if (!Number.isInteger(id) || !host || !Number.isInteger(port) || port < 1 || port > 65535) return refuse('bad target');
+                if (!tunnelAllowed(host, port)) { console.warn(`[agent] tunnel refused ${host}:${port} (TUNNEL_ALLOW=${TUNNEL_ALLOW})`); return refuse(`target ${host}:${port} not allowed by this agent (TUNNEL_ALLOW)`); }
+                if (tunnelStreams >= TUNNEL_MAX_STREAMS) return refuse('too many open tunnel streams on this agent (TUNNEL_MAX_STREAMS)');
+                if (mux.streams.has(id)) return refuse('stream id already in use');
+                const st = mux.open(id); tunnelStreams++;
+                st.onEnd = () => { tunnelStreams--; };
+                const live = () => mux.streams.get(id) === st;   // Midleman may have given up while we were dialling
+                const failed = (err: any) => { if (live()) { refuse(`connect ${host}:${port}: ${err?.message || err}`); st.fail('connect failed'); } };
+                Bun.connect({
+                    hostname: host, port, data: { st },
+                    socket: {
+                        open(sock) {
+                            if (!live()) { sock.end(); return; }
+                            st.attach(sock); mux.ctl({ t: 'opened', id, win: TUNNEL_WINDOW }); st.ready(Number(c.win) || TUNNEL_WINDOW);
+                        },
+                        ...muxSocket,
+                        connectError(_sock, err) { failed(err); },
+                    },
+                }).catch(failed);
+            };
+            ws.onerror = () => {};
+            ws.onclose = (ev) => { clearInterval(watchdog); mux.destroy('tunnel connection lost'); console.warn(`[agent] tunnel #${n} closed (${ev.code}${ev.reason ? ' ' + ev.reason : ''}) — reconnecting in ${backoff / 1000}s`); resolve(); };
+        });
+        await Bun.sleep(backoff); backoff = Math.min(backoff * 2, 15_000);   // stays under Midleman's 20 s grace for monitors
     }
 }
-void tunnelLoop();
+if (TUNNEL_ALLOW === 'off') console.log('[agent] tunnels disabled (TUNNEL_ALLOW=off)');
+else for (let n = 1; n <= TUNNEL_CONNS; n++) void tunnelLoop(n);
 
 console.log(`[agent] ${NAME} → ${URL_BASE} every ${INTERVAL}s (pattern /${PATTERN.source}/i)`);
 for (;;) {

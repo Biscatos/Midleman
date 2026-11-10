@@ -19,6 +19,8 @@ services:
       # Reverse tunnel: lets Midleman reach services on THIS server's network (Redis, databases) through the agent.
       #   private (default) = loopback / RFC1918 / container names only · off = disabled · explicit list = host:port,host:port
       # - TUNNEL_ALLOW=private
+      # - TUNNEL_CONNS=2                      # parallel connections to Midleman (1-8); raise for many busy tunnels
+      # - TUNNEL_MAX_STREAMS=512              # open tunnelled connections this agent accepts at once
       - TZ=Africa/Luanda
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -30,7 +32,7 @@ services:
     cap_drop: [ ALL ]
     security_opt: [ no-new-privileges:true ]
     pids_limit: 64
-    mem_limit: 128m
+    mem_limit: 256m
     logging:
       driver: json-file
       options: { max-size: "5m", max-file: "2" }
