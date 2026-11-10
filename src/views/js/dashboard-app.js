@@ -739,7 +739,8 @@ function mmSortMenus() {
     const flush = () => {
       if (run.length > 1) {
         const anchor = run[run.length - 1].nextSibling;
-        run.slice().sort((a, b) => labelOf(a).localeCompare(labelOf(b), 'en', { sensitivity: 'base' }))
+        // alphabetical within a section; data-pin="top" (Overview) stays first
+        run.slice().sort((a, b) => ((b.dataset?.pin === 'top') - (a.dataset?.pin === 'top')) || labelOf(a).localeCompare(labelOf(b), 'en', { sensitivity: 'base' }))
           .forEach(el => container.insertBefore(el, anchor));
       }
       run = [];
@@ -895,3 +896,10 @@ function mmWatchPagers() {
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mmWatchPagers);
 else mmWatchPagers();
+
+// Counters that read 0 are noise: hide them, and keep hiding as the pollers rewrite them.
+(function () {
+  const sync = () => document.querySelectorAll('#sidebarNav .sidebar-badge').forEach(b => b.classList.toggle('is-zero', /^~?0(\s*MB)?$/.test(b.textContent.trim())));
+  const start = () => { sync(); const nav = document.getElementById('sidebarNav'); if (nav) new MutationObserver(sync).observe(nav, { subtree: true, childList: true, characterData: true }); };
+  document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', start) : start();
+})();

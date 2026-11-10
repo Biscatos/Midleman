@@ -4020,11 +4020,12 @@ div:has(> div > #errPrev[disabled]):has(> div > #errNext[disabled]),
 .md-msg-h code { font-size: 11px; }
 
 /* ── Monitor form: queue browser ── */
-.mon-pick { margin-top: 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); max-height: 220px; overflow: auto; background: var(--surface); }
+.mon-pick { border: 1px solid var(--border); border-top: none; max-height: 240px; overflow: auto; background: var(--surface); }
 .mon-pick-row { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 7px 10px; background: none; border: none; border-bottom: 1px solid var(--border); cursor: pointer; font: inherit; color: var(--text); }
 .mon-pick-row:last-child { border-bottom: none; }
 .mon-pick-row:hover { background: var(--surface2); }
-.mon-pick-row.is-err .mon-pick-name { color: var(--red); }
+.mon-pick-row.is-err .mon-pick-name { color: var(--text3); }
+.mon-pick-tag { flex: none; font: 500 10px var(--font-sans); letter-spacing: .4px; text-transform: uppercase; color: var(--red); }
 .mon-pick-name { font: 400 12.5px var(--font-mono); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mon-pick-meta { font-size: 11px; color: var(--text3); white-space: nowrap; }
 .mon-pick-note { font-size: 12px; color: var(--text3); margin-top: 6px; }
@@ -4068,3 +4069,29 @@ div:has(> div > #errPrev[disabled]):has(> div > #errNext[disabled]),
 .mon-crit-row.is-on .mon-crit-name { font-weight: 500; }
 .mon-crit-name { flex: none; min-width: 180px; }
 .mon-crit-meta { flex: 1; min-width: 0; font: 400 11px var(--font-mono); color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; gap: 8px; align-items: center; }
+
+.mon-pick-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; padding: 5px 10px; border: 1px solid var(--border); background: var(--surface2); font-size: 11.5px; color: var(--text2); }
+.mon-pick-close { background: none; border: none; color: var(--text2); font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; }
+#monBrowseBtn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ── Sidebar: zero counters stay out of the way; external link marker ── */
+.sidebar-badge.is-zero { display: none; }
+.sidebar-ext-icon { margin-left: auto; opacity: .45; flex: none; }
+body.sidebar-collapsed .sidebar-ext-icon { display: none; }
+
+/* ── Monitor form: alert rules as aligned rows (switch · rule · what it means · its field) ── */
+.mon-rules { display: flex; flex-direction: column; border: 1px solid var(--border); background: var(--surface); }
+.mon-rule { display: grid; grid-template-columns: auto 110px 1fr 150px; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 12.5px; cursor: pointer; }
+.mon-rule:last-child { border-bottom: none; }
+.mon-rule-t { font-weight: 500; color: var(--text); }
+.mon-rule-d { color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-rule-f { display: flex; align-items: center; gap: 6px; justify-content: flex-end; min-height: var(--control-h); }
+.mon-rule-f .mm-input { height: var(--control-h); padding: 0 8px; font-size: 12.5px; }
+.mon-rule-f .mm-input[type=number] { width: 72px; text-align: right; }
+.mon-rule-u { color: var(--text3); font-size: 12px; }
+.mon-rule:has(input[type=checkbox]:not(:checked)) .mon-rule-t { color: var(--text2); font-weight: 400; }
+
+/* ── OAuth clients: app icon beside the name ── */
+.oc-name { display: inline-flex; align-items: center; gap: 10px; }
+.oc-ico { width: 20px !important; height: 20px !important; flex: none; object-fit: contain; }
+.oc-ico-letter { display: inline-flex; align-items: center; justify-content: center; font: 500 11px var(--font-sans); color: var(--text2); background: var(--surface2); }
