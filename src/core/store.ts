@@ -600,6 +600,13 @@ export function validateWebhookInput(input: unknown): string | null {
         }
     }
 
+    if (w.meta !== undefined) {
+        if (typeof w.meta !== 'object' || w.meta === null) return '"meta" must be an object';
+        const m = w.meta as Record<string, unknown>;
+        if (typeof m.enabled !== 'boolean') return '"meta.enabled" must be a boolean';
+        if (m.appSecret !== undefined && m.appSecret !== null && (typeof m.appSecret !== 'string' || m.appSecret.length > 200)) return '"meta.appSecret" must be a string';
+    }
+
     for (const target of w.targets) {
         if (typeof target === 'string') {
             try { assertSafeOutboundUrl(target, ssrfOverride); }
@@ -617,6 +624,14 @@ export function validateWebhookInput(input: unknown): string | null {
             if (dest.secretHeaders !== undefined && (!Array.isArray(dest.secretHeaders) || dest.secretHeaders.some(h => typeof h !== 'string'))) return '"secretHeaders" must be an array of header names';
             if (dest.forwardHeaders !== undefined && typeof dest.forwardHeaders !== 'boolean') return '"forwardHeaders" must be a boolean';
             if (dest.filterMode !== undefined && dest.filterMode !== 'all' && dest.filterMode !== 'any') return '"filterMode" must be "all" or "any"';
+            if (dest.metaRoute !== undefined) {
+                if (typeof dest.metaRoute !== 'object' || dest.metaRoute === null) return '"metaRoute" must be an object';
+                const r = dest.metaRoute as Record<string, unknown>;
+                if (!Array.isArray(r.numbers) || r.numbers.some(n => typeof n !== 'string' || !/^[0-9+ ]{3,32}$/.test(n as string))) return '"metaRoute.numbers" must be a list of phone_number_id / phone / WABA ids (digits)';
+                const kinds = new Set(['messages', 'statuses', 'templates', 'account', 'other']);
+                if (!Array.isArray(r.events) || r.events.some(e => typeof e !== 'string' || !kinds.has(e as string))) return '"metaRoute.events" must be a list of: messages, statuses, templates, account, other';
+                if (r.catchAll !== undefined && typeof r.catchAll !== 'boolean') return '"metaRoute.catchAll" must be a boolean';
+            }
             if (dest.filter !== undefined) {
                 if (!Array.isArray(dest.filter)) return '"filter" must be an array of conditions';
                 const validOps = new Set(['eq', 'neq', 'exists', 'notExists', 'contains', 'in']);

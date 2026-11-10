@@ -3416,6 +3416,19 @@
               href="javascript:void(0)" onclick="generateKey('wAuthToken')"
               style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></label><input type="text"
             id="wAuthToken" placeholder="Leave empty for public access"></div>
+        <div class="form-group span-2 mm-group" style="margin:0">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+            <div><div class="mm-group-title" style="margin:0">Meta Cloud API (WhatsApp)</div><div style="font-size:12px;color:var(--text2);margin-top:2px">One app-level callback for all your customers' numbers, routed per phone number and event — Tech Provider style.</div></div>
+            <label class="wd-switch-label"><input class="mm-switch" type="checkbox" id="wMetaEnabled" onchange="toggleMetaSection()"> Enable</label>
+          </div>
+          <div id="wMetaFields" style="display:none;margin-top:10px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div><label class="mm-label">App Secret <span style="color:var(--text3)">(Meta app → Settings → Basic)</span></label><input class="mm-input" id="wMetaAppSecret" type="password" autocomplete="new-password" placeholder="verifies X-Hub-Signature-256 on every POST"></div>
+              <div><label class="mm-label">Verify token</label><div class="mm-input" style="color:var(--text2);font-size:12.5px;display:flex;align-items:center">= the Incoming Auth Token above (set one)</div></div>
+            </div>
+            <div class="mm-field-hint">Callback URL in Meta: <code>https://&lt;your-host&gt;/</code> on this webhook's port (or the NPM hostname). Each destination then chooses its phone numbers and event kinds; numbers appear automatically once traffic arrives. Replays from Meta are deduplicated for 24 h.</div>
+          </div>
+        </div>
         <div class="form-group span-2"><label>Allowed IPs <span
               style="color:var(--text3);font-weight:400;font-size:11px">— CIDR, wildcard, or exact. Leave empty to allow
               all.</span></label>

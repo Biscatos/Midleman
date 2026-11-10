@@ -4117,3 +4117,17 @@ body.sidebar-collapsed .sidebar-link .sidebar-ext-icon { display: none !importan
 .md-ctr-search { width: 220px; flex: none; height: var(--control-h); padding: 0 10px; font-size: 12.5px; }
 .md-ctr-scroll { max-height: 46vh; overflow: auto; border: 1px solid var(--border); }
 .md-ctr-scroll .md-table thead th { position: sticky; top: 0; background: var(--table-head, var(--surface)); z-index: 1; }
+
+/* ── Destination editor: Meta Cloud API routing ── */
+.mr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.mr-list { border: 1px solid var(--border); background: var(--surface); max-height: 260px; overflow: auto; }
+.mr-row { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 10px; align-items: center; padding: 7px 10px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 12.5px; }
+.mr-row:last-child { border-bottom: none; }
+.mr-row:hover { background: var(--surface2); }
+.mr-row input { grid-row: 1 / span 2; }
+.mr-row.is-on .mr-num { font-weight: 500; }
+.mr-num { font: 400 12.5px var(--font-mono); color: var(--text); }
+.mr-meta { font-size: 11px; color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mr-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.mr-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px 2px 8px; border: 1px solid var(--border); font: 400 12px var(--font-mono); color: var(--text); }
+.mr-chip button { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }

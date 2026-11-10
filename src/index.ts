@@ -47,6 +47,7 @@ type NotificationSeverity, type NotificationChannel } from './auth/auth';
 import { emitNotificationEvent, dispatchTestToGroup } from './core/notifications';
 import { isPrivateOrLoopbackV4 } from './core/ssrf-guard';
 import { listWallboardKeys, createWallboardKey, revokeWallboardKey, verifyWallboardKey } from './core/wallboard-keys';
+import { numbersSeen as metaNumbersSeen, exportNumbersSeen, importNumbersSeen, META_EVENT_KINDS } from './core/meta-router';
 import { listMonitors, getMonitor, upsertMonitor, deleteMonitor, publicMonitor, validateMonitorInput, runCheck, peekQueue, listRabbitQueues, errorQueueName, requeueErrorMessages, discardErrorMessages, exportErrorMessages, startMonitorScheduler, stopMonitorScheduler, agentMonitorForToken, agentSourceAllowed, agentReportTooSoon, ingestAgentReport, serverErrors, newAgentToken, hashAgentToken, listIncidents, type AgentReport } from './core/monitors';
 import { getReportSettings, saveReportSettings, buildWeeklyReport, sendWeeklyReport, reportSchedulerTick } from './core/monitor-report';
 import { listTrafficResources } from './telemetry/request-log';
@@ -60,7 +61,7 @@ import { isNpmCertVolumePresent, startCertWatcher, onCertReloaded } from './cert
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleOauthSmsOtp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
 import { resolveClientIp, getTrustProxyConfig } from './core/ip-filter';
 import { initReportFeeds, handleReportRequest } from './reports/server';
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import QRCode from 'qrcode';
 import { resolve } from 'path';
 
@@ -487,6 +488,13 @@ if (five9Connectors.length > 0) {
 startPendingRetryScheduler();
 startSilenceAlertScheduler();
 startMonitorScheduler();
+{   // numbers seen on Meta webhooks survive restarts (small file, saved every 5 min and on shutdown)
+    const metaFile = resolve(process.env.DATA_DIR || resolve(process.cwd(), 'data'), 'meta-numbers.json');
+    try { if (existsSync(metaFile)) importNumbersSeen(JSON.parse(readFileSync(metaFile, 'utf-8'))); } catch {}
+    const saveMeta = () => { try { writeFileSync(metaFile, JSON.stringify(exportNumbersSeen()), 'utf-8'); } catch {} };
+    setInterval(saveMeta, 5 * 60_000);
+    process.on('beforeExit', saveMeta);
+}
 setInterval(() => { void reportSchedulerTick().catch(e => console.warn('[monitors] report tick:', e?.message || e)); }, 60_000);
 
 // TCP/UDP proxies are started AFTER the main HTTP server below — they may run
@@ -1885,6 +1893,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             port: s?.port ?? w.port,
                             hasAuth: !!w.authToken,
                             hasAuthToken: !!w.authToken,
+                            meta: { enabled: !!w.meta?.enabled, hasAppSecret: !!w.meta?.appSecret },
                             retry: w.retry,
                             allowedIps: w.allowedIps || [],
                             // The edit form is populated from this list, so every
@@ -2029,6 +2038,14 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     return removed ? jsonRes(200, { status: 'dismissed' }) : jsonRes(404, { error: 'Not found' });
                 }
 
+                // Phone numbers / WABAs seen on a Meta-mode webhook (for the destination editor).
+                {
+                    const mn = url.pathname.match(/^\/admin\/webhooks\/([^/]+)\/meta-numbers$/);
+                    if (mn && req.method === 'GET') {
+                        const name = decodeURIComponent(mn[1]).toLowerCase();
+                        return jsonRes(200, { numbers: metaNumbersSeen(name), kinds: META_EVENT_KINDS });
+                    }
+                }
                 if (url.pathname.startsWith('/admin/webhooks/') && req.method === 'GET') {
                     const name = decodeURIComponent(url.pathname.split('/')[3] || '');
                     if (!name) return jsonRes(400, { error: 'Webhook name required' });
@@ -2044,6 +2061,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             // shared secret. The form only sends a new value when the admin
                             // types one; otherwise the existing token is preserved on save.
                             hasAuthToken: !!webhook.authToken,
+                            meta: { enabled: !!webhook.meta?.enabled, hasAppSecret: !!webhook.meta?.appSecret },
                             retry: webhook.retry,
                             allowedIps: webhook.allowedIps || [],
                             allowPrivateTargets: webhook.allowPrivateTargets !== false,
@@ -2077,6 +2095,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         port: configuredPort,
                     };
                     if (input.authToken) webhook.authToken = input.authToken as string;
+                    if (input.meta && typeof input.meta === 'object') { const mi = input.meta as any; webhook.meta = { enabled: mi.enabled === true, ...(typeof mi.appSecret === 'string' && mi.appSecret ? { appSecret: mi.appSecret } : {}) }; }
                     if (input.retry && typeof input.retry === 'object') webhook.retry = input.retry as import('./core/types').WebhookRetryConfig;
                     if (Array.isArray(input.allowedIps) && input.allowedIps.length) webhook.allowedIps = input.allowedIps as string[];
                     if (typeof input.allowPrivateTargets === 'boolean') webhook.allowPrivateTargets = input.allowPrivateTargets;
@@ -2113,6 +2132,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         // Preserve the existing inbound auth token when the form did not
                         // submit a new one (it is no longer sent back to the client).
                         if (!webhookWithPort.authToken && prev.authToken) webhookWithPort.authToken = prev.authToken;
+                        if (webhookWithPort.meta && !webhookWithPort.meta.appSecret && prev.meta?.appSecret) webhookWithPort.meta.appSecret = prev.meta.appSecret;
                         // Masked header values (Authorization etc.) come back as SECRET_MASK — restore the stored ones.
                         webhookWithPort.targets = restoreTargetSecrets(webhookWithPort.targets, prev.targets);
                         if (prev.npmProxyHostId !== undefined) webhookWithPort.npmProxyHostId = prev.npmProxyHostId;

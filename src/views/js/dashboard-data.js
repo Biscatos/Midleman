@@ -4149,7 +4149,7 @@ function toggleRetrySection() {
 
 function addWebhookTarget(target = "") {
   if (typeof target === 'string') {
-    webhookTargetState.push({ type: 'basic', enabled: true, url: target, method: 'POST', bodyTemplate: '', customBody: false, dropEmpty: false, customHeaders: [], forwardHeaders: false, filter: [], filterMode: 'all', retry: null, retryOpen: false, persistentRetry: null, persistentRetryOpen: false });
+    webhookTargetState.push({ metaRoute: { numbers: [], events: [], catchAll: false }, type: 'basic', enabled: true, url: target, method: 'POST', bodyTemplate: '', customBody: false, dropEmpty: false, customHeaders: [], forwardHeaders: false, filter: [], filterMode: 'all', retry: null, retryOpen: false, persistentRetry: null, persistentRetryOpen: false });
   } else {
     const headersArr = [];
     if (target.customHeaders) {
@@ -4183,6 +4183,7 @@ function addWebhookTarget(target = "") {
       retryOpen: !!target.retry,
       persistentRetry: target.persistentRetry || null,
       persistentRetryOpen: !!(target.persistentRetry && target.persistentRetry.enabled),
+      metaRoute: { numbers: [...(target.metaRoute?.numbers || [])], events: [...(target.metaRoute?.events || [])], catchAll: target.metaRoute?.catchAll === true },
     });
   }
   webhookFormDirty = true;
@@ -4349,6 +4350,79 @@ function _wdEvaluate(t, payload) {
 }
 
 const _WD_OP_LABEL = { eq: '=', neq: '≠', contains: 'contains', in: 'in', exists: 'exists', notExists: 'does not exist' };
+// ─── Meta Cloud API routing (per destination) ───
+let _metaNumbers = null, _metaKinds = null;
+async function loadMetaNumbers(name) {
+  try { const d = await (await api('/admin/webhooks/' + encodeURIComponent(name) + '/meta-numbers')).json(); _metaNumbers = d.numbers || []; _metaKinds = d.kinds || null; }
+  catch { _metaNumbers = []; }
+  if (editingDestinationIndex >= 0) renderDestinationEditor(editingDestinationIndex);
+}
+const META_KINDS_FALLBACK = [
+  { id: 'messages', label: 'Incoming messages', hint: 'text, media, interactive replies, reactions' },
+  { id: 'statuses', label: 'Delivery statuses', hint: 'sent · delivered · read · failed' },
+  { id: 'templates', label: 'Templates', hint: 'approved / rejected / paused, category changes' },
+  { id: 'account', label: 'Account & number', hint: 'account_update, phone_number_quality_update, account_alerts' },
+  { id: 'other', label: 'Everything else', hint: 'any field not listed above' },
+];
+function _metaRouteText(r) {
+  const n = (r.numbers || []).length, ev = (r.events || []);
+  const evTxt = ev.length ? ev.map(e => (_metaKinds || META_KINDS_FALLBACK).find(k => k.id === e)?.label.toLowerCase() || e).join(', ') : 'all events';
+  if (!n && !r.catchAll) return '<span class="wd-muted" style="color:var(--red)">No numbers — receives nothing</span>';
+  return `${n ? `${n} number${n === 1 ? '' : 's'}` : 'catch-all'} <span class="wd-muted">· ${esc(evTxt)}</span>`;
+}
+function renderMetaRouteSection(i, n) {
+  const t = webhookTargetState[i]; const r = t.metaRoute || (t.metaRoute = { numbers: [], events: [], catchAll: false });
+  const kinds = _metaKinds || META_KINDS_FALLBACK;
+  const seen = _metaNumbers || [];
+  const sel = new Set(r.numbers.map(String));
+  const q = (s) => esc(String(s)).replace(/'/g, '&#39;');
+  const numRows = seen.map(x => { const id = x.phoneNumberId || ('waba:' + x.wabaId); const key = x.phoneNumberId || x.wabaId; const on = sel.has(String(key));
+    return `<label class="mr-row${on ? ' is-on' : ''}"><input type="checkbox" class="mm-switch" ${on ? 'checked' : ''} onchange="metaRouteToggleNumber(${i}, '${q(key)}', this.checked)">
+      <span class="mr-num">${x.displayPhone ? '+' + esc(x.displayPhone) : (x.phoneNumberId ? 'id ' + esc(x.phoneNumberId) : 'WABA ' + esc(x.wabaId))}</span>
+      <span class="mr-meta">${x.phoneNumberId ? 'id ' + esc(x.phoneNumberId) + ' · ' : ''}WABA ${esc(x.wabaId)} · ${x.count} event${x.count === 1 ? '' : 's'} · last ${_monAgo(x.lastAt)}</span></label>`; }).join('');
+  const manual = r.numbers.filter(nm => !seen.some(x => String(x.phoneNumberId) === String(nm) || String(x.wabaId) === String(nm) || String(x.displayPhone) === String(nm)));
+  return `
+    <section class="wd-sec">
+      <div class="wd-sec-head">
+        <span class="wd-num">${n}</span><h4>WhatsApp routing</h4><span class="wd-sec-sub">Which numbers and events this destination receives</span>
+        <label class="wd-switch-label" style="margin-left:auto" title="Receives every event that no other destination claimed"><input class="mm-switch" type="checkbox" ${r.catchAll ? 'checked' : ''} onchange="metaRouteField(${i}, 'catchAll', this.checked)"> Catch-all</label>
+      </div>
+      <div class="mr-grid">
+        <div>
+          <div class="wd-label" style="margin-bottom:6px">Phone numbers</div>
+          ${seen.length ? `<div class="mr-list">${numRows}</div>` : '<div class="mm-field-hint" style="margin:0 0 6px">No traffic seen yet on this webhook — numbers appear here automatically after the first events. You can add ids by hand below.</div>'}
+          <div style="display:flex;gap:6px;margin-top:8px"><input class="mm-input" id="mrManual_${i}" type="text" placeholder="phone_number_id, display number or WABA id" style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();metaRouteAddManual(${i})}"><button type="button" class="btn btn-sm" onclick="metaRouteAddManual(${i})">Add</button></div>
+          ${manual.length ? `<div class="mr-chips">${manual.map(nm => `<span class="mr-chip">${esc(nm)} <button type="button" onclick="metaRouteToggleNumber(${i}, '${q(nm)}', false)" aria-label="Remove">&times;</button></span>`).join('')}</div>` : ''}
+        </div>
+        <div>
+          <div class="wd-label" style="margin-bottom:6px">Events <span class="wd-muted" style="font-weight:400">(none marked = all)</span></div>
+          <div class="mr-list">${kinds.map(k => `<label class="mr-row${r.events.includes(k.id) ? ' is-on' : ''}"><input type="checkbox" class="mm-switch" ${r.events.includes(k.id) ? 'checked' : ''} onchange="metaRouteToggleEvent(${i}, '${k.id}', this.checked)"><span class="mr-num">${esc(k.label)}</span><span class="mr-meta">${esc(k.hint)}</span></label>`).join('')}</div>
+        </div>
+      </div>
+      <div class="wd-sec-sub">The destination receives a payload in Meta's own shape containing only its entries, so standard Cloud API code works unchanged. Body templates, if used, see that routed payload.</div>
+    </section>`;
+}
+function metaRouteToggleNumber(i, key, on) {
+  const r = webhookTargetState[i].metaRoute; const k = String(key);
+  r.numbers = on ? [...new Set([...r.numbers.map(String), k])] : r.numbers.filter(x => String(x) !== k);
+  webhookFormDirty = true; renderDestinationEditor(i);
+}
+function metaRouteAddManual(i) {
+  const el = document.getElementById('mrManual_' + i); const v = (el?.value || '').replace(/\s+/g, '').replace(/^\+/, '');
+  if (!/^[0-9]{3,32}$/.test(v)) return toast('Enter digits only: a phone_number_id, a display number or a WABA id', 'error');
+  metaRouteToggleNumber(i, v, true);
+}
+function metaRouteToggleEvent(i, id, on) {
+  const r = webhookTargetState[i].metaRoute;
+  r.events = on ? [...new Set([...r.events, id])] : r.events.filter(x => x !== id);
+  webhookFormDirty = true; renderDestinationEditor(i);
+}
+function metaRouteField(i, k, v) { webhookTargetState[i].metaRoute[k] = v; webhookFormDirty = true; renderDestinationEditor(i); renderWebhookTargets(); }
+function toggleMetaSection() {
+  const on = document.getElementById('wMetaEnabled').checked;
+  document.getElementById('wMetaFields').style.display = on ? '' : 'none';
+  if (typeof renderWebhookTargets === 'function') renderWebhookTargets();
+}
 function _wdConditionText(c) {
   const op = _WD_OP_LABEL[c.op] || c.op;
   return c.op === 'exists' || c.op === 'notExists' ? `${c.path} ${op}` : `${c.path} ${op} ${c.value}`;
@@ -4428,7 +4502,8 @@ function renderWebhookTargets() {
     const shapeBits = custom
       ? ['custom', t.customBody && t.bodyTemplate ? 'body template' : '', n ? `${n} header${n === 1 ? '' : 's'}` : '', t.forwardHeaders ? 'fwd headers' : ''].filter(Boolean)
       : [];
-    const whenText = active.length
+    const mr = document.getElementById('wMetaEnabled')?.checked ? t.metaRoute : null;
+    const whenText = mr ? _metaRouteText(mr) : active.length
       ? esc(_wdConditionText(active[0])) + (active.length > 1 ? ` <span class="wd-muted">${t.filterMode === 'any' ? 'or' : 'and'} +${active.length - 1}</span>` : '')
       : '<span class="wd-muted">Always</span>';
     const retryText = t.persistentRetryOpen ? 'Persistent' : t.retryOpen ? `${t.retry?.maxRetries ?? 3}× ${t.retry?.backoff === 'fixed' ? 'fixed' : 'exp.'}` : '<span class="wd-muted">Default</span>';
@@ -4567,9 +4642,11 @@ function renderDestinationEditorMarkup(i) {
       <div id="previewUrl_${i}" class="wd-inline-preview" style="display:none"></div>
     </section>
 
-    <section class="wd-sec">
+    ${document.getElementById('wMetaEnabled')?.checked ? renderMetaRouteSection(i, num()) : ''}
+
+    <section class="wd-sec" ${document.getElementById('wMetaEnabled')?.checked && !(t.filter || []).length ? 'style="display:none"' : ''}>
       <div class="wd-sec-head">
-        <span class="wd-num">${num()}</span><h4>When to send</h4><span class="wd-sec-sub">No conditions = every payload</span>
+        <span class="wd-num">${document.getElementById('wMetaEnabled')?.checked && !(t.filter || []).length ? '' : num()}</span><h4>When to send</h4><span class="wd-sec-sub">No conditions = every payload</span>
         <span class="wd-sec-sub" style="flex:0 0 auto;margin-left:auto">Match</span>
         <div class="mm-seg wd-seg" role="radiogroup" aria-label="Match mode" style="margin-left:0">
           ${seg(!anyMode, 'All (AND)', `setWebhookTargetMatch(${i}, 'all')`)}${seg(anyMode, 'Any (OR)', `setWebhookTargetMatch(${i}, 'any')`)}
@@ -4797,6 +4874,10 @@ function openWebhookModal(webhook = null) {
     ? '•••••••• (set — leave empty to keep)'
     : '';
   IpTagInput.setValue('wAllowedIps', webhook?.allowedIps || []);
+  document.getElementById('wMetaEnabled').checked = !!webhook?.meta?.enabled;
+  const secEl = document.getElementById('wMetaAppSecret'); secEl.value = ''; secEl.placeholder = webhook?.meta?.hasAppSecret ? '•••••••• (set — leave empty to keep)' : 'verifies X-Hub-Signature-256 on every POST';
+  toggleMetaSection();
+  _metaNumbers = null; if (webhook?.meta?.enabled) loadMetaNumbers(webhook.name);
   // Private/internal destinations are allowed by default; checkbox reflects the
   // stored value (true unless explicitly disabled), checked for new webhooks.
   document.getElementById('wAllowPrivateTargets').checked = webhook ? (webhook.allowPrivateTargets !== false) : true;
@@ -4912,9 +4993,10 @@ async function saveWebhook() {
       const hasFilter = filterConditions.length > 0;
 
       const isDisabled = t.enabled === false;
+      const metaOn = document.getElementById('wMetaEnabled').checked;
       // Basic forward with no retry override stays as a plain URL string
       // (a paused destination needs the object form to carry enabled:false).
-      if (t.type === 'basic' && !hasRetryOverride && !hasPersistent && !hasFilter && !isDisabled) {
+      if (t.type === 'basic' && !hasRetryOverride && !hasPersistent && !hasFilter && !isDisabled && !metaOn) {
           targetsRaw.push(t.url.trim());
           continue;
       }
@@ -4941,6 +5023,7 @@ async function saveWebhook() {
           dest.dropEmpty = (t.customBody && t.dropEmpty) ? true : undefined;
       }
       if (isDisabled) dest.enabled = false;
+      if (metaOn) dest.metaRoute = { numbers: (t.metaRoute?.numbers || []).map(x => String(x).trim()).filter(Boolean), events: t.metaRoute?.events || [], catchAll: t.metaRoute?.catchAll === true };
       if (hasFilter) dest.filter = filterConditions;
       if (hasFilter && t.filterMode === 'any') dest.filterMode = 'any';
       if (hasRetryOverride) dest.retry = t.retry;
@@ -4967,6 +5050,7 @@ async function saveWebhook() {
   };
   if (targetsRaw.length === 0) return toast('At least one valid destination is required', 'error');
   const at = document.getElementById('wAuthToken').value.trim(); if (at) body.authToken = at;
+  body.meta = { enabled: document.getElementById('wMetaEnabled').checked }; const sec = document.getElementById('wMetaAppSecret').value.trim(); if (sec) body.meta.appSecret = sec;
   const wIps = IpTagInput.getValue('wAllowedIps'); if (wIps.length) body.allowedIps = wIps;
   body.allowPrivateTargets = document.getElementById('wAllowPrivateTargets').checked;
   body.logMode = document.getElementById('wLogMode').value;
