@@ -672,6 +672,8 @@ async function compressed(req: Request, res: Response, url: URL): Promise<Respon
     if (req.method !== 'GET' && req.method !== 'POST') return res;
     if (!/\bgzip\b/.test(req.headers.get('accept-encoding') || '')) return res;
     if (res.status !== 200 || res.headers.has('content-encoding') || !res.body) return res;
+    // BREACH guard: a body carrying a one-time secret is never compressed (compressed length must not depend on it).
+    if (res.headers.has('x-sensitive')) return res;
     const type = res.headers.get('content-type') || '';
     if (!GZIP_TYPES.test(type) || res.headers.get('content-type')?.includes('event-stream')) return res;
     const isStatic = url.searchParams.has('v') && /^\/dashboard\/(js|css)\//.test(url.pathname);
@@ -4787,7 +4789,9 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: created ? 'monitor.create' : 'monitor.update', targetType: 'monitor', targetId: v.monitor.name, details: { type: v.monitor.type }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                     if (v.monitor.type !== 'server') void runCheck(v.monitor).catch(() => {});
                     // The agent token is returned exactly once (here or on rotate); it is never readable afterwards.
-                    return jsonRes(200, { status: created ? 'created' : 'updated', monitor: publicMonitor(v.monitor), ...(minted ? { token: minted } : {}) });
+                    const out = jsonRes(200, { status: created ? 'created' : 'updated', monitor: publicMonitor(v.monitor), ...(minted ? { token: minted } : {}) });
+                    if (minted) out.headers.set('X-Sensitive', '1');
+                    return out;
                 }
                 {
                     const mm = url.pathname.match(/^\/admin\/monitors\/([^/]+)(\/check|\/peek|\/errors|\/rotate-token|\/error-queue\/(?:requeue|discard|export))?$/);
@@ -4805,7 +4809,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             upsertMonitor({ ...m, agentTokenHash: hashAgentToken(token) });
                             const me = getAuthedAdmin(req);
                             logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'monitor.rotate_token', targetType: 'monitor', targetId: name, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
-                            return jsonRes(200, { token });
+                            const out = jsonRes(200, { token }); out.headers.set('X-Sensitive', '1'); return out;
                         }
                         if (mm[2] === '/peek' && req.method === 'GET') {
                             if (m.type !== 'rabbitmq') return jsonRes(400, { error: 'Only RabbitMQ monitors can peek messages' });

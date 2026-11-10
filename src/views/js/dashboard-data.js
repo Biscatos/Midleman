@@ -11953,6 +11953,7 @@ function openMonitorDetail(name) {
   g('mdInstallBtn').style.display = m.type === 'server' ? '' : 'none';
   const cBox = g('mdContainers');
   if (cBox.querySelector('.md-install')) { /* keep the install snippet (and its one-time token) across refreshes */ }
+  else if (_mdCtr && cBox.querySelector('.md-ctr-head')) { /* a container is open: leave it */ }
   else if (sv) {
     cBox.style.display = '';
     const crit = m.criticalContainers || [];
@@ -11988,7 +11989,7 @@ function openMonitorDetail(name) {
   if (!document.getElementById('monitorDetailModal').style.display || document.getElementById('monitorDetailModal').style.display === 'none') { const pk = g('mdPeek'); pk.style.display = 'none'; pk.innerHTML = ''; }
   g('monitorDetailModal').style.display = 'flex';
 }
-function closeMonitorDetail() { document.getElementById('monitorDetailModal').style.display = 'none'; _mdName = null; }
+function closeMonitorDetail() { document.getElementById('monitorDetailModal').style.display = 'none'; _mdName = null; _mdCtr = null; }
 async function mdPeek() {
   const box = document.getElementById('mdPeek'); const btn = document.getElementById('mdPeekBtn');
   box.style.display = ''; box.innerHTML = '<div style="color:var(--text3);font-size:12.5px">Reading queue…</div>'; btn.disabled = true;
@@ -12045,15 +12046,37 @@ async function mdToggleCritical(container, on) {
   toast(on ? `${container} marked critical` : `${container} no longer critical`);
   await fetchMonitors(); if (_mdName) openMonitorDetail(_mdName);
 }
+let _mdCtr = null; // container open inside the monitor detail (null = table)
 async function mdContainerErrors(container) {
-  const box = document.getElementById('mdCtrErrors'); if (!box) return;
-  box.innerHTML = '<div class="md-peek-head">Loading…</div>';
-  const res = await api(`/admin/monitors/${encodeURIComponent(_mdName)}/errors?container=${encodeURIComponent(container)}&limit=100`);
+  _mdCtr = container;
+  const box = document.getElementById('mdContainers'); if (!box) return;
+  const m = _allMonitors.find(x => x.name === _mdName); const c = m?.status?.server?.containers.find(x => x.name === container);
+  const crit = (m?.criticalContainers || []).includes(container);
+  const bad = c && (c.status !== 'running' || c.health === 'unhealthy');
+  const stat = (l, v, sub) => `<div class="md-ctr-stat"><div class="l">${l}</div><div class="v">${v}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
+  box.style.display = '';
+  box.innerHTML = `<div class="md-ctr-head">
+      <button class="btn btn-sm" onclick="mdContainerBack()">&larr; Containers</button>
+      <div class="md-ctr-title"><span class="md-ctr-name">${esc(container)}${crit ? ' <span class="md-crit">critical</span>' : ''}</span><span class="md-ctr-img">${esc(c?.image || '')}</span></div>
+      ${c ? `<span class="mm-chip ${bad ? 'err' : 'ok'}">${esc(c.status)}${c.health ? ' · ' + esc(c.health) : ''}</span>` : '<span class="mm-chip">not on host</span>'}
+      <label class="md-ctr-crit"><input type="checkbox" class="mm-switch" ${crit ? 'checked' : ''} onchange="mdToggleCritical('${esc(container).replace(/'/g, "\\'")}', this.checked)"> Critical</label>
+    </div>
+    ${c ? `<div class="md-ctr-stats">
+      ${stat('Restarts', c.restartCount, c.oomKilled ? '<span style="color:var(--red)">OOM killed</span>' : (c.restartPolicy || ''))}
+      ${stat('CPU', c.cpuPct != null ? c.cpuPct + '%' : '—')}
+      ${stat('RAM', c.memBytes != null ? _monBytes(c.memBytes) : '—', c.memLimit ? 'limit ' + _monBytes(c.memLimit) : 'no limit')}
+      ${stat('Started', c.startedAt ? _monAgo(Date.parse(c.startedAt)) : '—', c.exitCode != null ? 'exit code ' + c.exitCode : '')}
+      ${stat('Errors (' + (m.logWindowMinutes || 5) + ' min)', `<span style="color:${c.errorsInWindow ? 'var(--red)' : 'inherit'}">${c.errorsInWindow}</span>`)}
+    </div>` : ''}
+    <div id="mdCtrErrors"><div class="md-peek-head">Loading error lines…</div></div>`;
+  const res = await api(`/admin/monitors/${encodeURIComponent(_mdName)}/errors?container=${encodeURIComponent(container)}&limit=200`);
   const d = await res.json().catch(() => ({}));
-  if (!res.ok) { box.innerHTML = `<div class="md-peek-err">${esc(d.error || 'Failed')}</div>`; return; }
-  box.innerHTML = `<div class="md-peek-head" style="margin-top:10px">Last ${d.errors.length} error line(s) captured from <b>${esc(container)}</b> (newest first)</div>` +
-    (d.errors.length ? `<pre class="md-ctr-log">${d.errors.map(e => `<span class="md-ctr-ts">${new Date(e.at).toLocaleString()}</span> ${esc(e.line)}`).join('\n')}</pre>` : '<div style="color:var(--text3);font-size:12.5px">Nothing matched the log pattern yet.</div>');
+  const out = document.getElementById('mdCtrErrors'); if (!out || _mdCtr !== container) return;
+  if (!res.ok) { out.innerHTML = `<div class="md-peek-err">${esc(d.error || 'Failed')}</div>`; return; }
+  out.innerHTML = `<div class="md-peek-head">${d.errors.length ? `Last ${d.errors.length} line(s) matching the error pattern, newest first` : 'No log line matched the error pattern yet.'}</div>` +
+    (d.errors.length ? `<pre class="md-ctr-log">${d.errors.map(e => `<span class="md-ctr-ts">${new Date(e.at).toLocaleString()}</span> ${esc(e.line)}`).join('\n')}</pre>` : '');
 }
+function mdContainerBack() { _mdCtr = null; const box = document.getElementById('mdContainers'); box.innerHTML = ''; openMonitorDetail(_mdName); }
 /** Install command for this server's agent. The token is only shown when minted (create / rotate). */
 function _agentInstallHtml(name, token) {
   const base = 'https://' + location.hostname + ':' + (window.REPORT_PORT || 8444);

@@ -71,7 +71,7 @@ async function containerReport(c: any): Promise<any> {
         base.oomKilled = ins.State?.OOMKilled === true;
         base.exitCode = ins.State?.Running ? null : (ins.State?.ExitCode ?? null);
         base.startedAt = ins.State?.StartedAt || null;
-        if (ins.State?.Running) {
+        if (ins.State?.Running) try {
             const st = await dockerJson(`/containers/${id}/stats?stream=false`);
             const cpuD = (st.cpu_stats?.cpu_usage?.total_usage || 0) - (st.precpu_stats?.cpu_usage?.total_usage || 0);
             const sysD = (st.cpu_stats?.system_cpu_usage || 0) - (st.precpu_stats?.system_cpu_usage || 0);
@@ -79,7 +79,7 @@ async function containerReport(c: any): Promise<any> {
             const cache = st.memory_stats?.stats?.inactive_file || st.memory_stats?.stats?.cache || 0;
             if (st.memory_stats?.usage) base.memBytes = Math.max(0, st.memory_stats.usage - cache);
             if (st.memory_stats?.limit) base.memLimit = st.memory_stats.limit;
-        }
+        } catch (e: any) { console.warn(`[agent] stats unavailable for ${name}: ${e.message}`); } // CPU/RAM stay null; never an "error line" of the app
         // logs since the previous read (first run: last interval only, so a backlog never floods)
         const since = lastLogAt.get(id) ?? Math.floor(Date.now() / 1000) - INTERVAL;
         const now = Math.floor(Date.now() / 1000);
@@ -94,7 +94,7 @@ async function containerReport(c: any): Promise<any> {
             }
         }
         lastLogAt.set(id, now);
-    } catch (e: any) { base.errors.push({ at: Date.now(), line: `[agent] could not inspect: ${e.message}` }); }
+    } catch (e: any) { console.warn(`[agent] could not inspect ${name}: ${e.message}`); }
     return base;
 }
 
