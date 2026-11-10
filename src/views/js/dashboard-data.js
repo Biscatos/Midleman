@@ -11959,8 +11959,9 @@ function openMonitorDetail(name) {
     const crit = m.criticalContainers || [];
     const missing = crit.filter(n => !sv.containers.some(c => c.name === n)).map(n => ({ name: n, image: '(not on host)', status: 'missing', health: null, restartCount: 0, cpuPct: null, memBytes: null, errorsInWindow: 0, lastError: null, oomKilled: false }));
     const rows = [...missing, ...sv.containers].sort((a, b) => (crit.includes(b.name) - crit.includes(a.name)) || a.name.localeCompare(b.name));
-    cBox.innerHTML = `<div class="md-peek-head" style="display:flex;justify-content:space-between;gap:10px"><span>${crit.length ? `<b>${crit.length}</b> critical container(s) alert; the others are shown for information.` : 'No critical list: every container Docker should keep up alerts. Mark the ones that matter and only those will alert.'}</span></div>
-      <table class="md-table md-ctr"><thead><tr><th title="Only critical containers alert when at least one is marked">Critical</th><th>Container</th><th>State</th><th>Restarts</th><th>CPU</th><th>RAM</th><th>Errors (${m.logWindowMinutes} min)</th><th>Last error</th></tr></thead><tbody>` +
+    cBox.innerHTML = `<div class="md-ctr-bar"><span class="md-peek-head" style="margin:0">${crit.length ? `<b>${crit.length}</b> critical container(s) alert; the others are shown for information.` : 'No critical list: every container Docker should keep up alerts. Mark the ones that matter and only those will alert.'}</span>
+        <input class="mm-input md-ctr-search" id="mdCtrSearch" type="search" placeholder="Filter containers…" value="${esc(_mdCtrQ)}" oninput="mdCtrFilter(this.value)"></div>
+      <div class="md-ctr-scroll"><table class="md-table md-ctr"><thead><tr><th title="Only critical containers alert when at least one is marked">Critical</th><th>Container</th><th>State</th><th>Restarts</th><th>CPU</th><th>RAM</th><th>Errors (${m.logWindowMinutes} min)</th><th>Last error</th></tr></thead><tbody>` +
       rows.map(c => { const isCrit = crit.includes(c.name); const watched = isCrit || !crit.length; const bad = c.status !== 'running' || c.health === 'unhealthy'; const ign = (m.ignoreContainers || []).includes(c.name);
         const q = esc(c.name).replace(/'/g, "\\'");
         return `<tr class="${bad && watched && !ign ? 'is-fail' : ''}${ign || (!watched && crit.length) ? ' is-ign' : ''}" onclick="mdContainerErrors('${q}')" title="${esc(c.image)} — click for its error lines">
@@ -11970,7 +11971,8 @@ function openMonitorDetail(name) {
         <td class="mono">${c.restartCount}</td><td class="mono">${c.cpuPct != null ? c.cpuPct + '%' : '—'}</td><td class="mono">${c.memBytes != null ? _monBytes(c.memBytes) : '—'}</td>
         <td class="mono" style="color:${c.errorsInWindow ? 'var(--red)' : 'inherit'}">${c.errorsInWindow}</td>
         <td class="detail" title="${esc(c.lastError?.line || '')}">${c.lastError ? `<span class="md-ctr-err">${esc(c.lastError.line.slice(0, 120))}</span><span class="md-ctr-when">${_monAgo(c.lastError.at)}</span>` : '<span style="color:var(--text3)">—</span>'}</td></tr>`; }).join('') +
-      `</tbody></table><div id="mdCtrErrors"></div>`;
+      `</tbody></table></div>`;
+    mdCtrFilter(_mdCtrQ);
   } else if (m.type === 'server') { cBox.style.display = ''; cBox.innerHTML = '<div class="md-peek-head">No report yet. Click <b>Install agent</b> for the command to run on the server.</div>'; }
   else { cBox.style.display = 'none'; cBox.innerHTML = ''; }
   g('mdChart').innerHTML = _monSpark(h, alert, unit).replace('class="mon-chart', 'class="mon-chart md-chart');
@@ -11989,7 +11991,7 @@ function openMonitorDetail(name) {
   if (!document.getElementById('monitorDetailModal').style.display || document.getElementById('monitorDetailModal').style.display === 'none') { const pk = g('mdPeek'); pk.style.display = 'none'; pk.innerHTML = ''; }
   g('monitorDetailModal').style.display = 'flex';
 }
-function closeMonitorDetail() { document.getElementById('monitorDetailModal').style.display = 'none'; _mdName = null; _mdCtr = null; }
+function closeMonitorDetail() { document.getElementById('monitorDetailModal').style.display = 'none'; document.getElementById('mdHistoryWrap').style.display = ''; _mdName = null; _mdCtr = null; _mdCtrQ = ''; }
 async function mdPeek() {
   const box = document.getElementById('mdPeek'); const btn = document.getElementById('mdPeekBtn');
   box.style.display = ''; box.innerHTML = '<div style="color:var(--text3);font-size:12.5px">Reading queue…</div>'; btn.disabled = true;
@@ -12047,9 +12049,18 @@ async function mdToggleCritical(container, on) {
   await fetchMonitors(); if (_mdName) openMonitorDetail(_mdName);
 }
 let _mdCtr = null; // container open inside the monitor detail (null = table)
+let _mdCtrQ = '';  // containers filter text (kept across the 15 s refresh)
+function mdCtrFilter(q) {
+  _mdCtrQ = q || ''; const needle = _mdCtrQ.trim().toLowerCase(); let shown = 0;
+  document.querySelectorAll('#mdContainers .md-ctr tbody tr').forEach(tr => { const hit = !needle || tr.textContent.toLowerCase().includes(needle); tr.style.display = hit ? '' : 'none'; if (hit) shown++; });
+  const inp = document.getElementById('mdCtrSearch'); if (inp && document.activeElement !== inp && inp.value !== _mdCtrQ) inp.value = _mdCtrQ;
+  const tb = document.querySelector('#mdContainers .md-ctr tbody'); let empty = document.getElementById('mdCtrEmpty');
+  if (tb && !shown) { if (!empty) { empty = document.createElement('tr'); empty.id = 'mdCtrEmpty'; empty.innerHTML = '<td colspan="8" style="text-align:center;color:var(--text3);padding:20px">No container matches.</td>'; tb.appendChild(empty); } } else if (empty) empty.remove();
+}
 async function mdContainerErrors(container) {
   _mdCtr = container;
   const box = document.getElementById('mdContainers'); if (!box) return;
+  document.getElementById('mdHistoryWrap').style.display = 'none'; // the check history is the monitor's, not this container's
   const m = _allMonitors.find(x => x.name === _mdName); const c = m?.status?.server?.containers.find(x => x.name === container);
   const crit = (m?.criticalContainers || []).includes(container);
   const bad = c && (c.status !== 'running' || c.health === 'unhealthy');
@@ -12076,7 +12087,7 @@ async function mdContainerErrors(container) {
   out.innerHTML = `<div class="md-peek-head">${d.errors.length ? `Last ${d.errors.length} line(s) matching the error pattern, newest first` : 'No log line matched the error pattern yet.'}</div>` +
     (d.errors.length ? `<pre class="md-ctr-log">${d.errors.map(e => `<span class="md-ctr-ts">${new Date(e.at).toLocaleString()}</span> ${esc(e.line)}`).join('\n')}</pre>` : '');
 }
-function mdContainerBack() { _mdCtr = null; const box = document.getElementById('mdContainers'); box.innerHTML = ''; openMonitorDetail(_mdName); }
+function mdContainerBack() { _mdCtr = null; const box = document.getElementById('mdContainers'); box.innerHTML = ''; document.getElementById('mdHistoryWrap').style.display = ''; openMonitorDetail(_mdName); }
 /** Install command for this server's agent. The token is only shown when minted (create / rotate). */
 function _agentInstallHtml(name, token) {
   const base = 'https://' + location.hostname + ':' + (window.REPORT_PORT || 8444);

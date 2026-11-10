@@ -347,8 +347,9 @@ body.sidebar-collapsed .sidebar-link {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  /* same row height as the expanded link (6px padding + 12.5px text ≈ 30px), so collapsing never makes the menu taller */
+  width: 36px;
+  height: 30px;
   margin: 0 auto;
   padding: 0;
   gap: 0;
@@ -4077,7 +4078,7 @@ div:has(> div > #errPrev[disabled]):has(> div > #errNext[disabled]),
 /* ── Sidebar: zero counters stay out of the way; external link marker ── */
 .sidebar-badge.is-zero { display: none; }
 .sidebar-ext-icon { margin-left: auto; opacity: .45; flex: none; }
-body.sidebar-collapsed .sidebar-ext-icon { display: none; }
+body.sidebar-collapsed .sidebar-link .sidebar-ext-icon { display: none !important; }
 
 /* ── Monitor form: alert rules as aligned rows (switch · rule · what it means · its field) ── */
 .mon-rules { display: flex; flex-direction: column; border: 1px solid var(--border); background: var(--surface); }
@@ -4108,3 +4109,9 @@ body.sidebar-collapsed .sidebar-ext-icon { display: none; }
 .md-ctr-stat .v { font-size: 18px; font-weight: 500; }
 .md-ctr-stat .s { font-size: 11px; color: var(--text3); }
 .md-ctr tbody tr { cursor: pointer; }
+
+/* ── Monitor detail: containers list scrolls on its own, header stays, filter on the right ── */
+.md-ctr-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.md-ctr-search { width: 220px; flex: none; height: var(--control-h); padding: 0 10px; font-size: 12.5px; }
+.md-ctr-scroll { max-height: 46vh; overflow: auto; border: 1px solid var(--border); }
+.md-ctr-scroll .md-table thead th { position: sticky; top: 0; background: var(--table-head, var(--surface)); z-index: 1; }

@@ -72,7 +72,10 @@ async function containerReport(c: any): Promise<any> {
         base.exitCode = ins.State?.Running ? null : (ins.State?.ExitCode ?? null);
         base.startedAt = ins.State?.StartedAt || null;
         if (ins.State?.Running) try {
-            const st = await dockerJson(`/containers/${id}/stats?stream=false`);
+            // stats samples CPU for ~1 s; a container that will not answer must not hold the whole report (20 s default)
+            const sr = await fetch(`http://localhost/containers/${id}/stats?stream=false`, { unix: SOCK, signal: AbortSignal.timeout(6_000) } as any);
+            if (!sr.ok) throw new Error(`stats HTTP ${sr.status}`);
+            const st = await sr.json() as any;
             const cpuD = (st.cpu_stats?.cpu_usage?.total_usage || 0) - (st.precpu_stats?.cpu_usage?.total_usage || 0);
             const sysD = (st.cpu_stats?.system_cpu_usage || 0) - (st.precpu_stats?.system_cpu_usage || 0);
             if (sysD > 0) base.cpuPct = Math.round(1000 * cpuD / sysD * (st.cpu_stats?.online_cpus || 1)) / 10;
@@ -124,9 +127,13 @@ async function hostReport(): Promise<any> {
     return host;
 }
 
+// Inside a container the hostname is the container id: never report ourselves (our own log says
+// "N error lines", which would match the pattern and alert on itself forever).
+const SELF_ID = hostname();
 async function tick(): Promise<void> {
     const list: any[] = await dockerJson('/containers/json?all=1');
-    const containers = await Promise.all(list.filter(c => !SKIP.has((c.Names?.[0] || '').replace(/^\//, ''))).map(containerReport));
+    const mine = (c: any) => c.Id.startsWith(SELF_ID) || SKIP.has((c.Names?.[0] || '').replace(/^\//, ''));
+    const containers = await Promise.all(list.filter(c => !mine(c)).map(containerReport));
     const report = { agent: NAME, at: Date.now(), intervalSeconds: INTERVAL, host: await hostReport(), containers };
     const res = await fetch(`${URL_BASE}/agent/report`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify(report), signal: AbortSignal.timeout(20_000) });
     if (!res.ok) throw new Error(`Midleman answered HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
