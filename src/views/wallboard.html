@@ -199,6 +199,8 @@
   }
   const bytes = b => b >= 1 << 30 ? (b / (1 << 30)).toFixed(2) + ' GB' : b >= 1 << 20 ? (b / (1 << 20)).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB';
 
+  const ADMIN = window.WB_MODE === 'admin'; // a shared screen is read-only: no dashboard link, no peek, no queue operations
+  if (!ADMIN) document.querySelectorAll('a[href^="/dashboard"]').forEach(a => a.remove());
   let LAST = [], OPEN = null;
   const fmt = (v, unit) => Math.round(v) + ' ' + unit;
   function openDetail(name) {
@@ -213,8 +215,9 @@
     const b = document.getElementById('dBadge'); b.className = 'badge ' + cls; b.textContent = al ? 'ALERT' : state === 'ok' ? 'OK' : state.toUpperCase();
     document.getElementById('dTarget').textContent = target(m);
     document.getElementById('dDash').href = '/dashboard#monitors/' + encodeURIComponent(m.name);
-    document.getElementById('dPeekBtn').style.display = m.type === 'rabbitmq' ? '' : 'none';
-    document.getElementById('dPeekWhich').style.display = m.type === 'rabbitmq' ? '' : 'none';
+    document.getElementById('dPeekBtn').style.display = ADMIN && m.type === 'rabbitmq' ? '' : 'none';
+    document.getElementById('dDash').style.display = ADMIN ? '' : 'none';
+    document.getElementById('dPeekWhich').style.display = ADMIN && m.type === 'rabbitmq' ? '' : 'none';
     const mo = document.getElementById('dPeekMain'), busy = s.consumers === null || s.consumers > 0; mo.disabled = busy; mo.textContent = busy ? `queue (${s.consumers ?? '?'} consumers — peek disabled)` : 'queue (no consumers)'; if (busy) document.getElementById('dPeekWhich').value = 'error';
     const stat = (l, v, sub) => `<div class="stat"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${sub || ''}</div></div>`;
     document.getElementById('dStats').innerHTML =
@@ -286,8 +289,8 @@
 
   async function load() {
     try {
-      const res = await fetch('/admin/monitors', { cache: 'no-store' });
-      if (res.status === 401) { location.href = '/dashboard'; return; }
+      const res = await fetch('/wallboard/data', { cache: 'no-store' });
+      if (res.status === 401) { if (ADMIN) { location.href = '/dashboard'; return; } throw new Error('this wallboard link has expired or was revoked — ask an administrator for a new one'); }
       if (!res.ok) throw new Error('HTTP ' + res.status);
       LAST = (await res.json()).monitors || [];
       render(LAST);

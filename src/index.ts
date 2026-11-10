@@ -46,6 +46,7 @@ timingSafeEqualStr,
 type NotificationSeverity, type NotificationChannel } from './auth/auth';
 import { emitNotificationEvent, dispatchTestToGroup } from './core/notifications';
 import { isPrivateOrLoopbackV4 } from './core/ssrf-guard';
+import { listWallboardKeys, createWallboardKey, revokeWallboardKey, verifyWallboardKey } from './core/wallboard-keys';
 import { listMonitors, getMonitor, upsertMonitor, deleteMonitor, publicMonitor, validateMonitorInput, runCheck, peekQueue, listRabbitQueues, errorQueueName, requeueErrorMessages, discardErrorMessages, exportErrorMessages, startMonitorScheduler, stopMonitorScheduler, agentMonitorForToken, agentSourceAllowed, agentReportTooSoon, ingestAgentReport, serverErrors, newAgentToken, hashAgentToken, type AgentReport } from './core/monitors';
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
 import { initConsentPages, listConsentPages, getConsentPage, createConsentPage, updateConsentPage, deleteConsentPage, findConsentPageOauthReferences } from './auth/consent-pages';
@@ -1268,9 +1269,30 @@ async function handle(req: Request, srv: any): Promise<Response> {
             // Wallboard: full-screen operations board for the monitors (same session as the dashboard;
             // the page redirects to /dashboard when /admin/monitors answers 401).
             if (url.pathname === '/wallboard' || url.pathname === '/wallboard/') {
+                const ip = reqClientIp(req);
+                const k = url.searchParams.get('k');
+                if (k) {
+                    // Share link opened: exchange the key for a cookie scoped to /wallboard and drop it from the URL
+                    // (so it does not sit in the address bar, history or screenshots).
+                    if (!checkRateLimit('wbkey:' + ip, 20)) return new Response('Too many attempts', { status: 429 });
+                    const rec = verifyWallboardKey(k, ip);
+                    if (!rec) { recordFailedAttempt('wbkey:' + ip); return new Response('This wallboard link is not valid (revoked, expired or not allowed from this network).', { status: 403, headers: { 'Content-Type': 'text/plain; charset=utf-8' } }); }
+                    const maxAge = rec.expiresAt ? Math.max(60, Math.floor((rec.expiresAt - Date.now()) / 1000)) : 365 * 86400;
+                    return new Response(null, { status: 302, headers: { Location: '/wallboard', 'Set-Cookie': `mm_wb=${k}; HttpOnly; SameSite=Lax; Path=/wallboard; Max-Age=${maxAge}${isSecureRequest(req) ? '; Secure' : ''}` } });
+                }
+                const admin = !!getAuthedAdmin(req);
+                const shared = !admin && !!verifyWallboardKey(parseCookies(req).mm_wb, ip);
+                if (!admin && !shared) return new Response(null, { status: 302, headers: { Location: '/dashboard' } });
                 const html = withTheme(readFileSync(resolve(import.meta.dir, 'views/wallboard.html'), 'utf-8'))
-                    .replace('<!-- MM_LOGO -->', LOGO_GLYPH_SVG);
+                    .replace('<!-- MM_LOGO -->', LOGO_GLYPH_SVG)
+                    .replace('</head>', `<script>window.WB_MODE=${JSON.stringify(admin ? 'admin' : 'shared')};</script></head>`);
                 return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+            }
+            // Read-only board data: admin session or a valid share key (cookie set above).
+            if (url.pathname === '/wallboard/data' && req.method === 'GET') {
+                const ip = reqClientIp(req);
+                if (!getAuthedAdmin(req) && !verifyWallboardKey(parseCookies(req).mm_wb, ip)) return jsonRes(401, { error: 'unauthorized' });
+                return jsonRes(200, { monitors: listMonitors().map(publicMonitor) });
             }
 
             if (url.pathname === '/dashboard' || url.pathname === '/dashboard/') {
@@ -4758,6 +4780,35 @@ async function handle(req: Request, srv: any): Promise<Response> {
                 // ── Monitors (RabbitMQ queues, HTTP endpoints) ──
                 if (url.pathname === '/admin/monitors' && req.method === 'GET') {
                     return jsonRes(200, { monitors: listMonitors().map(publicMonitor) });
+                }
+                // ── Wallboard share links (read-only, no login) ──
+                if (url.pathname === '/admin/wallboard-keys' && req.method === 'GET') {
+                    return jsonRes(200, { keys: listWallboardKeys() });
+                }
+                if (url.pathname === '/admin/wallboard-keys' && req.method === 'POST') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
+                    const name = typeof body?.name === 'string' ? body.name.trim() : '';
+                    if (!name) return jsonRes(400, { error: '"name" is required (e.g. "Helpdesk screen")' });
+                    const days = body.expiresDays === null || body.expiresDays === undefined || body.expiresDays === '' ? null : Number(body.expiresDays);
+                    if (days !== null && (!Number.isFinite(days) || days < 1 || days > 3650)) return jsonRes(400, { error: '"expiresDays" must be 1–3650, or empty for no expiry' });
+                    const cidrs = Array.isArray(body.allowedCidrs) ? body.allowedCidrs.filter((x: unknown): x is string => typeof x === 'string').map((x: string) => x.trim()).filter(Boolean) : [];
+                    for (const c of cidrs) if (!/^\d{1,3}(\.\d{1,3}){3}(\/\d{1,2})?$/.test(c)) return jsonRes(400, { error: `"${c}" is not an IPv4 address or CIDR` });
+                    const me = getAuthedAdmin(req);
+                    const { key, record } = createWallboardKey({ name, expiresAt: days ? Date.now() + days * 86400_000 : null, allowedCidrs: cidrs, createdBy: me?.username });
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'wallboard.key.create', targetType: 'wallboard_key', targetId: record.id, details: { name, expiresAt: record.expiresAt, allowedCidrs: cidrs }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    const out = jsonRes(200, { key: record, url: `${publicLinkBase(req)}/wallboard?k=${key}` });
+                    out.headers.set('X-Sensitive', '1'); // one-time secret: never compressed
+                    return out;
+                }
+                {
+                    const wk = url.pathname.match(/^\/admin\/wallboard-keys\/([a-f0-9]{12})$/);
+                    if (wk && req.method === 'DELETE') {
+                        if (!revokeWallboardKey(wk[1])) return jsonRes(404, { error: 'Key not found' });
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'wallboard.key.revoke', targetType: 'wallboard_key', targetId: wk[1], ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { status: 'revoked' });
+                    }
                 }
                 if (url.pathname === '/admin/monitors/rabbit-queues' && req.method === 'POST') {
                     // Browse a broker's queues from the monitor form. Credentials come in the body;

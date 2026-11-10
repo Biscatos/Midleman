@@ -721,10 +721,39 @@
         </div>
         <div style="display:flex;gap:8px">
           <a class="btn btn-sm" href="/wallboard" target="_blank" rel="noopener" title="Open the full-screen operations board in a new tab">Wallboard</a>
+          <button class="btn btn-sm" onclick="openWbShare()" title="Read-only links for screens without a login">Share wallboard</button>
           <button class="btn btn-primary btn-sm" onclick="openMonitorModal()">+ New Monitor</button>
         </div>
       </div>
       <div id="monitorListBody" class="mon-grid"><div class="mon-empty">Loading...</div></div>
+    </div>
+
+    <!-- ═══ WALLBOARD SHARE LINKS ═══ -->
+    <div id="wbShareModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px" onclick="if(event.target===this)closeWbShare()">
+      <div class="mm-dialog" style="max-width:720px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column;max-height:92vh">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+          <div>
+            <h3 style="margin:0;font-size:16px">Share the wallboard</h3>
+            <p style="margin:4px 0 0;font-size:12.5px;color:var(--text2)">A link that opens the wallboard read-only, without a login — for the helpdesk screens. Each link can expire, be limited to a network, and be revoked here.</p>
+          </div>
+          <button onclick="closeWbShare()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">&times;</button>
+        </div>
+        <div style="padding:16px 22px;display:flex;flex-direction:column;gap:14px;overflow-y:auto">
+          <div class="mm-group"><div class="mm-group-title">New link</div>
+            <div style="display:grid;grid-template-columns:2fr 1fr 2fr auto;gap:10px;align-items:end">
+              <div><label class="mm-label">Name *</label><input class="mm-input" id="wbKeyName" type="text" placeholder="Helpdesk screen"></div>
+              <div><label class="mm-label">Expires</label><select class="mm-input" id="wbKeyDays"><option value="">never</option><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option><option value="365">1 year</option></select></div>
+              <div><label class="mm-label">Allowed IPs (optional)</label><input class="mm-input" id="wbKeyCidrs" type="text" placeholder="10.11.1.0/24"></div>
+              <button class="btn btn-primary btn-sm" onclick="wbCreateKey()" style="height:var(--control-h)">Create</button>
+            </div>
+            <div id="wbKeyNew" style="display:none"></div>
+          </div>
+          <div>
+            <label class="mm-label">Active links</label>
+            <table class="md-table"><thead><tr><th>Name</th><th>Created</th><th>Expires</th><th>Allowed IPs</th><th>Last used</th><th></th></tr></thead><tbody id="wbKeyRows"></tbody></table>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ═══ MONITOR DETAIL (history) ═══ -->

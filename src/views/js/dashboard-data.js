@@ -12267,6 +12267,44 @@ function monPickQueue(name, vhost) {
   if (/error|err|dead|dlq|dlx|fail|reject/i.test(name)) { document.getElementById('monAlertMessages').checked = true; document.getElementById('monAlertSilence').checked = false; monitorTypeChanged(); }
 }
 
+// ─── Wallboard share links ───
+async function openWbShare() {
+  document.getElementById('wbShareModal').style.display = 'flex';
+  document.getElementById('wbKeyNew').style.display = 'none'; document.getElementById('wbKeyNew').innerHTML = '';
+  await wbLoadKeys();
+}
+function closeWbShare() { document.getElementById('wbShareModal').style.display = 'none'; }
+async function wbLoadKeys() {
+  const res = await api('/admin/wallboard-keys'); const d = await res.json().catch(() => ({}));
+  const rows = document.getElementById('wbKeyRows');
+  const keys = d.keys || [];
+  rows.innerHTML = keys.length ? keys.map(k => `<tr>
+      <td style="font-weight:500">${esc(k.name)}<div style="font-size:11px;color:var(--text3)">${k.createdBy ? 'by ' + esc(k.createdBy) : ''}</div></td>
+      <td class="mono">${new Date(k.createdAt).toLocaleDateString()}</td>
+      <td class="mono" style="color:${k.expiresAt && k.expiresAt < Date.now() ? 'var(--red)' : 'inherit'}">${k.expiresAt ? new Date(k.expiresAt).toLocaleDateString() : 'never'}</td>
+      <td class="mono">${(k.allowedCidrs || []).map(esc).join(', ') || '<span style="color:var(--text3)">any</span>'}</td>
+      <td class="mono">${k.lastUsedAt ? _monAgo(k.lastUsedAt) + (k.lastUsedIp ? ' · ' + esc(k.lastUsedIp.replace(/^::ffff:/, '')) : '') : '<span style="color:var(--text3)">never</span>'}</td>
+      <td style="text-align:right"><button class="btn btn-sm md-danger" onclick="wbRevokeKey('${esc(k.id)}', '${esc(k.name).replace(/'/g, "\\'")}')">Revoke</button></td></tr>`).join('')
+    : '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:20px">No share links yet.</td></tr>';
+}
+async function wbCreateKey() {
+  const name = document.getElementById('wbKeyName').value.trim(); if (!name) return toast('Give the link a name', 'error');
+  const body = { name, expiresDays: document.getElementById('wbKeyDays').value || null, allowedCidrs: document.getElementById('wbKeyCidrs').value.split(',').map(x => x.trim()).filter(Boolean) };
+  const res = await api('/admin/wallboard-keys', { method: 'POST', body: JSON.stringify(body) }); const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || 'Could not create the link', 'error');
+  const box = document.getElementById('wbKeyNew'); box.style.display = '';
+  box.innerHTML = `<div class="mm-field-hint" style="margin-top:10px">Link for <b>${esc(name)}</b> — shown once; copy it now and open it on the screen. Opening it stores a cookie on that browser, so the screen keeps working after a reboot.</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:6px"><input class="mm-input" readonly value="${esc(d.url)}" style="font:400 12px var(--font-mono)" onclick="this.select()"><button class="btn btn-sm" data-copy="${esc(d.url)}" onclick="mmCopyFrom(this)">Copy</button></div>`;
+  document.getElementById('wbKeyName').value = ''; document.getElementById('wbKeyCidrs').value = '';
+  await wbLoadKeys();
+}
+async function wbRevokeKey(id, name) {
+  if (!await showConfirm({ title: 'Revoke link', message: `Revoke the wallboard link "${name}"?`, detail: 'Screens using it stop updating within 10 seconds and show a message asking for a new link.', confirmText: 'Revoke', danger: true })) return;
+  const res = await api('/admin/wallboard-keys/' + encodeURIComponent(id), { method: 'DELETE' }); const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || 'Failed', 'error');
+  toast('Link revoked'); await wbLoadKeys();
+}
+
 function monitorTypeChanged() {
   const type = document.getElementById('monType').value;
   document.getElementById('monRabbitFields').style.display = type === 'rabbitmq' ? 'flex' : 'none';
