@@ -11850,6 +11850,16 @@ async function fetchMonitors() {
 
 /** "4 ms · mem 120 MB (12%) · 7 clients · 98% hits" from the last INFO. */
 /** "12 containers · 1 down · disk 71% · mem 54%" from the last agent report. */
+/** "12 ms · 23/100 conns (23%) · 1.2 GB · lag 3s" from the last database readings. */
+function _monDbLine(s) {
+  const d = s.db; if (!d) return s.lastValue != null ? s.lastValue + ' ms' : '—';
+  return [s.lastValue != null ? s.lastValue + ' ms' : null, d.maxConnections ? `${d.connections}/${d.maxConnections} conns (${d.connectionsPct}%)` : `${d.connections} conns`, d.sizeBytes != null ? _monBytes(d.sizeBytes) : null, d.replica ? (d.replicaLagSec != null ? `lag ${d.replicaLagSec}s` : 'replica') : null, d.waitingLocks ? `${d.waitingLocks} waiting on locks` : null].filter(Boolean).join(' · ');
+}
+function _monTrafficLine(s) {
+  const t = s.traffic; if (!t) return '—';
+  if (!t.total) return `no requests in the last ${t.windowMinutes} min`;
+  return [`${t.total.toLocaleString()} req`, `${t.errorPct}% errors`, t.avgMs != null ? `avg ${t.avgMs} ms` : null, `${t.windowMinutes} min`].filter(Boolean).join(' · ');
+}
 function _monServerLine(s, m = {}) {
   const r = s.server; if (!r) return 'waiting for the first report…';
   const crit = m.criticalContainers || [];
@@ -11869,6 +11879,8 @@ function _monBytes(b) { return b >= 1 << 30 ? (b / (1 << 30)).toFixed(2) + ' GB'
 function monitorTarget(m) {
   if (m.type === 'http') return `${m.method} ${m.url}`;
   if (m.type === 'redis') return `redis://${m.host}:${m.port}/${m.db}`;
+  if (m.type === 'database') return `${m.engine} ${m.host}:${m.port}/${m.database}`;
+  if (m.type === 'traffic') return `${m.source} ${m.resource} · last ${m.windowMinutes} min`;
   if (m.type === 'server') { const h = m.status?.server?.host; return h?.hostname ? `${h.hostname} · agent every ${m.intervalSeconds}s` : `agent "${m.name}" · every ${m.intervalSeconds}s`; }
   return `${m.queue} (${[].concat(m.alertOn).join('+')}) @ ${m.apiUrl}`;
 }
@@ -11916,7 +11928,7 @@ function openMonitorDetail(name) {
   const m = _allMonitors.find(x => x.name === name);
   if (!m) return;
   _mdName = name;
-  const s = m.status || {}; const alert = s.state === 'alert'; const unit = m.type === 'rabbitmq' ? 'msgs' : m.type === 'server' ? 'errors' : 'ms';
+  const s = m.status || {}; const alert = s.state === 'alert'; const unit = m.type === 'rabbitmq' ? 'msgs' : m.type === 'server' ? 'errors' : m.type === 'traffic' ? '%' : 'ms';
   const g = id => document.getElementById(id);
   g('mdIcon').className = 'mon-ico mon-ico-' + m.type; g('mdIcon').innerHTML = `<svg><use href="#mon-ico-${m.type}"/></svg>`;
   g('mdName').textContent = m.name;
@@ -11931,7 +11943,7 @@ function openMonitorDetail(name) {
   g('mdStats').innerHTML =
     stat('Checks kept', h.length, h.length ? `since ${new Date(h[0].at).toLocaleTimeString()}` : '') +
     stat('Failed', `<span style="color:${fails ? 'var(--red)' : 'inherit'}">${fails}</span>`, h.length ? Math.round(100 * (h.length - fails) / h.length) + '% ok' : '') +
-    stat(unit === 'ms' ? 'Avg latency' : unit === 'errors' ? 'Avg errors / report' : 'Avg msgs / check', avg === null ? '—' : _monFmt(avg, unit), max === null ? '' : 'max ' + _monFmt(max, unit)) +
+    stat(unit === 'ms' ? 'Avg latency' : unit === 'errors' ? 'Avg errors / report' : unit === '%' ? 'Avg error rate' : 'Avg msgs / check', avg === null ? '—' : _monFmt(avg, unit), max === null ? '' : 'max ' + _monFmt(max, unit)) +
     (s.errorQueue ? stat('Error queue', s.errorQueue.messages === null ? '<span style="color:var(--text3)">not found</span>' : `<span style="color:${s.errorQueue.messages ? 'var(--red)' : 'inherit'}">${s.errorQueue.messages}</span>`, esc(s.errorQueue.name)) : '') +
     stat(alert ? 'Alerting for' : 'Last check', alert && s.alertSince ? _monAgo(s.alertSince).replace(' ago', '') : _monAgo(s.lastCheckAt), s.lastError && !alert ? '' : (alert ? 'since ' + new Date(s.alertSince || Date.now()).toLocaleTimeString() : ''));
   const r = s.redis;
@@ -11941,6 +11953,17 @@ function openMonitorDetail(name) {
     stat('Hit ratio', r.hitRatio !== null ? r.hitRatio + '%' : '—', `${r.hits} hits · ${r.misses} misses`) +
     stat('Evicted / rejected', `<span style="color:${r.evictedKeys || r.rejectedConnections ? 'var(--red)' : 'inherit'}">${r.evictedKeys} / ${r.rejectedConnections}</span>`, 'since server start') +
     stat('Persistence', `<span style="color:${r.rdbStatus !== 'ok' || (r.aofStatus && r.aofStatus !== 'ok') ? 'var(--red)' : 'inherit'}">${esc(r.rdbStatus)}</span>`, (r.aofStatus ? 'AOF ' + esc(r.aofStatus) + ' · ' : '') + `up ${_monUptime(r.uptimeSec)} · v${esc(r.version)} ${esc(r.role)}${r.linkStatus ? ' · link ' + esc(r.linkStatus) : ''}`);
+  const dbi = s.db;
+  if (dbi) g('mdStats').innerHTML +=
+    stat('Connections', dbi.maxConnections ? `<span style="color:${dbi.connectionsPct > (m.maxConnectionsPct || 101) ? 'var(--red)' : 'inherit'}">${dbi.connectionsPct}%</span>` : dbi.connections, dbi.maxConnections ? `${dbi.connections} of ${dbi.maxConnections}` : 'no limit read') +
+    stat('Longest query', dbi.longestQuerySec + ' s', dbi.waitingLocks ? `<span style="color:var(--red)">${dbi.waitingLocks} waiting on locks</span>` : 'no lock waits') +
+    stat('Size', dbi.sizeBytes != null ? _monBytes(dbi.sizeBytes) : '—', dbi.deadlocks != null ? `${dbi.deadlocks} deadlocks total` : '') +
+    stat(dbi.replica ? 'Replica lag' : 'Role', dbi.replica ? (dbi.replicaLagSec != null ? dbi.replicaLagSec + ' s' : '<span style="color:var(--red)">no link</span>') : 'primary', esc(dbi.version));
+  const tri = s.traffic;
+  if (tri) g('mdStats').innerHTML +=
+    stat(`Requests (${tri.windowMinutes} min)`, tri.total.toLocaleString(), tri.total < (m.minRequests || 0) ? 'below min — not judged' : '') +
+    stat('Errors', `<span style="color:${tri.errorPct > (m.maxErrorPct || 101) ? 'var(--red)' : 'inherit'}">${tri.errors.toLocaleString()}</span>`, tri.errorPct != null ? tri.errorPct + '% of requests' : '') +
+    stat('Avg duration', tri.avgMs != null ? tri.avgMs + ' ms' : '—', m.maxAvgMs ? `max ${m.maxAvgMs} ms` : '');
   const sv = s.server;
   if (sv) {
     const worst = sv.host.disks.length ? sv.host.disks.reduce((a, d) => d.pct > a.pct ? d : a) : null;
@@ -12162,6 +12185,8 @@ function renderOverviewMonitors() {
       : m.type === 'rabbitmq' ? (s.lastActivityAt ? 'last message ' + _monAgo(s.lastActivityAt) : 'no messages seen yet') + (s.errorQueue && s.errorQueue.messages ? ` · ${s.errorQueue.messages} in error queue` : '')
       : m.type === 'redis' ? _monRedisLine(s)
       : m.type === 'server' ? _monServerLine(s, m)
+      : m.type === 'database' ? _monDbLine(s)
+      : m.type === 'traffic' ? _monTrafficLine(s)
       : (s.lastValue != null ? s.lastValue + ' ms' : '—');
     return `<div class="ovm-row${alert ? ' is-alert' : ''}" onclick="openMonitorDetail('${esc(m.name)}')" role="button" tabindex="0" title="Open details">
       <span class="mon-ico mon-ico-${m.type}" style="width:28px;height:28px;border-radius:7px"><svg style="width:16px;height:16px"><use href="#mon-ico-${m.type}"/></svg></span>
@@ -12187,11 +12212,13 @@ function renderMonitors() {
       : alert ? '<span class="mm-chip err">ALERT</span>'
       : s.state === 'disabled' ? '<span class="mm-chip">Disabled</span>'
       : '<span class="mm-chip">Pending</span>';
-    const typeLabel = m.type === 'http' ? 'HTTP endpoint' : m.type === 'redis' ? 'Redis server' : m.type === 'server' ? 'Docker host' : 'RabbitMQ queue';
+    const typeLabel = m.type === 'http' ? 'HTTP endpoint' : m.type === 'redis' ? 'Redis server' : m.type === 'server' ? 'Docker host' : m.type === 'database' ? ({ postgres: 'PostgreSQL', mysql: 'MySQL', mssql: 'SQL Server' }[m.engine] || 'Database') : m.type === 'traffic' ? 'Traffic' : 'RabbitMQ queue';
     const reading = m.type === 'rabbitmq'
       ? (s.lastActivityAt ? 'Last message ' + _monAgo(s.lastActivityAt) : 'No messages seen yet')
       : m.type === 'redis' ? _monRedisLine(s)
       : m.type === 'server' ? _monServerLine(s, m)
+      : m.type === 'database' ? _monDbLine(s)
+      : m.type === 'traffic' ? _monTrafficLine(s)
       : (s.lastValue != null ? s.lastValue + ' ms' : '—');
     const eq = s.errorQueue;
     const eqBadge = eq ? (eq.messages === null
@@ -12210,7 +12237,7 @@ function renderMonitors() {
     ${chip}
   </div>
   <div class="mon-target" title="${esc(monitorTarget(m))}">${esc(monitorTarget(m))}</div>
-  ${_monSpark(s.history, alert, m.type === 'rabbitmq' ? 'msgs' : m.type === 'server' ? 'errors' : 'ms')}
+  ${_monSpark(s.history, alert, m.type === 'rabbitmq' ? 'msgs' : m.type === 'server' ? 'errors' : m.type === 'traffic' ? '%' : 'ms')}
   <div class="mon-foot">
     ${foot}
     <span class="mon-when">checked ${_monAgo(s.lastCheckAt)}</span>
@@ -12267,6 +12294,39 @@ function monPickQueue(name, vhost) {
   if (/error|err|dead|dlq|dlx|fail|reject/i.test(name)) { document.getElementById('monAlertMessages').checked = true; document.getElementById('monAlertSilence').checked = false; monitorTypeChanged(); }
 }
 
+// ─── Weekly report & incidents ───
+async function openReport() {
+  document.getElementById('reportModal').style.display = 'flex';
+  const hs = document.getElementById('rpHour'); if (!hs.options.length) hs.innerHTML = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, '0')}:00</option>`).join('');
+  const d = await (await api('/admin/monitors/report-settings')).json().catch(() => ({}));
+  const st = d.settings || {};
+  document.getElementById('rpEnabled').checked = !!st.enabled; document.getElementById('rpEmails').value = (st.emails || []).join(', ');
+  document.getElementById('rpDay').value = String(st.dayOfWeek ?? 1); hs.value = String(st.hour ?? 8);
+  document.getElementById('rpStatus').textContent = !d.smtpConfigured ? 'SMTP is not configured — set it up in Notifications first.' : st.lastSentAt ? `Last sent ${_monAgo(st.lastSentAt)}${st.lastError ? ' · ' + st.lastError : ''}` : 'Never sent yet.';
+  const inc = await (await api('/admin/monitors/incidents?days=7&limit=200')).json().catch(() => ({ incidents: [] }));
+  const dur = ms => { const m = Math.round(ms / 60000); return m < 60 ? m + ' min' : m < 1440 ? Math.floor(m / 60) + ' h ' + (m % 60) + ' min' : Math.floor(m / 1440) + ' d'; };
+  const list = inc.incidents || [];
+  document.getElementById('rpIncCount').textContent = `${list.filter(i => i.kind === 'episode').length} incident(s) · ${list.filter(i => i.kind === 'event').length} event(s)`;
+  document.getElementById('rpIncRows').innerHTML = list.length ? list.map(i => `<tr class="${i.endedAt === null ? 'is-fail' : ''}"><td class="mono">${new Date(i.startedAt).toLocaleString()}</td><td style="font-weight:500">${esc(i.monitor)} <span style="font-size:11px;color:var(--text3)">${esc(i.type)}</span></td><td class="mono">${i.kind === 'event' ? '<span style="color:var(--text3)">event</span>' : i.endedAt ? dur(i.endedAt - i.startedAt) : '<span style="color:var(--red)">open</span>'}</td><td class="detail" title="${esc(i.detail)}">${esc(i.detail.slice(0, 160))}</td></tr>`).join('')
+    : '<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:20px">No incidents in the last 7 days.</td></tr>';
+}
+function closeReport() { document.getElementById('reportModal').style.display = 'none'; }
+async function saveReportSettings() {
+  const body = { enabled: document.getElementById('rpEnabled').checked, emails: document.getElementById('rpEmails').value.split(',').map(x => x.trim()).filter(Boolean), dayOfWeek: parseInt(document.getElementById('rpDay').value, 10), hour: parseInt(document.getElementById('rpHour').value, 10) };
+  const res = await api('/admin/monitors/report-settings', { method: 'POST', body: JSON.stringify(body) }); const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || 'Save failed', 'error');
+  toast('Report settings saved');
+}
+async function sendReportNow() {
+  await saveReportSettings();
+  const btn = event?.target; if (btn) btn.disabled = true;
+  try {
+    const res = await api('/admin/monitors/report/send', { method: 'POST' }); const d = await res.json().catch(() => ({}));
+    if (!res.ok) return toast('Report not sent: ' + ((d.errors || []).join('; ') || d.error || 'failed'), 'error');
+    toast(`Report sent to ${d.sent} recipient(s)`); document.getElementById('rpStatus').textContent = 'Sent just now.';
+  } finally { if (btn) btn.disabled = false; }
+}
+
 // ─── Wallboard share links ───
 async function openWbShare() {
   document.getElementById('wbShareModal').style.display = 'flex';
@@ -12305,12 +12365,28 @@ async function wbRevokeKey(id, name) {
   toast('Link revoked'); await wbLoadKeys();
 }
 
+function monDbEngineChanged() {
+  const e = document.getElementById('monDbEngine').value, p = document.getElementById('monDbPort');
+  if (!p.dataset.touched) p.value = e === 'postgres' ? 5432 : e === 'mysql' ? 3306 : 1433;
+}
+let _monTrRes = null;
+async function monLoadTrafficResources() {
+  if (!_monTrRes) { try { _monTrRes = (await (await api('/admin/monitors/traffic-resources')).json()).resources || []; } catch { _monTrRes = []; } }
+  monTrafficSourceChanged();
+}
+function monTrafficSourceChanged() {
+  const src = document.getElementById('monTrSource').value;
+  document.getElementById('monTrResources').innerHTML = (_monTrRes || []).filter(r => r.type === src).map(r => `<option value="${esc(r.resource)}">${r.total.toLocaleString()} requests in 7 days</option>`).join('');
+}
 function monitorTypeChanged() {
   const type = document.getElementById('monType').value;
   document.getElementById('monRabbitFields').style.display = type === 'rabbitmq' ? 'flex' : 'none';
   document.getElementById('monHttpFields').style.display = type === 'http' ? 'flex' : 'none';
   document.getElementById('monRedisFields').style.display = type === 'redis' ? 'flex' : 'none';
   document.getElementById('monServerFields').style.display = type === 'server' ? 'flex' : 'none';
+  document.getElementById('monDatabaseFields').style.display = type === 'database' ? 'flex' : 'none';
+  document.getElementById('monTrafficFields').style.display = type === 'traffic' ? 'flex' : 'none';
+  if (type === 'traffic') monLoadTrafficResources();
   document.getElementById('monSilenceWrap').style.visibility = document.getElementById('monAlertSilence').checked ? 'visible' : 'hidden';
   document.getElementById('monErrorQueueWrap').style.visibility = document.getElementById('monWatchError').checked ? 'visible' : 'hidden';
 }
@@ -12360,6 +12436,18 @@ function openMonitorModal(m) {
   g('monSrvCritical').value = m?.type === 'server' ? (m.criticalContainers || []).join(', ') : '';
   monRenderCriticalPick(m);
   g('monSrvCidrs').value = m?.type === 'server' ? (m.allowedSourceCidrs || []).join(', ') : '';
+  const isDb = m?.type === 'database';
+  g('monDbEngine').value = isDb ? m.engine : 'postgres';
+  g('monDbHost').value = isDb ? m.host : ''; g('monDbPort').value = isDb ? m.port : 5432; delete g('monDbPort').dataset.touched;
+  g('monDbName').value = isDb ? m.database : ''; g('monDbUser').value = isDb ? m.username : '';
+  g('monDbPassword').value = ''; g('monDbPassword').placeholder = isDb && m.hasPassword ? '(kept — type to replace)' : '';
+  g('monDbTls').checked = isDb && !!m.tls;
+  g('monDbMaxLatencyMs').value = isDb ? (m.maxLatencyMs ?? 0) : 0; g('monDbMaxConnPct').value = isDb ? (m.maxConnectionsPct ?? 85) : 85;
+  g('monDbMaxLongQuerySec').value = isDb ? (m.maxLongQuerySec ?? 60) : 60; g('monDbMaxReplicaLagSec').value = isDb ? (m.maxReplicaLagSec ?? 60) : 60;
+  const isTr = m?.type === 'traffic';
+  g('monTrSource').value = isTr ? m.source : 'webhook'; g('monTrResource').value = isTr ? m.resource : '';
+  g('monTrWindow').value = isTr ? String(m.windowMinutes) : '30'; g('monTrMinReq').value = isTr ? m.minRequests : 10;
+  g('monTrMaxErrPct').value = isTr ? m.maxErrorPct : 5; g('monTrMaxAvgMs').value = isTr ? m.maxAvgMs : 0;
   g('monIntervalSeconds').value = m?.intervalSeconds ?? 60;
   g('monCooldownMinutes').value = m?.cooldownMinutes ?? 60;
   g('monEnabled').checked = m ? m.enabled !== false : true;
@@ -12406,6 +12494,17 @@ async function saveMonitor() {
       alertOn: [['silence', 'monAlertSilence'], ['messages', 'monAlertMessages'], ['health', 'monAlertHealth']].filter(([, id]) => document.getElementById(id).checked).map(([v]) => v),
       watchErrorQueue: document.getElementById('monWatchError').checked, errorQueue: g('monErrorQueue').trim() || undefined,
       silenceMinutes: parseInt(g('monSilenceMinutes'), 10),
+    });
+  } else if (type === 'database') {
+    Object.assign(body, {
+      engine: g('monDbEngine'), host: g('monDbHost').trim(), port: parseInt(g('monDbPort'), 10) || undefined, database: g('monDbName').trim(), username: g('monDbUser').trim(),
+      password: g('monDbPassword') || undefined, tls: document.getElementById('monDbTls').checked,
+      maxLatencyMs: parseInt(g('monDbMaxLatencyMs'), 10) || 0, maxConnectionsPct: parseInt(g('monDbMaxConnPct'), 10) || 0, maxLongQuerySec: parseInt(g('monDbMaxLongQuerySec'), 10) || 0, maxReplicaLagSec: parseInt(g('monDbMaxReplicaLagSec'), 10) || 0,
+    });
+  } else if (type === 'traffic') {
+    Object.assign(body, {
+      source: g('monTrSource'), resource: g('monTrResource').trim(), windowMinutes: parseInt(g('monTrWindow'), 10) || 30, minRequests: parseInt(g('monTrMinReq'), 10) || 1,
+      maxErrorPct: parseFloat(g('monTrMaxErrPct')) || 0, maxAvgMs: parseInt(g('monTrMaxAvgMs'), 10) || 0,
     });
   } else if (type === 'server') {
     Object.assign(body, {

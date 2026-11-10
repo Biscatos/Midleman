@@ -47,7 +47,9 @@ type NotificationSeverity, type NotificationChannel } from './auth/auth';
 import { emitNotificationEvent, dispatchTestToGroup } from './core/notifications';
 import { isPrivateOrLoopbackV4 } from './core/ssrf-guard';
 import { listWallboardKeys, createWallboardKey, revokeWallboardKey, verifyWallboardKey } from './core/wallboard-keys';
-import { listMonitors, getMonitor, upsertMonitor, deleteMonitor, publicMonitor, validateMonitorInput, runCheck, peekQueue, listRabbitQueues, errorQueueName, requeueErrorMessages, discardErrorMessages, exportErrorMessages, startMonitorScheduler, stopMonitorScheduler, agentMonitorForToken, agentSourceAllowed, agentReportTooSoon, ingestAgentReport, serverErrors, newAgentToken, hashAgentToken, type AgentReport } from './core/monitors';
+import { listMonitors, getMonitor, upsertMonitor, deleteMonitor, publicMonitor, validateMonitorInput, runCheck, peekQueue, listRabbitQueues, errorQueueName, requeueErrorMessages, discardErrorMessages, exportErrorMessages, startMonitorScheduler, stopMonitorScheduler, agentMonitorForToken, agentSourceAllowed, agentReportTooSoon, ingestAgentReport, serverErrors, newAgentToken, hashAgentToken, listIncidents, type AgentReport } from './core/monitors';
+import { getReportSettings, saveReportSettings, buildWeeklyReport, sendWeeklyReport, reportSchedulerTick } from './core/monitor-report';
+import { listTrafficResources } from './telemetry/request-log';
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
 import { initConsentPages, listConsentPages, getConsentPage, createConsentPage, updateConsentPage, deleteConsentPage, findConsentPageOauthReferences } from './auth/consent-pages';
 import { initLdap, shutdownLdap, listLdapConfigs, getLdapConfig, createLdapConfig, updateLdapConfig, deleteLdapConfig, testLdapConfig, tryLdapLogin, runLdapSync, getLastLdapSyncReport } from './auth/ldap';
@@ -485,6 +487,7 @@ if (five9Connectors.length > 0) {
 startPendingRetryScheduler();
 startSilenceAlertScheduler();
 startMonitorScheduler();
+setInterval(() => { void reportSchedulerTick().catch(e => console.warn('[monitors] report tick:', e?.message || e)); }, 60_000);
 
 // TCP/UDP proxies are started AFTER the main HTTP server below — they may run
 // ACME HTTP-01 which needs the main server to be already listening on :80.
@@ -4780,6 +4783,40 @@ async function handle(req: Request, srv: any): Promise<Response> {
                 // ── Monitors (RabbitMQ queues, HTTP endpoints) ──
                 if (url.pathname === '/admin/monitors' && req.method === 'GET') {
                     return jsonRes(200, { monitors: listMonitors().map(publicMonitor) });
+                }
+                // ── Incidents, traffic resources, weekly report ──
+                if (url.pathname === '/admin/monitors/incidents' && req.method === 'GET') {
+                    const days = Math.min(Math.max(parseInt(url.searchParams.get('days') || '7', 10) || 7, 1), 90);
+                    return jsonRes(200, { incidents: listIncidents({ since: Date.now() - days * 86_400_000, monitor: url.searchParams.get('monitor') || undefined, limit: Math.min(parseInt(url.searchParams.get('limit') || '200', 10) || 200, 2000) }) });
+                }
+                if (url.pathname === '/admin/monitors/traffic-resources' && req.method === 'GET') {
+                    return jsonRes(200, { resources: listTrafficResources() });
+                }
+                if (url.pathname === '/admin/monitors/report-settings' && req.method === 'GET') {
+                    return jsonRes(200, { settings: getReportSettings(), smtpConfigured: isSmtpConfigured() });
+                }
+                if (url.pathname === '/admin/monitors/report-settings' && req.method === 'POST') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
+                    const emails = Array.isArray(body?.emails) ? body.emails.filter((x: unknown): x is string => typeof x === 'string').map((x: string) => x.trim()).filter(Boolean) : [];
+                    for (const e of emails) if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return jsonRes(400, { error: `"${e}" is not a valid email` });
+                    const dayOfWeek = Number(body?.dayOfWeek), hour = Number(body?.hour);
+                    if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) return jsonRes(400, { error: '"dayOfWeek" must be 0–6' });
+                    if (!Number.isInteger(hour) || hour < 0 || hour > 23) return jsonRes(400, { error: '"hour" must be 0–23' });
+                    const settings = saveReportSettings({ enabled: body?.enabled === true, emails: emails.slice(0, 20), dayOfWeek, hour });
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'monitor.report.settings', targetType: 'monitor_report', targetId: 'weekly', details: { enabled: settings.enabled, emails: settings.emails, dayOfWeek, hour }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(200, { settings });
+                }
+                if (url.pathname === '/admin/monitors/report/preview' && req.method === 'GET') {
+                    const r = buildWeeklyReport();
+                    return new Response(r.html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'SAMEORIGIN' } });
+                }
+                if (url.pathname === '/admin/monitors/report/send' && req.method === 'POST') {
+                    const r = await sendWeeklyReport();
+                    const me = getAuthedAdmin(req);
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'monitor.report.send', targetType: 'monitor_report', targetId: 'weekly', details: { sent: r.sent, errors: r.errors }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    return jsonRes(r.ok ? 200 : 502, r);
                 }
                 // ── Wallboard share links (read-only, no login) ──
                 if (url.pathname === '/admin/wallboard-keys' && req.method === 'GET') {

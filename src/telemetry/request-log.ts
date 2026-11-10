@@ -1068,6 +1068,33 @@ export function getRequestLogBreakdown(): { types: { type: string; count: number
  * only inbound `webhook` records (fan-out attempts are excluded). Null when the
  * webhook has never received a payload — used by the silence-alert scheduler.
  */
+/** Traffic of one webhook / proxy over the last `minutes` (30-minute buckets from request_stats, so
+ *  counters include resources whose logs are off). An error is a 5xx or a request that got no response. */
+export function getTrafficWindow(type: 'webhook' | 'proxy', resource: string, minutes: number): { total: number; errors: number; avgMs: number | null; buckets: number } {
+    const empty = { total: 0, errors: 0, avgMs: null, buckets: 0 };
+    if (!db) return empty;
+    try {
+        flushStats();
+        const buckets = Math.max(1, Math.ceil(minutes / 30));
+        const from = statBucket(new Date(Date.now() - buckets * 30 * 60_000));
+        const r = db.prepare(`
+            SELECT SUM(count) AS total, SUM(CASE WHEN status >= 500 THEN count ELSE failed END) AS errors, SUM(dur_sum) AS ds, SUM(dur_n) AS dn
+            FROM request_stats WHERE type = $type AND resource = $resource AND bucket >= $from
+        `).get({ $type: type, $resource: resource, $from: from }) as { total: number | null; errors: number | null; ds: number | null; dn: number | null };
+        return { total: Number(r?.total || 0), errors: Number(r?.errors || 0), avgMs: r?.dn ? Math.round((r.ds || 0) / r.dn) : null, buckets };
+    } catch { return empty; }
+}
+
+/** Resources seen in the last 7 days, for the monitor form. */
+export function listTrafficResources(): { type: string; resource: string; total: number }[] {
+    if (!db) return [];
+    try {
+        flushStats();
+        const from = statBucket(new Date(Date.now() - 7 * 86_400_000));
+        return db.prepare(`SELECT type, resource, SUM(count) AS total FROM request_stats WHERE bucket >= $from AND resource <> '' GROUP BY type, resource ORDER BY type, resource`).all({ $from: from }) as any[];
+    } catch { return []; }
+}
+
 export function getLastWebhookActivity(webhookName: string): number | null {
     if (!db) return null;
     try {
