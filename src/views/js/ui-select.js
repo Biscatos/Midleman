@@ -132,14 +132,36 @@
       items.push(it);
     }
     if (!items.length) return;
+    // Search box: for long lists (8+) or when the select asks for it (data-search). Filters as you type.
+    const searchable = sel.hasAttribute('data-search') || items.length >= 8;
+    let search = null;
+    if (searchable) {
+      const wrap = document.createElement('div');
+      wrap.className = 'mm-select-search';
+      search = document.createElement('input');
+      search.type = 'text'; search.placeholder = 'Search…'; search.setAttribute('aria-label', 'Search options'); search.autocomplete = 'off'; search.spellcheck = false;
+      wrap.appendChild(search);
+      const empty = document.createElement('div'); empty.className = 'mm-select-empty'; empty.textContent = 'No match'; empty.style.display = 'none';
+      panel.prepend(wrap); panel.appendChild(empty);
+      search.addEventListener('input', () => {
+        const q = search.value.trim().toLowerCase();
+        let shown = 0;
+        for (const it of items) { const hit = !q || it.textContent.toLowerCase().includes(q); it.style.display = hit ? '' : 'none'; if (hit) shown++; }
+        panel.querySelectorAll('.mm-select-group').forEach(g => { g.style.display = q ? 'none' : ''; });
+        empty.style.display = shown ? 'none' : '';
+        if (open) { open.active = -1; const k = items.findIndex(it => it.style.display !== 'none' && it.getAttribute('aria-disabled') !== 'true'); if (k >= 0) setActive(k); }
+      });
+      search.addEventListener('keydown', (e) => { if (['ArrowDown', 'ArrowUp', 'Enter', 'Escape', 'Home', 'End', 'Tab'].includes(e.key)) onTriggerKey(e, sel); });
+    }
     document.body.appendChild(panel);
-    open = { select: sel, trigger: st.trigger, panel, items, active: -1 };
+    open = { select: sel, trigger: st.trigger, panel, items, active: -1, search };
     st.trigger.setAttribute('aria-expanded', 'true');
     st.trigger.setAttribute('aria-controls', panel.id);
     st.trigger.classList.add('is-open');
     place();
     const cur = items.findIndex(i => Number(i.dataset.index) === sel.selectedIndex);
     setActive(cur >= 0 ? cur : firstEnabled(0, 1));
+    if (search) setTimeout(() => search.focus(), 0);
   }
 
   function place() {
@@ -164,7 +186,9 @@
 
   function close() {
     if (!open) return;
+    const hadSearch = !!open.search && document.activeElement === open.search;
     open.panel.remove();
+    if (hadSearch) open.trigger.focus();
     open.trigger.setAttribute('aria-expanded', 'false');
     open.trigger.removeAttribute('aria-controls');
     open.trigger.removeAttribute('aria-activedescendant');
@@ -188,7 +212,7 @@
     if (!open) return -1;
     const n = open.items.length;
     for (let i = 0, k = from; i < n; i++, k = (k + step + n) % n) {
-      if (open.items[k].getAttribute('aria-disabled') !== 'true') return k;
+      if (open.items[k].getAttribute('aria-disabled') !== 'true' && open.items[k].style.display !== 'none') return k;
     }
     return -1;
   }
@@ -230,6 +254,7 @@
         if (isOpen) close();
         return;
       default:
+        if (isOpen && open.search && document.activeElement === open.search) return; // typing filters the list
         if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
           // Type-ahead: jump to the first option starting with the typed text.
           clearTimeout(typeTimer);

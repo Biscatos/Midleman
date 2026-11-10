@@ -126,6 +126,34 @@ Monitors are a first-class resource (dashboard → Monitors): RabbitMQ queues (s
 
 Runs on each server, outbound only — nothing to open on the server. Create a **Server** monitor; the dashboard shows the `docker run` command with the one-time token. See `docker-compose.agent.yml`. For servers outside the LAN, `MIDLEMAN_URL` must be `https://` (front the Report port 8444 with your reverse proxy / tunnel) and the monitor can be limited to the server's egress IP.
 
+### Reverse tunnels through the agent
+
+A monitor can reach a service that is not exposed to Midleman — a Redis or database on a cloud server's private network — **through that server's agent**: pick "Reach through an agent" in the monitor form. The agent keeps an outbound WebSocket to Midleman and connects to the target on its own network; nothing is opened on the server (FRP-style, zero extra setup). What the agent is willing to reach is decided on the agent: `TUNNEL_ALLOW=private` (default: loopback, RFC1918/CGNAT and container names), an explicit `host:port` list, or `off`.
+
+**Named tunnels** (Traffic → Tunnels) give a remote service a fixed port on Midleman, so any tool on the LAN (`redis-cli`, a SQL client, a browser) uses it as if it were local:
+
+| Field | Meaning |
+|---|---|
+| Agent | The server monitor whose network holds the target |
+| Remote host / port | The target as seen from the agent |
+| Midleman port | Empty = first free port from `PORT_RANGE_START` (4000). It must be a port the Midleman container publishes (`4000-4050` in the compose file) |
+| Allowed from | IPv4 addresses / CIDRs that may connect. Empty = the port listens on `127.0.0.1` only |
+| Connection limit | Simultaneous connections through the tunnel (default 100) |
+
+Create, change and delete are written to the Audit Log (`tunnel.*`). The list shows open connections, bytes, last use and the last refused source address.
+
+**Protocol (v2).** One WebSocket carries many TCP streams. Each stream has its own credit window, so a slow reader slows only its own stream and memory stays bounded; the agent keeps a small pool of connections and Midleman picks the least loaded one; a ping every 15 s measures the round trip and detects dead paths. Measured on loopback: 200–380 MB/s per stream and 300 simultaneous streams without loss.
+
+| Agent variable | Default | |
+|---|---|---|
+| `TUNNEL_CONNS` | `2` | Parallel WebSockets to Midleman (1–8) |
+| `TUNNEL_MAX_STREAMS` | `512` | Open streams the agent accepts |
+| `TUNNEL_WINDOW_MB` | `2` | Per-stream window; set the same value on Midleman |
+
+Midleman and its agents must run the same protocol version: update the agent image together with Midleman. An older agent is refused with HTTP 426 and keeps reporting metrics, only its tunnels stop.
+
+When Midleman restarts, agents dial back within 15 s. A monitor that goes through an agent waits up to `TUNNEL_GRACE_MS` (default 20000) for that before it reports a failure, so a deploy does not raise a false alert.
+
 ### A second pair of eyes
 
 The monitors run inside Midleman, so the host that runs Midleman cannot alert about itself being down. Run `docker-compose.watcher.yml` on another host (a small cloud VM) and point an HTTP monitor from each instance at the other's `/health`. Each instance needs its own SMTP/SMS settings.

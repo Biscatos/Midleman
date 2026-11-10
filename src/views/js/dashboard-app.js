@@ -151,6 +151,8 @@ async function startApp(username) {
     appIntervals.push(setInterval(fetchHealth, 5000));
     appIntervals.push(setInterval(fetchRecentRequests, 3000));
     appIntervals.push(setInterval(fetchChartData, 15000));
+    fetchTunnels();   // sidebar count
+    appIntervals.push(setInterval(() => { if (currentPage === 'tunnels' && document.getElementById('tunnelModal').style.display === 'none') fetchTunnels(); }, 5000));
     appIntervals.push(setInterval(() => { if (currentPage === 'overview' || currentPage === 'monitors') fetchMonitors(); }, 15000));
     appIntervals.push(setInterval(() => {
       if (currentPage === 'requests' && document.getElementById('rlAutoRefresh').checked) fetchRequestLogs();
@@ -455,6 +457,7 @@ const PAGE_TITLES = {
   requests: 'Request Log',
   tcpudp: 'TCP/UDP',
   profiles: 'HTTP Proxies',
+  tunnels: 'Tunnels',
   webhooks: 'Webhooks',
   monitors: 'Monitors',
   connectors: 'Chat Connectors',
@@ -479,7 +482,7 @@ const PAGE_TITLES = {
 const ROUTABLE_PAGES = new Set([
   'overview','requests','proxyusers','profiles','connectors',
   'oauthclients','consentpages','ldap','email','sms','notifications',
-  'npm','audit','webhooks','monitors','ldap','reports','errors','logsettings','docs',
+  'npm','audit','webhooks','monitors','ldap','reports','errors','logsettings','docs','tunnels',
 ]);
 
 function navigate(page, opts = {}) {
@@ -541,6 +544,7 @@ function navigate(page, opts = {}) {
     else fetchSipProxies();
   }
   if (page === 'monitors') { fetchMonitors().then(() => { if (hashSuffix && typeof openMonitorDetail === 'function') openMonitorDetail(decodeURIComponent(hashSuffix)); }); }
+  if (page === 'tunnels') { fetchTunnels(); }
   if (page === 'connectors') { fetchConnectors(); fetchFive9Connectors(); }
   if (page === 'proxyusers') { fetchProxyUsers(); fetchInvites(); }
   if (page === 'oauthclients') { fetchOauthClients(); }
@@ -703,7 +707,7 @@ function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.
 function fmtNum(n) { if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'; if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K'; return String(n); }
 function fmtMs(ms) { if (!ms) return '0ms'; if (ms < 1) return ms.toFixed(2) + 'ms'; if (ms < 1000) return Math.round(ms) + 'ms'; return (ms / 1000).toFixed(2) + 's'; }
 function fmtUptime(s) { if (s < 60) return s + 's'; if (s < 3600) return Math.floor(s / 60) + 'm ' + s % 60 + 's'; const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h + 'h ' + m + 'm'; }
-function fmtBytes(b) { if (b < 1024) return b + ' B'; if (b < 1048576) return (b / 1024).toFixed(1) + ' KB'; return (b / 1048576).toFixed(1) + ' MB'; }
+function fmtBytes(b) { if (b < 1024) return b + ' B'; if (b < 1048576) return (b / 1024).toFixed(1) + ' KB'; if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB'; return (b / 1073741824).toFixed(2) + ' GB'; }
 
 // ─── Field hints live under the field, never inside the label ───────────────
 // A muted <span> inside a field label wraps the label onto two lines and pushes

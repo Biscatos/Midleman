@@ -34,7 +34,7 @@ import { initCertStore, shutdownCertStore, listCerts, getCert, getCertByDomain, 
 import { migrateProfileCerts } from './core/cert-migration';
 import { scheduleAcmeRenewal, shutdownAcme, requestCertificate } from './sip/acme';
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort, isProxyServerRunning, setProxyLoginTemplate, setProxyLogo } from './servers/proxy-server';
-import { loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort, assignTcpUdpListenerPort, releaseProxyPort, releaseWebhookPort, releaseTcpUdpListenerPorts, getWebhookPort, assignConnectorPort, releaseConnectorPort, getConnectorPort } from './servers/port-manager';
+import { PORT_RANGE_START, loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort, assignTcpUdpListenerPort, releaseProxyPort, releaseWebhookPort, releaseTcpUdpListenerPorts, getWebhookPort, assignConnectorPort, releaseConnectorPort, getConnectorPort } from './servers/port-manager';
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, dismissAllFailedFanouts, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, dismissAllPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState, setDlqAuthResolver, listRunningWebhookNames } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
@@ -48,6 +48,8 @@ import { emitNotificationEvent, dispatchTestToGroup } from './core/notifications
 import { isPrivateOrLoopbackV4 } from './core/ssrf-guard';
 import { listWallboardKeys, createWallboardKey, revokeWallboardKey, verifyWallboardKey } from './core/wallboard-keys';
 import { numbersSeen as metaNumbersSeen, exportNumbersSeen, importNumbersSeen, META_EVENT_KINDS } from './core/meta-router';
+import { tunnelWebSocket, upgradeTunnel, tunnelAgents, tunnelBridges } from './core/agent-tunnel';
+import { startTunnels, listTunnels, getTunnel, saveTunnel, deleteTunnel, testTunnel } from './core/tunnels';
 import { listMonitors, getMonitor, upsertMonitor, deleteMonitor, publicMonitor, validateMonitorInput, runCheck, peekQueue, listRabbitQueues, errorQueueName, requeueErrorMessages, discardErrorMessages, exportErrorMessages, startMonitorScheduler, stopMonitorScheduler, agentMonitorForToken, agentSourceAllowed, agentReportTooSoon, ingestAgentReport, serverErrors, newAgentToken, hashAgentToken, listIncidents, type AgentReport } from './core/monitors';
 import { getReportSettings, saveReportSettings, buildWeeklyReport, sendWeeklyReport, reportSchedulerTick } from './core/monitor-report';
 import { listTrafficResources } from './telemetry/request-log';
@@ -653,14 +655,31 @@ async function handleAgentReport(req: Request): Promise<Response> {
     return jsonRes(200, { status: status.state, intervalSeconds: m.intervalSeconds });
 }
 
+/** GET /agent/tunnel — the agent's reverse-tunnel WebSocket. Same token, same source rules as /agent/report. */
+function handleTunnelUpgrade(req: Request, srv: any): Response | undefined {
+    const ip = reqClientIp(req);
+    if (!isSecureRequest(req) && !isPrivateOrLoopbackV4(ip)) return jsonRes(426, { error: 'unauthorized' });
+    if (!checkRateLimit('agent:' + ip, AGENT_FAILS_PER_IP)) return jsonRes(429, { error: 'too many requests' });
+    const auth = req.headers.get('authorization') || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    const name = (req.headers.get('x-agent-name') || '').trim().toLowerCase();
+    const m = name && name.length <= 64 ? agentMonitorForToken(name, token) : null;
+    if (!m || !agentSourceAllowed(m, ip)) { recordFailedAttempt('agent:' + ip); return jsonRes(401, { error: 'unauthorized' }); }
+    if (!m.enabled) return jsonRes(403, { error: 'monitor disabled' });
+    return upgradeTunnel(srv, req, name, ip);
+}
+
 const reportPortRaw = process.env.REPORT_PORT ?? '8444';
+startTunnels([config.port, Number(jwksPortRaw) || 0, Number(reportPortRaw) || 0]);
 const reportApiServer = Bun.serve({
     port: parseInt(reportPortRaw, 10),
     idleTimeout: 0,
     maxRequestBodySize: 1 * 1024 * 1024, // 1MB — consumer API only
-    async fetch(req: Request, srv): Promise<Response> {
+    websocket: tunnelWebSocket,
+    async fetch(req: Request, srv): Promise<Response | undefined> {
         rememberPeerIp(req, srv?.requestIP?.(req)?.address ?? null); // the agent handler needs the real peer for its HTTPS / lockout / allowlist checks
         const url = new URL(req.url);
+        if (url.pathname === '/agent/tunnel') return handleTunnelUpgrade(req, srv);
         if (url.pathname === '/agent/report') return handleAgentReport(req);
         if (!url.pathname.startsWith('/reports/')) {
             return new Response('Not Found', { status: 404 });
@@ -707,8 +726,10 @@ const server = Bun.serve({
     port: config.port,
     idleTimeout: 0,
     maxRequestBodySize: 50 * 1024 * 1024, // 50MB
+    websocket: tunnelWebSocket,
 
-    async fetch(req: Request, srv): Promise<Response> {
+    async fetch(req: Request, srv): Promise<Response | undefined> {
+        if (new URL(req.url).pathname === '/agent/tunnel') { rememberPeerIp(req, srv?.requestIP?.(req)?.address ?? null); return handleTunnelUpgrade(req, srv); }
         const res = await handle(req, srv);
         try { return await compressed(req, res, new URL(req.url)); } catch { return res; }
     },
@@ -4800,6 +4821,39 @@ async function handle(req: Request, srv: any): Promise<Response> {
 
                 // ── TCP/UDP Proxy CRUD ───────────────────────────────────────────────────
 
+                // ── Tunnels (a Midleman port → host:port on an agent's network) ──
+                if (url.pathname === '/admin/tunnels' && req.method === 'GET') {
+                    const live = tunnelAgents();
+                    const agents = listMonitors().filter(m => m.type === 'server').map(m => { const a = live.find(x => x.name === m.name); return { name: m.name, enabled: m.enabled, connected: !!a, connections: a?.connections ?? 0, streams: a?.streams ?? 0, rttMs: a?.rttMs ?? null }; });
+                    return jsonRes(200, { tunnels: listTunnels(), agents, portRangeStart: PORT_RANGE_START });
+                }
+                {
+                    const tm = url.pathname.match(/^\/admin\/tunnels(?:\/([^/]+)(\/test)?)?$/);
+                    if (tm && req.method !== 'GET') {
+                        const me = getAuthedAdmin(req);
+                        const audit = (action: string, t: { name: string; agent: string; host: string; port: number; listenPort: number; allowedIps: string[]; enabled: boolean }) =>
+                            logAudit({ actorUserId: me?.id, actorUsername: me?.username, action, targetType: 'tunnel', targetId: t.name, details: { agent: t.agent, target: `${t.host}:${t.port}`, listenPort: t.listenPort, allowedIps: t.allowedIps, enabled: t.enabled }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        const existing = tm[1] ? getTunnel(decodeURIComponent(tm[1])) : undefined;
+                        if (tm[1] && !existing) return jsonRes(404, { error: `Tunnel "${decodeURIComponent(tm[1])}" not found` });
+                        if (existing && tm[2] && req.method === 'POST') return jsonRes(200, await testTunnel(existing));
+                        if (existing && !tm[2] && req.method === 'DELETE') { deleteTunnel(existing.name); audit('tunnel.delete', existing); return jsonRes(200, { status: 'deleted' }); }
+                        if (!tm[2] && ((!existing && req.method === 'POST') || (existing && req.method === 'PUT'))) {
+                            let body: any;
+                            try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
+                            if (!body || typeof body !== 'object' || Array.isArray(body)) return jsonRes(400, { error: 'Invalid JSON body' });
+                            const input = existing ? { ...existing, ...body } : body;   // PUT may carry only what changed (the on/off switch sends { enabled })
+                            const ag = getMonitor(String(input.agent || '').toLowerCase());
+                            if (!ag || ag.type !== 'server') return jsonRes(400, { error: 'Choose a server monitor (agent) that exists in Midleman' });
+                            try {
+                                const t = saveTunnel(input, existing, me?.username);
+                                audit(existing ? 'tunnel.update' : 'tunnel.create', t);
+                                return jsonRes(200, { status: existing ? 'updated' : 'created', tunnel: listTunnels().find(x => x.name === t.name) });
+                            } catch (e: any) { return jsonRes(400, { error: e?.message || 'Invalid tunnel' }); }
+                        }
+                        return jsonRes(405, { error: 'Method not allowed' });
+                    }
+                }
+
                 // ── Monitors (RabbitMQ queues, HTTP endpoints) ──
                 if (url.pathname === '/admin/monitors' && req.method === 'GET') {
                     return jsonRes(200, { monitors: listMonitors().map(publicMonitor) });
@@ -4808,6 +4862,9 @@ async function handle(req: Request, srv: any): Promise<Response> {
                 if (url.pathname === '/admin/monitors/incidents' && req.method === 'GET') {
                     const days = Math.min(Math.max(parseInt(url.searchParams.get('days') || '7', 10) || 7, 1), 90);
                     return jsonRes(200, { incidents: listIncidents({ since: Date.now() - days * 86_400_000, monitor: url.searchParams.get('monitor') || undefined, limit: Math.min(parseInt(url.searchParams.get('limit') || '200', 10) || 200, 2000) }) });
+                }
+                if (url.pathname === '/admin/monitors/tunnels' && req.method === 'GET') {
+                    return jsonRes(200, { agents: tunnelAgents(), bridges: tunnelBridges() });
                 }
                 if (url.pathname === '/admin/monitors/traffic-resources' && req.method === 'GET') {
                     return jsonRes(200, { resources: listTrafficResources() });
