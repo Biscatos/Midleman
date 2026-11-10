@@ -29,7 +29,9 @@ if (!URL_BASE || !TOKEN) { console.error('MIDLEMAN_URL and AGENT_TOKEN are requi
 // Reports include log lines → HTTPS only, except to a private/LAN Midleman (or AGENT_ALLOW_HTTP=1 for a lab).
 {
     const u = new URL(URL_BASE);
-    const lan = /^(localhost|host\.docker\.internal|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(u.hostname);
+    // Private IPs, localhost, and container/compose names (no public TLD: "midleman", "midlemanprod.api", "*.internal", "*.local").
+    const lan = /^(localhost|host\.docker\.internal|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(u.hostname)
+        || !u.hostname.includes('.') || /\.(internal|local|lan|docker)$/.test(u.hostname) || /^[a-z0-9_-]+\.(api|app|svc|srv|db|web|prod|dev|stage)$/i.test(u.hostname);
     if (u.protocol !== 'https:' && !lan && process.env.AGENT_ALLOW_HTTP !== '1') { console.error(`MIDLEMAN_URL must be https:// (got ${u.protocol}//${u.hostname}); set AGENT_ALLOW_HTTP=1 only for a trusted network`); process.exit(2); }
 }
 /** Secrets must never leave the server inside a log line. */
