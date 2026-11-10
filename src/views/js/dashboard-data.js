@@ -4875,7 +4875,7 @@ function openWebhookModal(webhook = null) {
     : '';
   IpTagInput.setValue('wAllowedIps', webhook?.allowedIps || []);
   document.getElementById('wMetaEnabled').checked = !!webhook?.meta?.enabled;
-  const secEl = document.getElementById('wMetaAppSecret'); secEl.value = ''; secEl.placeholder = webhook?.meta?.hasAppSecret ? '•••••••• (set — leave empty to keep)' : 'verifies X-Hub-Signature-256 on every POST';
+  const secEl = document.getElementById('wMetaAppSecret'); secEl.value = ''; secEl.placeholder = webhook?.meta?.hasAppSecret ? '•••••••• (set — leave empty to keep)' : 'empty = accept POSTs as today; set = verify X-Hub-Signature-256';
   toggleMetaSection();
   _metaNumbers = null; if (webhook?.meta?.enabled) loadMetaNumbers(webhook.name);
   // Private/internal destinations are allowed by default; checkbox reflects the

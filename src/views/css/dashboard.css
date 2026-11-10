@@ -4131,3 +4131,7 @@ body.sidebar-collapsed .sidebar-link .sidebar-ext-icon { display: none !importan
 .mr-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .mr-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px 2px 8px; border: 1px solid var(--border); font: 400 12px var(--font-mono); color: var(--text); }
 .mr-chip button { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
+
+/* Collapsed: the hidden brand name must not leave its flex gap behind, or the owl sits 5px left of the icon column */
+body.sidebar-collapsed .sidebar-brand { gap: 0; }
+body.sidebar-collapsed .sidebar-brand-name { display: none; }

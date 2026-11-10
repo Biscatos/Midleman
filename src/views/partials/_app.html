@@ -3423,10 +3423,10 @@
           </div>
           <div id="wMetaFields" style="display:none;margin-top:10px">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-              <div><label class="mm-label">App Secret <span style="color:var(--text3)">(Meta app → Settings → Basic)</span></label><input class="mm-input" id="wMetaAppSecret" type="password" autocomplete="new-password" placeholder="verifies X-Hub-Signature-256 on every POST"></div>
-              <div><label class="mm-label">Verify token</label><div class="mm-input" style="color:var(--text2);font-size:12.5px;display:flex;align-items:center">= the Incoming Auth Token above (set one)</div></div>
+              <div><label class="mm-label">App Secret <span style="color:var(--text3)">(optional, recommended — Meta app → Settings → Basic)</span></label><input class="mm-input" id="wMetaAppSecret" type="password" autocomplete="new-password" placeholder="empty = accept POSTs as today; set = verify X-Hub-Signature-256"></div>
+              <div><label class="mm-label">Verify token (handshake)</label><div class="mm-input" style="color:var(--text2);font-size:12.5px;display:flex;align-items:center">uses the Incoming Auth Token above — nothing new to set</div></div>
             </div>
-            <div class="mm-field-hint">Callback URL in Meta: <code>https://&lt;your-host&gt;/</code> on this webhook's port (or the NPM hostname). Each destination then chooses its phone numbers and event kinds; numbers appear automatically once traffic arrives. Replays from Meta are deduplicated for 24 h.</div>
+            <div class="mm-field-hint">Existing Meta webhooks keep working unchanged. Enabling only adds: routing per phone number / event in each destination (numbers appear automatically once traffic arrives), 24 h deduplication of Meta replays and, if an App Secret is set, signature verification of every POST.</div>
           </div>
         </div>
         <div class="form-group span-2"><label>Allowed IPs <span
