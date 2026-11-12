@@ -11947,11 +11947,12 @@ function _monTrafficLine(s) {
 function _monServerLine(s, m = {}) {
   const r = s.server; if (!r) return 'waiting for the first report…';
   const crit = m.criticalContainers || [];
+  const twin = m.agentConflict ? `second agent refused from ${m.agentConflict.ip}` : null;
   const watched = crit.length ? r.containers.filter(c => crit.includes(c.name)) : r.containers;
   const down = watched.filter(c => c.status !== 'running' || c.health === 'unhealthy').length + crit.filter(n => !r.containers.some(c => c.name === n)).length;
   const disk = r.host.disks.length ? Math.max(...r.host.disks.map(d => d.pct)) : null;
   const errs = watched.reduce((a, c) => a + c.errorsInWindow, 0);
-  return [crit.length ? `${crit.length} critical of ${r.containers.length}` : `${r.containers.length} containers`, down ? `${down} down` : 'all running', disk !== null ? `disk ${disk}%` : null, r.host.memPct !== null ? `mem ${r.host.memPct}%` : null, errs ? `${errs} errors` : null].filter(Boolean).join(' · ');
+  return [crit.length ? `${crit.length} critical of ${r.containers.length}` : `${r.containers.length} containers`, down ? `${down} down` : 'all running', disk !== null ? `disk ${disk}%` : null, r.host.memPct !== null ? `mem ${r.host.memPct}%` : null, errs ? `${errs} errors` : null, twin].filter(Boolean).join(' · ');
 }
 function _monRedisLine(s) {
   const r = s.redis; if (!r) return s.lastValue != null ? s.lastValue + ' ms' : '—';

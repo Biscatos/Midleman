@@ -61,6 +61,7 @@ import { initSms, getSmsConfig, publicSmsConfig, validateSmsInput, saveSmsConfig
 import { initNpmSettings, getNpmSettings, publicNpmSettings, validateNpmInput, saveNpmSettings, deleteNpmSettings, isNpmEnabled, decryptNpmPassword } from './core/npm-settings';
 import { isNpmCertVolumePresent, startCertWatcher, onCertReloaded } from './certs/npm-cert-loader';
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleOauthSmsOtp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
+import { claimAgent } from './core/agent-instance';
 import { resolveClientIp, getTrustProxyConfig } from './core/ip-filter';
 import { initReportFeeds, handleReportRequest } from './reports/server';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
@@ -641,6 +642,8 @@ async function handleAgentReport(req: Request): Promise<Response> {
     if (!body || typeof body.agent !== 'string' || body.agent.length > 64 || !Array.isArray(body.containers) || !body.host) return jsonRes(400, { error: 'report needs agent, host, containers' });
     const m = agentMonitorForToken(body.agent, token);
     if (!m || !agentSourceAllowed(m, ip)) { recordFailedAttempt('agent:' + ip); return deny(401, m ? 'source ip not allowed' : 'bad token'); }
+    // a valid token from a second machine: not an attack to lock out, but only one agent may hold the monitor
+    if (!claimAgent(m.name, String(body.instance || '').slice(0, 64), ip, 3 * m.intervalSeconds * 1000)) return deny(409, 'another agent holds this monitor');
     if (agentReportTooSoon(m)) return deny(429, 'faster than interval');
     if (!m.enabled) return jsonRes(200, { status: 'disabled' });
     body.containers = body.containers.slice(0, 500).map((c: any) => ({
@@ -669,6 +672,7 @@ function handleTunnelUpgrade(req: Request, srv: any): Response | undefined {
     const m = name && name.length <= 64 ? agentMonitorForToken(name, token) : null;
     if (!m || !agentSourceAllowed(m, ip)) { recordFailedAttempt('agent:' + ip); return jsonRes(401, { error: 'unauthorized' }); }
     if (!m.enabled) return jsonRes(403, { error: 'monitor disabled' });
+    if (!claimAgent(m.name, (req.headers.get('x-agent-instance') || '').slice(0, 64), ip, 3 * m.intervalSeconds * 1000)) return jsonRes(409, { error: 'unauthorized' });
     return upgradeTunnel(srv, req, name, ip);
 }
 
