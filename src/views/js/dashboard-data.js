@@ -12207,7 +12207,7 @@ function _agentInstallHtml(name, token) {
   // networks are only known once an agent has reported: a first install has none to offer
   const all = [...new Set((sv?.containers || []).flatMap(c => (c.networks || []).map(n => n.name)))].filter(n => !['bridge', 'host', 'none'].includes(n)).sort();
   if (_agentNets?.name !== name) _agentNets = { name, on: new Set((sv?.host?.agentNetworks || []).filter(n => all.includes(n))) };
-  const base = 'https://' + location.hostname + ':' + (window.REPORT_PORT || 8444);
+  const base = window.AGENT_URL || 'https://' + location.hostname + ':' + (window.REPORT_PORT || 8444);   // AGENT_PUBLIC_URL when set
   const cmd = `docker run -d --name midleman-agent --restart unless-stopped \\
   --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --pids-limit 64 --memory 256m --log-opt max-size=10m --log-opt max-file=3 \\
   -v /var/run/docker.sock:/var/run/docker.sock:ro -v /:/hostfs:ro \\

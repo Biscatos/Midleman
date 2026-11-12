@@ -677,6 +677,9 @@ function handleTunnelUpgrade(req: Request, srv: any): Response | undefined {
 }
 
 const reportPortRaw = process.env.REPORT_PORT ?? '8444';
+// Where agents reach the Report port from outside, e.g. https://host/mid-agents: shown in the agent install command
+// instead of the address the dashboard happens to be open on. Anything that is not a plain http(s) URL is ignored.
+const agentPublicUrl = /^https?:\/\/[^\s"'<>\\]+$/.test((process.env.AGENT_PUBLIC_URL || '').trim()) ? process.env.AGENT_PUBLIC_URL!.trim().replace(/\/+$/, '') : '';
 startTunnels([config.port, Number(jwksPortRaw) || 0, Number(reportPortRaw) || 0]);
 const reportApiServer = Bun.serve({
     port: parseInt(reportPortRaw, 10),
@@ -1346,7 +1349,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     html = html.replace('<!-- INJECT_SETUP -->', setupHtml)
                                .replace('<!-- INJECT_LOGIN -->', loginHtml)
                                .replace('<!-- INJECT_APP -->', appHtml)
-                               .replace('<!-- INJECT_CONFIG -->', `<script>window.REPORT_PORT=${reportPortRaw};</script>`)
+                               .replace('<!-- INJECT_CONFIG -->', `<script>window.REPORT_PORT=${reportPortRaw};window.AGENT_URL=${JSON.stringify(agentPublicUrl)};</script>`)
                     html = html.replaceAll('__MM_V__', dashboardAssetVersion()).replace('__MM_FAVICON__', FAVICON_DATA_URI);
                 } catch (err) {
                     console.error('Failed to load dashboard partials:', err);

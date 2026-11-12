@@ -19,6 +19,7 @@ services:
       - JWT_ISSUER=${JWT_ISSUER}
       - JWKS_PORT=8443
       - REPORT_PORT=8444
+      - AGENT_PUBLIC_URL=${AGENT_PUBLIC_URL:-}   # public address agents report to, e.g. https://host/mid-agents (used in the install command)
       - SESSION_MAX_AGE=${SESSION_MAX_AGE:-86400}
       - OTEL_ENABLED=${OTEL_ENABLED:-true}
       - OTEL_ENDPOINT=http://otel-collector:4318
