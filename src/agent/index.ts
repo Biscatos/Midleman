@@ -61,6 +61,12 @@ function demux(buf: Uint8Array, tty: boolean): string {
 }
 
 const lastLogAt = new Map<string, number>(); // container id → unix seconds of the last line we read
+const lastCpu = new Map<string, { cpu: number; sys: number }>(); // container id → counters of the previous cycle
+/** CPU % between two samples of Docker's cumulative counters; null when there is no earlier sample. */
+export function cpuPct(prev: { cpu: number; sys: number } | undefined, cur: { cpu: number; sys: number }, cpus: number): number | null {
+    if (!prev || cur.sys <= prev.sys || cur.cpu < prev.cpu) return null;   // first cycle, or the container restarted
+    return Math.round(1000 * (cur.cpu - prev.cpu) / (cur.sys - prev.sys) * cpus) / 10;
+}
 let lastReport = 0;
 
 async function containerReport(c: any): Promise<any> {
@@ -75,13 +81,14 @@ async function containerReport(c: any): Promise<any> {
         base.exitCode = ins.State?.Running ? null : (ins.State?.ExitCode ?? null);
         base.startedAt = ins.State?.StartedAt || null;
         if (ins.State?.Running) try {
-            // stats samples CPU for ~1 s; a container that will not answer must not hold the whole report (20 s default)
-            const sr = await fetch(`http://localhost/containers/${id}/stats?stream=false`, { unix: SOCK, signal: AbortSignal.timeout(6_000) } as any);
+            // one-shot: dockerd answers from one cgroup read instead of sampling for 1-2 s per container (measured 300x cheaper);
+            // CPU % is the delta against our previous cycle. A container that will not answer must not hold the whole report.
+            const sr = await fetch(`http://localhost/containers/${id}/stats?stream=false&one-shot=true`, { unix: SOCK, signal: AbortSignal.timeout(6_000) } as any);
             if (!sr.ok) throw new Error(`stats HTTP ${sr.status}`);
             const st = await sr.json() as any;
-            const cpuD = (st.cpu_stats?.cpu_usage?.total_usage || 0) - (st.precpu_stats?.cpu_usage?.total_usage || 0);
-            const sysD = (st.cpu_stats?.system_cpu_usage || 0) - (st.precpu_stats?.system_cpu_usage || 0);
-            if (sysD > 0) base.cpuPct = Math.round(1000 * cpuD / sysD * (st.cpu_stats?.online_cpus || 1)) / 10;
+            const cur = { cpu: st.cpu_stats?.cpu_usage?.total_usage || 0, sys: st.cpu_stats?.system_cpu_usage || 0 };
+            base.cpuPct = cpuPct(lastCpu.get(id), cur, st.cpu_stats?.online_cpus || 1);
+            lastCpu.set(id, cur);
             const cache = st.memory_stats?.stats?.inactive_file || st.memory_stats?.stats?.cache || 0;
             if (st.memory_stats?.usage) base.memBytes = Math.max(0, st.memory_stats.usage - cache);
             if (st.memory_stats?.limit) base.memLimit = st.memory_stats.limit;
@@ -89,7 +96,12 @@ async function containerReport(c: any): Promise<any> {
         // logs since the previous read (first run: last interval only, so a backlog never floods)
         const since = lastLogAt.get(id) ?? Math.floor(Date.now() / 1000) - INTERVAL;
         const now = Math.floor(Date.now() / 1000);
-        const r = await docker(`/containers/${id}/logs?stdout=1&stderr=1&timestamps=1&since=${since}&until=${now}`);
+        // a stopped container writes nothing more: once read past its end, leave it alone (most containers on a host can be stopped)
+        const finished = ins.State?.Running ? Infinity : Math.ceil(Date.parse(ins.State?.FinishedAt || '') / 1000) || 0;
+        if (since > finished) return base;
+        // tail makes dockerd read the log file from its end; without it every call decodes the whole file to find `since`
+        // shortcut: more than 2000 lines in one interval loses the oldest ones, raise tail if a container logs that fast
+        const r = await docker(`/containers/${id}/logs?stdout=1&stderr=1&timestamps=1&since=${since}&until=${now}&tail=2000`);
         if (r.ok) {
             const text = demux(new Uint8Array(await r.arrayBuffer()), ins.Config?.Tty === true);
             for (const raw of text.split('\n')) {
