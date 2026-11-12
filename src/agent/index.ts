@@ -11,7 +11,7 @@
 //     registry.biscatos.com/midleman/api-midleman:<tag> bun run src/agent/index.ts
 //
 // Env: MIDLEMAN_URL (required), AGENT_TOKEN (required), AGENT_NAME (default hostname),
-//      AGENT_INTERVAL seconds (default 30), LOG_PATTERN regex (default ERROR|Exception|FATAL|panic),
+//      AGENT_INTERVAL seconds (default 30), LOG_PATTERN regex (default ERROR|Exception|FATAL|panic; warnings are reported too, but never alert),
 //      LOG_IGNORE regex (optional), DOCKER_SOCK (default /var/run/docker.sock),
 //      SKIP_CONTAINERS comma list (default: this agent's own container).
 //      TUNNEL_ALLOW private | host:port list | off, TUNNEL_CONNS parallel connections (default 2),
@@ -25,6 +25,7 @@ const TOKEN = process.env.AGENT_TOKEN || '';
 const NAME = process.env.AGENT_NAME || hostname();
 const INTERVAL = Math.max(10, Number(process.env.AGENT_INTERVAL) || 30);
 const SOCK = process.env.DOCKER_SOCK || '/var/run/docker.sock';
+import { pickLogLines } from './loglines';
 const PATTERN = new RegExp(process.env.LOG_PATTERN || 'ERROR|Exception|FATAL|panic', 'i');
 const IGNORE = process.env.LOG_IGNORE ? new RegExp(process.env.LOG_IGNORE, 'i') : null;
 const SKIP = new Set((process.env.SKIP_CONTAINERS || 'midleman-agent').split(',').map(s => s.trim()).filter(Boolean));
@@ -71,7 +72,7 @@ let lastReport = 0;
 
 async function containerReport(c: any): Promise<any> {
     const id: string = c.Id, name: string = (c.Names?.[0] || c.Id).replace(/^\//, '');
-    const base = { id: id.slice(0, 12), name, image: c.Image, status: c.State, health: null as string | null, restartCount: 0, oomKilled: false, restartPolicy: 'no', exitCode: null as number | null, startedAt: null as string | null, cpuPct: null as number | null, memBytes: null as number | null, memLimit: null as number | null, errors: [] as { at: number; line: string }[],
+    const base = { id: id.slice(0, 12), name, image: c.Image, status: c.State, health: null as string | null, restartCount: 0, oomKilled: false, restartPolicy: 'no', exitCode: null as number | null, startedAt: null as string | null, cpuPct: null as number | null, memBytes: null as number | null, memLimit: null as number | null, errors: [] as { at: number; line: string; warn?: boolean }[],
         // where a tunnel can reach it: the dashboard offers these when a tunnel is created
         networks: Object.entries(c.NetworkSettings?.Networks || {}).map(([n, v]: any) => ({ name: n, ip: v?.IPAddress || '' })),
         ports: [...new Set((c.Ports || []).filter((p: any) => p.Type === 'tcp').map((p: any) => p.PrivatePort))].sort((a: any, b: any) => a - b) as number[] };
@@ -107,12 +108,10 @@ async function containerReport(c: any): Promise<any> {
         const r = await docker(`/containers/${id}/logs?stdout=1&stderr=1&timestamps=1&since=${since}&until=${now}&tail=2000`);
         if (r.ok) {
             const text = demux(new Uint8Array(await r.arrayBuffer()), ins.Config?.Tty === true);
-            for (const raw of text.split('\n')) {
-                const line = raw.trimEnd(); if (!line) continue;
-                const ts = Date.parse(line.slice(0, 30).split(' ')[0]) || Date.now();
-                const msg = line.replace(/^\S+\s/, '');
-                if (PATTERN.test(msg) && !(IGNORE && IGNORE.test(msg))) { base.errors.push({ at: ts, line: redact(msg).slice(0, 500) }); if (base.errors.length >= 100) break; }
-            }
+            const lines = text.split('\n').map(l => l.trimEnd()).filter(Boolean);
+            // errors first: a noisy stream of warnings must not use up the 100 lines a report carries
+            const picked = pickLogLines(lines.map(l => l.replace(/^\S+\s/, '')), PATTERN, IGNORE).sort((a, b) => Number(a.warn) - Number(b.warn)).slice(0, 100).sort((a, b) => a.i - b.i);
+            for (const p of picked) base.errors.push({ at: Date.parse(lines[p.i].slice(0, 30).split(' ')[0]) || Date.now(), line: redact(p.line).slice(0, 500), ...(p.warn ? { warn: true } : {}) });
         }
         lastLogAt.set(id, now);
     } catch (e: any) { console.warn(`[agent] could not inspect ${name}: ${e.message}`); }
@@ -158,8 +157,8 @@ async function tick(): Promise<void> {
     const res = await fetch(`${URL_BASE}/agent/report`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify(report), signal: AbortSignal.timeout(20_000) });
     if (!res.ok) throw new Error(`Midleman answered HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
     lastReport = Date.now();
-    const down = containers.filter(c => c.status !== 'running').length, errs = containers.reduce((a, c) => a + c.errors.length, 0);
-    console.log(`[agent] ${new Date().toISOString()} sent ${containers.length} containers, ${down} down, ${errs} error lines`);
+    const down = containers.filter(c => c.status !== 'running').length, errs = containers.reduce((a, c) => a + c.errors.filter((e: any) => !e.warn).length, 0), warns = containers.reduce((a, c) => a + c.errors.length, 0) - errs;
+    console.log(`[agent] ${new Date().toISOString()} sent ${containers.length} containers, ${down} down, ${errs} error lines, ${warns} warnings`);
 }
 
 // ─── Reverse tunnel (FRP-style, no extra setup) ─────────────────────────────

@@ -141,8 +141,8 @@ export interface AgentContainer {
     cpuPct: number | null; memBytes: number | null; memLimit: number | null;
     /** Docker networks it is attached to and its TCP ports (agents before this field send neither). */
     networks?: { name: string; ip: string }[]; ports?: number[];
-    /** New matching log lines since the previous report. */
-    errors: { at: number; line: string }[];
+    /** New matching log lines since the previous report. `warn` lines are kept and shown, never alerted on. */
+    errors: { at: number; line: string; warn?: boolean }[];
 }
 export interface AgentReport {
     agent: string; at: number; intervalSeconds?: number;
@@ -153,7 +153,7 @@ export interface AgentReport {
 export interface ServerSnapshot {
     at: number;
     host: AgentReport['host'];
-    containers: (Omit<AgentContainer, 'errors'> & { errorsInWindow: number; lastError: { at: number; line: string } | null })[];
+    containers: (Omit<AgentContainer, 'errors'> & { errorsInWindow: number; warningsInWindow: number; lastError: { at: number; line: string } | null })[];
 }
 
 export type DbEngine = 'postgres' | 'mysql' | 'mssql';
@@ -470,7 +470,7 @@ export function hashAgentToken(token: string): string { return createHash('sha25
 
 // ─── Runtime state & checks ─────────────────────────────────────────────────
 
-interface State extends MonitorStatus { checking: boolean; /** dead-letter queue publish counter at the previous check */ errPublished: number | null; /** redis counters at the previous check (restart / eviction / rejection detection) */ redisPrev: { evicted: number; rejected: number; uptime: number } | null; /** server: bursts detected when a report arrived, consumed by the next runCheck */ pendingBursts: string[]; /** server: captured log lines, newest last (max ERRORS_MAX) */ serverErrors: { at: number; container: string; line: string }[]; /** server: exception classes already seen per container */ seenErrorKinds: Map<string, Set<string>>; /** server: previous report's restart counters */ serverPrev: Map<string, { restartCount: number; oomKilled: boolean; running: boolean }>; /** database: deadlock counter at the previous check */ dbPrev: { deadlocks: number | null } | null; /** server: error lines per day per container (14 days) — for the weekly report */ errorDaily: Record<string, Record<string, number>>; /** incident open for the current alert episode */ openIncident: string | null }
+interface State extends MonitorStatus { checking: boolean; /** dead-letter queue publish counter at the previous check */ errPublished: number | null; /** redis counters at the previous check (restart / eviction / rejection detection) */ redisPrev: { evicted: number; rejected: number; uptime: number } | null; /** server: bursts detected when a report arrived, consumed by the next runCheck */ pendingBursts: string[]; /** server: captured log lines, newest last (max ERRORS_MAX) */ serverErrors: { at: number; container: string; line: string; warn?: boolean }[]; /** server: exception classes already seen per container */ seenErrorKinds: Map<string, Set<string>>; /** server: previous report's restart counters */ serverPrev: Map<string, { restartCount: number; oomKilled: boolean; running: boolean }>; /** database: deadlock counter at the previous check */ dbPrev: { deadlocks: number | null } | null; /** server: error lines per day per container (14 days) — for the weekly report */ errorDaily: Record<string, Record<string, number>>; /** incident open for the current alert episode */ openIncident: string | null }
 const ERRORS_MAX = 300;
 const states = new Map<string, State>();
 
@@ -937,8 +937,9 @@ export async function ingestAgentReport(m: ServerMonitor, r: AgentReport): Promi
     const windowMs = m.logWindowMinutes * 60_000;
     const containers: ServerSnapshot['containers'] = [];
     for (const c of r.containers) {
-        const { errors, ...rest } = c;
-        for (const e of errors) s.serverErrors.push({ at: e.at || now, container: c.name, line: e.line.slice(0, 500) });
+        const { errors: lines, ...rest } = c;
+        for (const e of lines) s.serverErrors.push({ at: e.at || now, container: c.name, line: e.line.slice(0, 500), ...(e.warn ? { warn: true } : {}) });
+        const errors = lines.filter(e => !e.warn);   // everything below (counts, new-error detection, alerts) is about errors only
         if (errors.length) { const day = new Date(now).toISOString().slice(0, 10); (s.errorDaily[day] ||= {})[c.name] = (s.errorDaily[day][c.name] || 0) + errors.length; }
         if (watchedContainer(m, c.name)) {
             const prev = s.serverPrev.get(c.name);
@@ -951,13 +952,13 @@ export async function ingestAgentReport(m: ServerMonitor, r: AgentReport): Promi
                 const k = errorKind(e.line);
                 if (!seen.has(k)) { seen.add(k); if (!firstReport) s.pendingBursts.push(`new error in "${c.name}": ${e.line.slice(0, 200)}`); }
             }
-            const inWindow = s.serverErrors.filter(e => e.container === c.name && now - e.at <= windowMs).length;
+            const inWindow = s.serverErrors.filter(e => e.container === c.name && !e.warn && now - e.at <= windowMs).length;
             // first report only baselines: a backlog of old errors must not alert
             if (!firstReport && m.logErrorsPerWindow > 0 && errors.length && inWindow >= m.logErrorsPerWindow) s.pendingBursts.push(`${inWindow} error lines in "${c.name}" within ${m.logWindowMinutes} min — last: ${errors[errors.length - 1].line.slice(0, 200)}`);
         }
         s.serverPrev.set(c.name, { restartCount: c.restartCount, oomKilled: c.oomKilled, running: c.status === 'running' || s.serverPrev.get(c.name)?.running === true });
-        const mine = s.serverErrors.filter(e => e.container === c.name);
-        containers.push({ ...rest, errorsInWindow: mine.filter(e => now - e.at <= windowMs).length, lastError: mine.length ? { at: mine[mine.length - 1].at, line: mine[mine.length - 1].line } : null });
+        const all = s.serverErrors.filter(e => e.container === c.name), mine = all.filter(e => !e.warn);
+        containers.push({ ...rest, warningsInWindow: all.filter(e => e.warn && now - e.at <= windowMs).length, errorsInWindow: mine.filter(e => now - e.at <= windowMs).length, lastError: mine.length ? { at: mine[mine.length - 1].at, line: mine[mine.length - 1].line } : null });
     }
     if (s.serverErrors.length > ERRORS_MAX) s.serverErrors.splice(0, s.serverErrors.length - ERRORS_MAX);
     for (const day of Object.keys(s.errorDaily)) if (Date.now() - Date.parse(day) > 15 * 86_400_000) delete s.errorDaily[day];
@@ -966,7 +967,7 @@ export async function ingestAgentReport(m: ServerMonitor, r: AgentReport): Promi
     return runCheck(m);
 }
 
-export function serverErrors(name: string, container?: string, limit = 200): { at: number; container: string; line: string }[] {
+export function serverErrors(name: string, container?: string, limit = 200): { at: number; container: string; line: string; warn?: boolean }[] {
     const all = stateOf(name).serverErrors;
     const list = container ? all.filter(e => e.container === container) : all;
     return list.slice(-limit).reverse();

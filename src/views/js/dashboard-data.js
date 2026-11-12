@@ -12079,7 +12079,7 @@ function openMonitorDetail(name) {
         <td><div class="md-ctr-name">${esc(c.name)}${isCrit ? ' <span class="md-crit">critical</span>' : ''}</div><div class="md-ctr-img">${esc(c.image)}</div></td>
         <td><span class="mm-chip ${bad ? 'err' : 'ok'}">${esc(c.status)}${c.health ? ' · ' + esc(c.health) : ''}</span>${c.oomKilled ? ' <span class="mm-chip err">OOM</span>' : ''}${ign ? ' <span class="mm-chip">ignored</span>' : ''}</td>
         <td class="mono">${c.restartCount}</td><td class="mono">${c.cpuPct != null ? c.cpuPct + '%' : '—'}</td><td class="mono">${c.memBytes != null ? _monBytes(c.memBytes) : '—'}</td>
-        <td class="mono" style="color:${c.errorsInWindow ? 'var(--red)' : 'inherit'}">${c.errorsInWindow}</td>
+        <td class="mono"><span style="color:${c.errorsInWindow ? 'var(--red)' : 'inherit'}">${c.errorsInWindow}</span>${c.warningsInWindow ? ` <span style="color:var(--orange)" title="Warnings in the same window: shown, never alerted on">+${c.warningsInWindow} warn</span>` : ''}</td>
         <td class="detail" title="${esc(c.lastError?.line || '')}">${c.lastError ? `<span class="md-ctr-err">${esc(c.lastError.line.slice(0, 120))}</span><span class="md-ctr-when">${_monAgo(c.lastError.at)}</span>` : '<span style="color:var(--text3)">—</span>'}</td></tr>`; }).join('') +
       `</tbody></table></div>`;
     mdCtrFilter(_mdCtrQ);
@@ -12187,15 +12187,15 @@ async function mdContainerErrors(container) {
       ${stat('CPU', c.cpuPct != null ? c.cpuPct + '%' : '—')}
       ${stat('RAM', c.memBytes != null ? _monBytes(c.memBytes) : '—', c.memLimit ? 'limit ' + _monBytes(c.memLimit) : 'no limit')}
       ${stat('Started', c.startedAt ? _monAgo(Date.parse(c.startedAt)) : '—', c.exitCode != null ? 'exit code ' + c.exitCode : '')}
-      ${stat('Errors (' + (m.logWindowMinutes || 5) + ' min)', `<span style="color:${c.errorsInWindow ? 'var(--red)' : 'inherit'}">${c.errorsInWindow}</span>`)}
+      ${stat('Errors (' + (m.logWindowMinutes || 5) + ' min)', `<span style="color:${c.errorsInWindow ? 'var(--red)' : 'inherit'}">${c.errorsInWindow}</span>`, c.warningsInWindow ? c.warningsInWindow + ' warnings' : '')}
     </div>` : ''}
     <div id="mdCtrErrors"><div class="md-peek-head">Loading error lines…</div></div>`;
   const res = await api(`/admin/monitors/${encodeURIComponent(_mdName)}/errors?container=${encodeURIComponent(container)}&limit=200`);
   const d = await res.json().catch(() => ({}));
   const out = document.getElementById('mdCtrErrors'); if (!out || _mdCtr !== container) return;
   if (!res.ok) { out.innerHTML = `<div class="md-peek-err">${esc(d.error || 'Failed')}</div>`; return; }
-  out.innerHTML = `<div class="md-peek-head">${d.errors.length ? `Last ${d.errors.length} line(s) matching the error pattern, newest first` : 'No log line matched the error pattern yet.'}</div>` +
-    (d.errors.length ? `<pre class="md-ctr-log">${d.errors.map(e => `<span class="md-ctr-ts">${new Date(e.at).toLocaleString()}</span> ${esc(e.line)}`).join('\n')}</pre>` : '');
+  out.innerHTML = `<div class="md-peek-head">${d.errors.length ? `Last ${d.errors.length} error and warning line(s), newest first` : 'No error or warning line yet.'}</div>` +
+    (d.errors.length ? `<pre class="md-ctr-log">${d.errors.map(e => `<span class="md-ctr-ts">${new Date(e.at).toLocaleString()}</span> ${e.warn ? `<span style="color:var(--orange)">${esc(e.line)}</span>` : esc(e.line)}`).join('\n')}</pre>` : '');
 }
 function mdContainerBack() { _mdCtr = null; const box = document.getElementById('mdContainers'); box.innerHTML = ''; document.getElementById('mdHistoryWrap').style.display = ''; openMonitorDetail(_mdName); }
 let _agentNets = null, _agentTok = null;   // networks switched on for the install command, and the token it is showing

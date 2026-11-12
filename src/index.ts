@@ -648,7 +648,7 @@ async function handleAgentReport(req: Request): Promise<Response> {
         restartCount: Number(c.restartCount) || 0, oomKilled: c.oomKilled === true, restartPolicy: c.restartPolicy ? String(c.restartPolicy).slice(0, 20) : undefined, exitCode: Number.isFinite(c.exitCode) ? Number(c.exitCode) : null,
         startedAt: c.startedAt ? String(c.startedAt) : null,
         cpuPct: Number.isFinite(c.cpuPct) ? Number(c.cpuPct) : null, memBytes: Number.isFinite(c.memBytes) ? Number(c.memBytes) : null, memLimit: Number.isFinite(c.memLimit) ? Number(c.memLimit) : null,
-        errors: (Array.isArray(c.errors) ? c.errors : []).slice(0, 100).map((e: any) => ({ at: Number(e.at) || Date.now(), line: String(e.line || '').slice(0, 500) })),
+        errors: (Array.isArray(c.errors) ? c.errors : []).slice(0, 100).map((e: any) => ({ at: Number(e.at) || Date.now(), line: String(e.line || '').slice(0, 500), ...(e.warn === true ? { warn: true } : {}) })),
         networks: (Array.isArray(c.networks) ? c.networks : []).slice(0, 20).map((n: any) => ({ name: String(n?.name || '').slice(0, 128), ip: String(n?.ip || '').slice(0, 45) })),
         ports: (Array.isArray(c.ports) ? c.ports : []).slice(0, 50).map(Number).filter((p: number) => Number.isInteger(p) && p > 0 && p < 65536),
     }));
