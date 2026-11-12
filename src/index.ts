@@ -2342,6 +2342,8 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             input.gocontact.password = prev.gocontact.password;
                         }
                         // Webchat API callback secret — carried over when the form leaves it blank.
+                        // Blank or masked hash key on edit = keep the stored one (must happen before validation).
+                        if (input.gocontact && typeof input.gocontact === 'object' && (!input.gocontact.hashKey || input.gocontact.hashKey === SECRET_MASK) && prev.gocontact.hashKey) input.gocontact.hashKey = prev.gocontact.hashKey;
                         if (input.gocontact && typeof input.gocontact === 'object' && !input.gocontact.callbackToken && prev.gocontact.callbackToken) {
                             input.gocontact.callbackToken = prev.gocontact.callbackToken;
                         }

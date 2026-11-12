@@ -2482,7 +2482,7 @@ const cnWiz = Wizard.mount('connectorModal', {
     if (!Wizard.val('cnGoUsername')) flag('gocontact', 'GoContact username is required');
     if ((Wizard.val('cnGoMode') || 'poll') === 'poll') {
       if (!Wizard.val('cnGoBaseUrl')) flag('gocontact', 'Base URL is required in polling mode');
-      else if (!Wizard.val('cnGoHashKey')) flag('gocontact', 'Hash Key is required in polling mode');
+      else if (!Wizard.val('cnGoHashKey') && !document.getElementById('cnGoHashKey').placeholder) flag('gocontact', 'Hash Key is required in polling mode');
     } else {
       if (!Wizard.val('cnGoAudience')) flag('gocontact', 'Audience is required in Webchat API mode');
       else if (!Wizard.val('cnGoChannelUuid')) flag('gocontact', 'Channel UUID is required in Webchat API mode');
