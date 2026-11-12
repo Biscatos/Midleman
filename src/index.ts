@@ -365,7 +365,8 @@ function getAuthedAdmin(req: Request): import('./core/types').AuthUser | null {
 // Real socket peer IP captured at the server boundary; see rememberPeerIp.
 const reqPeerIp = new WeakMap<Request, string>();
 function rememberPeerIp(req: Request, peerIp: string | null | undefined): void {
-    if (peerIp) reqPeerIp.set(req, peerIp);
+    // Bun reports IPv4 peers as ::ffff:a.b.c.d on a dual-stack socket; every allowlist and TRUST_PROXY rule is written in plain IPv4
+    if (peerIp) reqPeerIp.set(req, peerIp.replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/i, ''));
 }
 
 /** Resolves the trusted client IP (socket peer + X-Forwarded-For only when the
