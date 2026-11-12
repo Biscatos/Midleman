@@ -12867,29 +12867,39 @@ function openTunnelModal(name) {
   g('tunnelModal').style.display = 'flex';
   setTimeout(() => g(t ? 'tunHost' : 'tunName').focus(), 30);
 }
-/** Container picker shared by the tunnel and monitor forms: a select above the host input, and picking a container
- *  hides the typed address. f = element ids { sel, host, port, hint }; a = { networks, containers } the agent reported. */
+/** Container picker shared by the tunnel and monitor forms: a select above the target input.
+ *  f = element ids { sel, hint } plus either { host, port } (picking hides the typed address) or { url, prefer }
+ *  (picking rewrites host and port inside the URL, which stays editable for the path); a = { networks, containers } the agent reported. */
 function ctrFill(f, a) {
-  const g = id => document.getElementById(id), host = g(f.host).value.trim(), list = a?.containers || [];
-  g(f.sel).innerHTML = '<option value="">Address typed by hand</option>' + list.map(c =>
-    `<option value="${esc(c.name)}" ${host && (c.name === host || c.networks.some(n => n.ip === host)) ? 'selected' : ''}>${esc(c.name)}${c.ports.length ? ' · port ' + c.ports.slice(0, 3).join(', ') + (c.ports.length > 3 ? ` +${c.ports.length - 3}` : '') : ''}</option>`).join('');
+  const g = id => document.getElementById(id), inp = g(f.url || f.host), list = a?.containers || [];
+  let cur = inp.value.trim();
+  if (f.url) try { cur = new URL(cur).hostname; } catch { cur = ''; }
+  g(f.sel).innerHTML = `<option value="">${f.url ? 'Pick a container to fill the address' : 'Address typed by hand'}</option>` + list.map(c =>
+    `<option value="${esc(c.name)}" ${cur && (c.name === cur || c.networks.some(n => n.ip === cur)) ? 'selected' : ''}>${esc(c.name)}${c.ports.length ? ' · port ' + c.ports.slice(0, 3).join(', ') + (c.ports.length > 3 ? ` +${c.ports.length - 3}` : '') : ''}</option>`).join('');
   g(f.sel).style.display = list.length ? '' : 'none';   // nothing reported (direct, or an agent older than this field): just the input
   g(f.hint).innerHTML = '';
-  g(f.host).style.marginTop = list.length ? '6px' : '';
-  g(f.host).style.display = g(f.sel).value ? 'none' : '';
+  inp.style.marginTop = list.length ? '6px' : '';
+  if (!f.url) inp.style.display = g(f.sel).value ? 'none' : '';
 }
-/** Fill host and port from the picked container, and say so when the agent cannot reach it yet. */
+/** Fill the target from the picked container, and say so when the agent cannot reach it yet. */
 function ctrPick(f, a) {
-  const g = id => document.getElementById(id), c = a?.containers.find(x => x.name === g(f.sel).value);
+  const g = id => document.getElementById(id), inp = g(f.url || f.host), c = a?.containers.find(x => x.name === g(f.sel).value);
   g(f.hint).innerHTML = '';
-  g(f.host).style.display = c ? 'none' : '';
-  if (!c) { g(f.host).focus(); return; }
-  if (c.ports.length && !c.ports.includes(Number(g(f.port).value))) { g(f.port).value = c.ports[0]; g(f.port).dataset.touched = 1; }
-  if (c.networks.some(n => n.name === 'host')) { g(f.sel).value = ''; window.mmSelectSync?.(g(f.sel)); g(f.host).value = ''; g(f.host).style.display = ''; g(f.hint).innerHTML = `${esc(c.name)} uses the host network: type the server's own private IP.`; return; }
+  if (!f.url) inp.style.display = c ? 'none' : '';
+  if (!c) { inp.focus(); return; }
+  if (c.networks.some(n => n.name === 'host')) { g(f.sel).value = ''; window.mmSelectSync?.(g(f.sel)); if (!f.url) { inp.value = ''; inp.style.display = ''; } g(f.hint).innerHTML = `${esc(c.name)} uses the host network: type the server's own private IP.`; return; }
   const shared = c.networks.filter(n => a.networks.includes(n.name));
   // Docker resolves container names only on user-defined networks; on the default bridge the IP is the only address
-  const byName = shared.some(n => n.name !== 'bridge');
-  g(f.host).value = byName || !shared.length ? c.name : shared[0].ip;
+  const byName = shared.some(n => n.name !== 'bridge'), host = byName || !shared.length ? c.name : shared[0].ip;
+  if (f.url) {
+    let u; try { u = new URL(inp.value.trim()); } catch { u = new URL('http://x'); }
+    u.hostname = host;
+    if (c.ports.length && !c.ports.includes(Number(u.port || (u.protocol === 'https:' ? 443 : 80)))) u.port = String(c.ports.includes(f.prefer) ? f.prefer : c.ports[0]);
+    inp.value = u.href.replace(/\/$/, ''); inp.dispatchEvent(new Event('input'));
+  } else {
+    if (c.ports.length && !c.ports.includes(Number(g(f.port).value))) { g(f.port).value = c.ports[0]; g(f.port).dataset.touched = 1; }
+    inp.value = host;
+  }
   if (!a.networks.length || !c.networks.length) return;   // agent older than this field: nothing to compare
   if (!shared.length) g(f.hint).innerHTML = `<span style="color:var(--red)">The agent is not on this container's network, so it cannot reach it.</span> Run on that server: <code>docker network connect ${esc(c.networks[0].name)} midleman-agent</code>`;
   else if (!byName) g(f.hint).innerHTML = 'Reached by IP on the default bridge network; the IP can change when the container is recreated.';
@@ -12898,13 +12908,13 @@ const TUN_CTR = { sel: 'tunContainer', host: 'tunHost', port: 'tunPort', hint: '
 const _tunAgentSel = () => _tunAgents.find(x => x.name === document.getElementById('tunAgent').value);
 function tunFillContainers() { ctrFill(TUN_CTR, _tunAgentSel()); }
 function tunPickContainer() { ctrPick(TUN_CTR, _tunAgentSel()); }
-const MON_CTR = { Redis: { sel: 'monRedisCtr', host: 'monRedisHost', port: 'monRedisPort', hint: 'monRedisCtrHint' }, Db: { sel: 'monDbCtr', host: 'monDbHost', port: 'monDbPort', hint: 'monDbCtrHint' } };
+const MON_CTR = { Rabbit: { sel: 'monApiCtr', url: 'monApiUrl', hint: 'monApiCtrHint', prefer: 15672 }, Http: { sel: 'monUrlCtr', url: 'monUrl', hint: 'monUrlCtrHint' }, Redis: { sel: 'monRedisCtr', host: 'monRedisHost', port: 'monRedisPort', hint: 'monRedisCtrHint' }, Db: { sel: 'monDbCtr', host: 'monDbHost', port: 'monDbPort', hint: 'monDbCtrHint' } };
 /** What the agent chosen in "Reach through an agent" last reported (null when direct or never reported). */
 function _monCtrAgent() {
   const sv = _allMonitors.find(m => m.type === 'server' && m.name === document.getElementById('monVia').value)?.status?.server;
   return sv ? { networks: sv.host?.agentNetworks || [], containers: sv.containers.filter(c => c.status === 'running').map(c => ({ name: c.name, ports: c.ports || [], networks: c.networks || [] })) } : null;
 }
-function monCtrFill() { const a = _monCtrAgent(); ctrFill(MON_CTR.Redis, a); ctrFill(MON_CTR.Db, a); }
+function monCtrFill() { const a = _monCtrAgent(); for (const f of Object.values(MON_CTR)) ctrFill(f, a); }
 function monCtrPick(k) { ctrPick(MON_CTR[k], _monCtrAgent()); }
 /** One-click additions to "Allowed from": the address this browser comes from, and the last one the tunnel refused. */
 function tunAllowQuick() {

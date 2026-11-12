@@ -870,10 +870,16 @@
             <input class="mm-input" id="monDescription" type="text" placeholder="(optional — included in the alert)">
           </div>
 
+          <div id="monViaWrap" style="display:none">
+            <label class="mm-label">Reach through an agent <span style="color:var(--text3)">(reverse tunnel — for targets whose port is not exposed to us)</span></label>
+            <select class="mm-input" id="monVia" data-search onchange="monCtrFill()"><option value="">Direct — Midleman connects itself</option></select>
+            <div class="mm-field-hint">The target below is then resolved on that server's network, and its running containers can be picked. The agent only tunnels to private addresses by default (TUNNEL_ALLOW); HTTPS through a tunnel is not certificate-checked.</div>
+          </div>
+
           <!-- RabbitMQ -->
           <div id="monRabbitFields" class="mm-group"><div class="mm-group-title">RabbitMQ</div>
             <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
-              <div><label class="mm-label">Management API URL *</label><input class="mm-input" id="monApiUrl" type="text" placeholder="http://10.11.1.200:15672" oninput="monBrowseState()"></div>
+              <div><label class="mm-label">Management API URL *</label><select class="mm-input" id="monApiCtr" data-search style="display:none" onchange="monCtrPick('Rabbit')"></select><input class="mm-input" id="monApiUrl" type="text" placeholder="http://10.11.1.200:15672" oninput="monBrowseState()"><div class="mm-field-hint" id="monApiCtrHint"></div></div>
               <div><label class="mm-label">vhost</label><input class="mm-input" id="monVhost" type="text" placeholder="/"></div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
@@ -900,7 +906,7 @@
           <div id="monHttpFields" class="mm-group" style="display:none"><div class="mm-group-title">HTTP</div>
             <div style="display:grid;grid-template-columns:100px 1fr;gap:10px">
               <div><label class="mm-label">Method</label><select class="mm-input" id="monMethod"><option>GET</option><option>HEAD</option><option>POST</option></select></div>
-              <div><label class="mm-label">URL *</label><input class="mm-input" id="monUrl" type="text" placeholder="https://api.example.com/health"></div>
+              <div><label class="mm-label">URL *</label><select class="mm-input" id="monUrlCtr" data-search style="display:none" onchange="monCtrPick('Http')"></select><input class="mm-input" id="monUrl" type="text" placeholder="https://api.example.com/health"><div class="mm-field-hint" id="monUrlCtrHint"></div></div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
               <div><label class="mm-label">Expected status</label><input class="mm-input" id="monExpectStatus" type="text" placeholder="2xx" value="2xx"></div>
@@ -987,11 +993,6 @@
             <div class="mm-field-hint">Always alerts on: container stopped/unhealthy, restart, OOM kill, a never-seen error type, agent silent for 3 intervals.</div>
           </div>
 
-          <div id="monViaWrap" style="display:none">
-            <label class="mm-label">Reach through an agent <span style="color:var(--text3)">(reverse tunnel — for targets whose port is not exposed to us)</span></label>
-            <select class="mm-input" id="monVia" data-search onchange="monCtrFill()"><option value="">Direct — Midleman connects itself</option></select>
-            <div class="mm-field-hint">Host and port above are then resolved on that server's network. The agent only tunnels to private addresses by default (TUNNEL_ALLOW); HTTPS through a tunnel is not certificate-checked.</div>
-          </div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
             <div><label class="mm-label">Check every (seconds)</label><input class="mm-input" id="monIntervalSeconds" type="number" min="10" value="60"></div>
             <div><label class="mm-label">Cooldown (minutes)</label><input class="mm-input" id="monCooldownMinutes" type="number" min="1" value="60"></div>
