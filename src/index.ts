@@ -50,7 +50,7 @@ import { listWallboardKeys, createWallboardKey, revokeWallboardKey, verifyWallbo
 import { numbersSeen as metaNumbersSeen, exportNumbersSeen, importNumbersSeen, META_EVENT_KINDS } from './core/meta-router';
 import { tunnelWebSocket, upgradeTunnel, tunnelAgents, tunnelBridges } from './core/agent-tunnel';
 import { startTunnels, listTunnels, getTunnel, saveTunnel, deleteTunnel, testTunnel } from './core/tunnels';
-import { listMonitors, getMonitor, upsertMonitor, deleteMonitor, publicMonitor, validateMonitorInput, runCheck, peekQueue, listRabbitQueues, errorQueueName, requeueErrorMessages, discardErrorMessages, exportErrorMessages, startMonitorScheduler, stopMonitorScheduler, agentMonitorForToken, agentSourceAllowed, agentReportTooSoon, ingestAgentReport, serverErrors, newAgentToken, hashAgentToken, listIncidents, type AgentReport } from './core/monitors';
+import { listMonitors, getMonitor, getStatus, upsertMonitor, deleteMonitor, publicMonitor, validateMonitorInput, runCheck, peekQueue, listRabbitQueues, errorQueueName, requeueErrorMessages, discardErrorMessages, exportErrorMessages, startMonitorScheduler, stopMonitorScheduler, agentMonitorForToken, agentSourceAllowed, agentReportTooSoon, ingestAgentReport, serverErrors, newAgentToken, hashAgentToken, listIncidents, type AgentReport } from './core/monitors';
 import { getReportSettings, saveReportSettings, buildWeeklyReport, sendWeeklyReport, reportSchedulerTick } from './core/monitor-report';
 import { listTrafficResources } from './telemetry/request-log';
 import { initOauth, createOauthClient, listOauthClients, deleteOauthClient, updateOauthClient, setOauthClientAllowList, addUserToOauthClient, removeUserFromOauthClient, listUsersForOauthClient, getOauthClient, listLdapGroupsForOauthClient, addLdapGroupToOauthClient, removeLdapGroupFromOauthClient, reconcileShadowAccessAfterRuleChange, isUserAllowedForClient, revokeUserRefreshTokensForClient } from './auth/oauth';
@@ -649,8 +649,10 @@ async function handleAgentReport(req: Request): Promise<Response> {
         startedAt: c.startedAt ? String(c.startedAt) : null,
         cpuPct: Number.isFinite(c.cpuPct) ? Number(c.cpuPct) : null, memBytes: Number.isFinite(c.memBytes) ? Number(c.memBytes) : null, memLimit: Number.isFinite(c.memLimit) ? Number(c.memLimit) : null,
         errors: (Array.isArray(c.errors) ? c.errors : []).slice(0, 100).map((e: any) => ({ at: Number(e.at) || Date.now(), line: String(e.line || '').slice(0, 500) })),
+        networks: (Array.isArray(c.networks) ? c.networks : []).slice(0, 20).map((n: any) => ({ name: String(n?.name || '').slice(0, 128), ip: String(n?.ip || '').slice(0, 45) })),
+        ports: (Array.isArray(c.ports) ? c.ports : []).slice(0, 50).map(Number).filter((p: number) => Number.isInteger(p) && p > 0 && p < 65536),
     }));
-    body.host = { ...body.host, memPct: Number.isFinite(body.host.memPct) ? Number(body.host.memPct) : null, disks: (Array.isArray(body.host.disks) ? body.host.disks : []).slice(0, 50).map((d: any) => ({ mount: String(d.mount || '/'), pct: Number(d.pct) || 0, total: Number(d.total) || 0, used: Number(d.used) || 0 })) };
+    body.host = { ...body.host, agentNetworks: (Array.isArray(body.host.agentNetworks) ? body.host.agentNetworks : []).slice(0, 20).map((n: any) => String(n).slice(0, 128)), memPct: Number.isFinite(body.host.memPct) ? Number(body.host.memPct) : null, disks: (Array.isArray(body.host.disks) ? body.host.disks : []).slice(0, 50).map((d: any) => ({ mount: String(d.mount || '/'), pct: Number(d.pct) || 0, total: Number(d.total) || 0, used: Number(d.used) || 0 })) };
     const status = await ingestAgentReport(m, body);
     return jsonRes(200, { status: status.state, intervalSeconds: m.intervalSeconds });
 }
@@ -4824,7 +4826,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                 // ── Tunnels (a Midleman port → host:port on an agent's network) ──
                 if (url.pathname === '/admin/tunnels' && req.method === 'GET') {
                     const live = tunnelAgents();
-                    const agents = listMonitors().filter(m => m.type === 'server').map(m => { const a = live.find(x => x.name === m.name); return { name: m.name, enabled: m.enabled, connected: !!a, connections: a?.connections ?? 0, streams: a?.streams ?? 0, rttMs: a?.rttMs ?? null }; });
+                    const agents = listMonitors().filter(m => m.type === 'server').map(m => { const a = live.find(x => x.name === m.name); const sv = getStatus(m.name).server; return { name: m.name, enabled: m.enabled, connected: !!a, connections: a?.connections ?? 0, streams: a?.streams ?? 0, rttMs: a?.rttMs ?? null, networks: sv?.host.agentNetworks || [], containers: (sv?.containers || []).filter(c => c.status === 'running').map(c => ({ name: c.name, ports: c.ports || [], networks: c.networks || [] })) }; });
                     return jsonRes(200, { tunnels: listTunnels(), agents, portRangeStart: PORT_RANGE_START });
                 }
                 {

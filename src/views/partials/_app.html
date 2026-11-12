@@ -1186,7 +1186,12 @@
         <div style="padding:16px 22px;display:flex;flex-direction:column;gap:14px;overflow-y:auto">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div><label class="mm-label">Name *</label><input class="mm-input" id="tunName" type="text" placeholder="redis-cloud" autocomplete="off" spellcheck="false"></div>
-            <div><label class="mm-label">Agent *</label><select class="mm-input" id="tunAgent" data-search></select></div>
+            <div><label class="mm-label">Agent *</label><select class="mm-input" id="tunAgent" data-search onchange="tunFillContainers()"></select></div>
+          </div>
+          <div>
+            <label class="mm-label">Container</label>
+            <select class="mm-input" id="tunContainer" data-search onchange="tunPickContainer()"></select>
+            <div class="mm-field-hint" id="tunCtrHint"></div>
           </div>
           <div>
             <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
