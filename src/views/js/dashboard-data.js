@@ -12860,17 +12860,19 @@ function openTunnelModal(name) {
 /** Running containers the chosen agent reported; the one the host field already points at stays selected. */
 function tunFillContainers() {
   const g = id => document.getElementById(id), a = _tunAgents.find(x => x.name === g('tunAgent').value), host = g('tunHost').value.trim();
-  g('tunContainer').innerHTML = '<option value="">Not a container — type the address below</option>' + (a?.containers || []).map(c =>
-    `<option value="${esc(c.name)}" ${host && (c.name === host || c.networks.some(n => n.ip === host)) ? 'selected' : ''}>${esc(c.name)}${c.ports.length ? ' · port ' + c.ports.join(', ') : ''}</option>`).join('');
+  g('tunContainer').innerHTML = '<option value="">Address typed by hand</option>' + (a?.containers || []).map(c =>
+    `<option value="${esc(c.name)}" ${host && (c.name === host || c.networks.some(n => n.ip === host)) ? 'selected' : ''}>${esc(c.name)}${c.ports.length ? ' · port ' + c.ports.slice(0, 3).join(', ') + (c.ports.length > 3 ? ` +${c.ports.length - 3}` : '') : ''}</option>`).join('');
   g('tunCtrHint').innerHTML = '';
+  g('tunHost').style.display = g('tunContainer').value ? 'none' : '';   // one or the other: a picked container hides the typed address
 }
 /** Fill host and port from the picked container, and say so when the agent cannot reach it yet. */
 function tunPickContainer() {
   const g = id => document.getElementById(id), a = _tunAgents.find(x => x.name === g('tunAgent').value), c = a?.containers.find(x => x.name === g('tunContainer').value);
   g('tunCtrHint').innerHTML = '';
-  if (!c) return;
+  g('tunHost').style.display = c ? 'none' : '';
+  if (!c) { g('tunHost').focus(); return; }
   if (c.ports.length && !c.ports.includes(Number(g('tunPort').value))) g('tunPort').value = c.ports[0];
-  if (c.networks.some(n => n.name === 'host')) { g('tunHost').value = ''; g('tunCtrHint').innerHTML = 'This container uses the host network: type the server\'s own private IP as remote host.'; return; }
+  if (c.networks.some(n => n.name === 'host')) { g('tunContainer').value = ''; window.mmSelectSync?.(g('tunContainer')); g('tunHost').value = ''; g('tunHost').style.display = ''; g('tunCtrHint').innerHTML = `${esc(c.name)} uses the host network: type the server's own private IP.`; return; }
   const shared = c.networks.filter(n => a.networks.includes(n.name));
   // Docker resolves container names only on user-defined networks; on the default bridge the IP is the only address
   const byName = shared.some(n => n.name !== 'bridge');
