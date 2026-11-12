@@ -914,7 +914,7 @@
           <!-- Redis -->
           <div id="monRedisFields" class="mm-group" style="display:none"><div class="mm-group-title">Redis</div>
             <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px">
-              <div><label class="mm-label">Host *</label><input class="mm-input" id="monRedisHost" type="text" placeholder="10.11.1.200"></div>
+              <div><label class="mm-label">Host *</label><select class="mm-input" id="monRedisCtr" data-search style="display:none" onchange="monCtrPick('Redis')"></select><input class="mm-input" id="monRedisHost" type="text" placeholder="10.11.1.200"><div class="mm-field-hint" id="monRedisCtrHint"></div></div>
               <div><label class="mm-label">Port</label><input class="mm-input" id="monRedisPort" type="number" min="1" max="65535" value="6379"></div>
               <div><label class="mm-label">DB</label><input class="mm-input" id="monRedisDb" type="number" min="0" max="15" value="0"></div>
             </div>
@@ -936,7 +936,7 @@
             <div style="display:grid;grid-template-columns:1fr 2fr 1fr;gap:10px">
               <div><label class="mm-label">Engine</label><select class="mm-input" id="monDbEngine" style="display:none" onchange="monDbEngineChanged()"><option value="postgres">PostgreSQL</option><option value="mysql">MySQL / MariaDB</option><option value="mssql">SQL Server</option></select>
                 <div class="mon-engines" id="monDbEngines"><button type="button" class="mon-engine" data-engine="postgres" onclick="monPickEngine('postgres')" title="PostgreSQL"><svg><use href="#mon-ico-postgres"/></svg></button><button type="button" class="mon-engine" data-engine="mysql" onclick="monPickEngine('mysql')" title="MySQL / MariaDB"><svg><use href="#mon-ico-mysql"/></svg></button><button type="button" class="mon-engine" data-engine="mssql" onclick="monPickEngine('mssql')" title="SQL Server"><svg><use href="#mon-ico-mssql"/></svg></button></div></div>
-              <div><label class="mm-label">Host *</label><input class="mm-input" id="monDbHost" type="text" placeholder="10.11.1.200"></div>
+              <div><label class="mm-label">Host *</label><select class="mm-input" id="monDbCtr" data-search style="display:none" onchange="monCtrPick('Db')"></select><input class="mm-input" id="monDbHost" type="text" placeholder="10.11.1.200"><div class="mm-field-hint" id="monDbCtrHint"></div></div>
               <div><label class="mm-label">Port</label><input class="mm-input" id="monDbPort" type="number" min="1" max="65535" value="5432" oninput="this.dataset.touched=1"></div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end">
@@ -989,7 +989,7 @@
 
           <div id="monViaWrap" style="display:none">
             <label class="mm-label">Reach through an agent <span style="color:var(--text3)">(reverse tunnel — for targets whose port is not exposed to us)</span></label>
-            <select class="mm-input" id="monVia" data-search><option value="">Direct — Midleman connects itself</option></select>
+            <select class="mm-input" id="monVia" data-search onchange="monCtrFill()"><option value="">Direct — Midleman connects itself</option></select>
             <div class="mm-field-hint">Host and port above are then resolved on that server's network. The agent only tunnels to private addresses by default (TUNNEL_ALLOW); HTTPS through a tunnel is not certificate-checked.</div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
@@ -1190,7 +1190,7 @@
           </div>
           <div>
             <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
-              <div><label class="mm-label">Remote host *</label><select class="mm-input" id="tunContainer" data-search onchange="tunPickContainer()"></select><input class="mm-input" id="tunHost" type="text" style="margin-top:6px" placeholder="127.0.0.1, 10.0.0.5 or a container name" autocomplete="off" spellcheck="false"></div>
+              <div><label class="mm-label">Remote host *</label><select class="mm-input" id="tunContainer" data-search onchange="tunPickContainer()"></select><input class="mm-input" id="tunHost" type="text" placeholder="127.0.0.1, 10.0.0.5 or a container name" autocomplete="off" spellcheck="false"></div>
               <div><label class="mm-label">Remote port *</label><input class="mm-input" id="tunPort" type="number" min="1" max="65535" placeholder="6379"></div>
             </div>
             <div class="mm-field-hint" id="tunCtrHint"></div>
@@ -1206,7 +1206,8 @@
           </div>
           <div>
             <label class="mm-label">Allowed from</label>
-            <input class="mm-input" id="tunAllowedIps" type="text" placeholder="10.11.1.0/24, 10.11.2.15" autocomplete="off" spellcheck="false">
+            <input class="mm-input" id="tunAllowedIps" type="text" placeholder="10.11.1.0/24, 10.11.2.15" autocomplete="off" spellcheck="false" oninput="tunAllowQuick()">
+            <div id="tunAllowQuick" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"></div>
             <div class="mm-field-hint">IPv4 addresses or networks that may connect, comma separated. Empty = only Midleman itself (<code>127.0.0.1</code>); the port is not reachable from the network.</div>
           </div>
           <div><label class="mm-label">Description</label><input class="mm-input" id="tunDescription" type="text" maxlength="200" placeholder="What this tunnel is for"></div>

@@ -4827,7 +4827,10 @@ async function handle(req: Request, srv: any): Promise<Response> {
                 if (url.pathname === '/admin/tunnels' && req.method === 'GET') {
                     const live = tunnelAgents();
                     const agents = listMonitors().filter(m => m.type === 'server').map(m => { const a = live.find(x => x.name === m.name); const sv = getStatus(m.name).server; return { name: m.name, enabled: m.enabled, connected: !!a, connections: a?.connections ?? 0, streams: a?.streams ?? 0, rttMs: a?.rttMs ?? null, networks: sv?.host.agentNetworks || [], containers: (sv?.containers || []).filter(c => c.status === 'running').map(c => ({ name: c.name, ports: c.ports || [], networks: c.networks || [] })) }; });
-                    return jsonRes(200, { tunnels: listTunnels(), agents, portRangeStart: PORT_RANGE_START });
+                    // the address this browser reaches us from, for the "Add my address" button; unknown behind a proxy we do not trust
+                    const v4 = (x: string) => x.replace(/^::ffff:/, ''), cip = v4(reqClientIp(req));
+                    const clientIp = /^\d+\.\d+\.\d+\.\d+$/.test(cip) && (!req.headers.get('x-forwarded-for') || cip !== v4(reqPeerIp.get(req) || '')) ? cip : null;
+                    return jsonRes(200, { tunnels: listTunnels(), agents, portRangeStart: PORT_RANGE_START, clientIp });
                 }
                 {
                     const tm = url.pathname.match(/^\/admin\/tunnels(?:\/([^/]+)(\/test)?)?$/);
