@@ -12209,7 +12209,7 @@ function _agentInstallHtml(name, token) {
   if (_agentNets?.name !== name) _agentNets = { name, on: new Set((sv?.host?.agentNetworks || []).filter(n => all.includes(n))) };
   const base = 'https://' + location.hostname + ':' + (window.REPORT_PORT || 8444);
   const cmd = `docker run -d --name midleman-agent --restart unless-stopped \\
-  --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --pids-limit 64 --memory 256m \\
+  --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --pids-limit 64 --memory 256m --log-opt max-size=10m --log-opt max-file=3 \\
   -v /var/run/docker.sock:/var/run/docker.sock:ro -v /:/hostfs:ro \\
   -e MIDLEMAN_URL=${base} -e AGENT_NAME=${name} -e AGENT_TOKEN=${token || '<token — shown once on create; use "Rotate token" to get a new one>'} \\
   registry.biscatos.com/midleman/api-midleman:latest bun run src/agent/index.ts` + all.filter(n => _agentNets.on.has(n)).map(n => ` \\\n  && docker network connect ${n} midleman-agent`).join('');
