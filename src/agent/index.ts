@@ -26,6 +26,7 @@ const NAME = process.env.AGENT_NAME || hostname();
 const INTERVAL = Math.max(10, Number(process.env.AGENT_INTERVAL) || 30);
 const SOCK = process.env.DOCKER_SOCK || '/var/run/docker.sock';
 import { pickLogLines } from './loglines';
+const INSTANCE = crypto.randomUUID();   // this process: Midleman accepts one agent per monitor at a time
 const PATTERN = new RegExp(process.env.LOG_PATTERN || 'ERROR|Exception|FATAL|panic', 'i');
 const IGNORE = process.env.LOG_IGNORE ? new RegExp(process.env.LOG_IGNORE, 'i') : null;
 const SKIP = new Set((process.env.SKIP_CONTAINERS || 'midleman-agent').split(',').map(s => s.trim()).filter(Boolean));
@@ -153,8 +154,9 @@ async function tick(): Promise<void> {
     const containers = await Promise.all(list.filter(c => !mine(c)).map(containerReport));
     const host = await hostReport();
     host.agentNetworks = Object.keys(list.find(c => c.Id.startsWith(SELF_ID))?.NetworkSettings?.Networks || {});
-    const report = { agent: NAME, at: Date.now(), intervalSeconds: INTERVAL, host, containers };
+    const report = { agent: NAME, instance: INSTANCE, at: Date.now(), intervalSeconds: INTERVAL, host, containers };
     const res = await fetch(`${URL_BASE}/agent/report`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify(report), signal: AbortSignal.timeout(20_000) });
+    if (res.status === 409) throw new Error(`another agent is already reporting as "${NAME}" from a different address: stop it, or rotate the token and reinstall only one`);
     if (!res.ok) throw new Error(`Midleman answered HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
     lastReport = Date.now();
     const down = containers.filter(c => c.status !== 'running').length, errs = containers.reduce((a, c) => a + c.errors.filter((e: any) => !e.warn).length, 0), warns = containers.reduce((a, c) => a + c.errors.length, 0) - errs;
@@ -186,7 +188,7 @@ async function tunnelLoop(n: number): Promise<void> {
     let backoff = 2000;
     for (;;) {
         await new Promise<void>((resolve) => {
-            const ws = new WebSocket(wsUrl, { headers: { Authorization: `Bearer ${TOKEN}`, 'X-Agent-Name': NAME } } as any);
+            const ws = new WebSocket(wsUrl, { headers: { Authorization: `Bearer ${TOKEN}`, 'X-Agent-Name': NAME, 'X-Agent-Instance': INSTANCE } } as any);
             ws.binaryType = 'arraybuffer';
             const mux = new Mux({ send: d => { if (ws.readyState === 1) ws.send(d); }, buffered: () => ws.bufferedAmount });
             // Midleman pings every 15 s: 45 s of silence means the path is dead even if TCP has not noticed

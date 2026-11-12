@@ -28,6 +28,7 @@ export const sink = { emit: emitNotificationEvent };
 import { assertResolvedHostAllowed, ipInCidrs } from './ssrf-guard';
 import { getTrafficWindow } from '../telemetry/request-log';
 import { tunnelLocalPort } from './agent-tunnel';
+import { agentConflict } from './agent-instance';
 import { Connection as TdsConnection, Request as TdsRequest } from 'tedious';
 import { isWithinBusinessHours, validateWeekly, type DaySchedule } from './business-hours';
 
@@ -146,6 +147,8 @@ export interface AgentContainer {
 }
 export interface AgentReport {
     agent: string; at: number; intervalSeconds?: number;
+    /** Random id of the agent process (agents before this field send none). */
+    instance?: string;
     host: { hostname?: string; agentNetworks?: string[]; uptimeSec?: number; load1?: number; memPct: number | null; memTotal?: number; disks: { mount: string; pct: number; total: number; used: number }[] };
     containers: AgentContainer[];
 }
@@ -299,7 +302,7 @@ export function deleteMonitor(name: string): boolean {
 export function publicMonitor(m: Monitor): Record<string, unknown> {
     const o = { ...(m as unknown as Record<string, unknown>) };
     if (m.type === 'rabbitmq' || m.type === 'redis' || m.type === 'database') { delete o.password; o.hasPassword = !!m.password; }
-    if (m.type === 'server') { delete o.agentTokenHash; o.hasToken = !!m.agentTokenHash; }
+    if (m.type === 'server') { delete o.agentTokenHash; o.hasToken = !!m.agentTokenHash; o.agentConflict = agentConflict(m.name); }
     return { ...o, status: getStatus(m.name) };
 }
 
