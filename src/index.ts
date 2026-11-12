@@ -365,7 +365,8 @@ function getAuthedAdmin(req: Request): import('./core/types').AuthUser | null {
 // Real socket peer IP captured at the server boundary; see rememberPeerIp.
 const reqPeerIp = new WeakMap<Request, string>();
 function rememberPeerIp(req: Request, peerIp: string | null | undefined): void {
-    if (peerIp) reqPeerIp.set(req, peerIp);
+    // Bun reports IPv4 peers as ::ffff:a.b.c.d on a dual-stack socket; every allowlist and TRUST_PROXY rule is written in plain IPv4
+    if (peerIp) reqPeerIp.set(req, peerIp.replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/i, ''));
 }
 
 /** Resolves the trusted client IP (socket peer + X-Forwarded-For only when the
@@ -648,7 +649,7 @@ async function handleAgentReport(req: Request): Promise<Response> {
         restartCount: Number(c.restartCount) || 0, oomKilled: c.oomKilled === true, restartPolicy: c.restartPolicy ? String(c.restartPolicy).slice(0, 20) : undefined, exitCode: Number.isFinite(c.exitCode) ? Number(c.exitCode) : null,
         startedAt: c.startedAt ? String(c.startedAt) : null,
         cpuPct: Number.isFinite(c.cpuPct) ? Number(c.cpuPct) : null, memBytes: Number.isFinite(c.memBytes) ? Number(c.memBytes) : null, memLimit: Number.isFinite(c.memLimit) ? Number(c.memLimit) : null,
-        errors: (Array.isArray(c.errors) ? c.errors : []).slice(0, 100).map((e: any) => ({ at: Number(e.at) || Date.now(), line: String(e.line || '').slice(0, 500) })),
+        errors: (Array.isArray(c.errors) ? c.errors : []).slice(0, 100).map((e: any) => ({ at: Number(e.at) || Date.now(), line: String(e.line || '').slice(0, 500), ...(e.warn === true ? { warn: true } : {}) })),
         networks: (Array.isArray(c.networks) ? c.networks : []).slice(0, 20).map((n: any) => ({ name: String(n?.name || '').slice(0, 128), ip: String(n?.ip || '').slice(0, 45) })),
         ports: (Array.isArray(c.ports) ? c.ports : []).slice(0, 50).map(Number).filter((p: number) => Number.isInteger(p) && p > 0 && p < 65536),
     }));
@@ -4827,7 +4828,10 @@ async function handle(req: Request, srv: any): Promise<Response> {
                 if (url.pathname === '/admin/tunnels' && req.method === 'GET') {
                     const live = tunnelAgents();
                     const agents = listMonitors().filter(m => m.type === 'server').map(m => { const a = live.find(x => x.name === m.name); const sv = getStatus(m.name).server; return { name: m.name, enabled: m.enabled, connected: !!a, connections: a?.connections ?? 0, streams: a?.streams ?? 0, rttMs: a?.rttMs ?? null, networks: sv?.host.agentNetworks || [], containers: (sv?.containers || []).filter(c => c.status === 'running').map(c => ({ name: c.name, ports: c.ports || [], networks: c.networks || [] })) }; });
-                    return jsonRes(200, { tunnels: listTunnels(), agents, portRangeStart: PORT_RANGE_START });
+                    // the address this browser reaches us from, for the "Add my address" button; unknown behind a proxy we do not trust
+                    const v4 = (x: string) => x.replace(/^::ffff:/, ''), cip = v4(reqClientIp(req));
+                    const clientIp = /^\d+\.\d+\.\d+\.\d+$/.test(cip) && (!req.headers.get('x-forwarded-for') || cip !== v4(reqPeerIp.get(req) || '')) ? cip : null;
+                    return jsonRes(200, { tunnels: listTunnels(), agents, portRangeStart: PORT_RANGE_START, clientIp });
                 }
                 {
                     const tm = url.pathname.match(/^\/admin\/tunnels(?:\/([^/]+)(\/test)?)?$/);

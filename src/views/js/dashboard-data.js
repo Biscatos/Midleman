@@ -12079,7 +12079,7 @@ function openMonitorDetail(name) {
         <td><div class="md-ctr-name">${esc(c.name)}${isCrit ? ' <span class="md-crit">critical</span>' : ''}</div><div class="md-ctr-img">${esc(c.image)}</div></td>
         <td><span class="mm-chip ${bad ? 'err' : 'ok'}">${esc(c.status)}${c.health ? ' · ' + esc(c.health) : ''}</span>${c.oomKilled ? ' <span class="mm-chip err">OOM</span>' : ''}${ign ? ' <span class="mm-chip">ignored</span>' : ''}</td>
         <td class="mono">${c.restartCount}</td><td class="mono">${c.cpuPct != null ? c.cpuPct + '%' : '—'}</td><td class="mono">${c.memBytes != null ? _monBytes(c.memBytes) : '—'}</td>
-        <td class="mono" style="color:${c.errorsInWindow ? 'var(--red)' : 'inherit'}">${c.errorsInWindow}</td>
+        <td class="mono"><span style="color:${c.errorsInWindow ? 'var(--red)' : 'inherit'}">${c.errorsInWindow}</span>${c.warningsInWindow ? ` <span style="color:var(--orange)" title="Warnings in the same window: shown, never alerted on">+${c.warningsInWindow} warn</span>` : ''}</td>
         <td class="detail" title="${esc(c.lastError?.line || '')}">${c.lastError ? `<span class="md-ctr-err">${esc(c.lastError.line.slice(0, 120))}</span><span class="md-ctr-when">${_monAgo(c.lastError.at)}</span>` : '<span style="color:var(--text3)">—</span>'}</td></tr>`; }).join('') +
       `</tbody></table></div>`;
     mdCtrFilter(_mdCtrQ);
@@ -12187,28 +12187,37 @@ async function mdContainerErrors(container) {
       ${stat('CPU', c.cpuPct != null ? c.cpuPct + '%' : '—')}
       ${stat('RAM', c.memBytes != null ? _monBytes(c.memBytes) : '—', c.memLimit ? 'limit ' + _monBytes(c.memLimit) : 'no limit')}
       ${stat('Started', c.startedAt ? _monAgo(Date.parse(c.startedAt)) : '—', c.exitCode != null ? 'exit code ' + c.exitCode : '')}
-      ${stat('Errors (' + (m.logWindowMinutes || 5) + ' min)', `<span style="color:${c.errorsInWindow ? 'var(--red)' : 'inherit'}">${c.errorsInWindow}</span>`)}
+      ${stat('Errors (' + (m.logWindowMinutes || 5) + ' min)', `<span style="color:${c.errorsInWindow ? 'var(--red)' : 'inherit'}">${c.errorsInWindow}</span>`, c.warningsInWindow ? c.warningsInWindow + ' warnings' : '')}
     </div>` : ''}
     <div id="mdCtrErrors"><div class="md-peek-head">Loading error lines…</div></div>`;
   const res = await api(`/admin/monitors/${encodeURIComponent(_mdName)}/errors?container=${encodeURIComponent(container)}&limit=200`);
   const d = await res.json().catch(() => ({}));
   const out = document.getElementById('mdCtrErrors'); if (!out || _mdCtr !== container) return;
   if (!res.ok) { out.innerHTML = `<div class="md-peek-err">${esc(d.error || 'Failed')}</div>`; return; }
-  out.innerHTML = `<div class="md-peek-head">${d.errors.length ? `Last ${d.errors.length} line(s) matching the error pattern, newest first` : 'No log line matched the error pattern yet.'}</div>` +
-    (d.errors.length ? `<pre class="md-ctr-log">${d.errors.map(e => `<span class="md-ctr-ts">${new Date(e.at).toLocaleString()}</span> ${esc(e.line)}`).join('\n')}</pre>` : '');
+  out.innerHTML = `<div class="md-peek-head">${d.errors.length ? `Last ${d.errors.length} error and warning line(s), newest first` : 'No error or warning line yet.'}</div>` +
+    (d.errors.length ? `<pre class="md-ctr-log">${d.errors.map(e => `<span class="md-ctr-ts">${new Date(e.at).toLocaleString()}</span> ${e.warn ? `<span style="color:var(--orange)">${esc(e.line)}</span>` : esc(e.line)}`).join('\n')}</pre>` : '');
 }
 function mdContainerBack() { _mdCtr = null; const box = document.getElementById('mdContainers'); box.innerHTML = ''; document.getElementById('mdHistoryWrap').style.display = ''; openMonitorDetail(_mdName); }
+let _agentNets = null, _agentTok = null;   // networks switched on for the install command, and the token it is showing
 /** Install command for this server's agent. The token is only shown when minted (create / rotate). */
 function _agentInstallHtml(name, token) {
+  _agentTok = token;
+  const sv = _allMonitors.find(m => m.name === name)?.status?.server;
+  // networks are only known once an agent has reported: a first install has none to offer
+  const all = [...new Set((sv?.containers || []).flatMap(c => (c.networks || []).map(n => n.name)))].filter(n => !['bridge', 'host', 'none'].includes(n)).sort();
+  if (_agentNets?.name !== name) _agentNets = { name, on: new Set((sv?.host?.agentNetworks || []).filter(n => all.includes(n))) };
   const base = 'https://' + location.hostname + ':' + (window.REPORT_PORT || 8444);
   const cmd = `docker run -d --name midleman-agent --restart unless-stopped \\
   --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --pids-limit 64 --memory 256m \\
   -v /var/run/docker.sock:/var/run/docker.sock:ro -v /:/hostfs:ro \\
   -e MIDLEMAN_URL=${base} -e AGENT_NAME=${name} -e AGENT_TOKEN=${token || '<token — shown once on create; use "Rotate token" to get a new one>'} \\
-  registry.biscatos.com/midleman/api-midleman:latest bun run src/agent/index.ts`;
-  return `<div class="md-peek-head">Run on the server (outbound only — no port to open). <code>MIDLEMAN_URL</code> must be <b>https://</b> — the public hostname that fronts the Report port (${window.REPORT_PORT || 8444}); plain http is only accepted from the LAN. The container runs read-only with no capabilities and only reads the Docker socket.</div><pre class="md-ctr-log md-install">${esc(cmd)}</pre>
+  registry.biscatos.com/midleman/api-midleman:latest bun run src/agent/index.ts` + all.filter(n => _agentNets.on.has(n)).map(n => ` \\\n  && docker network connect ${n} midleman-agent`).join('');
+  const nets = all.length ? `<div class="md-peek-head" style="margin-top:10px">Docker networks the agent joins. Tunnels and monitors reach a container by name only on a network the agent is on.</div>
+    <div style="display:flex;gap:6px 18px;flex-wrap:wrap;margin:6px 0 10px">${all.map(n => `<label style="display:flex;align-items:center;gap:6px;font-size:12.5px"><input type="checkbox" class="mm-switch" data-net="${esc(n)}" ${_agentNets.on.has(n) ? 'checked' : ''} onchange="agentNetToggle(this.dataset.net, this.checked)"> ${esc(n)}</label>`).join('')}</div>` : '';
+  return `<div class="md-peek-head">Run on the server (outbound only — no port to open). <code>MIDLEMAN_URL</code> must be <b>https://</b> — the public hostname that fronts the Report port (${window.REPORT_PORT || 8444}); plain http is only accepted from the LAN. The container runs read-only with no capabilities and only reads the Docker socket.</div>${nets}<pre class="md-ctr-log md-install">${esc(cmd)}</pre>
     <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-sm" data-copy="${esc(cmd)}" onclick="mmCopyFrom(this)">Copy</button>${token ? '' : `<button class="btn btn-sm" onclick="mdRotateToken()">Rotate token</button>`}<button class="btn btn-sm" style="margin-left:auto" onclick="document.getElementById('mdContainers').innerHTML='';openMonitorDetail(_mdName)">Back to containers</button></div>`;
 }
+function agentNetToggle(net, on) { _agentNets.on[on ? 'add' : 'delete'](net); document.getElementById('mdContainers').innerHTML = _agentInstallHtml(_mdName, _agentTok); }
 function mdInstall() { const box = document.getElementById('mdContainers'); box.style.display = ''; box.innerHTML = _agentInstallHtml(_mdName, null); }
 async function mdRotateToken() {
   if (!await showConfirm({ title: 'Rotate agent token', message: `Generate a new token for "${_mdName}"?`, detail: 'The running agent keeps working only until you restart it with the new token.', confirmText: 'Rotate' })) return;
@@ -12584,7 +12593,7 @@ function openMonitorModal(m) {
   g('monCooldownMinutes').value = m?.cooldownMinutes ?? 60;
   g('monEnabled').checked = m ? m.enabled !== false : true;
   g('monAllowPrivate').checked = m ? m.allowPrivate !== false : true;
-  monLoadTunnelAgents(m?.via || '');
+  monLoadTunnelAgents(m?.via || '').then(monCtrFill);
   for (let d = 0; d <= 6; d++) {
     const day = (m?.weekly || []).find(w => w.day === d);
     g('monDay' + d).value = day ? bhRangesToText(day.ranges) : '';
@@ -12744,13 +12753,13 @@ function bhRefreshPickers(prefix) {
 document.addEventListener('DOMContentLoaded', () => { document.querySelectorAll('input[type=text]').forEach(el => { if (BH_PICK_RE.test(el.id)) bhEnhance(el); }); });
 
 // ─── Tunnels (Traffic → Tunnels) ─────────────────────────────────────────────
-let _tunnels = [], _tunAgents = [], _tunPortStart = 4000, _tunEditing = null;
+let _tunnels = [], _tunAgents = [], _tunPortStart = 4000, _tunEditing = null, _tunClientIp = '';
 const TUN_STATUS = { online: ['ok', 'Online'], offline: ['warn', 'Agent offline'], error: ['err', 'Error'], disabled: ['', 'Disabled'] };
 
 async function fetchTunnels() {
   try {
     const d = await (await api('/admin/tunnels')).json();
-    _tunnels = d.tunnels || []; _tunAgents = d.agents || []; _tunPortStart = d.portRangeStart || 4000;
+    _tunnels = d.tunnels || []; _tunAgents = d.agents || []; _tunPortStart = d.portRangeStart || 4000; _tunClientIp = d.clientIp || '';
   } catch { return; }
   const b = document.getElementById('navTunnelBadge'); if (b) b.textContent = _tunnels.length;
   renderTunnels();
@@ -12842,6 +12851,7 @@ function openTunnelModal(name) {
   g('tunListenPort').value = t?.listenPort || ''; g('tunMax').value = t?.maxConnections || '';
   g('tunEnabled').checked = t ? t.enabled : true;
   g('tunAllowedIps').value = (t?.allowedIps || []).join(', ');
+  tunAllowQuick();
   g('tunDescription').value = t?.description || '';
   g('tunPortHint').innerHTML = `Empty port = first free one from <code>${_tunPortStart}</code>. It must be a port the Midleman container publishes (the compose file publishes <code>4000-4050</code>).`;
   g('tunActivity').style.display = t ? '' : 'none';
@@ -12857,29 +12867,66 @@ function openTunnelModal(name) {
   g('tunnelModal').style.display = 'flex';
   setTimeout(() => g(t ? 'tunHost' : 'tunName').focus(), 30);
 }
-/** Running containers the chosen agent reported; the one the host field already points at stays selected. */
-function tunFillContainers() {
-  const g = id => document.getElementById(id), a = _tunAgents.find(x => x.name === g('tunAgent').value), host = g('tunHost').value.trim();
-  g('tunContainer').innerHTML = '<option value="">Address typed by hand</option>' + (a?.containers || []).map(c =>
-    `<option value="${esc(c.name)}" ${host && (c.name === host || c.networks.some(n => n.ip === host)) ? 'selected' : ''}>${esc(c.name)}${c.ports.length ? ' · port ' + c.ports.slice(0, 3).join(', ') + (c.ports.length > 3 ? ` +${c.ports.length - 3}` : '') : ''}</option>`).join('');
-  g('tunCtrHint').innerHTML = '';
-  g('tunHost').style.display = g('tunContainer').value ? 'none' : '';   // one or the other: a picked container hides the typed address
+/** Container picker shared by the tunnel and monitor forms: a select above the target input.
+ *  f = element ids { sel, hint } plus either { host, port } (picking hides the typed address) or { url, prefer }
+ *  (picking rewrites host and port inside the URL, which stays editable for the path); a = { networks, containers } the agent reported. */
+function ctrFill(f, a) {
+  const g = id => document.getElementById(id), inp = g(f.url || f.host), list = a?.containers || [];
+  let cur = inp.value.trim();
+  if (f.url) try { cur = new URL(cur).hostname; } catch { cur = ''; }
+  g(f.sel).innerHTML = `<option value="">${f.url ? 'Pick a container to fill the address' : 'Address typed by hand'}</option>` + list.map(c =>
+    `<option value="${esc(c.name)}" ${cur && (c.name === cur || c.networks.some(n => n.ip === cur)) ? 'selected' : ''}>${esc(c.name)}${c.ports.length ? ' · port ' + c.ports.slice(0, 3).join(', ') + (c.ports.length > 3 ? ` +${c.ports.length - 3}` : '') : ''}</option>`).join('');
+  g(f.sel).style.display = list.length ? '' : 'none';   // nothing reported (direct, or an agent older than this field): just the input
+  g(f.hint).innerHTML = '';
+  inp.style.marginTop = list.length ? '6px' : '';
+  if (!f.url) inp.style.display = g(f.sel).value ? 'none' : '';
 }
-/** Fill host and port from the picked container, and say so when the agent cannot reach it yet. */
-function tunPickContainer() {
-  const g = id => document.getElementById(id), a = _tunAgents.find(x => x.name === g('tunAgent').value), c = a?.containers.find(x => x.name === g('tunContainer').value);
-  g('tunCtrHint').innerHTML = '';
-  g('tunHost').style.display = c ? 'none' : '';
-  if (!c) { g('tunHost').focus(); return; }
-  if (c.ports.length && !c.ports.includes(Number(g('tunPort').value))) g('tunPort').value = c.ports[0];
-  if (c.networks.some(n => n.name === 'host')) { g('tunContainer').value = ''; window.mmSelectSync?.(g('tunContainer')); g('tunHost').value = ''; g('tunHost').style.display = ''; g('tunCtrHint').innerHTML = `${esc(c.name)} uses the host network: type the server's own private IP.`; return; }
+/** Fill the target from the picked container, and say so when the agent cannot reach it yet. */
+function ctrPick(f, a) {
+  const g = id => document.getElementById(id), inp = g(f.url || f.host), c = a?.containers.find(x => x.name === g(f.sel).value);
+  g(f.hint).innerHTML = '';
+  if (!f.url) inp.style.display = c ? 'none' : '';
+  if (!c) { inp.focus(); return; }
+  if (c.networks.some(n => n.name === 'host')) { g(f.sel).value = ''; window.mmSelectSync?.(g(f.sel)); if (!f.url) { inp.value = ''; inp.style.display = ''; } g(f.hint).innerHTML = `${esc(c.name)} uses the host network: type the server's own private IP.`; return; }
   const shared = c.networks.filter(n => a.networks.includes(n.name));
   // Docker resolves container names only on user-defined networks; on the default bridge the IP is the only address
-  const byName = shared.some(n => n.name !== 'bridge');
-  g('tunHost').value = byName || !shared.length ? c.name : shared[0].ip;
+  const byName = shared.some(n => n.name !== 'bridge'), host = byName || !shared.length ? c.name : shared[0].ip;
+  if (f.url) {
+    let u; try { u = new URL(inp.value.trim()); } catch { u = new URL('http://x'); }
+    u.hostname = host;
+    if (c.ports.length && !c.ports.includes(Number(u.port || (u.protocol === 'https:' ? 443 : 80)))) u.port = String(c.ports.includes(f.prefer) ? f.prefer : c.ports[0]);
+    inp.value = u.href.replace(/\/$/, ''); inp.dispatchEvent(new Event('input'));
+  } else {
+    if (c.ports.length && !c.ports.includes(Number(g(f.port).value))) { g(f.port).value = c.ports[0]; g(f.port).dataset.touched = 1; }
+    inp.value = host;
+  }
   if (!a.networks.length || !c.networks.length) return;   // agent older than this field: nothing to compare
-  if (!shared.length) g('tunCtrHint').innerHTML = `<span style="color:var(--red)">The agent is not on this container's network, so it cannot reach it.</span> Run on that server: <code>docker network connect ${esc(c.networks[0].name)} midleman-agent</code>`;
-  else if (!byName) g('tunCtrHint').innerHTML = 'Reached by IP on the default bridge network; the IP can change when the container is recreated.';
+  if (!shared.length) g(f.hint).innerHTML = `<span style="color:var(--red)">The agent is not on this container's network, so it cannot reach it.</span> Run on that server: <code>docker network connect ${esc(c.networks[0].name)} midleman-agent</code>`;
+  else if (!byName) g(f.hint).innerHTML = 'Reached by IP on the default bridge network; the IP can change when the container is recreated.';
+}
+const TUN_CTR = { sel: 'tunContainer', host: 'tunHost', port: 'tunPort', hint: 'tunCtrHint' };
+const _tunAgentSel = () => _tunAgents.find(x => x.name === document.getElementById('tunAgent').value);
+function tunFillContainers() { ctrFill(TUN_CTR, _tunAgentSel()); }
+function tunPickContainer() { ctrPick(TUN_CTR, _tunAgentSel()); }
+const MON_CTR = { Rabbit: { sel: 'monApiCtr', url: 'monApiUrl', hint: 'monApiCtrHint', prefer: 15672 }, Http: { sel: 'monUrlCtr', url: 'monUrl', hint: 'monUrlCtrHint' }, Redis: { sel: 'monRedisCtr', host: 'monRedisHost', port: 'monRedisPort', hint: 'monRedisCtrHint' }, Db: { sel: 'monDbCtr', host: 'monDbHost', port: 'monDbPort', hint: 'monDbCtrHint' } };
+/** What the agent chosen in "Reach through an agent" last reported (null when direct or never reported). */
+function _monCtrAgent() {
+  const sv = _allMonitors.find(m => m.type === 'server' && m.name === document.getElementById('monVia').value)?.status?.server;
+  return sv ? { networks: sv.host?.agentNetworks || [], containers: sv.containers.filter(c => c.status === 'running').map(c => ({ name: c.name, ports: c.ports || [], networks: c.networks || [] })) } : null;
+}
+function monCtrFill() { const a = _monCtrAgent(); for (const f of Object.values(MON_CTR)) ctrFill(f, a); }
+function monCtrPick(k) { ctrPick(MON_CTR[k], _monCtrAgent()); }
+/** One-click additions to "Allowed from": the address this browser comes from, and the last one the tunnel refused. */
+function tunAllowQuick() {
+  const have = document.getElementById('tunAllowedIps').value.split(/[\s,;]+/), r = _tunEditing?.lastRejected;
+  const btn = (ip, label) => ip && !have.includes(ip) ? `<button type="button" class="btn btn-sm" onclick="tunAllowAdd('${esc(ip)}')">${label}</button>` : '';
+  document.getElementById('tunAllowQuick').innerHTML = btn(_tunClientIp, `Add my address · ${esc(_tunClientIp)}`)
+    + (r?.why === 'address not allowed' && r.ip !== _tunClientIp ? btn(r.ip, `Allow ${esc(r.ip)} · refused ${_monAgo(r.at)}`) : '');
+}
+function tunAllowAdd(ip) {
+  const el = document.getElementById('tunAllowedIps');
+  el.value = [el.value.trim().replace(/[,;]$/, ''), ip].filter(Boolean).join(', ');
+  tunAllowQuick();
 }
 function closeTunnelModal() { document.getElementById('tunnelModal').style.display = 'none'; fetchTunnels(); }
 
