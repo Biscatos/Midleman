@@ -71,7 +71,10 @@ let lastReport = 0;
 
 async function containerReport(c: any): Promise<any> {
     const id: string = c.Id, name: string = (c.Names?.[0] || c.Id).replace(/^\//, '');
-    const base = { id: id.slice(0, 12), name, image: c.Image, status: c.State, health: null as string | null, restartCount: 0, oomKilled: false, restartPolicy: 'no', exitCode: null as number | null, startedAt: null as string | null, cpuPct: null as number | null, memBytes: null as number | null, memLimit: null as number | null, errors: [] as { at: number; line: string }[] };
+    const base = { id: id.slice(0, 12), name, image: c.Image, status: c.State, health: null as string | null, restartCount: 0, oomKilled: false, restartPolicy: 'no', exitCode: null as number | null, startedAt: null as string | null, cpuPct: null as number | null, memBytes: null as number | null, memLimit: null as number | null, errors: [] as { at: number; line: string }[],
+        // where a tunnel can reach it: the dashboard offers these when a tunnel is created
+        networks: Object.entries(c.NetworkSettings?.Networks || {}).map(([n, v]: any) => ({ name: n, ip: v?.IPAddress || '' })),
+        ports: [...new Set((c.Ports || []).filter((p: any) => p.Type === 'tcp').map((p: any) => p.PrivatePort))].sort((a: any, b: any) => a - b) as number[] };
     try {
         const ins = await dockerJson(`/containers/${id}/json`);
         base.health = ins.State?.Health?.Status || null;
@@ -149,7 +152,9 @@ async function tick(): Promise<void> {
     const list: any[] = await dockerJson('/containers/json?all=1');
     const mine = (c: any) => c.Id.startsWith(SELF_ID) || SKIP.has((c.Names?.[0] || '').replace(/^\//, ''));
     const containers = await Promise.all(list.filter(c => !mine(c)).map(containerReport));
-    const report = { agent: NAME, at: Date.now(), intervalSeconds: INTERVAL, host: await hostReport(), containers };
+    const host = await hostReport();
+    host.agentNetworks = Object.keys(list.find(c => c.Id.startsWith(SELF_ID))?.NetworkSettings?.Networks || {});
+    const report = { agent: NAME, at: Date.now(), intervalSeconds: INTERVAL, host, containers };
     const res = await fetch(`${URL_BASE}/agent/report`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify(report), signal: AbortSignal.timeout(20_000) });
     if (!res.ok) throw new Error(`Midleman answered HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
     lastReport = Date.now();

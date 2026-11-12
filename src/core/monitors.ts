@@ -139,12 +139,14 @@ export interface AgentContainer {
     /** HostConfig.RestartPolicy.Name: no | always | unless-stopped | on-failure. A stopped container only alerts when Docker was supposed to keep it up, or it was running in an earlier report. */
     restartPolicy?: string;
     cpuPct: number | null; memBytes: number | null; memLimit: number | null;
+    /** Docker networks it is attached to and its TCP ports (agents before this field send neither). */
+    networks?: { name: string; ip: string }[]; ports?: number[];
     /** New matching log lines since the previous report. */
     errors: { at: number; line: string }[];
 }
 export interface AgentReport {
     agent: string; at: number; intervalSeconds?: number;
-    host: { hostname?: string; uptimeSec?: number; load1?: number; memPct: number | null; memTotal?: number; disks: { mount: string; pct: number; total: number; used: number }[] };
+    host: { hostname?: string; agentNetworks?: string[]; uptimeSec?: number; load1?: number; memPct: number | null; memTotal?: number; disks: { mount: string; pct: number; total: number; used: number }[] };
     containers: AgentContainer[];
 }
 /** Report as kept in the status: per-container error lines summarised, full lines live in State.serverErrors. */

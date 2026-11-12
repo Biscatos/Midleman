@@ -12838,6 +12838,7 @@ function openTunnelModal(name) {
     return `<option value="${esc(n)}" ${n === t?.agent ? 'selected' : ''}>${esc(n)} ${a?.connected ? '· connected' + (a.rttMs != null ? ` · ${a.rttMs} ms` : '') : '· tunnel offline'}</option>`;
   }).join('');
   g('tunHost').value = t?.host || ''; g('tunPort').value = t?.port || '';
+  tunFillContainers();
   g('tunListenPort').value = t?.listenPort || ''; g('tunMax').value = t?.maxConnections || '';
   g('tunEnabled').checked = t ? t.enabled : true;
   g('tunAllowedIps').value = (t?.allowedIps || []).join(', ');
@@ -12855,6 +12856,30 @@ function openTunnelModal(name) {
   }
   g('tunnelModal').style.display = 'flex';
   setTimeout(() => g(t ? 'tunHost' : 'tunName').focus(), 30);
+}
+/** Running containers the chosen agent reported; the one the host field already points at stays selected. */
+function tunFillContainers() {
+  const g = id => document.getElementById(id), a = _tunAgents.find(x => x.name === g('tunAgent').value), host = g('tunHost').value.trim();
+  g('tunContainer').innerHTML = '<option value="">Address typed by hand</option>' + (a?.containers || []).map(c =>
+    `<option value="${esc(c.name)}" ${host && (c.name === host || c.networks.some(n => n.ip === host)) ? 'selected' : ''}>${esc(c.name)}${c.ports.length ? ' · port ' + c.ports.slice(0, 3).join(', ') + (c.ports.length > 3 ? ` +${c.ports.length - 3}` : '') : ''}</option>`).join('');
+  g('tunCtrHint').innerHTML = '';
+  g('tunHost').style.display = g('tunContainer').value ? 'none' : '';   // one or the other: a picked container hides the typed address
+}
+/** Fill host and port from the picked container, and say so when the agent cannot reach it yet. */
+function tunPickContainer() {
+  const g = id => document.getElementById(id), a = _tunAgents.find(x => x.name === g('tunAgent').value), c = a?.containers.find(x => x.name === g('tunContainer').value);
+  g('tunCtrHint').innerHTML = '';
+  g('tunHost').style.display = c ? 'none' : '';
+  if (!c) { g('tunHost').focus(); return; }
+  if (c.ports.length && !c.ports.includes(Number(g('tunPort').value))) g('tunPort').value = c.ports[0];
+  if (c.networks.some(n => n.name === 'host')) { g('tunContainer').value = ''; window.mmSelectSync?.(g('tunContainer')); g('tunHost').value = ''; g('tunHost').style.display = ''; g('tunCtrHint').innerHTML = `${esc(c.name)} uses the host network: type the server's own private IP.`; return; }
+  const shared = c.networks.filter(n => a.networks.includes(n.name));
+  // Docker resolves container names only on user-defined networks; on the default bridge the IP is the only address
+  const byName = shared.some(n => n.name !== 'bridge');
+  g('tunHost').value = byName || !shared.length ? c.name : shared[0].ip;
+  if (!a.networks.length || !c.networks.length) return;   // agent older than this field: nothing to compare
+  if (!shared.length) g('tunCtrHint').innerHTML = `<span style="color:var(--red)">The agent is not on this container's network, so it cannot reach it.</span> Run on that server: <code>docker network connect ${esc(c.networks[0].name)} midleman-agent</code>`;
+  else if (!byName) g('tunCtrHint').innerHTML = 'Reached by IP on the default bridge network; the IP can change when the container is recreated.';
 }
 function closeTunnelModal() { document.getElementById('tunnelModal').style.display = 'none'; fetchTunnels(); }
 
