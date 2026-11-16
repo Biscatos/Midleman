@@ -3,6 +3,11 @@
  * IPv4 only for CIDR/wildcard; IPv6 addresses are matched by exact string equality only.
  */
 
+/** Dual-stack sockets report IPv4 peers as "::ffff:10.0.0.1" — compare and show them as plain IPv4. */
+function normalizeIp(ip: string): string {
+    return ip.trim().replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/i, '');
+}
+
 function ipToInt(ip: string): number | null {
     const parts = ip.split('.').map(Number);
     if (parts.length !== 4 || parts.some(p => isNaN(p) || p < 0 || p > 255)) return null;
@@ -17,7 +22,8 @@ function ipToInt(ip: string): number | null {
  *  - Wildcard: "192.168.1.*", "10.0.*.*"
  */
 function ipMatchesRule(clientIp: string, rule: string): boolean {
-    const trimmed = rule.trim();
+    clientIp = normalizeIp(clientIp);
+    const trimmed = normalizeIp(rule);
     if (!trimmed) return false;
 
     // Wildcard — convert to CIDR equivalent by counting fixed octets
@@ -113,9 +119,9 @@ export function resolveClientIp(
     xff: string | null | undefined,
     cfg: TrustProxyConfig = getTrustProxyConfig(),
 ): string {
-    const peer = (peerIp || '').trim() || 'unknown';
+    const peer = normalizeIp(peerIp || '') || 'unknown';
     if (!xff || (!cfg.trustAll && !isTrustedProxy(peer, cfg))) return peer;
-    const hops = xff.split(',').map(s => s.trim()).filter(Boolean);
+    const hops = xff.split(',').map(normalizeIp).filter(Boolean);
     for (let i = hops.length - 1; i >= 0; i--) {
         if (!isTrustedProxy(hops[i], cfg)) return hops[i];
     }
