@@ -796,7 +796,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
             if (url.pathname === '/logo.png' || url.pathname === '/favicon.ico' || url.pathname === '/favicon.png') {
                 if (logoSvg) {
                     return new Response(logoSvg, {
-                        headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000' }
+                        headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' }
                     });
                 }
                 return new Response(null, { status: 204 });
@@ -1183,6 +1183,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Midleman — Health</title>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
   <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='dark';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1221,6 +1222,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
       padding: 40px 24px;
     }
     .wrap { max-width: 400px; width: 100%; }
+    .wordmark svg { width: 22px; height: 22px; vertical-align: middle; margin-right: 8px; }
     .wordmark {
       font-size: 11px;
       font-weight: 600;
@@ -1266,7 +1268,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
 </head>
 <body>
   <div class="wrap">
-    <div class="wordmark">Midleman</div>
+    <div class="wordmark">${LOGO_GLYPH_SVG}Midleman</div>
     <div class="status-row">
       <span class="dot"></span>
       <h1>Operational</h1>
@@ -1412,7 +1414,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                 const loginTitle = profile?.loginTitle || profile?.name || 'Acesso';
                 const SAFE_LOGO_RE = /^(https:\/\/|data:image\/(png|jpeg|gif|webp);base64,)[A-Za-z0-9+/=.\-_~:@!$&'()*+,;%?#[\]]+$/;
                 const loginLogoUrl = (profile?.loginLogo && SAFE_LOGO_RE.test(profile.loginLogo)) ? profile.loginLogo
-                    : (profile?.targetUrl ? (() => { try { return new URL(profile.targetUrl).origin + '/favicon.ico'; } catch { return '/logo.png'; } })() : '/logo.png');
+                    : (profile?.targetUrl ? (() => { try { return new URL(profile.targetUrl).origin + '/favicon.ico'; } catch { return '/logo.png?v=2'; } })() : '/logo.png?v=2');
 
                 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 

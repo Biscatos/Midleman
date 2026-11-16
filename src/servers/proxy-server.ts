@@ -46,7 +46,7 @@ function safeLogoUrl(raw: string | undefined, targetUrl?: string): string {
     if (targetUrl) {
         try { return new URL(targetUrl).origin + '/favicon.ico'; } catch {}
     }
-    return '/logo.png';
+    return '/logo.png?v=2';
 }
 
 export function setProxyLoginTemplate(html: string): void {
@@ -84,10 +84,10 @@ export function startProxyServer(profile: ProxyProfile, port: number): ProxyServ
             rememberPeerIp(req, srv?.requestIP?.(req)?.address ?? null);
 
             // ── Serve static assets (logo, favicon) for login page ──
-            if (url.pathname === '/logo.png' || url.pathname === '/favicon.ico' || url.pathname === '/favicon.png') {
+            if (url.pathname === '/logo.png?v=2' || url.pathname === '/favicon.ico' || url.pathname === '/favicon.png') {
                 if (logoBytes) {
                     return new Response(logoBytes, {
-                        headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000' },
+                        headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' },
                     });
                 }
                 return new Response(null, { status: 204 });

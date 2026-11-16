@@ -1538,67 +1538,70 @@
           <h2>Consent Pages</h2>
           <p>Library of reusable pages. OAuth clients and proxy profiles reference them by name instead of duplicating the text.</p>
         </div>
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:8px;align-items:center">
+          <label class="mm-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="text" id="consentPageSearch" placeholder="Search pages…" autocomplete="off" aria-label="Search consent pages" oninput="renderConsentPages(_consentPages)"></label>
           <button class="btn btn-primary btn-sm" onclick="openCreateConsentPageModal()" style="display:inline-flex;align-items:center;gap:6px">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
             New page
           </button>
         </div>
       </div>
-      <div class="card">
-        <div class="card-body" style="padding:0;overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:13px">
-            <thead>
-              <tr style="background:var(--surface2);text-align:left">
-                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Title</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Updated</th>
-                <th style="padding:10px 12px"></th>
-              </tr>
-            </thead>
-            <tbody id="consentPagesListBody">
-              <tr><td colspan="4" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <div id="consentPagesGrid" class="cp-grid"><div class="cp-empty">Loading...</div></div>
     </div>
 
-    <!-- Consent page editor modal -->
-    <div id="consentPageModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
-      <div class="mm-dialog" style="max-width:760px;width:100%;max-height:92vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
-        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-          <h3 style="margin:0;font-size:15px" id="consentPageModalTitle">New page</h3>
-          <button onclick="closeConsentPageModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">&times;</button>
-        </div>
-        <div style="padding:20px;overflow-y:auto;flex:1">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-            <div>
-              <div class="form-group" style="margin-bottom:12px">
-                <label class="form-label">Internal name</label>
-                <input type="text" id="consentPageName" class="form-input" placeholder="e.g. gdpr-terms-en" maxlength="80">
-                <p style="font-size:11px;color:var(--text3);margin-top:4px">Label shown in the dropdown when selecting the page.</p>
-              </div>
-              <div class="form-group" style="margin-bottom:12px">
-                <label class="form-label">Title</label>
-                <input type="text" id="consentPageTitle" class="form-input" placeholder="e.g. Terms of use" maxlength="200">
-              </div>
-              <div class="form-group">
-                <label class="form-label">Body (limited markdown)</label>
-                <textarea id="consentPageBody" class="form-input" rows="14" placeholder="Supports **bold**, *italic*, [link](https://…), - lists." maxlength="20000" oninput="renderConsentPagePreview()" style="font-family:'SF Mono',ui-monospace,monospace;font-size:12px;resize:vertical"></textarea>
-                <p style="font-size:11px;color:var(--text3);margin-top:4px">Paragraphs, lists, bold/italic and http(s) links.</p>
-              </div>
-            </div>
-            <div>
-              <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:var(--text3);margin-bottom:8px">Preview</div>
-              <div id="consentPagePreviewTitle" style="font-size:15px;font-weight:600;margin-bottom:10px;color:var(--text)">&nbsp;</div>
-              <div id="consentPagePreviewBody" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:14px;font-size:13px;line-height:1.6;color:var(--text2);min-height:280px;max-height:480px;overflow-y:auto"></div>
-            </div>
-          </div>
-        </div>
-        <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+    <!-- Consent page editor -->
+    <div id="consentPageModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);align-items:center;justify-content:center;padding:24px 16px">
+      <div class="mm-dialog cp-editor">
+        <div class="cp-ed-head">
+          <span class="cp-ed-crumb">Consent pages</span><span class="cp-ed-sep">/</span>
+          <h3 id="consentPageModalTitle">New page</h3>
+          <span id="consentPageDirty" class="cp-ed-dirty" style="display:none">Unsaved changes</span>
+          <span style="flex:1"></span>
+          <span id="consentPageUsage" class="cp-ed-usage"></span>
           <button class="btn btn-ghost btn-sm" onclick="closeConsentPageModal()">Cancel</button>
           <button class="btn btn-primary btn-sm" id="consentPageSubmitBtn" onclick="withBusy(this, 'Saving…', async () => { await submitConsentPage(); })">Create</button>
+        </div>
+        <div class="cp-ed-fields">
+          <label class="form-group" style="margin:0"><span class="form-label">Name (identifier)</span>
+            <input type="text" id="consentPageName" class="form-input" placeholder="e.g. terms-of-use" maxlength="80" oninput="markConsentPageDirty()" style="font-family:var(--font-mono);font-size:12px"></label>
+          <label class="form-group" style="margin:0"><span class="form-label">Title shown to users</span>
+            <input type="text" id="consentPageTitle" class="form-input" placeholder="e.g. Terms of use" maxlength="200" oninput="renderConsentPagePreview()"></label>
+        </div>
+        <div class="cp-ed-split">
+          <div class="cp-ed-pane">
+            <div class="cp-ed-bar">
+              <button type="button" class="cp-tool" title="Bold (Ctrl+B)" aria-label="Bold" onclick="consentFormat('**','**')"><b>B</b></button>
+              <button type="button" class="cp-tool" title="Italic (Ctrl+I)" aria-label="Italic" onclick="consentFormat('*','*')"><i>I</i></button>
+              <button type="button" class="cp-tool" title="Link (Ctrl+K)" aria-label="Link" onclick="consentFormat('[','](https://)')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></button>
+              <button type="button" class="cp-tool" title="Bulleted list" aria-label="Bulleted list" onclick="consentList()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg></button>
+              <span style="flex:1"></span>
+              <span id="consentPageCount" class="cp-ed-meta">0 words</span>
+            </div>
+            <textarea id="consentPageBody" class="cp-ed-text" placeholder="Write the text users must accept…" maxlength="20000" spellcheck="true" oninput="renderConsentPagePreview()" onkeydown="consentKeys(event)"></textarea>
+            <div class="cp-ed-hint"><span>**bold**</span><span>*italic*</span><span>[text](https://…)</span><span>- list item</span><span>blank line = new paragraph</span></div>
+          </div>
+          <div class="cp-ed-pane cp-ed-preview">
+            <div class="cp-ed-bar">
+              <span class="cp-ed-meta" style="text-transform:uppercase;letter-spacing:.06em">Live preview</span>
+              <span style="flex:1"></span>
+              <div class="cp-seg" role="group" aria-label="Preview device">
+                <button type="button" data-cp-device="desktop" class="on" onclick="setConsentPreview('device','desktop')">Desktop</button>
+                <button type="button" data-cp-device="mobile" onclick="setConsentPreview('device','mobile')">Mobile</button>
+              </div>
+              <div class="cp-seg" role="group" aria-label="Preview theme">
+                <button type="button" data-cp-theme="dark" class="on" onclick="setConsentPreview('theme','dark')">Dark</button>
+                <button type="button" data-cp-theme="light" onclick="setConsentPreview('theme','light')">Light</button>
+              </div>
+            </div>
+            <div class="cp-ed-stage">
+              <div id="consentPreviewCard" class="cp-shot" data-theme-preview="dark">
+                <div class="cp-shot-flow"><img class="cp-shot-logo" src="/logo.png?v=2" alt="">Midleman<span>→</span><span class="cp-shot-app">A</span>Your app</div>
+                <div id="consentPagePreviewTitle" class="cp-shot-title">&nbsp;</div>
+                <div id="consentPagePreviewBody" class="cp-shot-body"></div>
+                <div class="cp-shot-actions"><span class="cp-shot-btn">Decline</span><span class="cp-shot-btn primary">Accept and continue</span></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1628,25 +1631,18 @@
       </div>
       <div id="ldapSyncReport" style="display:none;margin-bottom:14px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12.5px;color:var(--text2)"></div>
 
-      <div class="card">
-        <div class="card-body" style="padding:0;overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:13px">
-            <thead>
-              <tr style="background:var(--surface2);text-align:left">
-                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">URL</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Base DN</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Scope</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">2FA</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Status</th>
-                <th style="padding:10px 12px"></th>
-              </tr>
-            </thead>
-            <tbody id="ldapListBody">
-              <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
-            </tbody>
-          </table>
+      <div class="ldm-legend" aria-hidden="true">
+        <span><i class="ldm-key ok"></i>Encrypted (LDAPS / StartTLS)</span>
+        <span><i class="ldm-key warn"></i>Plain LDAP or certificate not checked</span>
+        <span><i class="ldm-key off"></i>Disabled</span>
+      </div>
+      <div class="ldm" id="ldapMap">
+        <svg class="ldm-wires" id="ldapMapWires" aria-hidden="true"></svg>
+        <div class="ldm-col ldm-dirs" id="ldapListBody"><div class="ldm-empty">Loading...</div></div>
+        <div class="ldm-col ldm-mid">
+          <div class="ldm-hub" id="ldapMapHub"><svg viewBox="0 0 64 64" aria-hidden="true"><polygon points="14,8 26,16 18,24" fill="#1E6FAE"/><polygon points="50,8 38,16 46,24" fill="#1E6FAE"/><polygon points="18,24 26,16 38,16 46,24 48,46 32,58 16,46" fill="#2A8BD4"/><polygon points="16,46 18,24 8,40" fill="#1E6FAE"/><polygon points="48,46 46,24 56,40" fill="#1E6FAE"/><polygon points="26,16 38,16 32,22" fill="#1E6FAE"/><polygon points="22,40 32,58 42,40 32,46" fill="#5FB0EA"/><circle cx="25" cy="29" r="6" fill="#fff"/><circle cx="39" cy="29" r="6" fill="#fff"/><circle cx="25.8" cy="29.5" r="2.8" fill="#1E6FAE"/><circle cx="38.2" cy="29.5" r="2.8" fill="#1E6FAE"/><polygon points="29.5,35 34.5,35 32,40" fill="#1E6FAE"/><polygon points="26,58 30,58 28,62" fill="#1E6FAE"/><polygon points="34,58 38,58 36,62" fill="#1E6FAE"/></svg><b>Midleman</b><span id="ldapMapHubMeta"></span></div>
         </div>
+        <div class="ldm-col ldm-uses" id="ldapMapUses"></div>
       </div>
 
       <div class="card" style="margin-top:16px">
