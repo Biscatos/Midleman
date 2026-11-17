@@ -460,11 +460,11 @@ async function fetchOverview() {
   }).join('');
 
   // 4. Traffic by kind
-  const max = Math.max(1, ...t.timeline.map(b => b.proxy + b.webhook + b.connector));
-  const h = v => v ? Math.max(1, Math.round(v / max * 120)) : 0;
+  const max = Math.max(1, ...t.timeline.map(b => b.proxy + b.webhook + b.connector + b.errors));
+  const h = v => v ? `max(1px, ${(v / max * 94).toFixed(2)}%)` : '0';  // % of the plot, so bars grow with the card
   document.getElementById('ovTraffic').innerHTML = t.timeline.map((b, i) => {
     const time = new Date(Date.parse(b.bucket + ':00Z')).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    return `<button type="button" class="ov-bar" onclick="ovOpenRange(${i})" title="${time} — ${b.proxy} proxy · ${b.webhook} webhook · ${b.connector} connector · ${b.errors} errors" aria-label="${time}"><i class="e" style="height:${b.errors ? Math.max(2, h(b.errors)) : 0}px"></i><i class="c" style="height:${h(b.connector)}px"></i><i class="w" style="height:${h(b.webhook)}px"></i><i class="p" style="height:${h(b.proxy)}px"></i></button>`;
+    return `<button type="button" class="ov-bar" onclick="ovOpenRange(${i})" title="${time} — ${b.proxy} proxy · ${b.webhook} webhook · ${b.connector} connector · ${b.errors} errors" aria-label="${time}"><i class="e" style="height:${b.errors ? `max(2px, ${(b.errors / max * 94).toFixed(2)}%)` : 0}"></i><i class="c" style="height:${h(b.connector)}"></i><i class="w" style="height:${h(b.webhook)}"></i><i class="p" style="height:${h(b.proxy)}"></i></button>`;
   }).join('');
 
   // 5. Recent activity
@@ -1889,7 +1889,7 @@ function _sourceBadge(source) {
   const pill = (label, bg, color, border, title) =>
     '<span title="' + esc(title || '') + '" style="display:inline-block;background:' + bg + ';color:' + color + ';border:1px solid ' + border + ';border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:600;letter-spacing:.04em">' + label + '</span>';
   if (source === 'direct') return pill('DIRECT', 'var(--accent-bg)', 'var(--accent)', 'var(--accent-bdr)', 'Assigned directly to this user');
-  if (source === 'ldap_group') return pill('LDAP GROUP', 'rgba(168,85,247,.12)', '#a855f7', 'rgba(168,85,247,.25)', 'Granted by LDAP group membership');
+  if (source === 'ldap_group') return pill('LDAP GROUP', 'var(--ok-bg)', 'var(--ok-text)', 'var(--green-bdr)', 'Granted by LDAP group membership');
   if (source === 'open') return pill('OPEN', 'var(--surface2)', 'var(--text3)', 'var(--border)', 'Allow-list disabled — open to all users');
   return '<span style="color:var(--text3)">—</span>';
 }
