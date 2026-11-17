@@ -108,7 +108,16 @@ function sync(t: Tunnel): void {
     if (!t.enabled) return;
     // shortcut: a disabled tunnel keeps its port number but not the socket, so a proxy created meanwhile can take it; the tunnel then shows "port in use" and needs another port. Reserve disabled ports in port-manager if that ever bites.
     try { r.listener = accept(t.name, t.listenPort, everyone); r.bound = want; console.log(`🔌 [tunnel] "${t.name}" ${want} → ${t.agent} → ${t.host}:${t.port}`); }
-    catch (e: any) { r.error = /EADDRINUSE|in use/i.test(String(e?.code || e?.message)) ? `port ${t.listenPort} is already in use` : String(e?.message || e); console.error(`[tunnels] "${t.name}": ${r.error}`); }
+    catch (e: any) { r.error = /EADDRINUSE|in use/i.test(String(e?.code || e?.message)) ? `port ${t.listenPort} is already in use${portOwner(t.listenPort, t.name)}` : String(e?.message || e); console.error(`[tunnels] "${t.name}": ${r.error}`); }
+}
+
+/** " by connector \"x\"" when a Midleman listener we know of holds the port, else "". */
+function portOwner(port: number, self: string): string {
+    const a = getAllAssignedPorts();
+    const kinds: [string, Record<string, number> | undefined][] = [['proxy', a.proxies], ['webhook', a.webhooks], ['connector', a.connectors], ['TCP/UDP proxy', a.tcpUdp]];
+    for (const [kind, map] of kinds) for (const [name, p] of Object.entries(map || {})) if (p === port) return ` by ${kind} "${name.split(':')[0]}"`;
+    for (const t of tunnels.values()) if (t.name !== self && t.listenPort === port) return ` by tunnel "${t.name}"`;
+    return reserved.includes(port) ? ' by Midleman itself' : '';
 }
 
 /** First port from the published range that nothing holds. */

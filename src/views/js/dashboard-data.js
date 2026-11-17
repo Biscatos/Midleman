@@ -12949,35 +12949,90 @@ async function fetchTunnels() {
 /** What a client types: the dashboard's own host when the port is open to the network, loopback otherwise. */
 function _tunAddr(t) { return (t.allowedIps.length ? location.hostname : '127.0.0.1') + ':' + t.listenPort; }
 
+let _tunFilter = 'all';
+const _tunHasProblem = t => t.status === 'error' || t.status === 'offline';
+
+function setTunnelFilter(f) {
+  _tunFilter = f;
+  document.querySelectorAll('#tunnelQuickFilter [data-tf]').forEach(b => b.classList.toggle('on', b.dataset.tf === f));
+  renderTunnels();
+}
+
+/** A ready-to-paste client command for well-known service ports; plain host:port otherwise. */
+function _tunCommand(t) {
+  const [h, p] = _tunAddr(t).split(':');
+  const by = { 6379: `redis-cli -h ${h} -p ${p}`, 5432: `psql -h ${h} -p ${p}`, 3306: `mysql -h ${h} -P ${p}`, 1433: `sqlcmd -S ${h},${p}`,
+    27017: `mongosh "mongodb://${h}:${p}"`, 22: `ssh -p ${p} user@${h}`, 3389: `mstsc /v:${h}:${p}`, 5672: `amqp://${h}:${p}` };
+  if (by[t.port]) return by[t.port];
+  return [80, 443, 3000, 8080, 8443, 15672, 9090].includes(t.port) ? `${t.port === 443 || t.port === 8443 ? 'https' : 'http'}://${h}:${p}` : `${h}:${p}`;
+}
+
+/** Connections per 15 min over the last 6 h, from the last 50 connections the server keeps. */
+function _tunActivity(t) {
+  const bins = new Array(24).fill(0), now = Date.now(), span = 15 * 60_000;
+  for (const r of t.recent || []) { const i = 23 - Math.floor((now - r.at) / span); if (i >= 0 && i < 24) bins[i]++; }
+  return bins;
+}
+
 function renderTunnels() {
   const c = document.getElementById('tunnelListBody'); if (!c) return;
   const q = (document.getElementById('tunnelSearch').value || '').trim().toLowerCase();
-  const list = _tunnels.filter(t => !q || [t.name, t.description, t.agent, t.host + ':' + t.port, t.listenPort].join(' ').toLowerCase().includes(q));
-  if (!list.length) { c.innerHTML = `<tr><td colspan="10" style="padding:40px;text-align:center;color:var(--text3)">${_tunnels.length ? 'No tunnel matches the search.' : 'No tunnels yet. Click "+ Tunnel".'}</td></tr>`; return; }
-  const mono = 'font-family:var(--font-mono);font-size:12px;white-space:nowrap';
+  const setCount = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n ? '· ' + n : ''; };
+  setCount('tfProblems', _tunnels.filter(_tunHasProblem).length);
+  setCount('tfDisabled', _tunnels.filter(t => !t.enabled).length);
+  const list = _tunnels.filter(t => {
+    if (_tunFilter === 'problems' && !_tunHasProblem(t)) return false;
+    if (_tunFilter === 'disabled' && t.enabled) return false;
+    return !q || [t.name, t.description, t.agent, t.host + ':' + t.port, t.listenPort].join(' ').toLowerCase().includes(q);
+  });
+  if (!list.length) {
+    const msg = !_tunnels.length ? 'No tunnels yet. Click "+ Tunnel".' : 'No tunnel matches the current filter.';
+    c.innerHTML = `<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">${msg}</td></tr>`;
+    return;
+  }
   c.innerHTML = list.map(t => {
-    const [cls, label] = TUN_STATUS[t.status] || ['', t.status];
-    const why = t.status === 'error' ? t.error : t.status === 'offline' ? `Agent "${t.agent}" has no tunnel connection` : t.lastError ? `Last error ${_monAgo(t.lastError.at)}: ${t.lastError.msg}` : '';
+    const n = esc(t.name), addr = _tunAddr(t);
     const ag = _tunAgents.find(a => a.name === t.agent);
-    const rtt = ag && ag.connected && ag.rttMs != null ? ` <span style="color:var(--text3)">· ${ag.rttMs} ms</span>` : '';
-    const from = !t.allowedIps.length ? '<span style="color:var(--text3)">Midleman only</span>'
-      : t.allowedIps.length === 1 ? `<span style="${mono};color:var(--text2)">${esc(t.allowedIps[0])}</span>`
-      : `<span class="mm-chip" title="${esc(t.allowedIps.join(', '))}">${t.allowedIps.length} networks</span>`;
-    const refused = t.rejected ? ` <span class="mm-chip warn" title="${esc(`Last refused: ${t.lastRejected.ip} — ${t.lastRejected.why}, ${_monAgo(t.lastRejected.at)}`)}">${t.rejected} refused</span>` : '';
-    const addr = _tunAddr(t), n = esc(t.name);
-    return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
-  <td style="padding:8px 12px;font-weight:600;white-space:nowrap" title="${esc(t.description)}">${n}</td>
-  <td style="padding:8px;white-space:nowrap"><span class="mm-chip ${cls}" title="${esc(why)}">${label}</span></td>
-  <td style="padding:8px;white-space:nowrap">${esc(t.agent)}${rtt}</td>
-  <td style="padding:8px;${mono};color:var(--text2)">${esc(t.host)}:${t.port}</td>
-  <td style="padding:8px;${mono};color:var(--accent2);cursor:pointer" title="Click to copy" onclick="mmCopy('${addr}', this, 'Copied: ${addr}')">${addr}</td>
-  <td style="padding:8px;white-space:nowrap">${from}${refused}</td>
-  <td style="padding:8px;${mono};text-align:right" title="${t.total} since Midleman started">${t.active} <span style="color:var(--text3)">/ ${t.maxConnections}</span></td>
-  <td style="padding:8px;${mono};text-align:right;color:var(--text2)">${fmtBytes(t.bytesUp)} <span style="color:var(--text3)">/</span> ${fmtBytes(t.bytesDown)}</td>
-  <td style="padding:8px;white-space:nowrap;color:var(--text2)">${_monAgo(t.lastUsed)}</td>
-  <td style="padding:8px 12px;text-align:right;white-space:nowrap">
-    <input type="checkbox" class="mm-switch" ${t.enabled ? 'checked' : ''} title="${t.enabled ? 'Enabled' : 'Disabled'}" aria-label="Enable ${n}" onchange="tunnelToggle('${n}', this)" style="margin-right:10px">
-    <button data-name="${n}" onclick="tunnelMenu(event, this)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:2px 10px;cursor:pointer;color:var(--text2);font-size:18px;line-height:1.2;letter-spacing:1px;vertical-align:middle" title="Actions">&#8942;</button>
+    const agentUp = !!(ag && ag.connected);
+    const wide = t.allowedIps.some(ip => /^0\.0\.0\.0\/0$|\/([0-7])$/.test(ip));
+    const state = !t.enabled ? 'off' : t.status === 'error' ? 'err' : t.status === 'offline' ? 'warn' : 'ok';
+
+    // The chain: each hop coloured by where it breaks.
+    const from = !t.allowedIps.length ? 'Midleman only' : t.allowedIps.length === 1 ? t.allowedIps[0] : t.allowedIps.length + ' networks';
+    const hop = (cls, html, title) => `<span class="tn-hop ${cls}"${title ? ` title="${esc(title)}"` : ''}>${html}</span>`;
+    const arrow = '<span class="tn-arrow" aria-hidden="true">→</span>';
+    const chain =
+      hop(wide ? 'warn' : '', esc(from) + (wide ? ' ⚠' : ''), t.allowedIps.length ? t.allowedIps.join(', ') + (wide ? ' — very wide range' : '') : 'Only Midleman itself (127.0.0.1) can connect') + arrow +
+      `<button type="button" class="tn-hop ${t.status === 'error' ? 'err' : t.enabled ? 'ok' : ''} tn-port" title="Copy ${esc(addr)}" onclick="mmCopy('${esc(addr)}', this, 'Copied: ${esc(addr)}')">:${t.listenPort}</button>` + arrow +
+      hop(!t.enabled ? '' : agentUp ? 'ok' : 'warn', esc(t.agent) + (agentUp && ag.rttMs != null ? ` · ${ag.rttMs} ms` : agentUp ? '' : ' · offline')) + arrow +
+      hop(t.lastError && t.status === 'online' && Date.now() - t.lastError.at < 15 * 60_000 ? 'warn' : '', esc(t.host) + ':' + t.port, t.lastError ? `Last error ${_monAgo(t.lastError.at)}: ${t.lastError.msg}` : '');
+
+    // What is wrong, in words, with the action that fixes it.
+    let problem = '';
+    if (t.enabled && t.status === 'error') {
+      problem = `<div class="tn-problem err"><span>${esc(t.error || 'The tunnel is not listening.')}</span><button type="button" onclick="openTunnelModal('${n}')">${/in use/i.test(t.error || '') ? 'Change port' : 'Edit'}</button></div>`;
+    } else if (t.enabled && t.status === 'offline') {
+      problem = `<div class="tn-problem warn"><span>Agent "${esc(t.agent)}" has no tunnel connection — clients are refused until it reconnects.</span><button type="button" onclick="navigate('monitors')">Open monitors</button></div>`;
+    }
+    const refused = t.rejected ? ` · <span class="tn-refused" title="${esc(`Last refused: ${t.lastRejected.ip} — ${t.lastRejected.why}, ${_monAgo(t.lastRejected.at)}`)}">${t.rejected} refused</span>` : '';
+    const sub = [t.description, t.lastUsed ? 'used ' + _monAgo(t.lastUsed) : 'never used'].filter(Boolean).map(esc).join(' · ') + refused;
+
+    const act = _tunActivity(t), max = Math.max(1, ...act);
+    const spark = '<span class="wh-spark" aria-hidden="true">' + act.map(v => `<i style="height:${v ? Math.max(3, Math.round(v / max * 20)) : 1}px"${v ? '' : ' class="z"'}></i>`).join('') + '</span>';
+    const cmd = _tunCommand(t);
+
+    return `<tr class="wh-row tn-row">
+  <td class="wh-dotcol"><i class="wh-state ${state}"></i></td>
+  <td><div class="wh-name">${n}</div><div class="wh-sub">${sub}</div></td>
+  <td><div class="tn-chain">${chain}</div>${problem}</td>
+  <td title="${(t.recent || []).length} recent connections">${spark}</td>
+  <td class="wh-rate" title="${t.total} since Midleman started">${t.active} <span class="wh-none">/ ${t.maxConnections}</span></td>
+  <td class="wh-vol">${fmtBytes(t.bytesUp)} / ${fmtBytes(t.bytesDown)}</td>
+  <td style="text-align:right;white-space:nowrap">
+    <input type="checkbox" class="mm-switch" ${t.enabled ? 'checked' : ''} title="${t.enabled ? 'Enabled' : 'Disabled'}" aria-label="Enable ${n}" onchange="tunnelToggle('${n}', this)" style="margin-right:8px;vertical-align:middle">
+    <button type="button" class="wh-more tn-act" title="Test target" aria-label="Test target of ${n}" onclick="tunnelTest('${n}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></button>
+    <button type="button" class="wh-more tn-act" title="Copy: ${esc(cmd)}" aria-label="Copy connect command for ${n}" onclick="mmCopy('${esc(cmd).replace(/'/g, '&#39;')}', this, 'Copied: ${esc(cmd).replace(/'/g, '&#39;')}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11"/><path d="M5 15V4h11"/></svg></button>
+    <button class="wh-more" data-name="${n}" onclick="tunnelMenu(event, this)" aria-label="Actions for ${n}">⋮</button>
   </td>
 </tr>`;
   }).join('');
@@ -12989,6 +13044,7 @@ function tunnelMenu(e, btn) {
   showActionMenu(btn, [
     { label: 'Test target', fn: () => tunnelTest(t.name) },
     { label: 'Copy address', fn: () => mmCopy(_tunAddr(t), null, 'Copied: ' + _tunAddr(t)) },
+    { label: 'Copy connect command', fn: () => mmCopy(_tunCommand(t), null, 'Copied: ' + _tunCommand(t)) },
     { label: 'Edit', fn: () => openTunnelModal(t.name) },
     '---',
     { label: 'Delete', fn: () => tunnelDelete(t.name), danger: true },

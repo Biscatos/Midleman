@@ -1155,18 +1155,29 @@
       <div class="mm-filterbar">
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
             <label class="mm-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="text" id="tunnelSearch" placeholder="Search name, agent, target, port..." oninput="renderTunnels()"></label>
+            <div class="mm-seg-filter" role="group" aria-label="Show tunnels" id="tunnelQuickFilter">
+              <button type="button" class="on" data-tf="all" onclick="setTunnelFilter('all')">All</button>
+              <button type="button" data-tf="problems" onclick="setTunnelFilter('problems')">Problems <span id="tfProblems"></span></button>
+              <button type="button" data-tf="disabled" onclick="setTunnelFilter('disabled')">Disabled <span id="tfDisabled"></span></button>
+            </div>
           </div>
       </div>
       <div class="card">
         <div class="card-body" style="padding:0;overflow-x:auto">
-          <table id="tunnelTable" style="width:100%;border-collapse:collapse;font-size:13px">
+          <table id="tunnelTable" class="wh-table" style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
-              <tr style="background:var(--surface2);text-align:left;white-space:nowrap">
-                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th><th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Status</th><th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Agent</th><th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Remote target</th><th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Listens on</th><th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Allowed from</th><th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase;text-align:right">Connections</th><th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase;text-align:right">Sent / received</th><th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Last used</th><th style="padding:10px 12px"></th>
+              <tr>
+                <th class="wh-dotcol"></th>
+                <th>Tunnel</th>
+                <th>Who → Midleman → agent → service</th>
+                <th title="Connections opened, from the last 50 (6 h window)">Activity</th>
+                <th title="Open now / limit">Connections</th>
+                <th title="Since Midleman started">Traffic ↑ / ↓</th>
+                <th></th>
               </tr>
             </thead>
             <tbody id="tunnelListBody">
-              <tr><td colspan="10" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
+              <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
             </tbody>
           </table>
         </div>

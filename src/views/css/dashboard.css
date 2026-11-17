@@ -3934,6 +3934,19 @@ tr.mm-ctx-row, tr.mm-ctx-row > td, [role="row"].mm-ctx-row { background: var(--a
 .wh-host { color: var(--accent); text-decoration: none; }
 .wh-host:hover { text-decoration: underline; }
 .wh-link { padding: 0 6px; font: inherit; font-size: 10.5px; background: var(--accent); color: var(--on-accent); border: 0; cursor: pointer; }
+.tn-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 11.5px; }
+.tn-hop { padding: 2px 6px; border: 1px solid var(--border); color: var(--text2); white-space: nowrap; background: none; font: inherit; }
+.tn-hop.ok { border-color: var(--green-bdr); } .tn-hop.warn { border-color: var(--orange-bdr); color: var(--warn-text); } .tn-hop.err { border-color: var(--red-bdr); color: var(--err-text); }
+.tn-port { color: var(--accent2); cursor: pointer; }
+.tn-port:hover { border-color: var(--accent); }
+.tn-arrow { color: var(--text3); }
+.tn-problem { margin-top: 6px; display: flex; align-items: center; gap: 10px; padding: 5px 8px 5px 10px; font-size: 12px; border: 1px solid; }
+.tn-problem span { flex: 1; min-width: 0; }
+.tn-problem button { flex: none; height: 24px; padding: 0 10px; background: none; border: 1px solid; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.tn-problem.err { color: var(--err-text); border-color: var(--red-bdr); background: var(--red-bg); }
+.tn-problem.warn { color: var(--warn-text); border-color: var(--orange-bdr); background: var(--warning-bg); }
+.tn-refused { color: var(--warn-text); cursor: help; }
+.tn-act { border-color: var(--border); margin-right: 2px; vertical-align: middle; }
 .wh-more { width: 28px; height: 26px; background: none; border: 1px solid transparent; color: var(--text3); cursor: pointer; }
 .wh-more:hover { border-color: var(--border); color: var(--text); }
 
