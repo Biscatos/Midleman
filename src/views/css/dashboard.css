@@ -4023,7 +4023,7 @@ tr.mm-ctx-row, tr.mm-ctx-row > td, [role="row"].mm-ctx-row { background: var(--a
 .ov-card-head { display: flex; align-items: center; gap: 12px; } .ov-card-head b { color: var(--text); font-weight: 600; flex: 1; }
 .ov-legend { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text3); }
 .ov-legend i { width: 9px; height: 9px; display: inline-block; margin-left: 8px; }
-.ov-legend .p, .ov-bar .p { background: var(--accent); } .ov-legend .w, .ov-bar .w { background: #9b8cf0; }
+.ov-legend .p, .ov-bar .p { background: var(--accent); } .ov-legend .w, .ov-bar .w { background: #7cc3f5; }
 .ov-legend .c, .ov-bar .c { background: var(--green); } .ov-legend .e, .ov-bar .e { background: var(--red); }
 .ov-traffic { display: flex; align-items: flex-end; gap: 2px; height: 130px; }
 .ov-bar { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; gap: 1px; padding: 0; border: 0; background: none; cursor: pointer; }
@@ -4036,14 +4036,18 @@ tr.mm-ctx-row, tr.mm-ctx-row > td, [role="row"].mm-ctx-row { background: var(--a
 .ov-system { display: flex; flex-wrap: wrap; gap: 6px 22px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text3); }
 .ov-system b { color: var(--text2); font-weight: 500; }
 @media (max-width: 900px) { .ov-row { grid-template-columns: minmax(0, 1fr); } }
-/* Unified: numbers, services, chart, activity and system read as ONE framed panel with hairlines,
-   not a pile of separate cards. Outset shadows draw the inner lines; the frame clips the outer ones. */
-.ov-kpis, .ov-services, .ov-row { gap: 0; margin-bottom: 0; border: 1px solid var(--border); background: var(--surface); overflow: hidden; }
-.ov-services, .ov-row, .ov-system { border-top: 0; }
-.ov-kpi, .ov-svc, .ov-card { border: 0; background: none; box-shadow: 1px 0 0 var(--border), 0 1px 0 var(--border); }
-.ov-svc:hover { background: var(--surface2); }
-.ov-svc.bad { box-shadow: inset 3px 0 0 var(--red), 1px 0 0 var(--border), 0 1px 0 var(--border); }
-.ov-system { border: 1px solid var(--border); border-top: 0; background: var(--surface); padding: 10px 16px; margin-bottom: 14px; }
+/* As the approved mockup: fixed columns (never wrap into holes), 12 px between cards, 16 px between rows. */
+.ov-attn, .ov-kpis, .ov-services, .ov-row { margin-bottom: 16px; }
+.ov-attn-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+/* Traffic: the plot fills the card down to its bottom edge, bars stand on the frame. */
+.ov-card-chart { padding-bottom: 0; }
+.ov-card-chart .ov-traffic { flex: 1; height: auto; min-height: 150px; border-bottom: 0; }
+.ov-card-chart .ov-card-head b { flex: none; } .ov-card-chart .ov-legend { margin-left: auto; }
+.ov-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.ov-services { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.ov-kpi { display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 8px; row-gap: 6px; }
+.ov-kpi-l, .ov-kpi-s { grid-column: 1 / -1; }
+@media (max-width: 1100px) { .ov-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ov-services { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .wh-more { width: 28px; height: 26px; background: none; border: 1px solid transparent; color: var(--text3); cursor: pointer; }
 .wh-more:hover { border-color: var(--border); color: var(--text); }
 
