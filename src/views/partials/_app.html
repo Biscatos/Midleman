@@ -681,33 +681,32 @@
             <label class="mm-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="text" id="webhookSearch" placeholder="Search name..."
               style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
               oninput="filterWebhooks()"></label>
+            <div class="mm-seg-filter" role="group" aria-label="Show webhooks" id="webhookQuickFilter">
+              <button type="button" class="on" data-wf="all" onclick="setWebhookFilter('all')">All</button>
+              <button type="button" data-wf="issues" onclick="setWebhookFilter('issues')">With issues <span id="whfIssues"></span></button>
+              <button type="button" data-wf="stopped" onclick="setWebhookFilter('stopped')">Stopped <span id="whfStopped"></span></button>
+            </div>
           </div>
         
       </div>
       <div class="card">
         <div class="card-body" style="padding:0;overflow-x:auto">
-          <table id="webhookTable" style="width:100%;border-collapse:collapse;font-size:13px">
+          <table id="webhookTable" class="wh-table" style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
-              <tr style="background:var(--surface2);text-align:left">
-                <th
-                  style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Name</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Status</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Port</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Targets</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Auth</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  In-Flight</th>
-                <th style="padding:10px 12px"></th>
+              <tr>
+                <th class="wh-dotcol"></th>
+                <th>Name</th>
+                <th>Port</th>
+                <th>Destinations</th>
+                <th title="Payloads received per hour, last 24 h">Last 24 h</th>
+                <th title="Fan-out deliveries that succeeded, last 24 h">Delivered</th>
+                <th>Issues</th>
+                <th></th>
               </tr>
             </thead>
             <tbody id="webhookListBody">
               <tr>
-                <td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td>
+                <td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td>
               </tr>
             </tbody>
           </table>

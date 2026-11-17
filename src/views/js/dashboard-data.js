@@ -2303,6 +2303,8 @@ function copyTargetCredential() {}
 let _allWebhooks = [];
 let _dlqByWebhook = {}; // { [webhookName]: count }
 let _pendingByWebhook = {}; // { [webhookName]: count }
+let _dlqByTarget = {}, _pendingByTarget = {}; // { ["webhook\u0000targetUrl"]: count }
+let _webhookFilter = 'all';
 let editingWebhook = null;
 
 async function fetchWebhooks() {
@@ -2317,11 +2319,15 @@ async function fetchWebhooks() {
     _allWebhooks = d.webhooks || [];
 
     if (dlqRes.ok) {
-      _dlqByWebhook = (await dlqRes.json()).byWebhook || {};
+      const dq = await dlqRes.json();
+      _dlqByWebhook = dq.byWebhook || {};
+      _dlqByTarget = dq.byTarget || {};
     }
 
     if (prRes.ok) {
-      _pendingByWebhook = (await prRes.json()).byWebhook || {};
+      const pq = await prRes.json();
+      _pendingByWebhook = pq.byWebhook || {};
+      _pendingByTarget = pq.byTarget || {};
     }
 
     filterWebhooks();
@@ -2329,69 +2335,106 @@ async function fetchWebhooks() {
   } catch { }
 }
 
+function _webhookHasIssues(w) {
+  return (_dlqByWebhook[w.name] || 0) > 0 || (_pendingByWebhook[w.name] || 0) > 0;
+}
+
+function setWebhookFilter(f) {
+  _webhookFilter = f;
+  document.querySelectorAll('#webhookQuickFilter [data-wf]').forEach(b => b.classList.toggle('on', b.dataset.wf === f));
+  filterWebhooks();
+}
+
 function filterWebhooks() {
   const search = (document.getElementById('webhookSearch')?.value || '').toLowerCase();
+  const issues = _allWebhooks.filter(_webhookHasIssues).length;
+  const stopped = _allWebhooks.filter(w => !w.running).length;
+  const setCount = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n ? '· ' + n : ''; };
+  setCount('whfIssues', issues); setCount('whfStopped', stopped);
   const filtered = _allWebhooks.filter(w => {
     if (search && !w.name.toLowerCase().includes(search)) return false;
+    if (_webhookFilter === 'issues' && !_webhookHasIssues(w)) return false;
+    if (_webhookFilter === 'stopped' && w.running) return false;
     return true;
   });
   renderWebhooks(filtered);
 }
 
+/** Queue counts for one destination. Templated URLs are rendered per payload, so match on the part before the first {{. */
+function _targetQueueCounts(webhookName, url) {
+  const prefix = String(url || '').split('{{')[0];
+  const exact = !String(url || '').includes('{{');
+  let dlq = 0, pending = 0;
+  const scan = (map, add) => {
+    for (const k in map) {
+      const [w, u] = k.split('\u0000');
+      if (w === webhookName && (exact ? u === url : u.startsWith(prefix))) add(map[k]);
+    }
+  };
+  scan(_dlqByTarget, n => { dlq += n; });
+  scan(_pendingByTarget, n => { pending += n; });
+  return { dlq, pending };
+}
+
+function _webhookSpark(hours) {
+  const max = Math.max(1, ...hours);
+  return '<span class="wh-spark" aria-hidden="true">' + hours.map(n => '<i style="height:' + (n ? Math.max(2, Math.round(n / max * 20)) : 1) + 'px"' + (n ? '' : ' class="z"') + '></i>').join('') + '</span>';
+}
+
 function renderWebhooks(webhooks) {
   const c = document.getElementById('webhookListBody');
-  if (webhooks.length === 0) { c.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No webhooks yet. Click "+ New Webhook".</td></tr>'; return; }
+  if (webhooks.length === 0) {
+    const msg = _allWebhooks.length ? 'No webhook matches the current filter.' : 'No webhooks yet. Click "+ New Webhook".';
+    c.innerHTML = '<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">' + msg + '</td></tr>';
+    return;
+  }
+  const fmt = n => n >= 10000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1) + 'k' : String(n);
   c.innerHTML = webhooks.map(w => {
-    const statusBadge = w.running
-      ? '<span class="mm-chip ok">Running</span>'
-      : '<span class="mm-chip err">Stopped</span>';
-    const authBadge = w.hasAuth
-      ? '<span style="color:var(--green)">Enabled</span>'
-      : '<span style="color:var(--text3)">Public</span>';
-    const wIpBadge = (w.allowedIps && w.allowedIps.length)
-      ? `<span class="mm-chip" style="margin-left:4px" title="${esc(w.allowedIps.join(', '))}">IP restricted</span>`
-      : '';
-    const numTargets = w.targets.length;
-    const numPaused = w.targets.filter(t => typeof t === 'object' && t && t.enabled === false).length;
     const dlqCount = _dlqByWebhook[w.name] || 0;
     const pendingCount = _pendingByWebhook[w.name] || 0;
-    const dlqDot = dlqCount > 0
-      ? `<span style="position:absolute;top:2px;right:2px;width:7px;height:7px;background:var(--red);border-radius:50%;display:block" title="${dlqCount} failed deliveries"></span>`
-      : (pendingCount > 0
-          ? `<span style="position:absolute;top:2px;right:2px;width:7px;height:7px;background:var(--orange);border-radius:50%;display:block" title="${pendingCount} pending persistent retries"></span>`
-          : '');
-    const wNpmBadge = (() => {
-      if (!w.npmProxyHostId) return '';
-      const hosts = (w.publicHostnames || []).filter(Boolean);
-      const tip = (hosts.length ? `Open https://${esc(hosts[0])} (NPM #${w.npmProxyHostId})` : `NPM #${w.npmProxyHostId}`)
-        + (hosts.length > 1 ? ` — also: ${esc(hosts.slice(1).join(', '))}` : '');
-      const shown = hosts.length === 0
-        ? `NPM #${w.npmProxyHostId}`
-        : (hosts.length === 1
-            ? esc(hosts[0])
-            : `${esc(hosts[0])} <span style="color:var(--text3);font-weight:400">+${hosts.length - 1}</span>`);
-      const inner = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shown}</span>`;
-      if (hosts.length === 0) {
-        return `<span class="mm-chip acc" style="margin-left:4px;cursor:help;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle" title="${tip}">${inner}</span>`;
-      }
-      const href = 'https://' + hosts[0].replace(/^\*\./, 'www.');
-      return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="background:var(--accent-bg);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle;text-decoration:none;transition:background 0.15s" onmouseover="this.style.background='var(--accent-bdr)'" onmouseout="this.style.background='var(--accent-bg)'" title="${tip}">${inner}</a>`;
-    })();
-    return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
-  <td style="padding:8px 12px;font-weight:600">${esc(w.name)}</td>
-  <td style="padding:8px">${statusBadge}${wNpmBadge}</td>
-  <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${w.port}</td>
-  <td style="padding:8px"><a href="javascript:void(0)" onclick="manageWebhookDestinations('${esc(w.name)}')" style="color:var(--accent);text-decoration:none">${numTargets} destination${numTargets === 1 ? '' : 's'}${numPaused ? ' (' + numPaused + ' paused)' : ''} →</a></td>
-  <td style="padding:8px">${authBadge}${wIpBadge}</td>
-  <td style="padding:8px;color:var(--accent2)">${w.active > 0 ? w.active : '<span style="color:var(--text3)">0</span>'}</td>
-  <td style="padding:8px 12px;text-align:right">
-    <span style="position:relative;display:inline-block">
-      <button data-type="webhook" data-name="${esc(w.name)}" onclick="showContextMenu(event,this)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:2px 10px;cursor:pointer;color:var(--text2);font-size:18px;line-height:1.2;letter-spacing:1px" title="Actions">&#8942;</button>
-      ${dlqDot}
-    </span>
-  </td>
-</tr>`;
+    const state = !w.running ? 'off' : (dlqCount ? 'err' : pendingCount ? 'warn' : 'ok');
+
+    const sub = [];
+    if (!w.running) sub.push('Stopped');
+    sub.push(w.meta?.enabled ? 'Meta signature' : (w.hasAuth ? 'Auth' : 'Public'));
+    if (w.allowedIps && w.allowedIps.length) sub.push('IP restricted');
+    const hosts = (w.publicHostnames || []).filter(Boolean);
+    if (hosts.length) sub.push(hosts[0] + (hosts.length > 1 ? ' +' + (hosts.length - 1) : ''));
+    else if (w.npmProxyHostId) sub.push('NPM #' + w.npmProxyHostId);
+    if (w.active > 0) sub.push(w.active + ' in flight');
+
+    const targets = w.targets || [];
+    const squares = targets.map(t => {
+      const url = typeof t === 'string' ? t : (t?.url || (t?.webhookName ? 'webhook:' + t.webhookName : ''));
+      const paused = typeof t === 'object' && t && t.enabled === false;
+      const q = _targetQueueCounts(w.name, url);
+      const cls = paused ? 'off' : q.dlq ? 'err' : q.pending ? 'warn' : 'ok';
+      const tip = url + (paused ? ' — paused' : q.dlq ? ' — ' + q.dlq + ' failed' : q.pending ? ' — ' + q.pending + ' retrying' : '');
+      return '<i class="wh-dest ' + cls + '" title="' + esc(tip) + '"></i>';
+    }).join('');
+
+    const tr = w.traffic;
+    const attempts = tr ? tr.delivered + tr.failed : 0;
+    const rate = attempts ? tr.delivered / attempts * 100 : null;
+    const rateTxt = rate === null ? '—' : (rate >= 99.95 ? '100%' : rate.toFixed(1) + '%');
+    const rateCls = rate === null ? 'muted' : rate < 95 ? 'warn' : '';
+
+    const issues = [];
+    if (pendingCount) issues.push('<button type="button" class="wh-issue warn" onclick="openPendingRetryModal(\'' + esc(w.name) + '\')">' + pendingCount + ' retrying</button>');
+    if (dlqCount) issues.push('<button type="button" class="wh-issue err" onclick="openDlqModal(\'' + esc(w.name) + '\')">' + dlqCount + ' failed</button>');
+
+    return '<tr class="wh-row">' +
+      '<td class="wh-dotcol"><i class="wh-state ' + state + '" title="' + (w.running ? 'Running' : 'Stopped') + '"></i></td>' +
+      '<td><div class="wh-name">' + esc(w.name) + '</div><div class="wh-sub">' + esc(sub.join(' · ')) + '</div></td>' +
+      '<td class="wh-port">' + esc(String(w.port)) + '</td>' +
+      '<td><a href="javascript:void(0)" class="wh-dests" onclick="manageWebhookDestinations(\'' + esc(w.name) + '\')"><span class="wh-dest-row">' + squares + '</span>' +
+        targets.length + (targets.length === 1 ? ' destination' : ' destinations') + '</a></td>' +
+      '<td title="' + (tr ? fmt(tr.received) + ' received in the last 24 h' : 'No traffic in the last 24 h') + '">' + _webhookSpark(tr ? tr.hours : new Array(24).fill(0)) +
+        '<span class="wh-vol">' + (tr ? fmt(tr.received) : '0') + '</span></td>' +
+      '<td class="wh-rate ' + rateCls + '" title="' + (attempts ? tr.delivered + ' of ' + attempts + ' deliveries succeeded' : 'No deliveries in the last 24 h') + '">' + rateTxt + '</td>' +
+      '<td><div class="wh-issues">' + (issues.join('') || '<span class="wh-none">—</span>') + '</div></td>' +
+      '<td style="text-align:right"><button class="wh-more" data-type="webhook" data-name="' + esc(w.name) + '" onclick="showContextMenu(event,this)" aria-label="Actions for ' + esc(w.name) + '">⋮</button></td>' +
+    '</tr>';
   }).join('');
 }
 

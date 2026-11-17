@@ -63,6 +63,7 @@ import { isNpmCertVolumePresent, startCertWatcher, onCertReloaded } from './cert
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleOauthSmsOtp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
 import { claimAgent } from './core/agent-instance';
 import { resolveClientIp, getTrustProxyConfig } from './core/ip-filter';
+import { getWebhookTraffic24h } from './telemetry/request-log';
 import { initReportFeeds, handleReportRequest } from './reports/server';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import QRCode from 'qrcode';
@@ -600,6 +601,13 @@ function queueListLimit(url: URL): number {
 function countByWebhook(entries: { webhookName: string }[]): Record<string, number> {
     const out: Record<string, number> = {};
     for (const e of entries) out[e.webhookName] = (out[e.webhookName] || 0) + 1;
+    return out;
+}
+
+/** Same counts keyed "webhook\u0000targetUrl", so the list can colour each destination. */
+function countByTarget(entries: { webhookName: string; targetUrl: string }[]): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const e of entries) { const k = e.webhookName + '\u0000' + e.targetUrl; out[k] = (out[k] || 0) + 1; }
     return out;
 }
 
@@ -1918,6 +1926,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                 // ── Webhook CRUD ──
                 if (url.pathname === '/admin/webhooks' && req.method === 'GET') {
                     const status = getWebhookStatus();
+                    const traffic = getWebhookTraffic24h();
                     const webhooks = config.webhooks.map(w => {
                         const s = status.find(s => s.name === w.name);
                         return {
@@ -1940,6 +1949,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             active: s?.active ?? 0,
                             npmProxyHostId: w.npmProxyHostId,
                             publicHostnames: w.publicHostnames || [],
+                            traffic: traffic[w.name] || null,
                         };
                     });
                     return jsonRes(200, { webhooks });
@@ -1966,7 +1976,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     if (nameFilter) filtered = filtered.filter(e => e.webhookName === nameFilter);
                     if (requestIdFilter) filtered = filtered.filter(e => e.requestId === requestIdFilter);
                     // ?summary=1 → counts only (sidebar badges poll this; no rows shipped).
-                    if (url.searchParams.get('summary') === '1') return jsonRes(200, { byWebhook: countByWebhook(filtered), total: filtered.length });
+                    if (url.searchParams.get('summary') === '1') return jsonRes(200, { byWebhook: countByWebhook(filtered), byTarget: countByTarget(filtered), total: filtered.length });
                     const total = filtered.length;
                     const safeEntries = filtered.slice(0, queueListLimit(url)).map(e => ({
                         id: e.id,
@@ -2022,7 +2032,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     let queue = getPendingRetryQueue();
                     if (nameFilter) queue = queue.filter(e => e.webhookName === nameFilter);
                     if (requestIdFilter) queue = queue.filter(e => e.requestId === requestIdFilter);
-                    if (url.searchParams.get('summary') === '1') return jsonRes(200, { byWebhook: countByWebhook(queue), total: queue.length });
+                    if (url.searchParams.get('summary') === '1') return jsonRes(200, { byWebhook: countByWebhook(queue), byTarget: countByTarget(queue), total: queue.length });
                     const total = queue.length;
                     const safeEntries = queue.slice(0, queueListLimit(url)).map(e => ({
                         id: e.id,
