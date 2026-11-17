@@ -2176,6 +2176,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             meta: { enabled: !!webhook.meta?.enabled, hasAppSecret: !!webhook.meta?.appSecret },
                             retry: webhook.retry,
                             allowedIps: webhook.allowedIps || [],
+                            allowedMethods: webhook.allowedMethods || [],
                             allowPrivateTargets: webhook.allowPrivateTargets !== false,
                             targetAllowedCidrs: webhook.targetAllowedCidrs || [],
                             silenceAlert: webhook.silenceAlert,

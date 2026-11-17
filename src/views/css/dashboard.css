@@ -4036,6 +4036,14 @@ tr.mm-ctx-row, tr.mm-ctx-row > td, [role="row"].mm-ctx-row { background: var(--a
 .ov-system { display: flex; flex-wrap: wrap; gap: 6px 22px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text3); }
 .ov-system b { color: var(--text2); font-weight: 500; }
 @media (max-width: 900px) { .ov-row { grid-template-columns: minmax(0, 1fr); } }
+/* Unified: numbers, services, chart, activity and system read as ONE framed panel with hairlines,
+   not a pile of separate cards. Outset shadows draw the inner lines; the frame clips the outer ones. */
+.ov-kpis, .ov-services, .ov-row { gap: 0; margin-bottom: 0; border: 1px solid var(--border); background: var(--surface); overflow: hidden; }
+.ov-services, .ov-row, .ov-system { border-top: 0; }
+.ov-kpi, .ov-svc, .ov-card { border: 0; background: none; box-shadow: 1px 0 0 var(--border), 0 1px 0 var(--border); }
+.ov-svc:hover { background: var(--surface2); }
+.ov-svc.bad { box-shadow: inset 3px 0 0 var(--red), 1px 0 0 var(--border), 0 1px 0 var(--border); }
+.ov-system { border: 1px solid var(--border); border-top: 0; background: var(--surface); padding: 10px 16px; margin-bottom: 14px; }
 .wh-more { width: 28px; height: 26px; background: none; border: 1px solid transparent; color: var(--text3); cursor: pointer; }
 .wh-more:hover { border-color: var(--border); color: var(--text); }
 
