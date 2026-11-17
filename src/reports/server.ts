@@ -14,6 +14,7 @@
  *   GET    /admin/reports/:name/status    → cache status + last fetch info
  */
 
+import { FAVICON_DATA_URI } from '../core/ui-theme';
 import { log } from '../core/logger';
 import { loadPersistedReportFeeds, persistReportFeeds, validateReportFeedInput } from './store';
 import { getReadonlyData, getCachedRawRows, forceRefresh, startAutoRefresh, stopAutoRefresh, reprojectFeedCache, evictFeed, initFeeds, getFeedCacheStatus, projectRows, subscribeCacheEvents } from './cache';
@@ -969,6 +970,7 @@ function handleSwaggerDocs(req: Request, groupFilter: string | null): Response {
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${title}</title>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
   <style>
     body { margin: 0; }

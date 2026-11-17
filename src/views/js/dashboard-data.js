@@ -459,6 +459,7 @@ async function fetchProfiles() {
   try {
     const res = await api('/admin/profiles'); if (!res.ok) return;
     const d = await res.json(); _allProfiles = d.profiles || [];
+    if (_consentPages.length) renderConsentPages(_consentPages); // usage counts
     filterProfiles();
     if (_allInvites.length) renderInvites(_allInvites);
     document.getElementById('navProfileBadge').textContent = _allProfiles.length;
@@ -2302,6 +2303,8 @@ function copyTargetCredential() {}
 let _allWebhooks = [];
 let _dlqByWebhook = {}; // { [webhookName]: count }
 let _pendingByWebhook = {}; // { [webhookName]: count }
+let _dlqByTarget = {}, _pendingByTarget = {}; // { ["webhook\u0000targetUrl"]: count }
+let _webhookFilter = 'all';
 let editingWebhook = null;
 
 async function fetchWebhooks() {
@@ -2316,11 +2319,15 @@ async function fetchWebhooks() {
     _allWebhooks = d.webhooks || [];
 
     if (dlqRes.ok) {
-      _dlqByWebhook = (await dlqRes.json()).byWebhook || {};
+      const dq = await dlqRes.json();
+      _dlqByWebhook = dq.byWebhook || {};
+      _dlqByTarget = dq.byTarget || {};
     }
 
     if (prRes.ok) {
-      _pendingByWebhook = (await prRes.json()).byWebhook || {};
+      const pq = await prRes.json();
+      _pendingByWebhook = pq.byWebhook || {};
+      _pendingByTarget = pq.byTarget || {};
     }
 
     filterWebhooks();
@@ -2328,69 +2335,106 @@ async function fetchWebhooks() {
   } catch { }
 }
 
+function _webhookHasIssues(w) {
+  return (_dlqByWebhook[w.name] || 0) > 0 || (_pendingByWebhook[w.name] || 0) > 0;
+}
+
+function setWebhookFilter(f) {
+  _webhookFilter = f;
+  document.querySelectorAll('#webhookQuickFilter [data-wf]').forEach(b => b.classList.toggle('on', b.dataset.wf === f));
+  filterWebhooks();
+}
+
 function filterWebhooks() {
   const search = (document.getElementById('webhookSearch')?.value || '').toLowerCase();
+  const issues = _allWebhooks.filter(_webhookHasIssues).length;
+  const stopped = _allWebhooks.filter(w => !w.running).length;
+  const setCount = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n ? '· ' + n : ''; };
+  setCount('whfIssues', issues); setCount('whfStopped', stopped);
   const filtered = _allWebhooks.filter(w => {
     if (search && !w.name.toLowerCase().includes(search)) return false;
+    if (_webhookFilter === 'issues' && !_webhookHasIssues(w)) return false;
+    if (_webhookFilter === 'stopped' && w.running) return false;
     return true;
   });
   renderWebhooks(filtered);
 }
 
+/** Queue counts for one destination. Templated URLs are rendered per payload, so match on the part before the first {{. */
+function _targetQueueCounts(webhookName, url) {
+  const prefix = String(url || '').split('{{')[0];
+  const exact = !String(url || '').includes('{{');
+  let dlq = 0, pending = 0;
+  const scan = (map, add) => {
+    for (const k in map) {
+      const [w, u] = k.split('\u0000');
+      if (w === webhookName && (exact ? u === url : u.startsWith(prefix))) add(map[k]);
+    }
+  };
+  scan(_dlqByTarget, n => { dlq += n; });
+  scan(_pendingByTarget, n => { pending += n; });
+  return { dlq, pending };
+}
+
+function _webhookSpark(hours) {
+  const max = Math.max(1, ...hours);
+  return '<span class="wh-spark" aria-hidden="true">' + hours.map(n => '<i style="height:' + (n ? Math.max(2, Math.round(n / max * 20)) : 1) + 'px"' + (n ? '' : ' class="z"') + '></i>').join('') + '</span>';
+}
+
 function renderWebhooks(webhooks) {
   const c = document.getElementById('webhookListBody');
-  if (webhooks.length === 0) { c.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No webhooks yet. Click "+ New Webhook".</td></tr>'; return; }
+  if (webhooks.length === 0) {
+    const msg = _allWebhooks.length ? 'No webhook matches the current filter.' : 'No webhooks yet. Click "+ New Webhook".';
+    c.innerHTML = '<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">' + msg + '</td></tr>';
+    return;
+  }
+  const fmt = n => n >= 10000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1) + 'k' : String(n);
   c.innerHTML = webhooks.map(w => {
-    const statusBadge = w.running
-      ? '<span class="mm-chip ok">Running</span>'
-      : '<span class="mm-chip err">Stopped</span>';
-    const authBadge = w.hasAuth
-      ? '<span style="color:var(--green)">Enabled</span>'
-      : '<span style="color:var(--text3)">Public</span>';
-    const wIpBadge = (w.allowedIps && w.allowedIps.length)
-      ? `<span class="mm-chip" style="margin-left:4px" title="${esc(w.allowedIps.join(', '))}">IP restricted</span>`
-      : '';
-    const numTargets = w.targets.length;
-    const numPaused = w.targets.filter(t => typeof t === 'object' && t && t.enabled === false).length;
     const dlqCount = _dlqByWebhook[w.name] || 0;
     const pendingCount = _pendingByWebhook[w.name] || 0;
-    const dlqDot = dlqCount > 0
-      ? `<span style="position:absolute;top:2px;right:2px;width:7px;height:7px;background:var(--red);border-radius:50%;display:block" title="${dlqCount} failed deliveries"></span>`
-      : (pendingCount > 0
-          ? `<span style="position:absolute;top:2px;right:2px;width:7px;height:7px;background:var(--orange);border-radius:50%;display:block" title="${pendingCount} pending persistent retries"></span>`
-          : '');
-    const wNpmBadge = (() => {
-      if (!w.npmProxyHostId) return '';
-      const hosts = (w.publicHostnames || []).filter(Boolean);
-      const tip = (hosts.length ? `Open https://${esc(hosts[0])} (NPM #${w.npmProxyHostId})` : `NPM #${w.npmProxyHostId}`)
-        + (hosts.length > 1 ? ` — also: ${esc(hosts.slice(1).join(', '))}` : '');
-      const shown = hosts.length === 0
-        ? `NPM #${w.npmProxyHostId}`
-        : (hosts.length === 1
-            ? esc(hosts[0])
-            : `${esc(hosts[0])} <span style="color:var(--text3);font-weight:400">+${hosts.length - 1}</span>`);
-      const inner = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shown}</span>`;
-      if (hosts.length === 0) {
-        return `<span class="mm-chip acc" style="margin-left:4px;cursor:help;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle" title="${tip}">${inner}</span>`;
-      }
-      const href = 'https://' + hosts[0].replace(/^\*\./, 'www.');
-      return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="background:var(--accent-bg);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px;max-width:240px;display:inline-flex;align-items:center;gap:4px;vertical-align:middle;text-decoration:none;transition:background 0.15s" onmouseover="this.style.background='var(--accent-bdr)'" onmouseout="this.style.background='var(--accent-bg)'" title="${tip}">${inner}</a>`;
-    })();
-    return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
-  <td style="padding:8px 12px;font-weight:600">${esc(w.name)}</td>
-  <td style="padding:8px">${statusBadge}${wNpmBadge}</td>
-  <td style="padding:8px;font-family:'SF Mono',Monaco,monospace;color:var(--accent2)">${w.port}</td>
-  <td style="padding:8px"><a href="javascript:void(0)" onclick="manageWebhookDestinations('${esc(w.name)}')" style="color:var(--accent);text-decoration:none">${numTargets} destination${numTargets === 1 ? '' : 's'}${numPaused ? ' (' + numPaused + ' paused)' : ''} →</a></td>
-  <td style="padding:8px">${authBadge}${wIpBadge}</td>
-  <td style="padding:8px;color:var(--accent2)">${w.active > 0 ? w.active : '<span style="color:var(--text3)">0</span>'}</td>
-  <td style="padding:8px 12px;text-align:right">
-    <span style="position:relative;display:inline-block">
-      <button data-type="webhook" data-name="${esc(w.name)}" onclick="showContextMenu(event,this)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:2px 10px;cursor:pointer;color:var(--text2);font-size:18px;line-height:1.2;letter-spacing:1px" title="Actions">&#8942;</button>
-      ${dlqDot}
-    </span>
-  </td>
-</tr>`;
+    const state = !w.running ? 'off' : (dlqCount ? 'err' : pendingCount ? 'warn' : 'ok');
+
+    const sub = [];
+    if (!w.running) sub.push('Stopped');
+    sub.push(w.meta?.enabled ? 'Meta signature' : (w.hasAuth ? 'Auth' : 'Public'));
+    if (w.allowedIps && w.allowedIps.length) sub.push('IP restricted');
+    const hosts = (w.publicHostnames || []).filter(Boolean);
+    if (hosts.length) sub.push(hosts[0] + (hosts.length > 1 ? ' +' + (hosts.length - 1) : ''));
+    else if (w.npmProxyHostId) sub.push('NPM #' + w.npmProxyHostId);
+    if (w.active > 0) sub.push(w.active + ' in flight');
+
+    const targets = w.targets || [];
+    const squares = targets.map(t => {
+      const url = typeof t === 'string' ? t : (t?.url || (t?.webhookName ? 'webhook:' + t.webhookName : ''));
+      const paused = typeof t === 'object' && t && t.enabled === false;
+      const q = _targetQueueCounts(w.name, url);
+      const cls = paused ? 'off' : q.dlq ? 'err' : q.pending ? 'warn' : 'ok';
+      const tip = url + (paused ? ' — paused' : q.dlq ? ' — ' + q.dlq + ' failed' : q.pending ? ' — ' + q.pending + ' retrying' : '');
+      return '<i class="wh-dest ' + cls + '" title="' + esc(tip) + '"></i>';
+    }).join('');
+
+    const tr = w.traffic;
+    const attempts = tr ? tr.delivered + tr.failed : 0;
+    const rate = attempts ? tr.delivered / attempts * 100 : null;
+    const rateTxt = rate === null ? '—' : (rate >= 99.95 ? '100%' : rate.toFixed(1) + '%');
+    const rateCls = rate === null ? 'muted' : rate < 95 ? 'warn' : '';
+
+    const issues = [];
+    if (pendingCount) issues.push('<button type="button" class="wh-issue warn" onclick="openPendingRetryModal(\'' + esc(w.name) + '\')">' + pendingCount + ' retrying</button>');
+    if (dlqCount) issues.push('<button type="button" class="wh-issue err" onclick="openDlqModal(\'' + esc(w.name) + '\')">' + dlqCount + ' failed</button>');
+
+    return '<tr class="wh-row">' +
+      '<td class="wh-dotcol"><i class="wh-state ' + state + '" title="' + (w.running ? 'Running' : 'Stopped') + '"></i></td>' +
+      '<td><div class="wh-name">' + esc(w.name) + '</div><div class="wh-sub">' + esc(sub.join(' · ')) + '</div></td>' +
+      '<td class="wh-port">' + esc(String(w.port)) + '</td>' +
+      '<td><a href="javascript:void(0)" class="wh-dests" onclick="manageWebhookDestinations(\'' + esc(w.name) + '\')"><span class="wh-dest-row">' + squares + '</span>' +
+        targets.length + (targets.length === 1 ? ' destination' : ' destinations') + '</a></td>' +
+      '<td title="' + (tr ? fmt(tr.received) + ' received in the last 24 h' : 'No traffic in the last 24 h') + '">' + _webhookSpark(tr ? tr.hours : new Array(24).fill(0)) +
+        '<span class="wh-vol">' + (tr ? fmt(tr.received) : '0') + '</span></td>' +
+      '<td class="wh-rate ' + rateCls + '" title="' + (attempts ? tr.delivered + ' of ' + attempts + ' deliveries succeeded' : 'No deliveries in the last 24 h') + '">' + rateTxt + '</td>' +
+      '<td><div class="wh-issues">' + (issues.join('') || '<span class="wh-none">—</span>') + '</div></td>' +
+      '<td style="text-align:right"><button class="wh-more" data-type="webhook" data-name="' + esc(w.name) + '" onclick="showContextMenu(event,this)" aria-label="Actions for ' + esc(w.name) + '">⋮</button></td>' +
+    '</tr>';
   }).join('');
 }
 
@@ -5734,6 +5778,7 @@ async function fetchOauthClients() {
     _allOauthClients = clients || [];
     renderOauthClients(clients || []);
     if (_allInvites.length) renderInvites(_allInvites);
+    if (_consentPages.length) renderConsentPages(_consentPages); // usage counts
     const badge = document.getElementById('navOauthBadge');
     if (badge) badge.textContent = String(clients.length);
   } catch (e) {
@@ -6659,53 +6704,103 @@ async function fetchLdapConfigs() {
       badge.title = n === 1 ? '1 enabled directory' : n + ' enabled directories';
     }
   } catch (e) {
-    document.getElementById('ldapListBody').innerHTML =
-      '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
+    document.getElementById('ldapListBody').innerHTML = '<div class="ldm-empty" style="color:var(--err-text)">Error: ' + esc(e.message) + '</div>';
   }
 }
 
+/** How the link to a directory is protected: 'ok' encrypted and verified, 'warn' not (or unverified), 'off' disabled. */
+function ldapLinkSecurity(c) {
+  if (!c.enabled) return { cls: 'off', label: 'Disabled' };
+  const ldaps = /^ldaps:\/\//i.test(c.url || '');
+  if (ldaps || c.startTls) {
+    return c.tlsVerify === false
+      ? { cls: 'warn', label: (ldaps ? 'LDAPS' : 'StartTLS') + ' · cert not checked' }
+      : { cls: 'ok', label: ldaps ? 'LDAPS' : 'StartTLS' };
+  }
+  return { cls: 'warn', label: 'Plain LDAP' };
+}
+
 function renderLdapConfigs(configs) {
-  const tbody = document.getElementById('ldapListBody');
+  const dirs = document.getElementById('ldapListBody');
+  const uses = document.getElementById('ldapMapUses');
+  const map = document.getElementById('ldapMap');
+  if (!dirs) return;
+  map.classList.toggle('is-empty', !configs.length);
   if (!configs.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No directories configured. Click <strong>New directory</strong> to add one.</td></tr>';
+    dirs.innerHTML = '<div class="ldm-empty">No directories yet. Click <strong>New directory</strong> to connect one.</div>';
+    uses.innerHTML = '';
+    document.getElementById('ldapMapHubMeta').textContent = '';
+    drawLdapWires();
     return;
   }
-  const scopeBadge = s => {
-    const map = {
-      admin:  ['Admins',     'rgba(59,130,246,.15)', '#2563eb', 'rgba(59,130,246,.3)'],
-      proxy:  ['Proxy',      'rgba(168,85,247,.15)', '#9333ea', 'rgba(168,85,247,.3)'],
-      both:   ['Ambos',      'rgba(34,197,94,.1)',   'var(--green)', 'rgba(34,197,94,.25)'],
-    };
-    const [label, bg, fg, br] = map[s] || map.both;
-    return '<span style="display:inline-block;background:' + bg + ';color:' + fg + ';border:1px solid ' + br + ';border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">' + label + '</span>';
-  };
-  const totpBadge = p => {
-    const map = {
-      required: ['Required',  'var(--red)'],
-      optional: ['Optional',  'var(--text2)'],
-      disabled: ['Disabled',  'var(--text3)'],
-    };
-    const [label, color] = map[p] || map.optional;
-    return '<span style="font-size:11px;color:' + color + ';font-weight:600">' + label + '</span>';
-  };
-  const stateBadge = enabled => enabled
-    ? '<span style="display:inline-block;background:rgba(34,197,94,.1);color:var(--green);border:1px solid rgba(34,197,94,.25);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">Active</span>'
-    : '<span style="display:inline-block;background:rgba(148,163,184,.15);color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">Inactive</span>';
+  const scopeText = { admin: 'Admins', proxy: 'Proxies & OAuth', both: 'Admins + proxies & OAuth' };
+  const totpText = { required: '2FA required', optional: '2FA optional', disabled: 'No 2FA' };
+  const host = u => String(u || '').replace(/^ldaps?:\/\//i, '');
+  dirs.innerHTML = configs.map(c => {
+    const sec = ldapLinkSecurity(c);
+    const bind = c.bindMode === 'user' ? 'User’s own login' + (c.upnSuffix ? ' (@' + c.upnSuffix + ')' : '') : 'Service account';
+    return '<div class="ldm-dir ' + sec.cls + '" data-ldap-id="' + c.id + '" tabindex="0" role="button" aria-label="Edit ' + esc(c.name) + '"' +
+        ' onclick="openEditLdapModal(' + c.id + ')" onkeydown="if(event.key===\'Enter\')openEditLdapModal(' + c.id + ')" oncontextmenu="ldapDirMenu(event,' + c.id + ')">' +
+      '<div class="ldm-dir-top"><span class="ldm-dir-name">' + esc(c.name) + '</span><span class="ldm-sec ' + sec.cls + '">' + esc(sec.label) + '</span>' +
+        '<button type="button" class="ldm-more" aria-label="Actions for ' + esc(c.name) + '" onclick="event.stopPropagation();ldapDirMenu(event,' + c.id + ',this)">⋮</button></div>' +
+      '<div class="ldm-dir-host" title="Base DN: ' + esc(c.baseDn) + '">' + esc(host(c.url)) + '</div>' +
+      '<div class="ldm-dir-meta">' + esc(bind) + ' · ' + esc(scopeText[c.scope] || scopeText.both) + ' · ' + esc(totpText[c.totpPolicy] || totpText.optional) + '</div>' +
+    '</div>';
+  }).join('');
 
-  tbody.innerHTML = configs.map(c =>
-    '<tr style="border-top:1px solid var(--border)">' +
-      '<td style="padding:10px 12px;font-weight:500">' + esc(c.name) + '</td>' +
-      '<td style="padding:10px 8px;font-family:\'SF Mono\',ui-monospace,monospace;font-size:11.5px;color:var(--text2);word-break:break-all;max-width:240px">' + esc(c.url) + '</td>' +
-      '<td style="padding:10px 8px;font-family:\'SF Mono\',ui-monospace,monospace;font-size:11.5px;color:var(--text2);word-break:break-all;max-width:240px">' + esc(c.baseDn) + '</td>' +
-      '<td style="padding:10px 8px">' + scopeBadge(c.scope) + '</td>' +
-      '<td style="padding:10px 8px">' + totpBadge(c.totpPolicy) + '</td>' +
-      '<td style="padding:10px 8px">' + stateBadge(c.enabled) + '</td>' +
-      '<td style="padding:10px 12px;text-align:right;white-space:nowrap">' +
-        '<button class="btn btn-sm" onclick="openEditLdapModal(' + c.id + ')" style="margin-right:4px">Edit</button>' +
-        '<button class="btn btn-sm btn-ghost" onclick="deleteLdapConfig(' + c.id + ',' + JSON.stringify(c.name) + ')" style="color:var(--err-text)">Delete</button>' +
-      '</td>' +
-    '</tr>'
-  ).join('');
+  // Right side: who signs in through which directory (enabled ones only).
+  const live = configs.filter(c => c.enabled);
+  const feeds = kind => live.filter(c => c.scope === kind || c.scope === 'both');
+  const targets = [
+    { key: 'admin', title: 'Admin dashboard', list: feeds('admin') },
+    { key: 'proxy', title: 'Proxy & OAuth sign-in', list: feeds('proxy') },
+  ];
+  uses.innerHTML = targets.map(t => {
+    const totp = t.list.some(c => c.totpPolicy === 'required') ? ' · 2FA required' : '';
+    return '<div class="ldm-use' + (t.list.length ? '' : ' none') + '" data-ldap-use="' + t.key + '">' +
+      '<b>' + t.title + '</b>' +
+      '<span>' + (t.list.length ? esc(t.list.map(c => c.name).join(', ')) + totp : 'No directory — local accounts only') + '</span></div>';
+  }).join('');
+  document.getElementById('ldapMapHubMeta').textContent = live.length + ' of ' + configs.length + ' active';
+  drawLdapWires();
+}
+
+/** Curves from each directory to the hub and from the hub to what it serves, measured from the laid-out boxes. */
+function drawLdapWires() {
+  const map = document.getElementById('ldapMap'), svg = document.getElementById('ldapMapWires');
+  if (!map || !svg) return;
+  const box = map.getBoundingClientRect();
+  if (!box.width || getComputedStyle(svg).display === 'none') { svg.innerHTML = ''; return; }
+  svg.setAttribute('viewBox', '0 0 ' + box.width + ' ' + box.height);
+  const hub = document.getElementById('ldapMapHub').getBoundingClientRect();
+  const pt = (r, side) => ({ x: (side === 'r' ? r.right : r.left) - box.left, y: r.top + r.height / 2 - box.top });
+  const curve = (a, b) => { const dx = Math.max(30, (b.x - a.x) / 2); return 'M' + a.x + ',' + a.y + ' C' + (a.x + dx) + ',' + a.y + ' ' + (b.x - dx) + ',' + b.y + ' ' + b.x + ',' + b.y; };
+  const hubIn = pt(hub, 'l'), hubOut = pt(hub, 'r');
+  let out = '';
+  map.querySelectorAll('.ldm-dir').forEach(el => {
+    const cls = ['ok', 'warn', 'off'].find(c => el.classList.contains(c));
+    out += '<path class="ldm-wire ' + cls + '" d="' + curve(pt(el.getBoundingClientRect(), 'r'), hubIn) + '"/>';
+  });
+  map.querySelectorAll('.ldm-use').forEach(el => {
+    out += '<path class="ldm-wire ' + (el.classList.contains('none') ? 'off' : 'out') + '" d="' + curve(hubOut, pt(el.getBoundingClientRect(), 'l')) + '"/>';
+  });
+  svg.innerHTML = out;
+}
+if (window.ResizeObserver) {
+  // The page may render while hidden (0×0) and resizes with the sidebar: redraw whenever the map changes size.
+  new ResizeObserver(() => drawLdapWires()).observe(document.getElementById('ldapMap') || document.body);
+}
+
+function ldapDirMenu(e, id, btn) {
+  e.preventDefault(); e.stopPropagation();
+  const c = _ldapConfigs.find(x => x.id === id);
+  if (!c) return;
+  if (!btn) _menuAt = { x: e.clientX, y: e.clientY };
+  showActionMenu(btn || e.currentTarget, [
+    { label: 'Edit', fn: () => openEditLdapModal(id) },
+    '---',
+    { label: 'Delete', fn: () => deleteLdapConfig(id, c.name), danger: true },
+  ]);
 }
 
 /** Show the "test these credentials" bar only when editing.
@@ -7120,30 +7215,69 @@ async function fetchConsentPages() {
       badge.title = n === 1 ? '1 consent page' : n + ' consent pages';
     }
   } catch (e) {
-    const tbody = document.getElementById('consentPagesListBody');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="4" style="padding:40px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
+    const grid = document.getElementById('consentPagesGrid');
+    if (grid) grid.innerHTML = '<div class="cp-empty" style="color:var(--err-text)">Error: ' + esc(e.message) + '</div>';
   }
 }
 
+/** Where each consent page is referenced (OAuth clients + proxy profiles), from data already loaded. */
+function consentPageUsage(id) {
+  const clients = (_allOauthClients || []).filter(c => c.consentPageId === id).map(c => c.name || c.clientId);
+  const proxies = (_allProfiles || []).filter(p => p.consentPageId === id).map(p => p.name);
+  const parts = [];
+  if (clients.length) parts.push(clients.length + (clients.length === 1 ? ' OAuth client' : ' OAuth clients'));
+  if (proxies.length) parts.push(proxies.length + (proxies.length === 1 ? ' proxy' : ' proxies'));
+  return { text: parts.join(' · ') || 'Not in use', names: [...clients, ...proxies] };
+}
+
 function renderConsentPages(pages) {
-  const tbody = document.getElementById('consentPagesListBody');
-  if (!tbody) return;
-  if (!pages.length) {
-    tbody.innerHTML = '<tr><td colspan="4" style="padding:40px;text-align:center;color:var(--text3)">No pages yet — create the first one to reference it from clients or profiles.</td></tr>';
+  const grid = document.getElementById('consentPagesGrid');
+  if (!grid) return;
+  const q = (document.getElementById('consentPageSearch')?.value || '').trim().toLowerCase();
+  const list = q ? pages.filter(p => (p.name + ' ' + p.title + ' ' + p.body).toLowerCase().includes(q)) : pages;
+  if (!list.length) {
+    grid.innerHTML = '<div class="cp-empty">' + (q ? 'No page matches “' + esc(q) + '”.' : 'No pages yet — create the first one to reference it from OAuth clients or proxies.') + '</div>';
     return;
   }
-  tbody.innerHTML = pages.map(p => {
-    const updated = p.updatedAt ? new Date(p.updatedAt).toLocaleString() : '—';
-    return '<tr style="border-top:1px solid var(--border)">' +
-      '<td style="padding:10px 12px;font-family:\'SF Mono\',ui-monospace,monospace;font-size:12px;font-weight:500">' + esc(p.name) + '</td>' +
-      '<td style="padding:10px 8px">' + esc(p.title || '—') + '</td>' +
-      '<td style="padding:10px 8px;color:var(--text3);font-size:11.5px">' + esc(updated) + '</td>' +
-      '<td style="padding:10px 12px;text-align:right;white-space:nowrap">' +
-        '<button class="btn btn-sm" onclick="openEditConsentPageModal(' + p.id + ')" style="margin-right:4px">Edit</button>' +
-        '<button class="btn btn-sm btn-ghost" onclick="deleteConsentPage(' + p.id + ',' + JSON.stringify(p.name).replace(/"/g, '&quot;') + ')" style="color:var(--err-text)">Delete</button>' +
-      '</td>' +
-      '</tr>';
+  grid.innerHTML = list.map(p => {
+    const use = consentPageUsage(p.id);
+    const updated = p.updatedAt ? new Date(p.updatedAt.replace(' ', 'T') + (p.updatedAt.includes('Z') ? '' : 'Z')).toLocaleDateString() : '—';
+    return '<div class="cp-card" tabindex="0" role="button" aria-label="Edit ' + esc(p.name) + '" onclick="openEditConsentPageModal(' + p.id + ')" onkeydown="if(event.key===\'Enter\')openEditConsentPageModal(' + p.id + ')" oncontextmenu="consentCardMenu(event,' + p.id + ')">' +
+      '<div class="cp-thumb"><div class="cp-shot cp-shot-mini">' +
+        '<div class="cp-shot-flow"><img class="cp-shot-logo" src="/logo.png?v=2" alt="">Midleman → app</div>' +
+        '<div class="cp-shot-title">' + esc(p.title || p.name) + '</div>' +
+        '<div class="cp-shot-body">' + renderConsentMarkdownPreview(p.body || '') + '</div>' +
+        '<div class="cp-shot-actions"><span class="cp-shot-btn"></span><span class="cp-shot-btn primary"></span></div>' +
+      '</div></div>' +
+      '<div class="cp-card-foot">' +
+        '<div class="cp-card-row"><span class="cp-card-name">' + esc(p.name) + '</span>' +
+        '<button type="button" class="cp-card-more" aria-label="Actions for ' + esc(p.name) + '" onclick="event.stopPropagation();consentCardMenu(event,' + p.id + ',this)">⋮</button></div>' +
+        '<span class="cp-card-meta" title="' + esc(use.names.join(', ')) + '">' + esc(use.text) + ' · ' + esc(updated) + '</span>' +
+      '</div></div>';
   }).join('');
+}
+
+function consentCardMenu(e, id, btn) {
+  e.preventDefault(); e.stopPropagation();
+  const page = _consentPages.find(p => p.id === id);
+  if (!page) return;
+  if (!btn) _menuAt = { x: e.clientX, y: e.clientY };
+  showActionMenu(btn || e.currentTarget, [
+    { label: 'Edit', fn: () => openEditConsentPageModal(id) },
+    { label: 'Duplicate', fn: () => duplicateConsentPage(id) },
+    '---',
+    { label: 'Delete', fn: () => deleteConsentPage(id, page.name), danger: true },
+  ]);
+}
+
+function duplicateConsentPage(id) {
+  const page = _consentPages.find(p => p.id === id);
+  if (!page) return;
+  openCreateConsentPageModal();
+  document.getElementById('consentPageName').value = page.name + '-copy';
+  document.getElementById('consentPageTitle').value = page.title || '';
+  document.getElementById('consentPageBody').value = page.body || '';
+  renderConsentPagePreview();
 }
 
 /** Tiny safe markdown renderer for the live preview only.
@@ -7154,7 +7288,7 @@ function renderConsentMarkdownPreview(src) {
   const lines = src.split(/\r?\n/);
   const out = [];
   let listOpen = false, paraBuf = [];
-  const flushPara = () => { if (paraBuf.length) { out.push('<p>' + inline(paraBuf.join(' ')) + '</p>'); paraBuf = []; } };
+  const flushPara = () => { if (paraBuf.length) { out.push('<p>' + paraBuf.map(inline).join('<br>') + '</p>'); paraBuf = []; } };
   const closeList = () => { if (listOpen) { out.push('</ul>'); listOpen = false; } };
   function inline(text) {
     let t = escapeHtml(text);
@@ -7168,7 +7302,7 @@ function renderConsentMarkdownPreview(src) {
     if (!trimmed) { closeList(); flushPara(); continue; }
     if (/^[-*]\s+/.test(trimmed)) {
       flushPara();
-      if (!listOpen) { out.push('<ul style="margin:0 0 8px;padding-left:18px">'); listOpen = true; }
+      if (!listOpen) { out.push('<ul>'); listOpen = true; }
       out.push('<li>' + inline(trimmed.replace(/^[-*]\s+/, '')) + '</li>');
     } else {
       closeList();
@@ -7180,38 +7314,86 @@ function renderConsentMarkdownPreview(src) {
   return out.join('');
 }
 
+let _consentPageSnapshot = '';
+function _consentPageState() {
+  return ['consentPageName', 'consentPageTitle', 'consentPageBody'].map(id => document.getElementById(id).value).join('\u0000');
+}
+function markConsentPageDirty() {
+  document.getElementById('consentPageDirty').style.display = _consentPageState() !== _consentPageSnapshot ? '' : 'none';
+}
+
 function renderConsentPagePreview() {
   const title = document.getElementById('consentPageTitle').value || '';
   const body = document.getElementById('consentPageBody').value || '';
-  document.getElementById('consentPagePreviewTitle').textContent = title || ' ';
-  document.getElementById('consentPagePreviewBody').innerHTML = renderConsentMarkdownPreview(body) || '<span style="color:var(--text3)">Preview appears here.</span>';
+  document.getElementById('consentPagePreviewTitle').textContent = title || ' ';
+  document.getElementById('consentPagePreviewBody').innerHTML = renderConsentMarkdownPreview(body) || '<span class="cp-ed-meta">Preview appears here.</span>';
+  const words = (body.match(/\S+/g) || []).length;
+  document.getElementById('consentPageCount').textContent = 'Markdown · ' + words + (words === 1 ? ' word' : ' words');
+  markConsentPageDirty();
 }
 
-function openCreateConsentPageModal() {
-  _editingConsentPageId = null;
-  document.getElementById('consentPageName').value = '';
-  document.getElementById('consentPageTitle').value = '';
-  document.getElementById('consentPageBody').value = '';
-  document.getElementById('consentPageModalTitle').textContent = 'New page';
-  document.getElementById('consentPageSubmitBtn').textContent = 'Create';
+function setConsentPreview(kind, value) {
+  document.querySelectorAll('[data-cp-' + kind + ']').forEach(b => b.classList.toggle('on', b.dataset['cp' + kind[0].toUpperCase() + kind.slice(1)] === value));
+  const card = document.getElementById('consentPreviewCard');
+  if (kind === 'device') card.classList.toggle('mobile', value === 'mobile');
+  else card.dataset.themePreview = value;
+}
+
+/** Wrap the selection (or insert a placeholder) with markdown markers. */
+function consentFormat(before, after) {
+  const ta = document.getElementById('consentPageBody');
+  const { selectionStart: a, selectionEnd: b, value: v } = ta;
+  const sel = v.slice(a, b) || (before === '[' ? 'link text' : 'text');
+  ta.setRangeText(before + sel + after, a, b, 'end');
+  ta.setSelectionRange(a + before.length, a + before.length + sel.length);
+  ta.focus();
+  renderConsentPagePreview();
+}
+
+function consentList() {
+  const ta = document.getElementById('consentPageBody');
+  const { selectionStart: a, selectionEnd: b, value: v } = ta;
+  const start = v.lastIndexOf('\n', a - 1) + 1;
+  const block = v.slice(start, b).split('\n').map(l => /^\s*[-*]\s+/.test(l) ? l : '- ' + l).join('\n');
+  ta.setRangeText(block, start, b, 'end');
+  ta.focus();
+  renderConsentPagePreview();
+}
+
+function consentKeys(e) {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const k = e.key.toLowerCase();
+  if (k === 'b') { e.preventDefault(); consentFormat('**', '**'); }
+  else if (k === 'i') { e.preventDefault(); consentFormat('*', '*'); }
+  else if (k === 'k') { e.preventDefault(); consentFormat('[', '](https://)'); }
+  else if (k === 's') { e.preventDefault(); document.getElementById('consentPageSubmitBtn').click(); }
+}
+
+function _openConsentEditor(page) {
+  _editingConsentPageId = page ? page.id : null;
+  document.getElementById('consentPageName').value = page?.name || '';
+  document.getElementById('consentPageTitle').value = page?.title || '';
+  document.getElementById('consentPageBody').value = page?.body || '';
+  document.getElementById('consentPageModalTitle').textContent = page ? page.name : 'New page';
+  document.getElementById('consentPageSubmitBtn').textContent = page ? 'Save' : 'Create';
+  document.getElementById('consentPageUsage').textContent = page ? 'Used by ' + consentPageUsage(page.id).text.replace('Not in use', 'nothing yet') : '';
+  _consentPageSnapshot = _consentPageState();
   renderConsentPagePreview();
   document.getElementById('consentPageModal').style.display = 'flex';
+  document.getElementById(page ? 'consentPageBody' : 'consentPageName').focus();
 }
+
+function openCreateConsentPageModal() { _openConsentEditor(null); }
 
 function openEditConsentPageModal(id) {
   const page = _consentPages.find(p => p.id === id);
   if (!page) return toast('Page not found', 'error');
-  _editingConsentPageId = id;
-  document.getElementById('consentPageName').value = page.name || '';
-  document.getElementById('consentPageTitle').value = page.title || '';
-  document.getElementById('consentPageBody').value = page.body || '';
-  document.getElementById('consentPageModalTitle').textContent = 'Edit — ' + page.name;
-  document.getElementById('consentPageSubmitBtn').textContent = 'Save';
-  renderConsentPagePreview();
-  document.getElementById('consentPageModal').style.display = 'flex';
+  _openConsentEditor(page);
 }
 
-function closeConsentPageModal() {
+async function closeConsentPageModal() {
+  if (_consentPageState() !== _consentPageSnapshot &&
+      !(await showConfirm({ title: 'Discard changes', message: 'Close the editor and lose the unsaved changes?', confirmText: 'Discard' }))) return;
   document.getElementById('consentPageModal').style.display = 'none';
   _editingConsentPageId = null;
 }
@@ -7231,6 +7413,7 @@ async function submitConsentPage() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return toast(data.error || 'Failed to save', 'error');
     toast(_editingConsentPageId ? 'Page updated' : 'Page created');
+    _consentPageSnapshot = _consentPageState();
     closeConsentPageModal();
     fetchConsentPages();
   } catch (e) { toast('Error: ' + e.message, 'error'); }

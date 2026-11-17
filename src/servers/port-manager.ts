@@ -65,7 +65,14 @@ async function isPortFree(port: number): Promise<boolean> {
     }
 }
 
+// Ports held by listeners outside ports.json (tunnels). They register a getter
+// here because tunnels already import this module.
+let _externalPorts: () => number[] = () => [];
+export function setExternalPorts(fn: () => number[]): void { _externalPorts = fn; }
+
 async function allocate(used: Set<number>, preferred?: number): Promise<number> {
+    // A disabled or failed tunnel holds no socket, so the probe alone would hand its port out.
+    for (const p of _externalPorts()) used.add(p);
     if (preferred && preferred > 0 && !used.has(preferred) && await isPortFree(preferred)) {
         return preferred;
     }
@@ -83,7 +90,7 @@ function assertNotReserved(configuredPort: number, adminPort: number, excludePor
     if (configuredPort === adminPort) {
         throw new Error(`Port ${configuredPort} is reserved for the admin dashboard (PORT) — choose another port for "${name}" or 0 for auto-assign`);
     }
-    if (excludePorts.includes(configuredPort)) {
+    if (excludePorts.includes(configuredPort) || _externalPorts().includes(configuredPort)) {
         throw new Error(`Port ${configuredPort} is already used by another listener — choose another port for "${name}" or 0 for auto-assign`);
     }
 }

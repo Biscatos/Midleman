@@ -63,6 +63,7 @@ import { isNpmCertVolumePresent, startCertWatcher, onCertReloaded } from './cert
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleOauthSmsOtp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
 import { claimAgent } from './core/agent-instance';
 import { resolveClientIp, getTrustProxyConfig } from './core/ip-filter';
+import { getWebhookTraffic24h } from './telemetry/request-log';
 import { initReportFeeds, handleReportRequest } from './reports/server';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import QRCode from 'qrcode';
@@ -603,6 +604,13 @@ function countByWebhook(entries: { webhookName: string }[]): Record<string, numb
     return out;
 }
 
+/** Same counts keyed "webhook\u0000targetUrl", so the list can colour each destination. */
+function countByTarget(entries: { webhookName: string; targetUrl: string }[]): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const e of entries) { const k = e.webhookName + '\u0000' + e.targetUrl; out[k] = (out[k] || 0) + 1; }
+    return out;
+}
+
 function publicLinkBase(req: Request): string {
     if (PUBLIC_URL) return PUBLIC_URL;
     const reqHost = req.headers.get('host') || `localhost:${config.port}`;
@@ -796,7 +804,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
             if (url.pathname === '/logo.png' || url.pathname === '/favicon.ico' || url.pathname === '/favicon.png') {
                 if (logoSvg) {
                     return new Response(logoSvg, {
-                        headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000' }
+                        headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' }
                     });
                 }
                 return new Response(null, { status: 204 });
@@ -1183,6 +1191,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Midleman — Health</title>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
   <script>(function(){try{var k='midleman_theme',p=localStorage.getItem(k);if(p!=='dark'&&p!=='light'&&p!=='system')p='dark';var t=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.setAttribute('data-theme',t);if(p==='system'&&window.matchMedia){var m=matchMedia('(prefers-color-scheme: dark)');var fn=function(e){if(localStorage.getItem(k)==='system')document.documentElement.setAttribute('data-theme',e.matches?'dark':'light')};if(m.addEventListener)m.addEventListener('change',fn);else if(m.addListener)m.addListener(fn)}}catch(e){}})();</script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1221,6 +1230,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
       padding: 40px 24px;
     }
     .wrap { max-width: 400px; width: 100%; }
+    .wordmark svg { width: 22px; height: 22px; vertical-align: middle; margin-right: 8px; }
     .wordmark {
       font-size: 11px;
       font-weight: 600;
@@ -1266,7 +1276,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
 </head>
 <body>
   <div class="wrap">
-    <div class="wordmark">Midleman</div>
+    <div class="wordmark">${LOGO_GLYPH_SVG}Midleman</div>
     <div class="status-row">
       <span class="dot"></span>
       <h1>Operational</h1>
@@ -1412,7 +1422,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                 const loginTitle = profile?.loginTitle || profile?.name || 'Acesso';
                 const SAFE_LOGO_RE = /^(https:\/\/|data:image\/(png|jpeg|gif|webp);base64,)[A-Za-z0-9+/=.\-_~:@!$&'()*+,;%?#[\]]+$/;
                 const loginLogoUrl = (profile?.loginLogo && SAFE_LOGO_RE.test(profile.loginLogo)) ? profile.loginLogo
-                    : (profile?.targetUrl ? (() => { try { return new URL(profile.targetUrl).origin + '/favicon.ico'; } catch { return '/logo.png'; } })() : '/logo.png');
+                    : (profile?.targetUrl ? (() => { try { return new URL(profile.targetUrl).origin + '/favicon.ico'; } catch { return '/logo.png?v=2'; } })() : '/logo.png?v=2');
 
                 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -1916,6 +1926,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                 // ── Webhook CRUD ──
                 if (url.pathname === '/admin/webhooks' && req.method === 'GET') {
                     const status = getWebhookStatus();
+                    const traffic = getWebhookTraffic24h();
                     const webhooks = config.webhooks.map(w => {
                         const s = status.find(s => s.name === w.name);
                         return {
@@ -1938,6 +1949,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             active: s?.active ?? 0,
                             npmProxyHostId: w.npmProxyHostId,
                             publicHostnames: w.publicHostnames || [],
+                            traffic: traffic[w.name] || null,
                         };
                     });
                     return jsonRes(200, { webhooks });
@@ -1964,7 +1976,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     if (nameFilter) filtered = filtered.filter(e => e.webhookName === nameFilter);
                     if (requestIdFilter) filtered = filtered.filter(e => e.requestId === requestIdFilter);
                     // ?summary=1 → counts only (sidebar badges poll this; no rows shipped).
-                    if (url.searchParams.get('summary') === '1') return jsonRes(200, { byWebhook: countByWebhook(filtered), total: filtered.length });
+                    if (url.searchParams.get('summary') === '1') return jsonRes(200, { byWebhook: countByWebhook(filtered), byTarget: countByTarget(filtered), total: filtered.length });
                     const total = filtered.length;
                     const safeEntries = filtered.slice(0, queueListLimit(url)).map(e => ({
                         id: e.id,
@@ -2020,7 +2032,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     let queue = getPendingRetryQueue();
                     if (nameFilter) queue = queue.filter(e => e.webhookName === nameFilter);
                     if (requestIdFilter) queue = queue.filter(e => e.requestId === requestIdFilter);
-                    if (url.searchParams.get('summary') === '1') return jsonRes(200, { byWebhook: countByWebhook(queue), total: queue.length });
+                    if (url.searchParams.get('summary') === '1') return jsonRes(200, { byWebhook: countByWebhook(queue), byTarget: countByTarget(queue), total: queue.length });
                     const total = queue.length;
                     const safeEntries = queue.slice(0, queueListLimit(url)).map(e => ({
                         id: e.id,

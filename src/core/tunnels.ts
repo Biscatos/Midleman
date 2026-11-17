@@ -14,7 +14,7 @@ import type { TCPSocketListener } from 'bun';
 import { ipInCidrs } from './ssrf-guard';
 import { muxSocket, type MuxStream } from './tunnel-mux';
 import { openTunnelStream, probeTunnel, tunnelConnected } from './agent-tunnel';
-import { getAllAssignedPorts, PORT_RANGE_START } from '../servers/port-manager';
+import { getAllAssignedPorts, PORT_RANGE_START, setExternalPorts } from '../servers/port-manager';
 
 export interface Tunnel {
     name: string;
@@ -47,6 +47,7 @@ const FILE = resolve(DATA_DIR, 'tunnels.json');
 const tunnels = new Map<string, Tunnel>();
 const runtime = new Map<string, Runtime>();
 let reserved: number[] = [];
+setExternalPorts(() => [...tunnels.values()].map(t => t.listenPort));
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,62}$/;
 const HOST_RE = /^[a-zA-Z0-9]([a-zA-Z0-9._-]{0,251}[a-zA-Z0-9])?$/;

@@ -1085,6 +1085,36 @@ export function getTrafficWindow(type: 'webhook' | 'proxy', resource: string, mi
     } catch { return empty; }
 }
 
+/** Last-24 h traffic per webhook for the list: 24 hourly inbound counts (oldest first) plus
+ *  delivered / failed fan-outs. From request_stats, so it works with logs off. */
+export function getWebhookTraffic24h(): Record<string, { hours: number[]; received: number; delivered: number; failed: number }> {
+    if (!db) return {};
+    try {
+        flushStats();
+        const now = Date.now();
+        const rows = db.prepare(`
+            SELECT bucket, type, resource, SUM(count) AS n,
+                   SUM(CASE WHEN status = 0 OR status >= 400 THEN count ELSE failed END) AS bad
+            FROM request_stats
+            WHERE bucket >= $from AND type IN ('webhook', 'webhook-fanout') AND resource <> ''
+            GROUP BY bucket, type, resource
+        `).all({ $from: statBucket(new Date(now - 24 * 3_600_000)) }) as { bucket: string; type: string; resource: string; n: number; bad: number }[];
+        const out: Record<string, { hours: number[]; received: number; delivered: number; failed: number }> = {};
+        for (const r of rows) {
+            const w = out[r.resource] ??= { hours: new Array(24).fill(0), received: 0, delivered: 0, failed: 0 };
+            if (r.type === 'webhook') {
+                const h = 23 - Math.floor((now - Date.parse(r.bucket + ':00Z')) / 3_600_000);
+                if (h >= 0 && h < 24) w.hours[h] += r.n;
+                w.received += r.n;
+            } else {
+                w.failed += r.bad;
+                w.delivered += r.n - r.bad;
+            }
+        }
+        return out;
+    } catch { return {}; }
+}
+
 /** Resources seen in the last 7 days, for the monitor form. */
 export function listTrafficResources(): { type: string; resource: string; total: number }[] {
     if (!db) return [];
