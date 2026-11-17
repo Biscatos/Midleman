@@ -151,6 +151,7 @@ async function startApp(username) {
     appIntervals.push(setInterval(fetchHealth, 5000));
     appIntervals.push(setInterval(fetchRecentRequests, 3000));
     appIntervals.push(setInterval(fetchChartData, 15000));
+    appIntervals.push(setInterval(() => { if (currentPage === 'overview') fetchOverview(); }, 15000));
     fetchTunnels();   // sidebar count
     appIntervals.push(setInterval(() => { if (currentPage === 'tunnels' && document.getElementById('tunnelModal').style.display === 'none') fetchTunnels(); }, 5000));
     appIntervals.push(setInterval(() => { if (currentPage === 'overview' || currentPage === 'monitors') fetchMonitors(); }, 15000));
@@ -539,6 +540,7 @@ function navigate(page, opts = {}) {
   }
   if (SIDEBAR_EXT_PAGES.has(page)) setSidebarExt(true, false);
   if (page === 'requests') { rlPage = 1; fetchRequestLogs(); }
+  if (page === 'overview') fetchOverview();
   if (page === 'tcpudp') {
     if (pendingTcpTab) switchTcpUdpTab(pendingTcpTab);
     else fetchSipProxies();

@@ -242,71 +242,28 @@
         <p><span class="live-dot"></span>Real-time overview</p>
       </div>
 
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-label">Status</div>
-          <div class="stat-value" id="ovStatus" style="color:var(--text3)">--</div>
-          <div class="stat-sub" id="ovUptime"></div>
+      <div id="ovAttention" class="ov-attn"></div>
+      <div id="ovKpis" class="ov-kpis"></div>
+      <div id="ovServices" class="ov-services"></div>
+      <div class="ov-row">
+        <div class="ov-card">
+          <div class="ov-card-head"><b>Traffic · last 24 h</b><span class="ov-legend"><i class="p"></i>Proxies<i class="w"></i>Webhooks<i class="c"></i>Connectors<i class="e"></i>Errors</span></div>
+          <div id="ovTraffic" class="ov-traffic" aria-label="Requests per 30 minutes, last 24 h"></div>
+          <div class="ov-foot">Click a bar to open those requests.</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-label">Requests</div>
-          <div class="stat-value" id="ovActive">--</div>
-          <div class="stat-sub">in-flight</div>
-        </div>
-        <div class="stat-card" style="cursor:pointer" onclick="navigate('profiles')">
-          <div class="stat-label">Proxies</div>
-          <div class="stat-value" id="ovProfiles">--</div>
-          <div class="stat-sub" id="ovProfileNames"></div>
-        </div>
-        <div class="stat-card" style="cursor:pointer" onclick="navigate('webhooks')">
-          <div class="stat-label">Webhooks</div>
-          <div class="stat-value" id="ovWebhooks">--</div>
-          <div class="stat-sub">active fans</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">CPU</div>
-          <div class="stat-value" id="ovCpu">--</div>
-          <div class="stat-sub">process usage</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Memory</div>
-          <div class="stat-value" id="ovMem">--</div>
-          <div class="stat-sub">rss</div>
+        <div class="ov-card">
+          <div class="ov-card-head"><b>Recent activity</b><button type="button" class="btn btn-sm btn-ghost" onclick="navigate('audit')">Audit log →</button></div>
+          <div id="ovActivity" class="ov-activity"></div>
         </div>
       </div>
-
-      <!-- Charts -->
-      <div class="charts-row">
-        <div class="chart-card">
-          <div class="chart-header">Traffic <span id="chartTrafficLabel">last 24h</span></div>
-          <div class="chart-body" style="position:relative">
-            <canvas id="chartTimeline" style="cursor:crosshair"></canvas>
-            <div id="chartTooltip"
-              style="display:none;position:fixed;z-index:999;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;box-shadow:var(--shadow);pointer-events:none;white-space:nowrap">
-            </div>
-          </div>
-        </div>
-        <div class="chart-card">
-          <div class="chart-header">Breakdown</div>
-          <div class="chart-body" id="chartBreakdown">
-            <div style="color:var(--text3);font-size:13px;text-align:center;padding:20px">Loading...</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Monitors at a glance -->
-      <div class="card" id="ovMonitorsCard">
-        <div class="card-header">
-          <h3>Monitors</h3>
-          <div style="display:flex;gap:6px;align-items:center">
-            <span id="ovMonitorsSummary" style="font-size:12px;color:var(--text3);margin-right:6px"></span>
-            <a class="btn btn-sm btn-ghost" href="/wallboard" target="_blank" rel="noopener">Wallboard</a>
-            <button class="btn btn-sm btn-ghost" onclick="navigate('monitors')">View all &rarr;</button>
-          </div>
-        </div>
-        <div class="card-body" style="padding:0" id="ovMonitorsBody">
-          <div style="color:var(--text3);font-size:13px;text-align:center;padding:24px">Loading...</div>
-        </div>
+      <div class="ov-system">
+        <span>System</span>
+        <span id="ovStatus">--</span>
+        <span id="ovUptime"></span>
+        <span>CPU <b id="ovCpu">--</b></span>
+        <span>Memory <b id="ovMem">--</b></span>
+        <span><b id="ovActive">--</b> requests in flight</span>
+        <span hidden id="ovProfiles"></span><span hidden id="ovWebhooks"></span><span hidden id="ovProfileNames"></span>
       </div>
     </div>
 
@@ -327,23 +284,22 @@
       </div>
       <div class="mm-filterbar">
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-            <label class="mm-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="text" id="rlSearch" placeholder="Search path, URL, request ID..."
+            <label class="mm-search" style="flex:0 1 240px;min-width:160px"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="text" id="rlSearch" placeholder="Search path, URL, request ID..."
               style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"
               onkeydown="if(event.key==='Enter')fetchRequestLogs()"></label>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);user-select:none;cursor:pointer;white-space:nowrap"
                    title="Also match request/response body — slower (full scan).">
               <input type="checkbox" id="rlSearchBody" onchange="fetchRequestLogs()"> Search body
             </label>
-            <select id="rlType"
-              style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
-              onchange="fetchRequestLogs()">
-              <option value="">All types</option>
-
-              <option value="proxy">Proxy</option>
-              <option value="webhook">Webhook</option>
-              <option value="connector">Connector</option>
-              <option value="connector-fanout">Connector Fan-out</option>
-            </select>
+            <div class="mm-seg-filter" role="group" aria-label="Show requests" id="rlQuickFilter">
+          <button type="button" class="on" data-rq="" onclick="setRequestQuick('')">All</button>
+          <button type="button" data-rq="errors" onclick="setRequestQuick('errors')">Errors</button>
+          <button type="button" data-rq="webhook" onclick="setRequestQuick('webhook')">Webhooks</button>
+          <button type="button" data-rq="proxy" onclick="setRequestQuick('proxy')">Proxies</button>
+          <button type="button" data-rq="connector" onclick="setRequestQuick('connector')">Connectors</button>
+          <button type="button" data-rq="slow" onclick="setRequestQuick('slow')">Slow &gt; 1 s</button>
+        </div>
+        <span id="rlRangeChip" class="rq-range" style="display:none"></span>
             <select id="rlMethod"
               style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px"
               onchange="fetchRequestLogs()">
@@ -373,27 +329,19 @@
           </div>
         
       </div>
+      <div class="rq-strip" id="rlStrip" aria-label="Requests per 30 minutes, last 24 h"></div>
       <div class="card">
         <div class="card-body" style="padding:0;overflow-x:auto">
-          <table id="reqLogTable" style="width:100%;border-collapse:collapse;font-size:13px">
+          <table id="reqLogTable" class="wh-table" style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
-              <tr style="background:var(--surface2);text-align:left">
-                <th
-                  style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Time</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Type</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Method</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Path</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Status</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Duration</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Size</th>
-                <th style="padding:10px 12px"></th>
+              <tr>
+                <th class="wh-dotcol"></th>
+                <th>Time</th>
+                <th>Where</th>
+                <th>Method</th>
+                <th>Status</th>
+                <th>Duration</th>
+                <th>Size</th>
               </tr>
             </thead>
             <tbody id="reqLogBody">
@@ -1429,7 +1377,15 @@
           <label class="mm-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="text" id="userSearch" placeholder="Search name, username or email…" autocomplete="off" aria-label="Search users"
             oninput="searchProxyUsers(this.value)" onkeydown="if(event.key==='Escape'){this.value='';searchProxyUsers('')}"
             style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"></label>
-          <select id="userRoleFilter" onchange="filterProxyUsersByRole()" aria-label="Role"
+          <div class="mm-seg-filter" role="group" aria-label="Show users" id="userQuickFilter">
+            <button type="button" class="on" data-uf="" onclick="setUserFilter('')">All</button>
+            <button type="button" data-uf="admin" onclick="setUserFilter('admin')">Admins <span></span></button>
+            <button type="button" data-uf="ldap" onclick="setUserFilter('ldap')">LDAP <span></span></button>
+            <button type="button" data-uf="blocked" onclick="setUserFilter('blocked')">Blocked <span></span></button>
+            <button type="button" data-uf="no2fa" onclick="setUserFilter('no2fa')">No 2FA <span></span></button>
+            <button type="button" data-uf="never" onclick="setUserFilter('never')">Never signed in <span></span></button>
+          </div>
+          <select id="userRoleFilter" hidden onchange="filterProxyUsersByRole()" aria-label="Role"
             style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text);font-size:13px;min-width:150px">
             <option value="">All roles</option>
             <option value="admin">Admins only</option>
@@ -1443,15 +1399,16 @@
       <!-- Users Table -->
       <div class="card" style="margin-bottom:16px">
         <div class="card-body" style="padding:0;overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <table class="wh-table" style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
-              <tr style="background:var(--surface2);text-align:left">
-                <th style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Name</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Email / Username</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Role</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">2FA</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">Created</th>
-                <th style="padding:10px 12px"></th>
+              <tr>
+                <th class="wh-dotcol"></th>
+                <th>User</th>
+                <th>Role</th>
+                <th>2FA</th>
+                <th>Access</th>
+                <th>Last sign-in</th>
+                <th></th>
               </tr>
             </thead>
             <tbody id="proxyUserListBody">
@@ -1746,6 +1703,7 @@
       <div style="display:flex;gap:0;margin-top:18px;border-bottom:1px solid var(--border)">
         <button type="button" class="notif-tab" data-tab="groups" onclick="switchNotifTab('groups')" style="background:none;border:none;border-bottom:2px solid var(--accent);padding:10px 16px;color:var(--text);font-size:13px;font-weight:500;cursor:pointer">Groups</button>
         <button type="button" class="notif-tab" data-tab="rules" onclick="switchNotifTab('rules')" style="background:none;border:none;border-bottom:2px solid transparent;padding:10px 16px;color:var(--text2);font-size:13px;cursor:pointer">Rules</button>
+        <button type="button" class="notif-tab" data-tab="sent" onclick="switchNotifTab('sent')" style="background:none;border:none;border-bottom:2px solid transparent;padding:10px 16px;color:var(--text2);font-size:13px;cursor:pointer">Sent</button>
         <button type="button" class="notif-tab" data-tab="channels" onclick="switchNotifTab('channels')" style="background:none;border:none;border-bottom:2px solid transparent;padding:10px 16px;color:var(--text2);font-size:13px;cursor:pointer">Delivery channels</button>
       </div>
 
@@ -1773,23 +1731,20 @@
           </div>
         </div>
         <div class="card" id="notifRulesCard" style="display:none">
-          <div style="overflow-x:auto">
-            <table style="width:100%;border-collapse:collapse;font-size:13px">
-              <thead>
-                <tr style="background:var(--surface2);text-align:left;color:var(--text2);font-size:11px;text-transform:uppercase;letter-spacing:.5px">
-                  <th style="padding:10px 14px;font-weight:600">Priority</th>
-                  <th style="padding:10px 14px;font-weight:600">Category</th>
-                  <th style="padding:10px 14px;font-weight:600">Min severity</th>
-                  <th style="padding:10px 14px;font-weight:600">Group</th>
-                  <th style="padding:10px 14px;font-weight:600">Channels</th>
-                  <th style="padding:10px 14px;font-weight:600">Status</th>
-                  <th style="padding:10px 14px;font-weight:600;text-align:right">Actions</th>
-                </tr>
-              </thead>
-              <tbody id="notifRulesBody"></tbody>
-            </table>
-          </div>
+          <div id="notifRulesBody" class="nr-list"></div>
         </div>
+        <p style="font-size:11.5px;color:var(--text3);margin-top:8px">Rules are checked top to bottom; the first one that matches an event sends it. Click a rule to change it.</p>
+      </div>
+
+      <!-- Sent tab -->
+      <div class="notif-tabpane" data-tab="sent" style="margin-top:18px;display:none">
+        <div id="notifSentSummary" class="ns-summary"></div>
+        <div class="card"><div style="overflow-x:auto">
+          <table class="wh-table" style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr><th>When</th><th>Event</th><th>Severity</th><th>To</th><th>Result</th></tr></thead>
+            <tbody id="notifSentBody"><tr><td colspan="5" style="padding:30px;text-align:center;color:var(--text3)">Loading…</td></tr></tbody>
+          </table>
+        </div></div>
       </div>
 
       <!-- Channels tab -->

@@ -923,6 +923,23 @@ export interface LogAuditInput {
 }
 
 /** Append an audit log entry. Swallows errors — never blocks the parent request. */
+const LOGIN_ACTIONS = ['admin.login', 'oauth.admin_login', 'oauth.login.success', 'proxy.login.success', 'ldap.login.success'];
+
+/** user id → last successful sign-in (UTC 'YYYY-MM-DD HH:MM:SS'), from the audit log. */
+export function lastLoginByUser(): Map<number, string> {
+    const out = new Map<number, string>();
+    if (!db) return out;
+    try {
+        db.exec('CREATE INDEX IF NOT EXISTS idx_audit_actor_action ON audit_logs(actor_user_id, action)');
+        const rows = db.prepare(
+            `SELECT actor_user_id AS id, MAX(created_at) AS at FROM audit_logs
+             WHERE actor_user_id IS NOT NULL AND action IN (${LOGIN_ACTIONS.map(() => '?').join(',')}) GROUP BY actor_user_id`
+        ).all(...LOGIN_ACTIONS) as { id: number; at: string }[];
+        for (const r of rows) out.set(r.id, r.at);
+    } catch { /* the page still works without it */ }
+    return out;
+}
+
 export function logAudit(input: LogAuditInput): void {
     if (!db) return;
     try {
@@ -2830,6 +2847,26 @@ export function createNotificationLogEntry(input: {
     });
     const r = db.prepare('SELECT last_insert_rowid() AS id').get() as any;
     return r?.id || 0;
+}
+
+/** Latest dispatches for the "Sent" tab, newest first, with the group name and the first recipient error. */
+export function listRecentNotifications(limit = 100): {
+    id: number; category: string; severity: string; subject: string; groupName: string | null;
+    total: number; ok: number; failed: number; isTest: boolean; createdAt: number; firstError: string | null;
+}[] {
+    if (!db) return [];
+    const rows = db.prepare(`
+        SELECT n.id, n.category, n.severity, n.subject, g.name AS group_name, n.recipients_total, n.recipients_ok,
+               n.recipients_failed, n.is_test, n.created_at,
+               (SELECT e.error FROM email_send_log e WHERE e.notification_id = n.id AND e.success = 0 AND e.error IS NOT NULL LIMIT 1) AS first_error
+        FROM notifications n LEFT JOIN notification_groups g ON g.id = n.matched_group_id
+        ORDER BY n.id DESC LIMIT $limit
+    `).all({ $limit: Math.max(1, Math.min(500, limit)) }) as any[];
+    return rows.map(r => ({
+        id: r.id, category: r.category, severity: r.severity, subject: r.subject, groupName: r.group_name,
+        total: r.recipients_total, ok: r.recipients_ok, failed: r.recipients_failed, isTest: !!r.is_test,
+        createdAt: r.created_at, firstError: r.first_error,
+    }));
 }
 
 export function updateNotificationLogCounts(notificationId: number, ok: number, failed: number): void {

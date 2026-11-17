@@ -38,10 +38,10 @@ import { PORT_RANGE_START, loadPortAssignments, assignAllPorts, assignProxyPort,
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, dismissAllFailedFanouts, flushDlqSync, replayDeliveryJournal, findSelfTarget, setInternalServices, updateWebhookConfig, getPendingRetryQueue, dismissPendingRetry, dismissAllPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState, setDlqAuthResolver, listRunningWebhookNames } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserMfaExempt, setProxyUserAdminRole, setProxyUserBlocked, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, cleanupExpiredPasswordResetTokens, findResetCandidateByEmail, logSmsSend,
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, lastLoginByUser, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserMfaExempt, setProxyUserAdminRole, setProxyUserBlocked, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, cleanupExpiredPasswordResetTokens, findResetCandidateByEmail, logSmsSend,
 listNotificationGroups, getNotificationGroup, createNotificationGroup, updateNotificationGroup, deleteNotificationGroup,
 addNotificationGroupMember, removeNotificationGroupMember,
-listNotificationRules, createNotificationRule, updateNotificationRule, deleteNotificationRule,
+listNotificationRules, listRecentNotifications, createNotificationRule, updateNotificationRule, deleteNotificationRule,
 timingSafeEqualStr,
 type NotificationSeverity, type NotificationChannel } from './auth/auth';
 import { emitNotificationEvent, dispatchTestToGroup } from './core/notifications';
@@ -63,7 +63,7 @@ import { isNpmCertVolumePresent, startCertWatcher, onCertReloaded } from './cert
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleOauthSmsOtp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
 import { claimAgent } from './core/agent-instance';
 import { resolveClientIp, getTrustProxyConfig } from './core/ip-filter';
-import { getTraffic24h } from './telemetry/request-log';
+import { getTraffic24h, getOverviewTraffic } from './telemetry/request-log';
 import { journalClose } from './servers/delivery-journal';
 import { initReportFeeds, handleReportRequest } from './reports/server';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
@@ -1653,6 +1653,8 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         from: url.searchParams.get('from') || undefined,
                         to: url.searchParams.get('to') || undefined,
                         includeBody: url.searchParams.get('includeBody') === '1',
+                        errorsOnly: url.searchParams.get('errors') === '1',
+                        minDurationMs: parseInt(url.searchParams.get('minDuration') || '0', 10) || undefined,
                     });
                     return jsonRes(200, result as unknown as Record<string, unknown>);
                 }
@@ -1729,6 +1731,42 @@ async function handle(req: Request, srv: any): Promise<Response> {
 
                 if (url.pathname === '/admin/requests/stats' && req.method === 'GET') {
                     return jsonRes(200, getRequestLogStats() as unknown as Record<string, unknown>);
+                }
+
+                // ── Overview: what needs attention, 24 h numbers, health per service, recent activity ──
+                if (url.pathname === '/admin/overview' && req.method === 'GET') {
+                    const issues: { area: string; level: 'err' | 'warn'; title: string; detail: string; go: string }[] = [];
+                    const dlq = getDeadLetterQueue(), pend = getPendingRetryQueue();
+                    const badHooks = [...new Set([...dlq.map(e => e.webhookName), ...pend.map(e => e.webhookName)])];
+                    if (badHooks.length) issues.push({ area: 'Webhooks', level: 'err', go: 'webhooks', title: `${badHooks.length} with failing deliveries`, detail: `${pend.length} retrying · ${dlq.length} failed · ${badHooks.slice(0, 2).join(', ')}${badHooks.length > 2 ? '…' : ''}` });
+                    const tuns = listTunnels();
+                    const badTuns = tuns.filter(t => t.enabled && (t.status === 'error' || t.status === 'offline'));
+                    if (badTuns.length) issues.push({ area: 'Tunnels', level: badTuns.some(t => t.status === 'error') ? 'err' : 'warn', go: 'tunnels', title: badTuns.length === 1 ? `${badTuns[0].name} is not working` : `${badTuns.length} tunnels not working`, detail: badTuns[0].status === 'error' ? String(badTuns[0].error || '') : `agent "${badTuns[0].agent}" offline` });
+                    const mons = listMonitors().filter(m => (m as any).enabled !== false);
+                    const downMons = mons.filter(m => (getStatus(m.name) as any)?.state === 'alert');
+                    if (downMons.length) issues.push({ area: 'Monitors', level: 'err', go: 'monitors', title: downMons.length === 1 ? `${downMons[0].name} is down` : `${downMons.length} monitors down`, detail: downMons.slice(0, 3).map(m => m.name).join(', ') });
+                    const stopped = config.proxyProfiles.filter(p => !isProxyServerRunning(p.name));
+                    if (stopped.length) issues.push({ area: 'Proxies', level: 'warn', go: 'profiles', title: `${stopped.length} ${stopped.length === 1 ? 'proxy' : 'proxies'} stopped`, detail: stopped.slice(0, 3).map(p => p.name).join(', ') });
+                    const es = getErrorStats();
+                    if (es.openErrors + es.openWarnings > 0) issues.push({ area: 'System alerts', level: es.openErrors ? 'err' : 'warn', go: 'errors', title: `${es.openErrors + es.openWarnings} unread alert${es.openErrors + es.openWarnings === 1 ? '' : 's'}`, detail: es.sources.slice(0, 3).map(s => s.source).join(', ') });
+                    const plainLdap = listLdapConfigs().filter(c => c.enabled && !/^ldaps:/i.test(c.url) && !c.startTls);
+                    if (plainLdap.length) issues.push({ area: 'Security', level: 'warn', go: 'ldap', title: 'LDAP without encryption', detail: plainLdap.map(c => c.name).join(', ') });
+
+                    const conn = getConnectorStatus();
+                    const services = {
+                        webhooks: { total: config.webhooks.length, bad: badHooks.length },
+                        proxies: { total: config.proxyProfiles.length, bad: stopped.length },
+                        tunnels: { total: tuns.length, bad: badTuns.length },
+                        connectors: { total: conn.length + five9Connectors.length, bad: conn.filter(c => c.enabled && !c.running).length },
+                        monitors: { total: mons.length, bad: downMons.length },
+                    };
+                    const audit = queryAuditLogs({ limit: 40 }).logs
+                        .filter(l => !/\.(failed|rate_limited|denied)$|^request\.|\.test$/.test(l.action))
+                        .slice(0, 6)
+                        .map(l => ({ at: l.createdAt, text: `${l.actorUsername || 'system'} · ${l.action.replace(/[._]/g, ' ')}${l.targetId ? ' · ' + l.targetId : ''}` }));
+                    const sent = listRecentNotifications(4).map(n => ({ at: new Date(n.createdAt).toISOString().slice(0, 19).replace('T', ' '), text: `Notification "${n.subject || n.category}" → ${n.groupName || 'nobody'} (${n.ok}/${n.total})` }));
+                    const activity = [...audit, ...sent].sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 7);
+                    return jsonRes(200, { issues, traffic: getOverviewTraffic(), services, activity });
                 }
 
                 if (url.pathname === '/admin/requests/chart' && req.method === 'GET') {
@@ -2138,6 +2176,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             meta: { enabled: !!webhook.meta?.enabled, hasAppSecret: !!webhook.meta?.appSecret },
                             retry: webhook.retry,
                             allowedIps: webhook.allowedIps || [],
+                            allowedMethods: webhook.allowedMethods || [],
                             allowPrivateTargets: webhook.allowPrivateTargets !== false,
                             targetAllowedCidrs: webhook.targetAllowedCidrs || [],
                             silenceAlert: webhook.silenceAlert,
@@ -3110,10 +3149,12 @@ async function handle(req: Request, srv: any): Promise<Response> {
 
                 // GET /admin/proxy-users — list all global proxy users
                 if (url.pathname === '/admin/proxy-users' && req.method === 'GET') {
+                    const lastLogin = lastLoginByUser();
                     const users = listAllProxyUsers().map(u => {
                         return {
                             ...u,
                             profiles: listProfilesForProxyUser(u.id),
+                            lastLoginAt: lastLogin.get(u.id) || null,
                         };
                     });
                     const me = getAuthedAdmin(req);
@@ -3680,6 +3721,9 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     }
                 }
 
+                if (url.pathname === '/admin/notifications/sent' && req.method === 'GET') {
+                    return jsonRes(200, { sent: listRecentNotifications(Number(url.searchParams.get('limit')) || 100) });
+                }
                 if (url.pathname === '/admin/notification-rules' && req.method === 'GET') {
                     return jsonRes(200, { rules: listNotificationRules() });
                 }
