@@ -107,7 +107,14 @@ export interface WebhookFilterCondition {
 }
 
 export interface WebhookDestination {
+  /** Full URL — or, when `tunnel` is set, only the path (+ query) sent through that tunnel. */
   url: string;
+  /** Deliver through this Midleman tunnel (by name, resolved on every send) instead of to an outside URL. */
+  tunnel?: string;
+  /** Deliver to this Midleman HTTP proxy (access-key or open proxies; its key is added at send time). */
+  proxy?: string;
+  /** Deliver to this Midleman connector's inbound endpoint (its verify token is added at send time). */
+  connector?: string;
   /** false = keep the destination configured but skip it during fan-out. Default true. */
   enabled?: boolean;
   method?: string; // e.g. "POST", "GET"
@@ -174,6 +181,8 @@ export interface WebhookDistributor {
   authToken?: string;     // Optional auth token to restrict inbound requests
   retry?: WebhookRetryConfig; // Default retry config for all targets (can be overridden per-destination)
   allowedIps?: string[];  // Optional inbound IP allowlist (exact, CIDR, wildcard). Empty = unrestricted.
+  /** Only these HTTP methods are fanned out; others are answered 200 "ignored". Empty = all. */
+  allowedMethods?: string[];
   /** SSRF policy for OUTBOUND fan-out destinations of this webhook.
    *  When true, private/internal ranges (RFC1918, CGNAT, ULA) are permitted as
    *  targets. Loopback and link-local/metadata stay blocked unless explicitly

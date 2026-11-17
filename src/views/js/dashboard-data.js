@@ -4191,7 +4191,7 @@ function toggleRetrySection() {
 
 function addWebhookTarget(target = "") {
   if (typeof target === 'string') {
-    webhookTargetState.push({ metaRoute: { numbers: [], events: [], catchAll: false }, type: 'basic', enabled: true, url: target, method: 'POST', bodyTemplate: '', customBody: false, dropEmpty: false, customHeaders: [], forwardHeaders: false, filter: [], filterMode: 'all', retry: null, retryOpen: false, persistentRetry: null, persistentRetryOpen: false });
+    webhookTargetState.push({ metaRoute: { numbers: [], events: [], catchAll: false }, type: 'basic', enabled: true, url: target, inKind: '', inName: '', method: 'POST', bodyTemplate: '', customBody: false, dropEmpty: false, customHeaders: [], forwardHeaders: false, filter: [], filterMode: 'all', retry: null, retryOpen: false, persistentRetry: null, persistentRetryOpen: false });
   } else {
     const headersArr = [];
     if (target.customHeaders) {
@@ -4213,6 +4213,8 @@ function addWebhookTarget(target = "") {
       type: isBasicShape ? 'basic' : 'custom',
       enabled: target.enabled !== false,
       url: target.url || '',
+      inKind: target.tunnel ? 'tunnel' : target.proxy ? 'proxy' : target.connector ? 'connector' : '',
+      inName: target.tunnel || target.proxy || target.connector || '',
       method: target.method || 'POST',
       bodyTemplate: target.bodyTemplate || '',
       customBody: !!target.bodyTemplate,
@@ -4310,13 +4312,15 @@ async function removeWebhookTarget(index) {
   if (!(await showConfirm({
     title: 'Remove destination',
     message: `Remove ${label}?`,
-    detail: 'This only takes effect once you click "Save Webhook" — but the destination and any filter/retry overrides configured for it will be gone.',
+    detail: editingDestinationIndex === index ? 'The webhook is saved right away; its filter and retry settings go with it.' : 'This only takes effect once you click "Save webhook" — the destination and its filter/retry settings will be gone.',
     confirmText: 'Remove',
     danger: true,
   }))) return;
-  if (editingDestinationIndex === index) closeDestinationEditor();
+  const fromEditor = editingDestinationIndex === index;
+  if (fromEditor) closeDestinationEditor();
   webhookTargetState.splice(index, 1);
   webhookFormDirty = true;
+  if (fromEditor) { await saveWebhook({ stay: true }); renderWebhookTargets(); updateDestinationsSummary(); return; }
   renderWebhookTargets();
 }
 
@@ -4534,7 +4538,7 @@ function renderWebhookTargets() {
       : t.retryOpen ? chip(`Override · ${t.retry?.maxRetries ?? 3}×`, 'acc')
       : '<span class="wd-muted">Webhook default</span>';
     let sample;
-    if (!on) sample = '<span class="wd-muted">Paused</span>';
+    if (!on) sample = '<span class="wd-muted">—</span>';
     else if (!payload) sample = '<span class="wd-muted">—</span>';
     else {
       const ev = _wdEvaluate(t, payload);
@@ -4552,7 +4556,7 @@ function renderWebhookTargets() {
     return `
     <div class="wd-grid wd-row ${on ? '' : 'wd-off'}">
       <div class="wd-cell-dest" title="${esc(t.url)}" onclick="openDestinationEditor(${i})">
-        <div class="wd-url"><span class="wd-method">${esc(custom ? (t.method || 'POST') : 'POST')}</span>${t.url ? esc(t.url) : '<span class="wd-muted">(no URL)</span>'}</div>
+        <div class="wd-url">${on ? '' : '<span class="wd-paused">PAUSED</span>'}<span class="wd-method">${esc(custom ? (t.method || 'POST') : 'POST')}</span>${t.inKind ? `<span class="wd-tunnel">${t.inKind.toUpperCase()} ${esc(t.inName)}</span>` : ''}${t.url ? esc(t.url) : '<span class="wd-muted">(no URL)</span>'}</div>
         ${shapeBits.length ? `<div class="wd-shape">${esc(shapeBits.join(' · '))}</div>` : ''}
       </div>
       <div class="wd-cell">${whenText}</div>
@@ -4568,6 +4572,35 @@ function renderWebhookTargets() {
 }
 
 // ─── Destination editor ─────────────────────────────────────────────────────
+
+/** Choices for an internal destination: tunnels, proxies (not user-login ones) and connectors. */
+function _wdInternalOptions(kind) {
+  if (kind === 'tunnel') return _tunnels.map(x => ({ name: x.name, label: `${x.name} → ${x.host}:${x.port} (via ${x.agent})`, disabled: !x.enabled, note: x.enabled ? '' : 'disabled' }));
+  if (kind === 'proxy') return _allProfiles.map(p => ({ name: p.name, label: `${p.name} → ${p.targetUrl}`, disabled: p.authMode === 'login', note: p.authMode === 'login' ? 'needs user login' : '' }));
+  return [..._allConnectors.map(c => ({ name: c.name, label: `${c.name} (GoContact)` })), ..._allFive9Connectors.map(c => ({ name: c.name, label: `${c.name} (Five9)` }))];
+}
+const _WD_INTERNAL_HINT = {
+  tunnel: 'Midleman calls the tunnel from inside (127.0.0.1) — the service stays private and the tunnel needs no LAN access.',
+  proxy: 'Sent through the proxy from inside: its credential injection and path rules apply; its access key is added automatically.',
+  connector: 'Posted to the connector’s own inbound endpoint from inside; its verify token is added automatically.',
+};
+
+async function setWebhookTargetDeliver(index, kind) {
+  const t = webhookTargetState[index];
+  if (!t) return;
+  if (kind === 'url') {
+    t.inKind = ''; t.inName = '';
+  } else {
+    if (kind === 'tunnel' && !_tunnels.length) await fetchTunnels();
+    const first = _wdInternalOptions(kind).find(o => !o.disabled);
+    if (!first) { toast(`No ${kind} available — create one first.`, 'error'); return; }
+    if (t.inKind !== kind) { t.inKind = kind; t.inName = first.name; }
+    if (/^https?:\/\//i.test(t.url)) { try { const u = new URL(t.url.split('{{')[0]); t.url = t.url.slice(u.origin.length) || '/'; } catch { t.url = '/'; } }
+    if (!t.url) t.url = '/';
+  }
+  webhookFormDirty = true;
+  renderDestinationEditor(index);
+}
 
 function setWebhookTargetType(index, type) {
   const t = webhookTargetState[index];
@@ -4676,10 +4709,21 @@ function renderDestinationEditorMarkup(i) {
           ${seg(!custom, 'Forward as received', `setWebhookTargetType(${i}, 'basic')`)}${seg(custom, 'Custom request', `setWebhookTargetType(${i}, 'custom')`)}
         </div>
       </div>
-      <label class="wd-label" for="wdUrl_${i}">${custom ? 'Method and URL' : 'URL'}</label>
+      <div class="wd-deliver">
+        <span class="wd-label" style="margin:0">Deliver to</span>
+        <div class="mm-seg wd-seg" role="radiogroup" aria-label="Deliver to">
+          ${seg(!t.inKind, 'External URL', `setWebhookTargetDeliver(${i}, 'url')`)}${['tunnel', 'proxy', 'connector'].map(k => seg(t.inKind === k, k[0].toUpperCase() + k.slice(1), `setWebhookTargetDeliver(${i}, '${k}')`)).join('')}
+        </div>
+      </div>
+      ${t.inKind ? `<label class="wd-label" for="wdIn_${i}">${t.inKind[0].toUpperCase() + t.inKind.slice(1)}</label>
+      <select id="wdIn_${i}" class="wd-tunnel-select" onchange="updateWebhookTargetField(${i}, 'inName', this.value); renderDestinationEditor(${i})">
+        ${_wdInternalOptions(t.inKind).map(o => `<option value="${esc(o.name)}" ${o.name === t.inName ? 'selected' : ''} ${o.disabled ? 'disabled' : ''}>${esc(o.label)}${o.note ? ' — ' + esc(o.note) : ''}</option>`).join('')}
+      </select>
+      <p class="wd-sec-sub" style="margin:4px 0 10px">${_WD_INTERNAL_HINT[t.inKind]} If it is unavailable, the delivery follows this destination's retry settings.</p>` : ''}
+      <label class="wd-label" for="wdUrl_${i}">${t.inKind ? (custom ? 'Method and path' : 'Path') : (custom ? 'Method and URL' : 'URL')}</label>
       <div class="wd-url-row">
         ${custom ? `<select onchange="updateWebhookTargetField(${i}, 'method', this.value); renderDestinationEditor(${i})" aria-label="Method" class="wd-method-select">${['POST','PUT','GET','DELETE'].map(m => `<option ${t.method === m ? 'selected' : ''}>${m}</option>`).join('')}</select>` : ''}
-        <input id="wdUrl_${i}" type="text" class="wd-mono" placeholder="https://api.example.com/orders/{{order.id}}" value="${esc(t.url)}" oninput="updateWebhookTargetField(${i}, 'url', this.value)">
+        <input id="wdUrl_${i}" type="text" class="wd-mono" placeholder="${t.inKind ? '/api/orders/{{order.id}}' : 'https://api.example.com/orders/{{order.id}}'}" value="${esc(t.url)}" oninput="updateWebhookTargetField(${i}, 'url', this.value)">
       </div>
       <div id="previewUrl_${i}" class="wd-inline-preview" style="display:none"></div>
     </section>
@@ -4862,9 +4906,12 @@ function manageWebhookDestinations(name, pushHistory = true) {
   openDestinationsPage(pushHistory);
 }
 
+let _destSnapshot = null; // the destination as it was when the editor opened (Cancel restores it)
+
 function openDestinationEditor(i) {
   editingDestinationIndex = i;
   const t = webhookTargetState[i];
+  _destSnapshot = { i, json: JSON.stringify(t), dirty: webhookFormDirty };
   const wName = document.getElementById('wName')?.value || 'new webhook';
   const eyebrow = document.getElementById('destinationEditEyebrow');
   if (eyebrow) eyebrow.textContent = `${wName} / Destination ${i + 1} of ${webhookTargetState.length}`;
@@ -4883,7 +4930,27 @@ function renderDestinationEditor(i) {
   updateAllPreviews();
 }
 
+function cancelDestinationEditor() {
+  if (_destSnapshot && webhookTargetState[_destSnapshot.i]) {
+    const before = JSON.parse(_destSnapshot.json);
+    // a destination added and abandoned before it had a URL is not kept as an empty row
+    if (!before.url.trim()) webhookTargetState.splice(_destSnapshot.i, 1);
+    else webhookTargetState[_destSnapshot.i] = before;
+    webhookFormDirty = _destSnapshot.dirty;
+    _wdSyncDirty();
+  }
+  closeDestinationEditor();
+}
+
+/** Save this destination now (the webhook is applied live — no restart, nothing else on the page is lost). */
+async function saveDestinationFromEditor() {
+  const t = webhookTargetState[editingDestinationIndex];
+  if (t && !t.url.trim()) return toast(t.inKind ? 'Enter the path (it starts with /).' : 'Enter the destination URL.', 'error');
+  if (await saveWebhook({ stay: true })) closeDestinationEditor();
+}
+
 function closeDestinationEditor() {
+  _destSnapshot = null;
   document.getElementById('destinationEditModal').style.display = 'none';
   hideFilterAutocomplete();
   editingDestinationIndex = -1;
@@ -4916,6 +4983,9 @@ function openWebhookModal(webhook = null) {
     ? '•••••••• (set — leave empty to keep)'
     : '';
   IpTagInput.setValue('wAllowedIps', webhook?.allowedIps || []);
+  // New webhooks start POST-only; existing ones keep exactly what they have (none = accept all).
+  const wMethods = webhook ? (webhook.allowedMethods || []) : ['POST'];
+  document.querySelectorAll('#wAllowedMethods input').forEach(cb => { cb.checked = wMethods.includes(cb.value); });
   document.getElementById('wMetaEnabled').checked = !!webhook?.meta?.enabled;
   const secEl = document.getElementById('wMetaAppSecret'); secEl.value = ''; secEl.placeholder = webhook?.meta?.hasAppSecret ? '•••••••• (set — leave empty to keep)' : 'empty = accept POSTs as today; set = verify X-Hub-Signature-256';
   toggleMetaSection();
@@ -5025,7 +5095,7 @@ function buildWebhookTargetFilter(t) {
     .filter(c => c.op === 'exists' || c.op === 'notExists' || (c.value !== undefined && c.value !== '' && !(Array.isArray(c.value) && c.value.length === 0)));
 }
 
-async function saveWebhook() {
+async function saveWebhook(opts = {}) {
   const targetsRaw = [];
   for (const t of webhookTargetState) {
       if (!t.url.trim()) continue;
@@ -5038,7 +5108,7 @@ async function saveWebhook() {
       const metaOn = document.getElementById('wMetaEnabled').checked;
       // Basic forward with no retry override stays as a plain URL string
       // (a paused destination needs the object form to carry enabled:false).
-      if (t.type === 'basic' && !hasRetryOverride && !hasPersistent && !hasFilter && !isDisabled && !metaOn) {
+      if (t.type === 'basic' && !t.inKind && !hasRetryOverride && !hasPersistent && !hasFilter && !isDisabled && !metaOn) {
           targetsRaw.push(t.url.trim());
           continue;
       }
@@ -5047,6 +5117,7 @@ async function saveWebhook() {
       // are only emitted when this destination is actually in custom mode —
       // a basic destination with just a retry override stays clean.
       const dest = { url: t.url.trim() };
+      if (t.inKind) dest[t.inKind] = t.inName;
       if (t.type === 'custom') {
           let headersObj = undefined;
           if (t.customHeaders && t.customHeaders.length > 0) {
@@ -5094,6 +5165,7 @@ async function saveWebhook() {
   const at = document.getElementById('wAuthToken').value.trim(); if (at) body.authToken = at;
   body.meta = { enabled: document.getElementById('wMetaEnabled').checked }; const sec = document.getElementById('wMetaAppSecret').value.trim(); if (sec) body.meta.appSecret = sec;
   const wIps = IpTagInput.getValue('wAllowedIps'); if (wIps.length) body.allowedIps = wIps;
+  body.allowedMethods = [...document.querySelectorAll('#wAllowedMethods input:checked')].map(cb => cb.value);
   body.allowPrivateTargets = document.getElementById('wAllowPrivateTargets').checked;
   body.logMode = document.getElementById('wLogMode').value;
   const wCidrs = IpTagInput.getValue('wTargetAllowedCidrs'); if (wCidrs.length) body.targetAllowedCidrs = wCidrs;
@@ -5132,8 +5204,19 @@ async function saveWebhook() {
   }
   try {
     const res = await api('/admin/webhooks', { method: 'POST', body: JSON.stringify(body) }); const d = await res.json();
-    if (res.ok) { toast('Webhook ' + (d.status || 'saved')); closeWebhookModal(); await fetchWebhooks(); } else toast(d.error || 'Failed', 'error');
-  } catch (e) { toast('Error: ' + e.message, 'error'); }
+    if (!res.ok) { toast(d.error || 'Failed', 'error'); return false; }
+    if (opts.stay) {
+      // Saved from a destination: stay on the page, the rest of the session continues from the saved state.
+      toast('Destination saved — applied live');
+      webhookFormDirty = false;
+      _wdSyncDirty();
+      await fetchWebhooks();
+      editingWebhook = _allWebhooks.find(x => x.name === body.name) || editingWebhook;
+    } else {
+      toast('Webhook ' + (d.status || 'saved')); closeWebhookModal(); await fetchWebhooks();
+    }
+    return true;
+  } catch (e) { toast('Error: ' + e.message, 'error'); return false; }
 }
 
 async function editWebhook(name) {
@@ -7376,6 +7459,8 @@ function _openConsentEditor(page) {
   document.getElementById('consentPageSubmitBtn').textContent = page ? 'Save' : 'Create';
   document.getElementById('consentPageUsage').textContent = page ? 'Used by ' + consentPageUsage(page.id).text.replace('Not in use', 'nothing yet') : '';
   _consentPageSnapshot = _consentPageState();
+  // The preview opens in the theme the dashboard is showing right now (the toggle still switches it).
+  setConsentPreview('theme', document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
   renderConsentPagePreview();
   document.getElementById('consentPageModal').style.display = 'flex';
   document.getElementById(page ? 'consentPageBody' : 'consentPageName').focus();
@@ -13001,11 +13086,15 @@ function renderTunnels() {
     const from = !t.allowedIps.length ? 'Midleman only' : t.allowedIps.length === 1 ? t.allowedIps[0] : t.allowedIps.length + ' networks';
     const hop = (cls, html, title) => `<span class="tn-hop ${cls}"${title ? ` title="${esc(title)}"` : ''}>${html}</span>`;
     const arrow = '<span class="tn-arrow" aria-hidden="true">→</span>';
+    // Service in front, the route under it — only a broken hop gets colour.
+    const svcWarn = t.lastError && t.status === 'online' && Date.now() - t.lastError.at < 15 * 60_000;
     const chain =
-      hop(wide ? 'warn' : '', esc(from) + (wide ? ' ⚠' : ''), t.allowedIps.length ? t.allowedIps.join(', ') + (wide ? ' — very wide range' : '') : 'Only Midleman itself (127.0.0.1) can connect') + arrow +
-      `<button type="button" class="tn-hop ${t.status === 'error' ? 'err' : t.enabled ? 'ok' : ''} tn-port" title="Copy ${esc(addr)}" onclick="mmCopy('${esc(addr)}', this, 'Copied: ${esc(addr)}')">:${t.listenPort}</button>` + arrow +
-      hop(!t.enabled ? '' : agentUp ? 'ok' : 'warn', esc(t.agent) + (agentUp && ag.rttMs != null ? ` · ${ag.rttMs} ms` : agentUp ? '' : ' · offline')) + arrow +
-      hop(t.lastError && t.status === 'online' && Date.now() - t.lastError.at < 15 * 60_000 ? 'warn' : '', esc(t.host) + ':' + t.port, t.lastError ? `Last error ${_monAgo(t.lastError.at)}: ${t.lastError.msg}` : '');
+      `<div class="tn-svc">${hop(svcWarn ? 'warn' : '', esc(t.host) + ':' + t.port, t.lastError ? `Last error ${_monAgo(t.lastError.at)}: ${t.lastError.msg}` : '')}</div>` +
+      `<div class="tn-route">` +
+        hop(wide ? 'warn' : '', esc(from) + (wide ? ' ⚠' : ''), t.allowedIps.length ? t.allowedIps.join(', ') + (wide ? ' — very wide range' : '') : 'Only Midleman itself (127.0.0.1) can connect') + arrow +
+        `<button type="button" class="tn-hop ${t.status === 'error' ? 'err' : ''} tn-port" title="Copy ${esc(addr)}" onclick="mmCopy('${esc(addr)}', this, 'Copied: ${esc(addr)}')">:${t.listenPort}</button>` + arrow +
+        hop(t.enabled && !agentUp ? 'warn' : '', esc(t.agent) + (agentUp && ag.rttMs != null ? ` · ${ag.rttMs} ms` : agentUp ? '' : ' · offline')) +
+      `</div>`;
 
     // What is wrong, in words, with the action that fixes it.
     let problem = '';
@@ -13024,7 +13113,7 @@ function renderTunnels() {
     return `<tr class="wh-row tn-row">
   <td class="wh-dotcol"><i class="wh-state ${state}"></i></td>
   <td><div class="wh-name">${n}</div><div class="wh-sub">${sub}</div></td>
-  <td><div class="tn-chain">${chain}</div>${problem}</td>
+  <td>${chain}${problem}</td>
   <td title="${(t.recent || []).length} recent connections">${spark}</td>
   <td class="wh-rate" title="${t.total} since Midleman started">${t.active} <span class="wh-none">/ ${t.maxConnections}</span></td>
   <td class="wh-vol">${fmtBytes(t.bytesUp)} / ${fmtBytes(t.bytesDown)}</td>

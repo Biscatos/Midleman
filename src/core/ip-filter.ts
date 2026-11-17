@@ -57,6 +57,12 @@ function ipMatchesRule(clientIp: string, rule: string): boolean {
  * Returns true if `clientIp` is permitted by the allowlist.
  * An empty or undefined allowlist means unrestricted access.
  */
+/** Midleman calling itself (same host / container): never subject to an operator's IP allowlist. */
+export function isLoopbackIp(ip: string): boolean {
+    const v = normalizeIp(ip || '');
+    return v === '::1' || /^127\./.test(v);
+}
+
 export function isIpAllowed(clientIp: string, allowedIps: string[] | undefined): boolean {
     if (!allowedIps || allowedIps.length === 0) return true;
     return allowedIps.some(rule => ipMatchesRule(clientIp, rule));

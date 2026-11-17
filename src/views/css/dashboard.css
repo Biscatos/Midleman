@@ -3934,12 +3934,13 @@ tr.mm-ctx-row, tr.mm-ctx-row > td, [role="row"].mm-ctx-row { background: var(--a
 .wh-host { color: var(--accent); text-decoration: none; }
 .wh-host:hover { text-decoration: underline; }
 .wh-link { padding: 0 6px; font: inherit; font-size: 10.5px; background: var(--accent); color: var(--on-accent); border: 0; cursor: pointer; }
-.tn-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 11.5px; }
-.tn-hop { padding: 2px 6px; border: 1px solid var(--border); color: var(--text2); white-space: nowrap; background: none; font: inherit; }
-.tn-hop.ok { border-color: var(--green-bdr); } .tn-hop.warn { border-color: var(--orange-bdr); color: var(--warn-text); } .tn-hop.err { border-color: var(--red-bdr); color: var(--err-text); }
-.tn-port { color: var(--accent2); cursor: pointer; }
-.tn-port:hover { border-color: var(--accent); }
-.tn-arrow { color: var(--text3); }
+.tn-svc { font-family: var(--font-mono); font-size: 12.5px; color: var(--text); }
+.tn-route { margin-top: 1px; font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tn-hop { padding: 0; border: 0; background: none; font: inherit; color: inherit; white-space: nowrap; }
+.tn-hop.warn { color: var(--warn-text); } .tn-hop.err { color: var(--err-text); }
+.tn-port { font-family: var(--font-mono); color: var(--accent2); cursor: pointer; }
+.tn-port:hover { text-decoration: underline; }
+.tn-arrow { color: var(--text3); margin: 0 4px; }
 .tn-problem { margin-top: 6px; display: flex; align-items: center; gap: 10px; padding: 5px 8px 5px 10px; font-size: 12px; border: 1px solid; }
 .tn-problem span { flex: 1; min-width: 0; }
 .tn-problem button { flex: none; height: 24px; padding: 0 10px; background: none; border: 1px solid; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
@@ -3947,6 +3948,9 @@ tr.mm-ctx-row, tr.mm-ctx-row > td, [role="row"].mm-ctx-row { background: var(--a
 .tn-problem.warn { color: var(--warn-text); border-color: var(--orange-bdr); background: var(--warning-bg); }
 .tn-refused { color: var(--warn-text); cursor: help; }
 .tn-act { border-color: var(--border); margin-right: 2px; vertical-align: middle; }
+.wd-deliver { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.wd-tunnel-select { width: 100%; height: 34px; margin-bottom: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 0 8px; font: inherit; font-size: 13px; }
+.wd-tunnel { margin-right: 6px; padding: 0 5px; font-size: 10px; border: 1px solid var(--accent-bdr); color: var(--accent2); font-family: var(--font-mono); }
 .wh-more { width: 28px; height: 26px; background: none; border: 1px solid transparent; color: var(--text3); cursor: pointer; }
 .wh-more:hover { border-color: var(--border); color: var(--text); }
 
@@ -3956,7 +3960,7 @@ tr.mm-ctx-row, tr.mm-ctx-row > td, [role="row"].mm-ctx-row { background: var(--a
 :root { --radius: 0; --radius-sm: 0; --radius-md: 0; --radius-lg: 0; --panel-radius: 0; }
 *, *::before, *::after { border-radius: 0 !important; }
 .status-dot, .live-dot, .wz-dot, .btn-spinner, .rdm-spinner, .toast::before,
-.auth-hero-dot, .bd-dot, .sidebar-user-avatar, .topbar-avatar,
+.auth-hero-dot, .bd-dot, .sidebar-user-avatar, .topbar-avatar, .wh-state,
 [style*="border-radius:50%"], [style*="border-radius: 50%"] { border-radius: 50% !important; }
 
 /* Monitors modal */
@@ -4018,7 +4022,8 @@ input.mm-switch:checked::before { left: 16px !important; background: #fff !impor
 .wd-row { min-height: 44px; padding-top: 7px; padding-bottom: 7px; border-bottom: 1px solid var(--border); font-size: 12.5px; }
 .wd-row:last-child { border-bottom: none; }
 .wd-row:hover { background: var(--surface2); }
-.wd-row.wd-off > :not(.wd-cell-actions):not(:nth-child(5)) { opacity: .5; }
+.wd-row.wd-off > :not(.wd-cell-actions):not(:nth-child(5)) { opacity: .72; }
+.wd-paused { margin-right: 6px; padding: 0 5px; font-size: 10px; font-family: var(--font-mono); border: 1px solid var(--border2); color: var(--text2); }
 .wd-cell-dest { min-width: 0; cursor: pointer; }
 .wd-row .wd-url { font-size: 12.5px; }
 .wd-row .wd-method { font-size: 10.5px; margin-right: 6px; }

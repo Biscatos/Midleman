@@ -363,6 +363,8 @@ interface StoredWebhook {
     authToken?: string;
     retry?: import('./types').WebhookRetryConfig;
     allowedIps?: string[];
+    allowedMethods?: string[];
+    meta?: import('./types').WebhookMetaConfig;
     allowPrivateTargets?: boolean;
     targetAllowedCidrs?: string[];
     silenceAlert?: import('./types').WebhookSilenceAlert;
@@ -394,6 +396,8 @@ export function loadPersistedWebhooks(): WebhookDistributor[] {
                 authToken: w.authToken,
                 retry: w.retry,
                 allowedIps: w.allowedIps?.length ? w.allowedIps : undefined,
+                allowedMethods: w.allowedMethods?.length ? w.allowedMethods : undefined,
+                meta: w.meta,
                 allowPrivateTargets: w.allowPrivateTargets,
                 targetAllowedCidrs: w.targetAllowedCidrs?.length ? w.targetAllowedCidrs : undefined,
                 silenceAlert: w.silenceAlert,
@@ -424,6 +428,8 @@ export function persistWebhooks(webhooks: WebhookDistributor[]): void {
             authToken: w.authToken,
             retry: w.retry,
             allowedIps: w.allowedIps?.length ? w.allowedIps : undefined,
+            allowedMethods: w.allowedMethods?.length ? w.allowedMethods : undefined,
+            meta: w.meta,
             allowPrivateTargets: w.allowPrivateTargets,
             targetAllowedCidrs: w.targetAllowedCidrs?.length ? w.targetAllowedCidrs : undefined,
             silenceAlert: w.silenceAlert,
@@ -600,6 +606,10 @@ export function validateWebhookInput(input: unknown): string | null {
         }
     }
 
+    if (w.allowedMethods !== undefined && (!Array.isArray(w.allowedMethods) || w.allowedMethods.some(m => !['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(String(m))))) {
+        return '"allowedMethods" must be a list of GET, POST, PUT, PATCH, DELETE';
+    }
+
     if (w.meta !== undefined) {
         if (typeof w.meta !== 'object' || w.meta === null) return '"meta" must be an object';
         const m = w.meta as Record<string, unknown>;
@@ -614,8 +624,16 @@ export function validateWebhookInput(input: unknown): string | null {
         } else if (typeof target === 'object' && target !== null) {
             const dest = target as Record<string, unknown>;
             if (typeof dest.url !== 'string') return 'Custom action must have a valid string "url"';
-            try { assertSafeOutboundUrl(dest.url, ssrfOverride); }
-            catch (e) { return e instanceof SsrfBlockedError ? `"${dest.url}": ${e.message}` : `"${dest.url}" is not a valid URL`; }
+            const inner = (['tunnel', 'proxy', 'connector'] as const).filter(k => dest[k] !== undefined);
+            if (inner.length > 1) return 'A destination goes to one of tunnel, proxy or connector — not several';
+            if (inner.length) {
+                const k = inner[0], v = dest[k];
+                if (typeof v !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,62}$/i.test(v)) return `"${k}" must be a ${k} name`;
+                if (!dest.url.startsWith('/')) return `${k[0].toUpperCase() + k.slice(1)} destination "${v}": the path must start with "/"`;
+            } else {
+                try { assertSafeOutboundUrl(dest.url, ssrfOverride); }
+                catch (e) { return e instanceof SsrfBlockedError ? `"${dest.url}": ${e.message}` : `"${dest.url}" is not a valid URL`; }
+            }
             if (dest.enabled !== undefined && typeof dest.enabled !== 'boolean') return '"enabled" must be a boolean';
             if (dest.method && typeof dest.method !== 'string') return '"method" must be a string';
             if (dest.bodyTemplate && typeof dest.bodyTemplate !== 'string') return '"bodyTemplate" must be a string';

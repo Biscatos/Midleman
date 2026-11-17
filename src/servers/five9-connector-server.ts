@@ -25,7 +25,7 @@ import {
 } from '../five9/sessions';
 import { isWithinBusinessHours } from '../core/business-hours';
 import { logRequest, headersToRecord } from '../telemetry/request-log';
-import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
+import { isIpAllowed, isLoopbackIp, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { assertResolvedHostAllowed } from '../core/ssrf-guard';
 import { timingSafeEqualStr } from '../auth/auth';
 import { createHmac, createHash } from 'crypto';
@@ -1066,7 +1066,7 @@ async function handleFive9Request(req: Request, cs: Five9ConnectorServer): Promi
     }
 
     const clientIp = resolveClientIp(reqPeerIp.get(req), req.headers.get('x-forwarded-for'), getTrustProxyConfig());
-    if (!isIpAllowed(clientIp, c.allowedIps)) {
+    if (!isLoopbackIp(clientIp) && !isIpAllowed(clientIp, c.allowedIps)) {
         log.warn(`🚫 [five9:${c.name}] blocked IP ${clientIp}`);
         return jsonResponse(401, { error: 'Unauthorized', message: 'Your IP address is not allowed.' });
     }

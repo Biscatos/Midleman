@@ -1,6 +1,7 @@
 import type { WebhookDistributor, WebhookRetryConfig, WebhookPersistentRetry, WebhookDestination } from '../core/types';
 import { logRequest, headersToRecord, getLastWebhookActivity } from '../telemetry/request-log';
-import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
+import { isIpAllowed, isLoopbackIp, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
+import { networkInterfaces } from 'os';
 import { assertResolvedHostAllowed, webhookSsrfPolicy, SsrfBlockedError, type SsrfPolicyOverride } from '../core/ssrf-guard';
 import { timingSafeEqualStr } from '../auth/auth';
 
@@ -59,6 +60,8 @@ import { sendMail, isSmtpConfigured } from '../core/smtp';
 import { emitNotificationEvent } from '../core/notifications';
 import { isWithinBusinessHours } from '../core/business-hours';
 import { splitMetaPayload, dedupe as metaDedupe, noteNumbers as metaNoteNumbers, destinationWants, buildMetaPayload, verifyMetaSignature } from '../core/meta-router';
+import { journalEnabled, journalAccept, journalDone, journalOpen } from './delivery-journal';
+import { getTunnel, isTunnelPort } from '../core/tunnels';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -136,21 +139,30 @@ function deserializeDlqEntry(s: StoredFailedFanout): FailedFanout {
 // Load from disk on startup
 const deadLetterQueue: FailedFanout[] = loadPersistedDlq().map(deserializeDlqEntry);
 
-// Immediate synchronous flush (used for new failures and shutdown)
-export function flushDlqSync(): void {
-    if (_dlqFlushTimer) { clearTimeout(_dlqFlushTimer); _dlqFlushTimer = null; }
-    persistDlq(deadLetterQueue.map(serializeDlqEntry));
+// Queue files are rewritten whole, so they are written in batches: at most one
+// rewrite per QUEUE_FLUSH_MS however many failures arrive. Rewriting per failure
+// is what collapsed throughput to ~100 req/s when a destination went down.
+const QUEUE_FLUSH_MS = 500;
+/** Journal "done" marks that may only be written once the entry is on disk. */
+const afterDlqWrite: (() => void)[] = [];
+const afterPendingWrite: (() => void)[] = [];
+function runAfter(list: (() => void)[], n: number): void {
+    for (const fn of list.splice(0, n)) fn();
 }
 
-// Debounced flush — for non-critical updates (dismiss, retry metadata)
+// Immediate synchronous flush (shutdown)
+export function flushDlqSync(): void {
+    if (_dlqFlushTimer) { clearTimeout(_dlqFlushTimer); _dlqFlushTimer = null; }
+    const n = afterDlqWrite.length;
+    persistDlq(deadLetterQueue.map(serializeDlqEntry));
+    runAfter(afterDlqWrite, n);
+}
+
 let _dlqFlushTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleDlqFlush(): void {
-    // Throttle (not debounce): at most one rewrite per 2 s, and never postponed forever.
+    // Throttle (not debounce): never postponed forever under a steady stream.
     if (_dlqFlushTimer) return;
-    _dlqFlushTimer = setTimeout(() => {
-        _dlqFlushTimer = null;
-        persistDlq(deadLetterQueue.map(serializeDlqEntry));
-    }, 2000);
+    _dlqFlushTimer = setTimeout(flushDlqSync, QUEUE_FLUSH_MS);
 }
 
 export function getDeadLetterQueue(): FailedFanout[] {
@@ -341,17 +353,14 @@ const pendingRetryQueue: PendingRetry[] = (() => {
 
 let _pendingFlushTimer: ReturnType<typeof setTimeout> | null = null;
 function schedulePendingFlush(): void {
-    // Throttle (not debounce): the whole queue (with bodies) is rewritten at most
-    // once per 2 s; a steady stream of attempts no longer rewrites it constantly.
     if (_pendingFlushTimer) return;
-    _pendingFlushTimer = setTimeout(() => {
-        _pendingFlushTimer = null;
-        persistPendingRetry(pendingRetryQueue.map(serializePending));
-    }, 2000);
+    _pendingFlushTimer = setTimeout(flushPendingSync, QUEUE_FLUSH_MS);
 }
 function flushPendingSync(): void {
     if (_pendingFlushTimer) { clearTimeout(_pendingFlushTimer); _pendingFlushTimer = null; }
+    const n = afterPendingWrite.length;
     persistPendingRetry(pendingRetryQueue.map(serializePending));
+    runAfter(afterPendingWrite, n);
 }
 
 export function getPendingRetryQueue(): PendingRetry[] {
@@ -452,7 +461,7 @@ function enqueuePendingRetry(input: {
         running: false,
     };
     pendingRetryQueue.push(entry);
-    flushPendingSync();
+    schedulePendingFlush();
     console.warn(`📌 [pending-retry] Enqueued ${input.targetUrl} (${input.webhookName}) — ${pendingRetryQueue.length} pending`);
     // Kick the scheduler so it picks the new entry up promptly
     runSchedulerSoon();
@@ -516,7 +525,7 @@ async function attemptPendingRetry(entry: PendingRetry): Promise<void> {
     if (entry.running) return;
     entry.running = true;
     try {
-        const headers = new Headers(entry.headers);
+        const headers = withServiceAuth(entry.targetUrl, entry.headers);
         const body = entry.body ?? undefined;
         const label = `pending:${entry.webhookName} → ${entry.targetUrl}`;
         // Single-shot attempt — no inner retries, the scheduler IS the retry loop
@@ -623,7 +632,7 @@ export function enqueueFailedFanout(entry: Omit<FailedFanout, 'id' | 'failedAt' 
         body = body.slice(0, DLQ_MAX_BODY_SIZE);
     }
     deadLetterQueue.push({ ...entry, body, id: crypto.randomUUID(), failedAt: Date.now(), retrying: false });
-    flushDlqSync(); // write immediately — a crash right after a failure must not lose the entry
+    scheduleDlqFlush();
 }
 
 // ─── Retry Helper ───────────────────────────────────────────────────────────
@@ -665,6 +674,61 @@ function encodeUrlValue(v: string): string {
     return encodeURIComponent(v).replace(/%3A/gi, ':').replace(/%2F/gi, '/').replace(/%40/gi, '@').replace(/%2C/gi, ',');
 }
 
+// Burst protection: at most this many requests in flight per destination host.
+// The rest wait in memory instead of opening thousands of sockets at once
+// (which exhausted local ports and pushed deliveries to the DLQ under load).
+const MAX_CONNECTIONS_PER_HOST = (() => {
+    const n = parseInt(process.env.WEBHOOK_MAX_CONNECTIONS_PER_HOST || '', 10);
+    return Number.isFinite(n) && n > 0 ? n : 64;
+})();
+const hostSlots = new Map<string, { busy: number; waiting: (() => void)[] }>();
+function hostKey(url: string): string {
+    try { return new URL(url).host; } catch { return url; }
+}
+async function acquireHost(key: string): Promise<void> {
+    let s = hostSlots.get(key);
+    if (!s) hostSlots.set(key, s = { busy: 0, waiting: [] });
+    if (s.busy < MAX_CONNECTIONS_PER_HOST) { s.busy++; return; }
+    await new Promise<void>(r => s!.waiting.push(r)); // the releasing request hands its slot over
+}
+function releaseHost(key: string): void {
+    const s = hostSlots.get(key);
+    if (!s) return;
+    const next = s.waiting.shift();
+    if (next) next();
+    else if (--s.busy === 0) hostSlots.delete(key);
+}
+
+/** Proxies and connectors of this Midleman, provided by index.ts (it owns their config). */
+export interface InternalServices {
+    resolve(kind: 'proxy' | 'connector', name: string): { port: number } | { error: string };
+    /** Credentials the service at this local port expects from a caller (access key, verify token). */
+    authFor(port: number): Record<string, string>;
+    isServicePort(port: number): boolean;
+}
+let internalServices: InternalServices | null = null;
+export function setInternalServices(s: InternalServices): void { internalServices = s; }
+
+/** Port of http://127.0.0.1:<one of our tunnels / proxies / connectors>, else 0 — the only loopback the SSRF guard lets through. */
+function ownServicePort(url: string): number {
+    try {
+        const u = new URL(url);
+        const port = Number(u.port);
+        if (u.protocol !== 'http:' || u.hostname !== '127.0.0.1') return 0;
+        return isTunnelPort(port) || internalServices?.isServicePort(port) ? port : 0;
+    } catch { return 0; }
+}
+
+/** Headers with the local service's credentials added. Added at send time so they are never logged or queued. */
+function withServiceAuth(url: string, headers: RequestInit["headers"] | Record<string, string>): RequestInit["headers"] {
+    const port = ownServicePort(url);
+    const auth = port ? internalServices?.authFor(port) : undefined;
+    if (!auth || !Object.keys(auth).length) return headers;
+    const h = new Headers(headers);
+    for (const [k, v] of Object.entries(auth)) h.set(k, v);
+    return h;
+}
+
 async function fetchWithRetry(
     url: string,
     init: RequestInit,
@@ -689,7 +753,7 @@ async function fetchWithRetry(
     // already retried and tried its cache) is left to the retry loop below:
     // fetch() resolves again on each attempt with the configured backoff.
     try {
-        await assertResolvedHostAllowed(url, ssrf);
+        if (!ownServicePort(url)) await assertResolvedHostAllowed(url, ssrf);
     } catch (err) {
         if (err instanceof SsrfBlockedError) throw err;
         console.warn(`🌐 [${label}] ${err instanceof Error ? err.message : err} — entering retry loop`);
@@ -707,14 +771,21 @@ async function fetchWithRetry(
             await Bun.sleep(delay);
         }
 
+        const host = hostKey(url);
+        await acquireHost(host); // waiting for a slot is not counted in the attempt time or timeout
         const attemptStart = performance.now();
         try {
-            const res = await fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(WEBHOOK_FETCH_TIMEOUT_MS), tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' } } as RequestInit);
-            // Cap fanout response capture at 4KB for logging — skip for large/unknown-size responses.
-            const resContentLength = parseInt(res.headers.get('content-length') || '-1', 10);
-            const resText = resContentLength < 0 || resContentLength <= 4096
-                ? await res.text().catch(() => null)
-                : `[response not captured: ${resContentLength} bytes]`;
+            let res: Response, resText: string | null;
+            try {
+                res = await fetch(url, { ...init, headers: withServiceAuth(url, init.headers), redirect: 'manual', signal: AbortSignal.timeout(WEBHOOK_FETCH_TIMEOUT_MS), tls: { rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_TLS !== 'true' } } as RequestInit);
+                // Cap fanout response capture at 4KB for logging — skip for large/unknown-size responses.
+                const resContentLength = parseInt(res.headers.get('content-length') || '-1', 10);
+                resText = resContentLength < 0 || resContentLength <= 4096
+                    ? await res.text().catch(() => null)
+                    : `[response not captured: ${resContentLength} bytes]`;
+            } finally {
+                releaseHost(host);
+            }
 
             const attemptDuration = performance.now() - attemptStart;
             attemptLog.push({
@@ -874,17 +945,57 @@ export function resetSilenceState(webhookName: string): void {
 
 // ─── Request Fan-out Logic ──────────────────────────────────────────────────
 
+const VIA_HEADER = 'X-Midleman-Via';
+const MAX_HOPS = 5;
+
+/** Hostnames that reach this Midleman: loopback, this machine's own addresses, the webhook's public names. */
+function selfHosts(webhook: WebhookDistributor): Set<string> {
+    const s = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0', '[::1]']);
+    for (const list of Object.values(networkInterfaces())) for (const a of list || []) s.add(a.address.toLowerCase());
+    for (const h of webhook.publicHostnames || []) s.add(h.toLowerCase());
+    return s;
+}
+
+/**
+ * The destination URL of `webhook` that would deliver back into itself, or null.
+ * Same machine + its own port, or one of its own public hostnames (NPM in front).
+ */
+export function findSelfTarget(webhook: WebhookDistributor): string | null {
+    const hosts = selfHosts(webhook);
+    const pub = new Set((webhook.publicHostnames || []).map(h => h.toLowerCase()));
+    for (const t of webhook.targets) {
+        const raw = typeof t === 'string' ? t : t.url;
+        let u: URL;
+        try { u = new URL(raw.split('{{')[0] || raw); } catch { continue; }
+        const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+        const port = Number(u.port || (u.protocol === 'https:' ? 443 : 80));
+        if (pub.has(host) || (hosts.has(host) && port === webhook.port)) return raw;
+    }
+    return null;
+}
+
+/** Identity of a destination inside the delivery journal (survives a restart; index-free so edits don't shift it). */
+function destKey(target: string | WebhookDestination): string {
+    if (typeof target === 'string') return 'POST ' + target;
+    const via = target.tunnel ? 'tunnel:' + target.tunnel : target.proxy ? 'proxy:' + target.proxy : target.connector ? 'connector:' + target.connector : '';
+    return (target.method || 'POST') + ' ' + (via ? via + ' ' : '') + target.url;
+}
+
+/** Re-delivery of a journaled payload after a restart: already authenticated, only these destinations. */
+interface FanoutReplay { jid: string; keys: Set<string>; clientIp: string; settled?: Promise<unknown> }
+
 async function handleWebhookFanout(
     req: Request,
     webhook: WebhookDistributor,
     ws: WebhookServer,
+    replay?: FanoutReplay,
 ): Promise<Response> {
     const startTime = performance.now();
     const requestId = req.headers.get('X-Request-ID') || crypto.randomUUID();
     const url = new URL(req.url);
 
     // Meta (Facebook) Webhook Verification Handshake
-    if (req.method === 'GET' && url.searchParams.get('hub.mode') === 'subscribe') {
+    if (!replay && req.method === 'GET' && url.searchParams.get('hub.mode') === 'subscribe') {
         const verifyToken = url.searchParams.get('hub.verify_token');
         if (webhook.authToken && !timingSafeEqualStr(verifyToken, webhook.authToken)) {
              console.warn(`❌ [webhook:${webhook.name}] Meta Verification failed: Invalid hub.verify_token`);
@@ -895,10 +1006,25 @@ async function handleWebhookFanout(
         return new Response(challenge || '', { status: 200 });
     }
 
+    // Methods this webhook does not take (e.g. a scanner's GET on a POST-only callback):
+    // no fan-out, no retries, and a 2xx so a real sender does not keep retrying.
+    if (!replay && webhook.allowedMethods?.length && !webhook.allowedMethods.includes(req.method.toUpperCase())) {
+        console.log(`🚫 [webhook:${webhook.name}] Ignored ${req.method} ${url.pathname} — accepts ${webhook.allowedMethods.join(', ')}`);
+        return jsonResponse(200, { status: 'Ignored', message: `${req.method} is not accepted by this webhook` });
+    }
+
+    // Loop guard: every fan-out stamps the webhooks it went through. A payload that
+    // comes back to a webhook already on its path (A → A, A → B → A) is refused.
+    const via = (req.headers.get(VIA_HEADER) || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (!replay && (via.includes(webhook.name) || via.length >= MAX_HOPS)) {
+        console.warn(`🔁 [webhook:${webhook.name}] Loop refused — payload already passed through ${via.join(' → ')}`);
+        return jsonResponse(508, { error: 'Loop Detected', message: `This payload already passed through: ${via.join(' → ')}` });
+    }
+
     // In-process delivery from a connector: authenticated by the internal
     // token instead of the operator-facing authToken/allowedIps (see
     // INTERNAL_DISPATCH_TOKEN).
-    const internal = isInternalDispatch(req);
+    const internal = !!replay || isInternalDispatch(req);
 
     // Auth check (per-webhook token)
     if (webhook.authToken && !internal) {
@@ -934,11 +1060,13 @@ async function handleWebhookFanout(
         }
     }
 
-    const clientIp = internal
+    const clientIp = replay
+        ? replay.clientIp
+        : internal
         ? `internal:${req.headers.get('X-Connector') || 'midleman'}`
         : resolveClientIp(reqPeerIp.get(req), req.headers.get('x-forwarded-for'), getTrustProxyConfig());
 
-    if (!internal && !isIpAllowed(clientIp, webhook.allowedIps)) {
+    if (!internal && !isLoopbackIp(clientIp) && !isIpAllowed(clientIp, webhook.allowedIps)) {
         console.warn(`🚫 [webhook:${webhook.name}]: blocked IP ${clientIp}`);
         return jsonResponse(401, { error: 'Unauthorized', message: 'Your IP address is not allowed.' });
     }
@@ -953,6 +1081,7 @@ async function handleWebhookFanout(
     forwardHeaders.delete('X-Forward-Token');
     forwardHeaders.delete(INTERNAL_DISPATCH_HEADER); // never leaks past this process
     forwardHeaders.set('X-Request-ID', requestId);
+    forwardHeaders.delete(VIA_HEADER);
 
     // Attempt to parse incoming JSON for interpolations. Prefer the
     // content-type header, but fall back to sniffing the body itself —
@@ -978,7 +1107,7 @@ async function handleWebhookFanout(
 
     // ── Meta Cloud API mode: verify the signature, split the batch per number, drop replays ──
     let metaUnits: ReturnType<typeof splitMetaPayload> = null;
-    if (webhook.meta?.enabled && !internal) {
+    if (webhook.meta?.enabled && !internal) { // replays are internal: signature checked and dedupe done on first receipt
         if (webhook.meta.appSecret) {
             if (!verifyMetaSignature(webhook.meta.appSecret, bodyBuffer || new Uint8Array(), req.headers.get('x-hub-signature-256'))) {
                 console.warn(`❌ [webhook:${webhook.name}] Meta signature check failed from ${req.headers.get('X-Forwarded-For') || 'unknown'}`);
@@ -1089,12 +1218,35 @@ async function handleWebhookFanout(
     }
 
     // Destinations switched off in the dashboard stay configured but are not delivered to.
-    const activeTargets = webhook.targets.filter(t => typeof t === 'string' || t.enabled !== false);
+    let activeTargets = webhook.targets.filter(t => typeof t === 'string' || t.enabled !== false);
     const disabledCount = webhook.targets.length - activeTargets.length;
     if (disabledCount > 0) console.log(`⏸️  [webhook:${webhook.name}] ${disabledCount} destination(s) disabled — skipped`);
 
-    // Fire-and-forget background execution
-    Promise.allSettled(activeTargets.map(async (target) => {
+    // Delivery journal (DELIVERY_ENGINE=journal): one append before the 202 so a
+    // crash mid fan-out is re-delivered on the next start. Off = no I/O at all.
+    let jid = '';
+    if (replay) {
+        jid = replay.jid;
+        activeTargets = activeTargets.filter(t => replay.keys.has(destKey(t)));
+        // Destinations removed or disabled since the crash: nothing left to do for them.
+        const still = new Set(activeTargets.map(destKey));
+        for (const k of replay.keys) if (!still.has(k)) journalDone(jid, k);
+    } else if (journalEnabled && activeTargets.length) {
+        jid = crypto.randomUUID();
+        journalAccept({
+            id: jid, webhook: webhook.name, requestId, method: req.method, path: url.pathname + url.search,
+            headers: headersToRecord(forwardHeaders), clientIp, at: Date.now(),
+            body: bodyBuffer && bodyBuffer.byteLength ? Buffer.from(bodyBuffer).toString('base64') : undefined,
+            keys: [...new Set(activeTargets.map(destKey))],
+        });
+    }
+
+    // Fire-and-forget background execution (a replay keeps the handle to pace itself)
+    const fanout = Promise.allSettled(activeTargets.map(async (target) => {
+      // Every exit — delivered, skipped, or handed to the (synchronously persisted)
+      // pending/DLQ queues — closes this destination in the journal.
+      let handoff: (() => void)[] | null = null;
+      try {
         const fetchStart = performance.now();
         
         let tUrl: string;
@@ -1125,10 +1277,24 @@ async function handleWebhookFanout(
             }
         }
 
+        // A tunnel destination is resolved by name on every send: its port may change, it may be off.
+        let tunnelError = '';
         if (typeof target === 'string') {
             tUrl = target;
         } else {
             tUrl = renderTemplate(target.url, tPayload, encodeUrlValue);
+            if (target.tunnel) {
+                const tn = getTunnel(target.tunnel);
+                if (!tn) tunnelError = `tunnel "${target.tunnel}" does not exist`;
+                else if (!tn.enabled) tunnelError = `tunnel "${target.tunnel}" is disabled`;
+                // Every tunnel accepts 127.0.0.1, whatever its LAN allowlist.
+                tUrl = `http://127.0.0.1:${tn ? tn.listenPort : 0}${tUrl}`;
+            } else if (target.proxy || target.connector) {
+                const r = internalServices?.resolve(target.proxy ? 'proxy' : 'connector', (target.proxy || target.connector)!)
+                    ?? { error: 'internal services are not available' };
+                if ('error' in r) tunnelError = r.error;
+                tUrl = `http://127.0.0.1:${'port' in r ? r.port : 0}${tUrl}`;
+            }
 
             if (!target.forwardHeaders) {
                 tHeaders = new Headers();
@@ -1165,6 +1331,11 @@ async function handleWebhookFanout(
             }
         }
 
+        tHeaders.set(VIA_HEADER, [...via, webhook.name].join(','));
+
+        // Lets the receiver drop the rare duplicate a crash re-delivery can cause.
+        if (jid) tHeaders.set('Idempotency-Key', jid);
+
         const persistent = (typeof target !== 'string' && target.persistentRetry?.enabled)
             ? target.persistentRetry
             : null;
@@ -1181,6 +1352,7 @@ async function handleWebhookFanout(
                 : webhook.retry);
 
         try {
+            if (tunnelError) throw new Error(tunnelError);
             const { res, resText, attempts, attemptLog } = await fetchWithRetry(
                 tUrl,
                 { method: tMethod, headers: tHeaders, body: tBody },
@@ -1197,6 +1369,7 @@ async function handleWebhookFanout(
             // If the inline retries finished without a 2xx and this destination
             // is persistent, push it to the pending-retry queue so it keeps trying.
             if (persistent && (res.status < 200 || res.status >= 300)) {
+                handoff = afterPendingWrite;
                 enqueuePendingRetry({
                     webhookName: webhook.name,
                     requestId,
@@ -1242,6 +1415,7 @@ async function handleWebhookFanout(
             console.error(`❌ [webhook:${webhook.name}] Action to ${tUrl} failed (all attempts exhausted):`, errorMsg);
 
             if (persistent) {
+                handoff = afterPendingWrite;
                 enqueuePendingRetry({
                     webhookName: webhook.name,
                     requestId,
@@ -1259,6 +1433,7 @@ async function handleWebhookFanout(
                     initialAttempts: (effectiveRetry?.maxRetries ?? 0) + 1,
                 });
             } else {
+                handoff = afterDlqWrite;
                 enqueueFailedFanout({
                     webhookName: webhook.name,
                     requestId,
@@ -1294,7 +1469,14 @@ async function handleWebhookFanout(
                 attempts: attemptLog,
             });
         }
+      } finally {
+        if (jid) {
+            const k = destKey(target);
+            if (handoff) handoff.push(() => journalDone(jid, k)); else journalDone(jid, k);
+        }
+      }
     }));
+    if (replay) replay.settled = fanout;
 
     // Return immediate 202 Accepted to the caller
     const processingMs = performance.now() - startTime;
@@ -1309,7 +1491,7 @@ async function handleWebhookFanout(
 
     const resPayload = JSON.stringify(resJson);
 
-    logRequest({
+    if (!replay) logRequest({
         requestId,
         type: 'webhook',
         targetName: webhook.name,
@@ -1369,7 +1551,7 @@ export function startWebhookServer(webhook: WebhookDistributor): WebhookServer {
 
             ws.activeRequests++;
             try {
-                return await handleWebhookFanout(req, webhook, ws);
+                return await handleWebhookFanout(req, ws.webhook, ws); // ws.webhook: swapped live by updateWebhookConfig
             } catch (error) {
                 console.error(`❌ [webhook:${webhook.name}] Error:`, error);
                 return jsonResponse(500, {
@@ -1420,6 +1602,18 @@ export async function stopWebhookServer(name: string, graceful: boolean = true):
 export async function stopAllWebhooks(): Promise<void> {
     const names = Array.from(servers.keys());
     await Promise.all(names.map(name => stopWebhookServer(name)));
+}
+
+/**
+ * Apply an edited config to a running webhook without touching its socket:
+ * no dropped connections, no gap. False when only a restart can apply it (port changed / not running).
+ */
+export function updateWebhookConfig(webhook: WebhookDistributor): boolean {
+    const ws = servers.get(webhook.name);
+    if (!ws || ws.isShuttingDown || (ws.server.port ?? ws.webhook.port) !== webhook.port) return false;
+    webhookSsrfPolicies.set(webhook.name, webhookSsrfPolicy(webhook));
+    ws.webhook = webhook;
+    return true;
 }
 
 export async function restartWebhook(webhook: WebhookDistributor): Promise<WebhookServer> {
@@ -1475,6 +1669,49 @@ export async function dispatchToWebhook(
     if (res.status < 200 || res.status >= 300) {
         const detail = await res.text().catch(() => '');
         throw new Error(`Webhook "${name}" rejected the event: HTTP ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ''}`);
+    }
+}
+
+/**
+ * Re-deliver what the delivery journal holds from before a restart. Call once,
+ * after the webhook servers are started. No-op unless DELIVERY_ENGINE=journal.
+ */
+export function replayDeliveryJournal(): number {
+    if (!journalEnabled) return 0;
+    const left = journalOpen();
+    const n = left.reduce((a, r) => a + r.keys.length, 0);
+    if (left.length) console.log(`📒 [journal] Re-delivering ${n} destination(s) of ${left.length} payload(s) interrupted by the last stop`);
+    else console.log('📒 [journal] Delivery journal on — nothing to re-deliver');
+    // Paced: a backlog of thousands sent at once would exhaust connections and push them to the DLQ.
+    let i = 0;
+    const worker = async () => { while (i < left.length) await replayOne(left[i++]); };
+    for (let w = 0; w < REPLAY_CONCURRENCY; w++) worker();
+    return n;
+}
+
+const REPLAY_CONCURRENCY = 16;
+
+async function replayOne(r: ReturnType<typeof journalOpen>[number]): Promise<void> {
+    {
+        const ws = servers.get(r.webhook);
+        if (!ws) {
+            console.warn(`📒 [journal] Webhook "${r.webhook}" no longer runs — dropping ${r.keys.length} undelivered destination(s) of ${r.requestId}`);
+            for (const k of r.keys) journalDone(r.id, k);
+            return;
+        }
+        const m = r.method.toUpperCase();
+        const req = new Request('http://journal.local' + r.path, {
+            method: r.method,
+            headers: r.headers,
+            body: r.body && m !== 'GET' && m !== 'HEAD' ? Buffer.from(r.body, 'base64') : undefined,
+        });
+        const replay: FanoutReplay = { jid: r.id, keys: new Set(r.keys), clientIp: r.clientIp };
+        try {
+            await handleWebhookFanout(req, ws.webhook, ws, replay);
+            await replay.settled;
+        } catch (err) {
+            console.error(`📒 [journal] Replay of ${r.requestId} failed:`, err);
+        }
     }
 }
 

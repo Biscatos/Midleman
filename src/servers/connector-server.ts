@@ -29,7 +29,7 @@ import {
 import { isWithinBusinessHours } from '../core/business-hours';
 import { logRequest, headersToRecord } from '../telemetry/request-log';
 import { emitNotificationEvent, hasAnyRuleMatching } from '../core/notifications';
-import { isIpAllowed, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
+import { isIpAllowed, isLoopbackIp, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { assertResolvedHostAllowed, type SsrfPolicyOverride } from '../core/ssrf-guard';
 import { timingSafeEqualStr } from '../auth/auth';
 import { createHmac } from 'crypto';
@@ -1513,7 +1513,7 @@ async function handleInbound(req: Request, cs: ConnectorServer): Promise<Respons
     }
 
     const clientIp = resolveClientIp(reqPeerIp.get(req), req.headers.get('x-forwarded-for'), getTrustProxyConfig());
-    if (!isIpAllowed(clientIp, c.allowedIps)) {
+    if (!isLoopbackIp(clientIp) && !isIpAllowed(clientIp, c.allowedIps)) {
         log.warn(`🚫 [connector:${c.name}] blocked IP ${clientIp}`);
         return jsonResponse(401, { error: 'Unauthorized', message: 'Your IP address is not allowed.' });
     }
