@@ -3576,11 +3576,9 @@ async function dlqDismissOne(id) {
 }
 
 function viewWebhookLogs(name) {
-  document.getElementById('rlType').value = 'webhook';
   document.getElementById('rlSearch').value = name;
-  rlPage = 1;
   navigate('requests');
-  fetchRequestLogs();
+  setRequestQuick('webhook');
 }
 
 let webhookTargetState = [];
@@ -5335,7 +5333,7 @@ async function renderRequestStrip() {
 async function fetchRequestLogs() {
   try {
     const params = new URLSearchParams({ page: rlPage, limit: rlLimit });
-    const type = document.getElementById('rlType').value;
+    const type = '';
     const method = document.getElementById('rlMethod').value;
     const status = document.getElementById('rlStatus').value;
     const search = document.getElementById('rlSearch').value.trim();
