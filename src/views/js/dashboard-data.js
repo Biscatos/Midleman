@@ -353,7 +353,7 @@ function showContextMenu(e, btn) {
 
 // ─── Data Fetch ──────────────────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([fetchHealth(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchConnectors(), fetchFive9Connectors(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchConsentPages(), fetchLdapConfigs(), fetchLdapAdoptions()]);
+  await Promise.all([fetchHealth(), fetchOverview(), fetchConfig(), fetchProfiles(), fetchWebhooks(), fetchConnectors(), fetchFive9Connectors(), fetchSipProxies(), fetchProxyUsers(), fetchInvites(), fetchRequestLogStats(), fetchRecentRequests(), fetchChartData(), fetchOauthClients(), fetchConsentPages(), fetchLdapConfigs(), fetchLdapAdoptions()]);
 }
 
 async function fetchHealth() {
@@ -366,7 +366,7 @@ async function fetchHealth() {
     const ts = document.getElementById('topbarStatus'); if (ts) { ts.textContent = 'Online'; ts.parentElement.title = 'Online'; }
     document.getElementById('ovStatus').textContent = 'Online';
     document.getElementById('ovStatus').style.color = 'var(--green)';
-    document.getElementById('ovUptime').textContent = 'Uptime: ' + fmtUptime(d.uptime);
+    document.getElementById('ovUptime').textContent = 'Up ' + fmtUptime(d.uptime);
     document.getElementById('ovActive').textContent = (typeof d.activeRequests === 'number') ? d.activeRequests : '—';
     document.getElementById('ovProfiles').textContent = (typeof d.proxyProfiles === 'number') ? d.proxyProfiles : '—';
     document.getElementById('ovWebhooks').textContent = (typeof d.webhooks === 'number') ? d.webhooks : '—';
@@ -383,6 +383,103 @@ async function fetchHealth() {
     document.getElementById('ovStatus').textContent = 'Offline';
     document.getElementById('ovStatus').style.color = 'var(--red)';
   }
+}
+
+// ─── Overview ────────────────────────────────────────────────────────────────
+let _ovTimeline = [];
+const _OV_GO = {
+  webhooks: () => { navigate('webhooks'); setWebhookFilter('issues'); },
+  tunnels: () => { navigate('tunnels'); setTunnelFilter('problems'); },
+  profiles: () => { navigate('profiles'); setProfileFilter('stopped'); },
+  monitors: () => navigate('monitors'),
+  errors: () => navigate('errors'),
+  ldap: () => navigate('ldap'),
+  connectors: () => navigate('connectors'),
+};
+
+function _ovTrend(now, prev, { pct = true, lowerIsBetter = false, unit = '' } = {}) {
+  if (prev === null || prev === undefined || now === null || now === undefined) return '';
+  const d = pct ? (prev ? (now - prev) / prev * 100 : (now ? 100 : 0)) : now - prev;
+  if (Math.abs(d) < (pct ? 1 : 0.1)) return '<span class="ov-trend">= vs previous 24 h</span>';
+  const up = d > 0, bad = lowerIsBetter ? up : !up;
+  return `<span class="ov-trend ${bad ? 'bad' : 'good'}">${up ? '▲' : '▼'} ${Math.abs(d).toFixed(pct ? 0 : 1)}${pct ? '%' : unit} vs previous 24 h</span>`;
+}
+
+async function fetchOverview() {
+  if (!document.getElementById('ovAttention')) return;
+  let d;
+  try { const r = await api('/admin/overview'); if (!r.ok) return; d = await r.json(); } catch { return; }
+  const t = d.traffic, n = t.now, p = t.prev, sv = d.services;
+
+  // 1. Needs attention
+  const attn = document.getElementById('ovAttention');
+  if (!d.issues.length) {
+    const parts = [['webhooks', 'webhooks'], ['proxies', 'proxies'], ['tunnels', 'tunnels'], ['connectors', 'connectors'], ['monitors', 'monitors']].filter(([k]) => sv[k].total).map(([k, l]) => sv[k].total + ' ' + l);
+    attn.className = 'ov-attn ok';
+    attn.innerHTML = `<div class="ov-attn-ok"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><b>All systems healthy</b><span>${esc(parts.join(' · '))}${parts.length ? ' — ' : ''}nothing needs you right now.</span></div>`;
+  } else {
+    attn.className = 'ov-attn';
+    attn.innerHTML = `<div class="ov-attn-head"><b>Needs attention · ${d.issues.length}</b><span>Each item opens the page already filtered</span></div><div class="ov-attn-grid">` +
+      d.issues.map(i => `<button type="button" class="ov-issue ${i.level}" onclick="(_OV_GO['${esc(i.go)}']||(()=>navigate('${esc(i.go)}')))()"><span class="ov-issue-area">${esc(i.area)}</span><b>${esc(i.title)}</b><span class="ov-issue-detail">${esc(i.detail || '')}</span></button>`).join('') + '</div>';
+  }
+
+  // 2. KPIs
+  const errRate = x => x.requests ? x.errors / x.requests * 100 : 0;
+  const okRate = x => x.deliveries ? (x.deliveries - x.deliveryFailures) / x.deliveries * 100 : null;
+  const fmtK = v => v >= 10000 ? (v / 1000).toFixed(v >= 100000 ? 0 : 1) + 'k' : String(v);
+  const kpis = [
+    { label: 'Requests · 24 h', value: fmtK(n.requests), trend: _ovTrend(n.requests, p.requests), sub: 'proxies, webhooks and connectors' },
+    { label: 'Error rate', value: errRate(n).toFixed(1) + '%', trend: p.requests ? _ovTrend(errRate(n), errRate(p), { pct: false, lowerIsBetter: true, unit: ' pt' }) : '', sub: '5xx or no response' },
+    { label: 'Webhook deliveries ok', value: okRate(n) === null ? '—' : okRate(n).toFixed(1) + '%', trend: okRate(n) !== null && okRate(p) !== null ? _ovTrend(okRate(n), okRate(p), { pct: false, unit: ' pt' }) : '', sub: n.deliveries ? fmtK(n.deliveries) + ' deliveries' : 'no deliveries yet' },
+    { label: 'Proxy latency (avg)', value: n.avgMs === null ? '—' : (n.avgMs >= 1000 ? (n.avgMs / 1000).toFixed(1) + ' s' : n.avgMs + ' ms'), trend: n.avgMs !== null && p.avgMs ? _ovTrend(n.avgMs, p.avgMs, { lowerIsBetter: true }) : '', sub: 'average response time' },
+  ];
+  document.getElementById('ovKpis').innerHTML = kpis.map(k => `<div class="ov-kpi"><span class="ov-kpi-l">${k.label}</span><span class="ov-kpi-v">${esc(k.value)}</span>${k.trend || '<span class="ov-trend">&nbsp;</span>'}<span class="ov-kpi-s">${esc(k.sub)}</span></div>`).join('');
+
+  // 3. Health per service (sparklines from the per-kind timeline)
+  _ovTimeline = t.timeline;
+  const spark = key => {
+    if (!key) return '';
+    const vals = t.timeline.map(b => b[key]); const max = Math.max(1, ...vals);
+    return '<span class="wh-spark ov-spark" aria-hidden="true">' + vals.map(v => `<i style="height:${v ? Math.max(2, Math.round(v / max * 22)) : 1}px"${v ? '' : ' class="z"'}></i>`).join('') + '</span>';
+  };
+  const cards = [
+    ['Webhooks', 'webhooks', sv.webhooks, 'webhook', 'webhooks'],
+    ['Proxies', 'profiles', sv.proxies, 'proxy', 'running'],
+    ['Tunnels', 'tunnels', sv.tunnels, null, 'tunnels'],
+    ['Connectors', 'connectors', sv.connectors, 'connector', 'connectors'],
+    ['Monitors', 'monitors', sv.monitors, null, 'monitors'],
+  ];
+  document.getElementById('ovServices').innerHTML = cards.map(([name, go, c, key, noun]) => {
+    const state = !c.total ? 'off' : c.bad ? 'err' : 'ok';
+    const label = !c.total ? 'none yet' : c.bad ? c.bad + (c.bad === 1 ? ' issue' : ' issues') : 'all ok';
+    return `<button type="button" class="ov-svc ${state === 'err' ? 'bad' : ''}" onclick="(_OV_GO['${go}']&&${c.bad ? 'true' : 'false'}?_OV_GO['${go}']:()=>navigate('${go}'))()">
+      <span class="ov-svc-head"><i class="wh-state ${state}"></i><b>${name}</b><span class="${c.bad ? 'ns-bad' : 'wh-none'}">${label}</span></span>
+      ${spark(key) || '<span class="ov-spark-empty"></span>'}
+      <span class="ov-svc-sub">${c.total} ${noun === 'running' ? 'proxies · ' + (c.total - c.bad) + ' running' : noun + (c.bad ? ' · ' + (c.total - c.bad) + ' healthy' : '')}</span>
+    </button>`;
+  }).join('');
+
+  // 4. Traffic by kind
+  const max = Math.max(1, ...t.timeline.map(b => b.proxy + b.webhook + b.connector));
+  const h = v => v ? Math.max(1, Math.round(v / max * 120)) : 0;
+  document.getElementById('ovTraffic').innerHTML = t.timeline.map((b, i) => {
+    const time = new Date(Date.parse(b.bucket + ':00Z')).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return `<button type="button" class="ov-bar" onclick="ovOpenRange(${i})" title="${time} — ${b.proxy} proxy · ${b.webhook} webhook · ${b.connector} connector · ${b.errors} errors" aria-label="${time}"><i class="e" style="height:${b.errors ? Math.max(2, h(b.errors)) : 0}px"></i><i class="c" style="height:${h(b.connector)}px"></i><i class="w" style="height:${h(b.webhook)}px"></i><i class="p" style="height:${h(b.proxy)}px"></i></button>`;
+  }).join('');
+
+  // 5. Recent activity
+  const ago = s => _userAgo(s) || '';
+  document.getElementById('ovActivity').innerHTML = d.activity.length
+    ? d.activity.map(a => `<div class="ov-act"><span>${esc(ago(a.at))}</span><span>${esc(a.text)}</span></div>`).join('')
+    : '<div class="wh-none" style="padding:10px 0">Nothing yet.</div>';
+}
+
+/** A bar on the Overview chart → the Requests page, filtered to those 30 minutes. */
+function ovOpenRange(i) {
+  navigate('requests');
+  _rlTimeline = _ovTimeline.map(b => ({ bucket: b.bucket, count: b.proxy + b.webhook + b.connector, errors: b.errors }));
+  _rlStripAt = 0;
+  pickRequestRange(i);
 }
 
 async function fetchRequestLogStats() {

@@ -3990,8 +3990,65 @@ tr.mm-ctx-row, tr.mm-ctx-row > td, [role="row"].mm-ctx-row { background: var(--a
 .rq-dur i { display: inline-block; height: 4px; background: var(--accent); opacity: .55; }
 .rq-dur.warn { color: var(--warn-text); } .rq-dur.warn i { background: var(--orange); }
 .rq-dur.err { color: var(--err-text); } .rq-dur.err i { background: var(--red); }
+.ov-attn { margin-bottom: 14px; border: 1px solid var(--orange-bdr); background: var(--warning-bg); }
+.ov-attn.ok { border-color: var(--green-bdr); background: var(--ok-bg); }
+.ov-attn-ok { display: flex; align-items: center; gap: 12px; padding: 12px 14px; color: var(--ok-text); }
+.ov-attn-ok b { color: var(--text); font-weight: 500; } .ov-attn-ok span { color: var(--text2); }
+.ov-attn-head { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-bottom: 1px solid var(--orange-bdr); }
+.ov-attn-head b { color: var(--warn-text); font-weight: 600; } .ov-attn-head span { margin-left: auto; font-size: 12px; color: var(--text3); }
+.ov-attn-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.ov-issue { display: flex; flex-direction: column; gap: 3px; padding: 11px 14px; text-align: left; background: none; border: 0; border-right: 1px solid var(--orange-bdr); font: inherit; color: var(--text); cursor: pointer; min-width: 0; }
+.ov-issue:hover { background: var(--surface2); }
+.ov-issue b { font-weight: 500; }
+.ov-issue-area { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--warn-text); }
+.ov-issue.err .ov-issue-area { color: var(--err-text); }
+.ov-issue-detail { font-size: 12px; color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.ov-kpi { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border: 1px solid var(--border); background: var(--surface); }
+.ov-kpi-l { font-size: 12px; color: var(--text3); }
+.ov-kpi-v { font-size: 26px; font-weight: 600; color: var(--text); font-family: var(--font-mono); line-height: 1.15; }
+.ov-kpi-s { font-size: 11.5px; color: var(--text3); }
+.ov-trend { font-size: 12px; color: var(--text3); } .ov-trend.bad { color: var(--warn-text); } .ov-trend.good { color: var(--ok-text); }
+.ov-services { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.ov-svc { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; text-align: left; border: 1px solid var(--border); background: var(--surface); font: inherit; color: inherit; cursor: pointer; }
+.ov-svc:hover { border-color: var(--accent); }
+.ov-svc.bad { border-color: var(--red-bdr); }
+.ov-svc-head { display: flex; align-items: center; gap: 8px; } .ov-svc-head b { flex: 1; font-weight: 600; color: var(--text); }
+.ov-svc-head span { font-size: 12px; }
+.ov-svc-sub { font-size: 11.5px; color: var(--text3); }
+.ov-spark { height: 24px; margin: 0; } .ov-spark i { flex: 1; width: auto; }
+.ov-spark-empty { height: 24px; border-bottom: 1px dashed var(--border); }
+.ov-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 12px; margin-bottom: 14px; }
+.ov-card { border: 1px solid var(--border); background: var(--surface); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.ov-card-head { display: flex; align-items: center; gap: 12px; } .ov-card-head b { color: var(--text); font-weight: 600; flex: 1; }
+.ov-legend { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text3); }
+.ov-legend i { width: 9px; height: 9px; display: inline-block; margin-left: 8px; }
+.ov-legend .p, .ov-bar .p { background: var(--accent); } .ov-legend .w, .ov-bar .w { background: #9b8cf0; }
+.ov-legend .c, .ov-bar .c { background: var(--green); } .ov-legend .e, .ov-bar .e { background: var(--red); }
+.ov-traffic { display: flex; align-items: flex-end; gap: 2px; height: 130px; }
+.ov-bar { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; gap: 1px; padding: 0; border: 0; background: none; cursor: pointer; }
+.ov-bar i { display: block; opacity: .8; } .ov-bar:hover i { opacity: 1; }
+.ov-foot { font-size: 11.5px; color: var(--text3); }
+.ov-activity { display: flex; flex-direction: column; gap: 9px; }
+.ov-act { display: flex; gap: 10px; font-size: 12.5px; line-height: 1.4; }
+.ov-act span:first-child { flex: none; width: 74px; color: var(--text3); font-size: 11.5px; }
+.ov-act span:last-child { color: var(--text2); min-width: 0; overflow-wrap: anywhere; }
+.ov-system { display: flex; flex-wrap: wrap; gap: 6px 22px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text3); }
+.ov-system b { color: var(--text2); font-weight: 500; }
+@media (max-width: 900px) { .ov-row { grid-template-columns: minmax(0, 1fr); } }
 .wh-more { width: 28px; height: 26px; background: none; border: 1px solid transparent; color: var(--text3); cursor: pointer; }
 .wh-more:hover { border-color: var(--border); color: var(--text); }
+
+/* ─── Sign-in / setup: story and form as ONE centred block ───────────────────
+   On wide screens the two halves used to hug opposite edges with a gap between. */
+@media (min-width: 901px) {
+  .auth-page .auth-split { max-width: 1080px; margin: 0 auto; padding: 40px 40px 72px; box-sizing: border-box; align-items: center; justify-content: center; gap: 96px; }
+  .auth-hero { flex: 0 1 480px; padding: 0; border-right: 0; justify-content: center; }
+  .auth-hero-art { width: 104px; height: 104px; margin: 0 0 4px -6px; }
+  .auth-main { flex: 0 0 400px; padding: 0; }
+  .auth-card { max-width: none; padding: 36px; }
+  .auth-hero-foot { position: fixed; left: 0; right: 0; bottom: 24px; justify-content: center; }
+}
 
 /* ─── Flat: no rounded corners anywhere ──────────────────────────────────────
    Last layer on purpose — overrides tokens, component rules and inline styles.

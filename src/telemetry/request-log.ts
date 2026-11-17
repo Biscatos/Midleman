@@ -1139,6 +1139,56 @@ export function getTraffic24h(kind: 'webhook' | 'proxy'): Record<string, Traffic
     } catch { return {}; }
 }
 
+/** Overview numbers from request_stats: last 24 h vs the 24 h before, and a 48 × 30-min timeline by kind. */
+export function getOverviewTraffic(): {
+    now: { requests: number; errors: number; deliveries: number; deliveryFailures: number; avgMs: number | null };
+    prev: { requests: number; errors: number; deliveries: number; deliveryFailures: number; avgMs: number | null };
+    timeline: { bucket: string; proxy: number; webhook: number; connector: number; errors: number }[];
+} {
+    const zero = () => ({ requests: 0, errors: 0, deliveries: 0, deliveryFailures: 0, avgMs: null as number | null });
+    const out = { now: zero(), prev: zero(), timeline: [] as { bucket: string; proxy: number; webhook: number; connector: number; errors: number }[] };
+    if (!db) return out;
+    try {
+        flushStats();
+        const nowMs = Date.now();
+        const anchor = nowMs - (nowMs % 1_800_000);
+        const from48 = statBucket(new Date(anchor - 95 * 1_800_000));
+        const cut24 = statBucket(new Date(anchor - 47 * 1_800_000));
+        const rows = db.prepare(`
+            SELECT bucket, type, SUM(count) AS n,
+                   SUM(CASE WHEN status = 0 OR status >= 500 THEN count ELSE failed END) AS e5,
+                   SUM(CASE WHEN status = 0 OR status >= 400 THEN count ELSE failed END) AS e4,
+                   SUM(dur_sum) AS ds, SUM(dur_n) AS dn
+            FROM request_stats WHERE bucket >= $from GROUP BY bucket, type
+        `).all({ $from: from48 }) as { bucket: string; type: string; n: number; e5: number; e4: number; ds: number; dn: number }[];
+        const kindOf = (t: string) => t === 'proxy' || t === 'target' ? 'proxy' : t === 'webhook' ? 'webhook' : t === 'connector' ? 'connector' : null;
+        const lat = { now: [0, 0], prev: [0, 0] };
+        const tl = new Map<string, { bucket: string; proxy: number; webhook: number; connector: number; errors: number }>();
+        for (const r of rows) {
+            const side = r.bucket >= cut24 ? 'now' : 'prev';
+            const k = kindOf(r.type);
+            if (k) {
+                out[side].requests += r.n;
+                out[side].errors += r.e5;
+                if (k === 'proxy') { lat[side][0] += r.ds || 0; lat[side][1] += r.dn || 0; }
+                if (side === 'now') {
+                    const b = tl.get(r.bucket) || { bucket: r.bucket, proxy: 0, webhook: 0, connector: 0, errors: 0 };
+                    b[k] += r.n; b.errors += r.e5; tl.set(r.bucket, b);
+                }
+            } else if (r.type === 'webhook-fanout') {
+                out[side].deliveries += r.n;
+                out[side].deliveryFailures += r.e4;
+            }
+        }
+        for (const side of ['now', 'prev'] as const) out[side].avgMs = lat[side][1] ? Math.round(lat[side][0] / lat[side][1]) : null;
+        for (let i = 47; i >= 0; i--) {
+            const bucket = statBucket(new Date(anchor - i * 1_800_000));
+            out.timeline.push(tl.get(bucket) || { bucket, proxy: 0, webhook: 0, connector: 0, errors: 0 });
+        }
+    } catch { /* overview stays empty */ }
+    return out;
+}
+
 /** Resources seen in the last 7 days, for the monitor form. */
 export function listTrafficResources(): { type: string; resource: string; total: number }[] {
     if (!db) return [];

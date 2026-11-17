@@ -242,71 +242,28 @@
         <p><span class="live-dot"></span>Real-time overview</p>
       </div>
 
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-label">Status</div>
-          <div class="stat-value" id="ovStatus" style="color:var(--text3)">--</div>
-          <div class="stat-sub" id="ovUptime"></div>
+      <div id="ovAttention" class="ov-attn"></div>
+      <div id="ovKpis" class="ov-kpis"></div>
+      <div id="ovServices" class="ov-services"></div>
+      <div class="ov-row">
+        <div class="ov-card">
+          <div class="ov-card-head"><b>Traffic · last 24 h</b><span class="ov-legend"><i class="p"></i>Proxies<i class="w"></i>Webhooks<i class="c"></i>Connectors<i class="e"></i>Errors</span></div>
+          <div id="ovTraffic" class="ov-traffic" aria-label="Requests per 30 minutes, last 24 h"></div>
+          <div class="ov-foot">Click a bar to open those requests.</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-label">Requests</div>
-          <div class="stat-value" id="ovActive">--</div>
-          <div class="stat-sub">in-flight</div>
-        </div>
-        <div class="stat-card" style="cursor:pointer" onclick="navigate('profiles')">
-          <div class="stat-label">Proxies</div>
-          <div class="stat-value" id="ovProfiles">--</div>
-          <div class="stat-sub" id="ovProfileNames"></div>
-        </div>
-        <div class="stat-card" style="cursor:pointer" onclick="navigate('webhooks')">
-          <div class="stat-label">Webhooks</div>
-          <div class="stat-value" id="ovWebhooks">--</div>
-          <div class="stat-sub">active fans</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">CPU</div>
-          <div class="stat-value" id="ovCpu">--</div>
-          <div class="stat-sub">process usage</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Memory</div>
-          <div class="stat-value" id="ovMem">--</div>
-          <div class="stat-sub">rss</div>
+        <div class="ov-card">
+          <div class="ov-card-head"><b>Recent activity</b><button type="button" class="btn btn-sm btn-ghost" onclick="navigate('audit')">Audit log →</button></div>
+          <div id="ovActivity" class="ov-activity"></div>
         </div>
       </div>
-
-      <!-- Charts -->
-      <div class="charts-row">
-        <div class="chart-card">
-          <div class="chart-header">Traffic <span id="chartTrafficLabel">last 24h</span></div>
-          <div class="chart-body" style="position:relative">
-            <canvas id="chartTimeline" style="cursor:crosshair"></canvas>
-            <div id="chartTooltip"
-              style="display:none;position:fixed;z-index:999;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;box-shadow:var(--shadow);pointer-events:none;white-space:nowrap">
-            </div>
-          </div>
-        </div>
-        <div class="chart-card">
-          <div class="chart-header">Breakdown</div>
-          <div class="chart-body" id="chartBreakdown">
-            <div style="color:var(--text3);font-size:13px;text-align:center;padding:20px">Loading...</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Monitors at a glance -->
-      <div class="card" id="ovMonitorsCard">
-        <div class="card-header">
-          <h3>Monitors</h3>
-          <div style="display:flex;gap:6px;align-items:center">
-            <span id="ovMonitorsSummary" style="font-size:12px;color:var(--text3);margin-right:6px"></span>
-            <a class="btn btn-sm btn-ghost" href="/wallboard" target="_blank" rel="noopener">Wallboard</a>
-            <button class="btn btn-sm btn-ghost" onclick="navigate('monitors')">View all &rarr;</button>
-          </div>
-        </div>
-        <div class="card-body" style="padding:0" id="ovMonitorsBody">
-          <div style="color:var(--text3);font-size:13px;text-align:center;padding:24px">Loading...</div>
-        </div>
+      <div class="ov-system">
+        <span>System</span>
+        <span id="ovStatus">--</span>
+        <span id="ovUptime"></span>
+        <span>CPU <b id="ovCpu">--</b></span>
+        <span>Memory <b id="ovMem">--</b></span>
+        <span><b id="ovActive">--</b> requests in flight</span>
+        <span hidden id="ovProfiles"></span><span hidden id="ovWebhooks"></span><span hidden id="ovProfileNames"></span>
       </div>
     </div>
 
