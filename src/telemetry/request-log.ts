@@ -1085,33 +1085,48 @@ export function getTrafficWindow(type: 'webhook' | 'proxy', resource: string, mi
     } catch { return empty; }
 }
 
-/** Last-24 h traffic per webhook for the list: 24 hourly inbound counts (oldest first) plus
- *  delivered / failed fan-outs. From request_stats, so it works with logs off. */
-export function getWebhookTraffic24h(): Record<string, { hours: number[]; received: number; delivered: number; failed: number }> {
+export interface Traffic24h { hours: number[]; received: number; delivered: number; failed: number; avgMs: number | null }
+
+/** Last-24 h traffic per resource for the list pages, from request_stats (so it works with logs off).
+ *  `hours`: 24 hourly request counts, oldest first.
+ *  webhook: delivered / failed = fan-out attempts (4xx/5xx/no response = failed).
+ *  proxy:   delivered / failed = responses without / with a server error (5xx or no response). */
+export function getTraffic24h(kind: 'webhook' | 'proxy'): Record<string, Traffic24h> {
     if (!db) return {};
     try {
         flushStats();
         const now = Date.now();
+        const types = kind === 'webhook' ? "('webhook', 'webhook-fanout')" : "('proxy', 'target')";
+        const badStatus = kind === 'webhook' ? 'status = 0 OR status >= 400' : 'status = 0 OR status >= 500';
         const rows = db.prepare(`
             SELECT bucket, type, resource, SUM(count) AS n,
-                   SUM(CASE WHEN status = 0 OR status >= 400 THEN count ELSE failed END) AS bad
+                   SUM(CASE WHEN ${badStatus} THEN count ELSE failed END) AS bad,
+                   SUM(dur_sum) AS ds, SUM(dur_n) AS dn
             FROM request_stats
-            WHERE bucket >= $from AND type IN ('webhook', 'webhook-fanout') AND resource <> ''
+            WHERE bucket >= $from AND type IN ${types} AND resource <> ''
             GROUP BY bucket, type, resource
-        `).all({ $from: statBucket(new Date(now - 24 * 3_600_000)) }) as { bucket: string; type: string; resource: string; n: number; bad: number }[];
-        const out: Record<string, { hours: number[]; received: number; delivered: number; failed: number }> = {};
+        `).all({ $from: statBucket(new Date(now - 24 * 3_600_000)) }) as { bucket: string; type: string; resource: string; n: number; bad: number; ds: number; dn: number }[];
+        const out: Record<string, Traffic24h & { _ds: number; _dn: number }> = {};
         for (const r of rows) {
-            const w = out[r.resource] ??= { hours: new Array(24).fill(0), received: 0, delivered: 0, failed: 0 };
-            if (r.type === 'webhook') {
+            const t = out[r.resource] ??= { hours: new Array(24).fill(0), received: 0, delivered: 0, failed: 0, avgMs: null, _ds: 0, _dn: 0 };
+            const inbound = kind === 'proxy' || r.type === 'webhook';
+            if (inbound) {
                 const h = 23 - Math.floor((now - Date.parse(r.bucket + ':00Z')) / 3_600_000);
-                if (h >= 0 && h < 24) w.hours[h] += r.n;
-                w.received += r.n;
-            } else {
-                w.failed += r.bad;
-                w.delivered += r.n - r.bad;
+                if (h >= 0 && h < 24) t.hours[h] += r.n;
+                t.received += r.n;
+            }
+            if (kind === 'proxy' || r.type === 'webhook-fanout') {
+                t.failed += r.bad;
+                t.delivered += r.n - r.bad;
+                t._ds += r.ds || 0; t._dn += r.dn || 0;
             }
         }
-        return out;
+        const result: Record<string, Traffic24h> = {};
+        for (const [k, t] of Object.entries(out)) {
+            const { _ds, _dn, ...rest } = t;
+            result[k] = { ...rest, avgMs: _dn ? Math.round(_ds / _dn) : null };
+        }
+        return result;
     } catch { return {}; }
 }
 

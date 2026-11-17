@@ -3930,6 +3930,10 @@ tr.mm-ctx-row, tr.mm-ctx-row > td, [role="row"].mm-ctx-row { background: var(--a
 .wh-issue.warn { color: var(--warn-text); border-color: var(--orange-bdr); }
 .wh-issue.err { color: var(--err-text); border-color: var(--red-bdr); }
 .wh-none { color: var(--text3); }
+.wh-target { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; color: var(--text2); }
+.wh-host { color: var(--accent); text-decoration: none; }
+.wh-host:hover { text-decoration: underline; }
+.wh-link { padding: 0 6px; font: inherit; font-size: 10.5px; background: var(--accent); color: var(--on-accent); border: 0; cursor: pointer; }
 .wh-more { width: 28px; height: 26px; background: none; border: 1px solid transparent; color: var(--text3); cursor: pointer; }
 .wh-more:hover { border-color: var(--border); color: var(--text); }
 

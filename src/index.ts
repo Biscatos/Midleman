@@ -63,7 +63,7 @@ import { isNpmCertVolumePresent, startCertWatcher, onCertReloaded } from './cert
 import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleOauthSmsOtp, handleToken, handleUserinfo, handleOauthLogout, setOauthLoginTemplate } from './servers/oauth-handler';
 import { claimAgent } from './core/agent-instance';
 import { resolveClientIp, getTrustProxyConfig } from './core/ip-filter';
-import { getWebhookTraffic24h } from './telemetry/request-log';
+import { getTraffic24h } from './telemetry/request-log';
 import { initReportFeeds, handleReportRequest } from './reports/server';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import QRCode from 'qrcode';
@@ -1926,7 +1926,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                 // ── Webhook CRUD ──
                 if (url.pathname === '/admin/webhooks' && req.method === 'GET') {
                     const status = getWebhookStatus();
-                    const traffic = getWebhookTraffic24h();
+                    const traffic = getTraffic24h('webhook');
                     const webhooks = config.webhooks.map(w => {
                         const s = status.find(s => s.name === w.name);
                         return {
@@ -2837,6 +2837,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                 }
 
                 if (url.pathname === '/admin/profiles' && req.method === 'GET') {
+                    const traffic = getTraffic24h('proxy');
                     const profiles = config.proxyProfiles.map(p => ({
                         name: p.name,
                         targetUrl: p.targetUrl,
@@ -2871,6 +2872,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         npmLocations: p.npmLocations || [],
                         npmProxyHostId: p.npmProxyHostId,
                         npmCertificateId: p.npmCertificateId,
+                        traffic: traffic[p.name] || null,
                     }));
                     return jsonRes(200, { profiles });
                 }
