@@ -47,6 +47,10 @@ export interface ConnectorServer {
     server: ReturnType<typeof Bun.serve> | null;
     pollTimer: ReturnType<typeof setInterval> | null;
     polling: boolean;             // reentrancy guard for the poll tick
+    /** Sessions waiting for a poll worker, FIFO; `pollQueued` keeps each chat in it at most once. */
+    pollQueue: ConnectorSession[];
+    pollQueued: Set<string>;
+    pollRunning: number;
     activeRequests: number;
     isShuttingDown: boolean;
     stats: {
@@ -95,7 +99,7 @@ function backoffKey(connector: string, uuid: string): string {
 
 function deliveryDue(connector: string, uuid: string): boolean {
     const entry = deliveryBackoff.get(backoffKey(connector, uuid));
-    return !entry || entry.nextAttemptAt <= Date.now();
+    return !entry || entry.nextAttemptAt <= performance.now();
 }
 
 function recordDeliveryFailure(connector: string, uuid: string): { attempts: number; delayMs: number } {
@@ -103,7 +107,7 @@ function recordDeliveryFailure(connector: string, uuid: string): { attempts: num
     const entry = deliveryBackoff.get(key) || { attempts: 0, nextAttemptAt: 0 };
     entry.attempts += 1;
     const delayMs = Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * Math.pow(2, entry.attempts - 1));
-    entry.nextAttemptAt = Date.now() + delayMs;
+    entry.nextAttemptAt = performance.now() + delayMs; // monotonic, like the poll schedule
     deliveryBackoff.set(key, entry);
     if (deliveryBackoff.size > 1000) {
         const first = deliveryBackoff.keys().next().value;
@@ -127,8 +131,12 @@ const PENDING_FILE_GRACE_MS = 90_000;
 // activity — inbound customer message or an agent reply — snaps it back to
 // fast. Active chats feel real-time, idle ones barely cost requests.
 
+/** nextPollAt is on the monotonic clock (performance.now()): an NTP step of the wall clock
+ *  backwards must not freeze polling — a 60 s step used to stall every reply by 60 s. */
 interface SessionPollState { intervalMs: number; nextPollAt: number }
 const sessionPollState = new Map<string, SessionPollState>();
+/** Max simultaneous GoContact polls per connector (each poll is one GET, plus delivery when a reply is waiting). */
+const POLL_CONCURRENCY = Math.max(1, Number(process.env.GOCONTACT_POLL_CONCURRENCY) || 200);
 
 function fastIntervalMs(c: GoContactConnector): number {
     return Math.max(1000, c.pollIntervalMs ?? 4000);
@@ -1213,6 +1221,29 @@ async function processAgentMessage(cs: ConnectorServer, session: ConnectorSessio
     await cs.client.markAsRead(session.accessKey, m.uuid);
 }
 
+/** Start poll workers up to POLL_CONCURRENCY; each one drains the queue and exits. */
+function pumpPolls(cs: ConnectorServer): void {
+    const c = cs.connector;
+    while (cs.pollRunning < POLL_CONCURRENCY && cs.pollQueue.length && !cs.isShuttingDown) {
+        cs.pollRunning++;
+        void (async () => {
+            try {
+                while (cs.pollQueue.length && !cs.isShuttingDown) {
+                    const s = cs.pollQueue.shift()!;
+                    let gotMessages = false;
+                    try { gotMessages = (await pollSession(cs, s)) > 0; } catch { /* counted as empty: back off */ }
+                    cs.pollQueued.delete(s.chatId);
+                    // Reschedule: activity → fast; empty → back off.
+                    const key = `${c.name}:${s.chatId}`;
+                    const prev = sessionPollState.get(key)?.intervalMs ?? fastIntervalMs(c);
+                    const intervalMs = gotMessages ? fastIntervalMs(c) : Math.min(maxIntervalMs(c), Math.round(prev * 1.5));
+                    sessionPollState.set(key, { intervalMs, nextPollAt: performance.now() + intervalMs });
+                }
+            } finally { cs.pollRunning--; }
+        })();
+    }
+}
+
 async function pollTick(cs: ConnectorServer): Promise<void> {
     if (cs.polling || cs.isShuttingDown) return;
     cs.polling = true;
@@ -1232,32 +1263,20 @@ async function pollTick(cs: ConnectorServer): Promise<void> {
                 log.warn(`⚠️ [connector:${c.name}] chat_closed(expired) fan-out failed:`, err instanceof Error ? err.message : err));
         }
         // Adaptive scheduling: only poll the sessions that are due.
-        const now = Date.now();
+        const now = performance.now();
         const due = listActiveSessions(c.name, ttl).filter(s => {
             const state = sessionPollState.get(`${c.name}:${s.chatId}`);
             return !state || state.nextPollAt <= now;
         });
-        if (due.length === 0) return;
-        // Bounded parallelism: poll in batches so a large session count degrades
-        // into longer effective latency instead of a thundering herd against
-        // GoContact. The reentrancy guard above keeps overlapping ticks out.
-        const BATCH = 25;
-        for (let i = 0; i < due.length; i += BATCH) {
-            if (cs.isShuttingDown) return;
-            const batch = due.slice(i, i + BATCH);
-            const results = await Promise.allSettled(batch.map(s => pollSession(cs, s)));
-            // Reschedule each polled session: activity → fast; empty → back off.
-            results.forEach((r, idx) => {
-                const s = batch[idx];
-                const key = `${c.name}:${s.chatId}`;
-                const prev = sessionPollState.get(key)?.intervalMs ?? fastIntervalMs(c);
-                const gotMessages = r.status === 'fulfilled' && r.value > 0;
-                const intervalMs = gotMessages
-                    ? fastIntervalMs(c)
-                    : Math.min(maxIntervalMs(c), Math.round(prev * 1.5));
-                sessionPollState.set(key, { intervalMs, nextPollAt: Date.now() + intervalMs });
-            });
+        // Hand due sessions to a continuous worker pool. The tick itself returns at
+        // once, so a slow round (a burst of new chats, a slow GoContact) never
+        // stops sessions that fall due meanwhile from being queued next second.
+        for (const s of due) {
+            if (cs.pollQueued.has(s.chatId)) continue;
+            cs.pollQueued.add(s.chatId);
+            cs.pollQueue.push(s);
         }
+        pumpPolls(cs);
     } catch (err) {
         cs.stats.lastError = err instanceof Error ? err.message : String(err);
         log.error(`❌ [connector:${cs.connector.name}] poll tick error:`, cs.stats.lastError);
@@ -1690,6 +1709,9 @@ export function startConnectorServer(connector: GoContactConnector): ConnectorSe
         server: null,
         pollTimer: null,
         polling: false,
+        pollQueue: [],
+        pollQueued: new Set(),
+        pollRunning: 0,
         activeRequests: 0,
         isShuttingDown: false,
         stats: { inboundMessages: 0, agentMessages: 0, deliveryFailures: 0, lastInboundAt: null, lastAgentMessageAt: null, lastError: null },
