@@ -35,7 +35,7 @@ import { migrateProfileCerts } from './core/cert-migration';
 import { scheduleAcmeRenewal, shutdownAcme, requestCertificate } from './sip/acme';
 import { startProxyServer, stopProxyServer, stopAllProxyServers, restartProxyServer, getProxyServerStatus, getProxyServerPort, isProxyServerRunning, setProxyLoginTemplate, setProxyLogo } from './servers/proxy-server';
 import { PORT_RANGE_START, loadPortAssignments, assignAllPorts, assignProxyPort, assignWebhookPort, assignTcpUdpListenerPort, releaseProxyPort, releaseWebhookPort, releaseTcpUdpListenerPorts, getWebhookPort, assignConnectorPort, releaseConnectorPort, getConnectorPort } from './servers/port-manager';
-import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, dismissAllFailedFanouts, flushDlqSync, getPendingRetryQueue, dismissPendingRetry, dismissAllPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState, setDlqAuthResolver, listRunningWebhookNames } from './servers/webhook-server';
+import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, dismissAllFailedFanouts, flushDlqSync, replayDeliveryJournal, findSelfTarget, setInternalServices, updateWebhookConfig, getPendingRetryQueue, dismissPendingRetry, dismissAllPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState, setDlqAuthResolver, listRunningWebhookNames } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
 import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserMfaExempt, setProxyUserAdminRole, setProxyUserBlocked, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, cleanupExpiredPasswordResetTokens, findResetCandidateByEmail, logSmsSend,
@@ -64,6 +64,7 @@ import { handleAuthorize, handleOauthLogin, handleOauthTotp, handleOauthSmsOtp, 
 import { claimAgent } from './core/agent-instance';
 import { resolveClientIp, getTrustProxyConfig } from './core/ip-filter';
 import { getTraffic24h } from './telemetry/request-log';
+import { journalClose } from './servers/delivery-journal';
 import { initReportFeeds, handleReportRequest } from './reports/server';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import QRCode from 'qrcode';
@@ -448,6 +449,35 @@ for (const webhook of config.webhooks) {
         console.error(`❌ Failed to start webhook "${webhook.name}":`, err instanceof Error ? err.message : err);
     }
 }
+// Webhook destinations of type proxy / connector: where they listen and the credentials they expect.
+setInternalServices({
+    resolve(kind, name) {
+        if (kind === 'proxy') {
+            const p = config.proxyProfiles.find(x => x.name === name);
+            if (!p) return { error: `proxy "${name}" does not exist` };
+            if ((p.authMode || '') === 'login') return { error: `proxy "${name}" requires a user login — a webhook cannot sign in` };
+            const port = getProxyServerPort(name);
+            if (!port || !isProxyServerRunning(name)) return { error: `proxy "${name}" is not running` };
+            return { port };
+        }
+        if (!connectors.some(c => c.name === name) && !five9Connectors.some(c => c.name === name)) return { error: `connector "${name}" does not exist` };
+        const port = getConnectorPort(name);
+        return port ? { port } : { error: `connector "${name}" has no port` };
+    },
+    authFor(port): Record<string, string> {
+        const p = config.proxyProfiles.find(x => x.accessKey && getProxyServerPort(x.name) === port);
+        if (p) return { 'x-mid-api-key': p.accessKey! };
+        const c = [...connectors, ...five9Connectors].find(x => getConnectorPort(x.name) === port) as { verifyToken?: string } | undefined;
+        return c?.verifyToken ? { 'X-Forward-Token': c.verifyToken } : {};
+    },
+    isServicePort(port) {
+        return config.proxyProfiles.some(x => getProxyServerPort(x.name) === port)
+            || [...connectors, ...five9Connectors].some(x => getConnectorPort(x.name) === port);
+    },
+});
+
+// Payloads accepted but not fully delivered before the last stop (DELIVERY_ENGINE=journal).
+replayDeliveryJournal();
 
 // Start GoContact connectors (inbound listener + agent-reply poller)
 // DLQ replay needs the target's credential, which is deliberately NOT stored in
@@ -1938,6 +1968,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             meta: { enabled: !!w.meta?.enabled, hasAppSecret: !!w.meta?.appSecret },
                             retry: w.retry,
                             allowedIps: w.allowedIps || [],
+                            allowedMethods: w.allowedMethods || [],
                             // The edit form is populated from this list, so every
                             // editable field must be here or saving silently resets it.
                             allowPrivateTargets: w.allowPrivateTargets !== false,
@@ -2141,6 +2172,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     if (input.meta && typeof input.meta === 'object') { const mi = input.meta as any; webhook.meta = { enabled: mi.enabled === true, ...(typeof mi.appSecret === 'string' && mi.appSecret ? { appSecret: mi.appSecret } : {}) }; }
                     if (input.retry && typeof input.retry === 'object') webhook.retry = input.retry as import('./core/types').WebhookRetryConfig;
                     if (Array.isArray(input.allowedIps) && input.allowedIps.length) webhook.allowedIps = input.allowedIps as string[];
+                    if (Array.isArray(input.allowedMethods) && input.allowedMethods.length) webhook.allowedMethods = input.allowedMethods as string[];
                     if (typeof input.allowPrivateTargets === 'boolean') webhook.allowPrivateTargets = input.allowPrivateTargets;
                     if (Array.isArray(input.targetAllowedCidrs) && input.targetAllowedCidrs.length) webhook.targetAllowedCidrs = (input.targetAllowedCidrs as string[]).map(s => String(s).trim()).filter(Boolean);
                     if (input.silenceAlert && typeof input.silenceAlert === 'object') webhook.silenceAlert = input.silenceAlert as import('./core/types').WebhookSilenceAlert;
@@ -2183,6 +2215,26 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         if (prev.npmOriginalForwardPort !== undefined) webhookWithPort.npmOriginalForwardPort = prev.npmOriginalForwardPort;
                         if (prev.npmOriginalForwardScheme) webhookWithPort.npmOriginalForwardScheme = prev.npmOriginalForwardScheme;
                         if (prev.publicHostnames && prev.publicHostnames.length) webhookWithPort.publicHostnames = prev.publicHostnames;
+                    }
+                    for (const t of webhookWithPort.targets) {
+                        if (typeof t === 'string' || !t.tunnel) continue;
+                        const tn = getTunnel(t.tunnel);
+                        if (!tn) return jsonRes(400, { error: `Tunnel "${t.tunnel}" does not exist` });
+                        if (!tn.enabled) return jsonRes(400, { error: `Tunnel "${t.tunnel}" is disabled — enable it before delivering through it` });
+                    }
+                    for (const t of webhookWithPort.targets) {
+                        if (typeof t === 'string' || !(t.proxy || t.connector)) continue;
+                        if (t.proxy) {
+                            const p = config.proxyProfiles.find(x => x.name === t.proxy);
+                            if (!p) return jsonRes(400, { error: `Proxy "${t.proxy}" does not exist` });
+                            if ((p.authMode || '') === 'login') return jsonRes(400, { error: `Proxy "${t.proxy}" requires a user login — a webhook cannot sign in. Use an access key on that proxy.` });
+                        } else if (!connectors.some(c => c.name === t.connector) && !five9Connectors.some(c => c.name === t.connector)) {
+                            return jsonRes(400, { error: `Connector "${t.connector}" does not exist` });
+                        }
+                    }
+                    const selfTarget = findSelfTarget(webhookWithPort);
+                    if (selfTarget) return jsonRes(400, { error: `Destination "${selfTarget}" points back to this webhook — it would notify itself in a loop.` });
+                    if (existingIdx >= 0) {
                         config.webhooks[existingIdx] = webhookWithPort;
                     } else {
                         config.webhooks.push(webhookWithPort);
@@ -2193,7 +2245,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     // Start/restart the server
                     try {
                         if (existingIdx >= 0) {
-                            await restartWebhook(webhookWithPort);
+                            if (!updateWebhookConfig(webhookWithPort)) await restartWebhook(webhookWithPort);
                         } else {
                             startWebhookServer(webhookWithPort);
                         }
@@ -4865,7 +4917,11 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         const existing = tm[1] ? getTunnel(decodeURIComponent(tm[1])) : undefined;
                         if (tm[1] && !existing) return jsonRes(404, { error: `Tunnel "${decodeURIComponent(tm[1])}" not found` });
                         if (existing && tm[2] && req.method === 'POST') return jsonRes(200, await testTunnel(existing));
-                        if (existing && !tm[2] && req.method === 'DELETE') { deleteTunnel(existing.name); audit('tunnel.delete', existing); return jsonRes(200, { status: 'deleted' }); }
+                        if (existing && !tm[2] && req.method === 'DELETE') {
+                            const users = config.webhooks.filter(w => w.targets.some(t => typeof t !== 'string' && t.tunnel === existing.name)).map(w => w.name);
+                            if (users.length) return jsonRes(409, { error: `Tunnel "${existing.name}" receives deliveries from webhook(s): ${users.join(', ')} — remove those destinations first` });
+                            deleteTunnel(existing.name); audit('tunnel.delete', existing); return jsonRes(200, { status: 'deleted' });
+                        }
                         if (!tm[2] && ((!existing && req.method === 'POST') || (existing && req.method === 'PUT'))) {
                             let body: any;
                             try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
@@ -5454,6 +5510,7 @@ const shutdown = async (signal: string) => {
     stopSilenceAlertScheduler();
     stopMonitorScheduler();
     await stopAllWebhooks();
+    journalClose();
     await stopAllConnectors();
     await stopAllFive9Connectors();
 

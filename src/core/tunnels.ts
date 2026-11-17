@@ -151,6 +151,12 @@ export function listTunnels() {
 }
 export function getTunnel(name: string): Tunnel | undefined { return tunnels.get(name.toLowerCase()); }
 
+/** True when an enabled tunnel of this Midleman listens on `port` (webhook deliveries to it are internal). */
+export function isTunnelPort(port: number): boolean {
+    for (const t of tunnels.values()) if (t.enabled && t.listenPort === port) return true;
+    return false;
+}
+
 /** Create (existing = undefined) or update. Throws an Error whose message is safe to show. */
 export function saveTunnel(input: any, existing?: Tunnel, actor?: string): Tunnel {
     const name = existing ? existing.name : String(input?.name || '').trim().toLowerCase();

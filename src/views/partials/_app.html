@@ -28,6 +28,13 @@
         <span class="sidebar-link-label">Monitors</span>
         <span class="sidebar-badge" id="navMonitorBadge">0</span>
       </button>
+      <button class="sidebar-link" data-page="requests" data-tooltip="Requests" onclick="navigate('requests')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+        <span class="sidebar-link-label">Requests</span>
+        <span class="sidebar-badge" id="navReqBadge">0</span>
+      </button>
       <button class="sidebar-link" data-page="errors" data-tooltip="System alerts" onclick="navigate('errors')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
@@ -45,13 +52,6 @@
       </a>
 
       <div class="sidebar-section-label">Traffic</div>
-      <button class="sidebar-link" data-page="requests" data-tooltip="Requests" onclick="navigate('requests')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-        </svg>
-        <span class="sidebar-link-label">Requests</span>
-        <span class="sidebar-badge" id="navReqBadge">0</span>
-      </button>
       <button class="sidebar-link" data-page="profiles" data-tooltip="Http Proxies" onclick="navigate('profiles')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="4" width="18" height="6" rx="2"/>
@@ -1169,7 +1169,7 @@
               <tr>
                 <th class="wh-dotcol"></th>
                 <th>Tunnel</th>
-                <th>Who → Midleman → agent → service</th>
+                <th>Service · route (who → port → agent)</th>
                 <th title="Connections opened, from the last 50 (6 h window)">Activity</th>
                 <th title="Open now / limit">Connections</th>
                 <th title="Since Midleman started">Traffic ↑ / ↓</th>
@@ -1546,12 +1546,16 @@
           <p>Library of reusable pages. OAuth clients and proxy profiles reference them by name instead of duplicating the text.</p>
         </div>
         <div style="display:flex;gap:8px;align-items:center">
-          <label class="mm-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="text" id="consentPageSearch" placeholder="Search pages…" autocomplete="off" aria-label="Search consent pages" oninput="renderConsentPages(_consentPages)"></label>
           <button class="btn btn-primary btn-sm" onclick="openCreateConsentPageModal()" style="display:inline-flex;align-items:center;gap:6px">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
             New page
           </button>
         </div>
+      </div>
+      <div class="mm-filterbar">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <label class="mm-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="text" id="consentPageSearch" placeholder="Search pages…" autocomplete="off" aria-label="Search consent pages" oninput="renderConsentPages(_consentPages)" style="flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;color:var(--text);font-size:13px"></label>
+          </div>
       </div>
       <div id="consentPagesGrid" class="cp-grid"><div class="cp-empty">Loading...</div></div>
     </div>
@@ -3547,6 +3551,16 @@
               all.</span></label>
           <div id="wAllowedIps" class="ip-tag-wrap"></div>
         </div>
+        <div class="form-group span-2"><label>Accepted methods <span
+              style="color:var(--text3);font-weight:400;font-size:11px">— other methods are answered 200 "ignored" and never delivered. None checked = accept all.</span></label>
+          <div id="wAllowedMethods" style="display:flex;gap:14px;flex-wrap:wrap">
+            <label style="display:inline-flex;gap:6px;align-items:center;font-weight:400"><input type="checkbox" value="POST"> POST</label>
+            <label style="display:inline-flex;gap:6px;align-items:center;font-weight:400"><input type="checkbox" value="PUT"> PUT</label>
+            <label style="display:inline-flex;gap:6px;align-items:center;font-weight:400"><input type="checkbox" value="PATCH"> PATCH</label>
+            <label style="display:inline-flex;gap:6px;align-items:center;font-weight:400"><input type="checkbox" value="GET"> GET</label>
+            <label style="display:inline-flex;gap:6px;align-items:center;font-weight:400"><input type="checkbox" value="DELETE"> DELETE</label>
+          </div>
+        </div>
 
         <div class="form-group span-2">
           <label for="wLogMode">Request log mode</label>
@@ -3684,7 +3698,7 @@
         <h3 id="destinationEditTitle" class="wd-dialog-title">Edit destination</h3>
       </div>
       <label class="wd-switch-label"><input id="destinationEditEnabled" class="mm-switch" type="checkbox" checked onchange="setDestinationEnabledFromEditor(this.checked)"> Enabled</label>
-      <button type="button" class="wd-close" onclick="closeDestinationEditor()" aria-label="Close">&times;</button>
+      <button type="button" class="wd-close" onclick="cancelDestinationEditor()" aria-label="Close">&times;</button>
     </header>
     <div class="wd-dialog-body">
       <div id="destinationEditContent" class="wd-form"></div>
@@ -3700,7 +3714,8 @@
     <footer class="wd-dialog-foot">
       <button type="button" class="btn btn-sm wd-btn-danger" onclick="removeDestinationFromEditor()">Delete destination</button>
       <span class="wd-sec-sub" style="flex:1">Changes are kept on this page and saved with <strong>Save webhook</strong>.</span>
-      <button class="btn btn-primary btn-sm" onclick="closeDestinationEditor()">Done</button>
+      <button class="btn btn-sm" onclick="cancelDestinationEditor()">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Saving…', saveDestinationFromEditor)">Save destination</button>
     </footer>
   </div>
 </div>
