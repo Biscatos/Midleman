@@ -1257,30 +1257,27 @@
               <option value="protected">Protected</option>
               <option value="public">Public</option>
             </select>
+            <div class="mm-seg-filter" role="group" aria-label="Show proxies" id="profileQuickFilter">
+              <button type="button" class="on" data-pf="all" onclick="setProfileFilter('all')">All</button>
+              <button type="button" data-pf="errors" onclick="setProfileFilter('errors')">With errors <span id="pfErrors"></span></button>
+              <button type="button" data-pf="stopped" onclick="setProfileFilter('stopped')">Stopped <span id="pfStopped"></span></button>
+            </div>
           </div>
         
       </div>
       <div class="card">
         <div class="card-body" style="padding:0;overflow-x:auto">
-          <table id="profileTable" style="width:100%;border-collapse:collapse;font-size:13px">
+          <table id="profileTable" class="wh-table" style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
-              <tr style="background:var(--surface2);text-align:left">
-                <th
-                  style="padding:10px 12px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Name</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Status</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Port</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Target URL</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Auth Header</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Access</th>
-                <th style="padding:10px 8px;color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase">
-                  Blocked Ext.</th>
-                <th style="padding:10px 12px"></th>
+              <tr>
+                <th class="wh-dotcol"></th>
+                <th>Name</th>
+                <th>Port</th>
+                <th>Target</th>
+                <th title="Requests per hour, last 24 h">Last 24 h</th>
+                <th title="Responses without a server error (5xx or no response), last 24 h">OK</th>
+                <th title="Average response time, last 24 h">Latency</th>
+                <th></th>
               </tr>
             </thead>
             <tbody id="profileListBody">
