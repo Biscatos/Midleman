@@ -515,6 +515,10 @@ export interface RequestLogQuery {
     /** Include req_body in list rows. Off by default: the column can hold 64KB
      *  per row and only the webhook payload editor needs it. */
     includeBody?: boolean;
+    /** Only failures: 4xx/5xx or no response. */
+    errorsOnly?: boolean;
+    /** Only requests that took at least this long (ms). */
+    minDurationMs?: number;
 }
 
 // Short-lived caches so the dashboard's 3s/5s polling never re-runs a full
@@ -616,6 +620,11 @@ export function queryRequestLogs(query: RequestLogQuery): RequestLogListResult {
         if (query.searchBody) cols.push('req_body', 'res_body');
         conditions.push('(' + cols.map(c => `${c} LIKE $search`).join(' OR ') + ')');
         params.$search = `%${query.search}%`;
+    }
+    if (query.errorsOnly) conditions.push('(res_status >= 400 OR error IS NOT NULL)');
+    if (query.minDurationMs && query.minDurationMs > 0) {
+        conditions.push('duration_ms >= $minDuration');
+        params.$minDuration = query.minDurationMs;
     }
     if (query.from) {
         conditions.push('timestamp >= $from');

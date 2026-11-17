@@ -1299,16 +1299,39 @@ async function fetchProxyUsers() {
 
 function _filteredProxyUsers() {
   let list;
-  switch (_userRoleFilter) {
-    case 'admin': list = _allProxyUsers.filter(u => u.isAdmin); break;
-    case 'user':  list = _allProxyUsers.filter(u => !u.isAdmin); break;
-    case 'ldap':  list = _allProxyUsers.filter(u => u.authSource === 'ldap'); break;
-    case 'local': list = _allProxyUsers.filter(u => u.authSource !== 'ldap'); break;
-    default:      list = _allProxyUsers;
-  }
+  list = _allProxyUsers.filter(_USER_FILTERS[_userRoleFilter] || (() => true));
   const q = _userSearch.trim().toLowerCase();
   if (q) list = list.filter(u => [u.fullName, u.username, u.email].some(v => v && String(v).toLowerCase().includes(q)));
   return list;
+}
+
+const _USER_FILTERS = {
+  admin: u => u.isAdmin,
+  user: u => !u.isAdmin,
+  ldap: u => u.authSource === 'ldap',
+  local: u => u.authSource !== 'ldap',
+  blocked: u => u.blocked,
+  no2fa: u => !u.totpEnabled && !u.blocked,
+  never: u => !u.lastLoginAt,
+};
+
+function setUserFilter(f) {
+  _userRoleFilter = f;
+  _usersPage = 1;
+  document.querySelectorAll('#userQuickFilter [data-uf]').forEach(b => b.classList.toggle('on', b.dataset.uf === f));
+  renderProxyUsers(_filteredProxyUsers());
+}
+
+/** "3 h ago" / "12 Mar 2026" from the UTC timestamp SQLite stores. */
+function _userAgo(sqliteUtc) {
+  if (!sqliteUtc) return '';
+  const t = Date.parse(sqliteUtc.replace(' ', 'T') + 'Z');
+  if (!Number.isFinite(t)) return '';
+  const m = Math.round((Date.now() - t) / 60000);
+  if (m < 60) return m <= 1 ? 'just now' : m + ' min ago';
+  if (m < 1440) return Math.round(m / 60) + ' h ago';
+  if (m < 43200) return Math.round(m / 1440) + ' days ago';
+  return new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function filterProxyUsersByRole() {
@@ -1357,35 +1380,42 @@ function renderProxyUsers(users) {
   if (prev) prev.disabled = _usersPage <= 1;
   if (next) next.disabled = _usersPage >= pages;
   if (users.length === 0) {
-    c.innerHTML = `<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">${_userSearch.trim() ? 'No users match “' + esc(_userSearch.trim()) + '”.' : 'No users match the current filter.'}</td></tr>`;
+    c.innerHTML = `<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">${_userSearch.trim() ? 'No users match “' + esc(_userSearch.trim()) + '”.' : 'No users match the current filter.'}</td></tr>`;
     return;
   }
+  // Quick-filter counts follow the whole user list, not the current page.
+  document.querySelectorAll('#userQuickFilter [data-uf]').forEach(btn => {
+    const f = _USER_FILTERS[btn.dataset.uf], span = btn.querySelector('span');
+    if (f && span) { const n = _allProxyUsers.filter(f).length; span.textContent = n ? '· ' + n : ''; }
+  });
   c.innerHTML = pageUsers.map(u => {
     const twoFa = u.totpEnabled
-      ? '<span style="color:var(--green)">Active</span>'
-      : (u.force2faSetup
-        ? '<span style="color:var(--orange)" title="User must configure 2FA on next login">Pending setup</span>'
-        : (u.mfaExempt
-          ? '<span class="mm-chip warn" title="Allowed to sign in without 2FA even if the directory requires it">Exempt</span>'
-          : '<span style="color:var(--text3)">Off</span>'));
-    const nameCell = u.fullName
-      ? `<div style="font-weight:600;color:var(--text)">${esc(u.fullName)}</div><div style="font-size:11px;color:var(--text3);font-family:monospace">${esc(u.username)}</div>`
-      : `<div style="font-weight:600;color:var(--text)">${esc(u.username)}</div>`;
-    const emailLine = u.email
-      ? `<div style="font-size:12px;color:var(--text2)">${esc(u.email)}</div>`
-      : '';
-    const phoneLine = u.phoneNumber
-      ? `<div style="font-size:11.5px;color:var(--text3);font-family:ui-monospace,Menlo,monospace;margin-top:2px">${esc(u.phoneNumber)}</div>`
-      : '';
-    const emailCell = (emailLine || phoneLine) ? (emailLine + phoneLine) : `<span style="color:var(--text3)">—</span>`;
-    const actionsCell = `<button data-type="proxyUser" data-id="${u.id}" onclick="showContextMenu(event,this)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:2px 10px;cursor:pointer;color:var(--text2);font-size:18px;line-height:1.2;letter-spacing:1px" title="Actions">&#8942;</button>`;
-    return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s${u.blocked ? ';opacity:.55' : ''}" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
-      <td style="padding:8px 12px">${nameCell}</td>
-      <td style="padding:8px">${emailCell}</td>
-      <td style="padding:8px">${_roleBadge(u)}</td>
-      <td style="padding:8px">${twoFa}</td>
-      <td style="padding:8px;color:var(--text3);font-size:12px">${u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-GB') : '-'}</td>
-      <td style="padding:8px 12px;text-align:right;white-space:nowrap">${actionsCell}</td>
+      ? '<span class="ns-ok">On</span>'
+      : u.force2faSetup ? '<span class="tn-refused" title="User must configure 2FA on next login">Setup pending</span>'
+      : u.mfaExempt ? '<span class="tn-refused" title="Allowed to sign in without 2FA even if the directory requires it">Exempt</span>'
+      : '<span class="wh-none">Off</span>';
+    const state = u.blocked ? 'err' : (u.force2faSetup ? 'warn' : (u.lastLoginAt ? 'ok' : 'off'));
+    const stateTip = u.blocked ? 'Blocked — cannot sign in anywhere' : u.force2faSetup ? 'Must set up 2FA on next sign-in' : u.lastLoginAt ? 'Active' : 'Never signed in';
+    const display = u.fullName || u.username;
+    const initials = display.split(/[\s._@-]+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
+    const sub = [u.fullName ? u.username : '', u.email, u.phoneNumber].filter(Boolean).map(esc).join(' · ');
+    const source = u.authSource === 'ldap' ? '<span class="us-src">LDAP</span>' : '';
+    const role = u.isAdmin ? '<span class="mm-chip acc">Admin</span>' : '<span class="wh-none">User</span>';
+    const profiles = Array.isArray(u.profiles) ? u.profiles : [];
+    const access = u.isAdmin ? '<span class="wh-none">Everything</span>'
+      : profiles.length ? `<span title="${esc(profiles.map(p => p.name || p).join(', '))}">${profiles.length} ${profiles.length === 1 ? 'proxy' : 'proxies'}</span>`
+      : '<span class="wh-none">None</span>';
+    const last = u.lastLoginAt ? `<span title="${esc(u.lastLoginAt)} UTC">${esc(_userAgo(u.lastLoginAt))}</span>` : '<span class="wh-none">Never</span>';
+    return `<tr class="wh-row${u.blocked ? ' us-blocked' : ''}">
+      <td class="wh-dotcol"><i class="wh-state ${state}" title="${stateTip}"></i></td>
+      <td><div class="us-cell"><span class="us-av" aria-hidden="true">${esc(initials)}</span><div style="min-width:0">
+        <div class="wh-name">${esc(display)} ${source}${u.blocked ? ' <span class="mm-chip err">Blocked</span>' : ''}</div>
+        <div class="wh-sub">${sub || '—'}</div></div></div></td>
+      <td>${role}</td>
+      <td>${twoFa}</td>
+      <td>${access}</td>
+      <td style="white-space:nowrap">${last}</td>
+      <td style="text-align:right"><button class="wh-more" data-type="proxyUser" data-id="${u.id}" onclick="showContextMenu(event,this)" aria-label="Actions for ${esc(display)}">⋮</button></td>
     </tr>`;
   }).join('');
 }
@@ -5259,6 +5289,49 @@ async function restartWebhookAction(name) {
 
 // ─── Request Log ─────────────────────────────────────────────────────────────
 let rlPage = 1; const rlLimit = 50; let rlData = null;
+let _rlQuick = '', _rlRange = null, _rlStripAt = 0, _rlTimeline = [];
+
+function setRequestQuick(q) {
+  _rlQuick = q; rlPage = 1;
+  document.querySelectorAll('#rlQuickFilter [data-rq]').forEach(b => b.classList.toggle('on', b.dataset.rq === q));
+  fetchRequestLogs();
+}
+
+/** 'YYYY-MM-DDTHH:MM' (UTC bucket) → the 'YYYY-MM-DD HH:MM:SS' the log stores. */
+const _rlTs = (bucket, plusMin = 0) => new Date(Date.parse(bucket + ':00Z') + plusMin * 60000).toISOString().slice(0, 19).replace('T', ' ');
+
+function pickRequestRange(i) {
+  const b = _rlTimeline[i];
+  if (!b) return;
+  _rlRange = (_rlRange && _rlRange.i === i) ? null : { i, from: _rlTs(b.bucket), to: _rlTs(b.bucket, 30) };
+  rlPage = 1;
+  fetchRequestLogs();
+}
+
+/** 24 h of traffic in 30-min bars (errors on top); refreshed at most once a minute. */
+async function renderRequestStrip() {
+  const el = document.getElementById('rlStrip');
+  if (!el) return;
+  if (Date.now() - _rlStripAt > 60_000) {
+    try { const r = await api('/admin/requests/chart'); if (r.ok) { _rlTimeline = (await r.json()).timeline || []; _rlStripAt = Date.now(); } } catch {}
+  }
+  const max = Math.max(1, ..._rlTimeline.map(b => b.count));
+  el.innerHTML = _rlTimeline.map((b, i) => {
+    const h = b.count ? Math.max(3, Math.round(b.count / max * 44)) : 1;
+    const eh = b.errors ? Math.max(2, Math.round(b.errors / max * 44)) : 0;
+    const t = new Date(Date.parse(b.bucket + ':00Z'));
+    const label = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return `<button type="button" class="rq-bar${_rlRange && _rlRange.i === i ? ' on' : ''}" onclick="pickRequestRange(${i})" title="${label} — ${b.count} requests, ${b.errors} errors" aria-label="${label}: ${b.count} requests"><i style="height:${h}px"></i>${eh ? `<i class="e" style="height:${eh}px"></i>` : ''}</button>`;
+  }).join('');
+  const chip = document.getElementById('rlRangeChip');
+  if (chip) {
+    if (_rlRange) {
+      const t = new Date(Date.parse(_rlTimeline[_rlRange.i].bucket + ':00Z'));
+      chip.innerHTML = `${t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – ${new Date(t.getTime() + 1800000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} <button type="button" onclick="_rlRange=null;rlPage=1;fetchRequestLogs()" aria-label="Clear time range">×</button>`;
+      chip.style.display = '';
+    } else chip.style.display = 'none';
+  }
+}
 async function fetchRequestLogs() {
   try {
     const params = new URLSearchParams({ page: rlPage, limit: rlLimit });
@@ -5267,10 +5340,15 @@ async function fetchRequestLogs() {
     const status = document.getElementById('rlStatus').value;
     const search = document.getElementById('rlSearch').value.trim();
     if (type) params.set('type', type); if (method) params.set('method', method);
+    // Quick filter + a range picked on the strip
+    if (_rlQuick === 'errors') params.set('errors', '1');
+    else if (_rlQuick === 'slow') params.set('minDuration', '1000');
+    else if (_rlQuick) params.set('type', _rlQuick);
+    if (_rlRange) { params.set('from', _rlRange.from); params.set('to', _rlRange.to); }
     if (status) params.set('status', status); if (search) params.set('search', search);
     if (search && document.getElementById('rlSearchBody')?.checked) params.set('searchBody', '1');
     const res = await api('/admin/requests?' + params.toString()); if (!res.ok) return;
-    rlData = await res.json(); renderRequestLogs();
+    rlData = await res.json(); renderRequestLogs(); renderRequestStrip();
     const sres = await api('/admin/requests/stats'); if (sres.ok) {
       const s = await sres.json();
       document.getElementById('reqLogStats').textContent = s.total + ' total | ' + (s.dbSizeMB || 0) + ' MB';
@@ -5282,27 +5360,26 @@ function renderRequestLogs() {
   if (!rlData) return;
   const { requests, total, page, totalPages } = rlData;
   const tbody = document.getElementById('reqLogBody');
-  if (requests.length === 0) { tbody.innerHTML = '<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3)">No requests found.</td></tr>'; }
+  if (requests.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text3)">No requests found.</td></tr>'; }
   else {
+    const maxMs = Math.max(1, ...requests.map(r => r.durationMs || 0));
     tbody.innerHTML = requests.map(r => {
       const ts = new Date(r.timestamp + 'Z'); const sc = r.resStatus;
-      const statusChip = !sc ? 'mm-chip' : sc < 300 ? 'mm-chip ok' : sc < 400 ? 'mm-chip acc' : sc < 500 ? 'mm-chip warn' : 'mm-chip err';
-      const typeBadge = r.type === 'proxy'
-        ? '<span class="rdm-badge" style="background:var(--accent-bg);color:var(--accent2);padding:2px 8px;border-radius:4px;font-size:11px">proxy' + (r.profileName ? ' / ' + esc(r.profileName) : '') + '</span>'
-        : r.type === 'webhook'
-        ? '<span class="rdm-badge" style="background:var(--orange-bg);color:var(--orange);padding:2px 8px;border-radius:4px;font-size:11px">webhook' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>'
-        : '<span class="rdm-badge" style="background:var(--blue-bg);color:var(--blue);padding:2px 8px;border-radius:4px;font-size:11px">target' + (r.targetName ? ' / ' + esc(r.targetName) : '') + '</span>';
-      const methodCls = r.method === 'GET' ? 'color:var(--green)' : r.method === 'POST' ? 'color:var(--blue)' : r.method === 'DELETE' ? 'color:var(--red)' : 'color:var(--orange)';
+      const state = !sc ? 'err' : sc >= 500 ? 'err' : sc >= 400 ? 'warn' : 'ok';
+      const kind = r.type === 'webhook-fanout' ? 'delivery' : r.type === 'target' ? 'proxy' : r.type;
+      const name = r.profileName || r.targetName || '';
+      const ms = r.durationMs || 0;
+      const durCls = ms >= 5000 ? 'err' : ms >= 1000 ? 'warn' : '';
       const sz = (r.reqBodySize || 0) + (r.resBodySize || 0);
-      return `<tr style="border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''" onclick="openReqDetail(${r.id})">
-  <td style="padding:8px 12px;white-space:nowrap;color:var(--text2);font-size:12px">${esc(ts.toLocaleString())}</td>
-  <td style="padding:8px">${typeBadge}</td>
-  <td style="padding:8px;font-weight:600;${methodCls}">${esc(r.method)}</td>
-  <td style="padding:8px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.path)}">${esc(r.path)}</td>
-  <td style="padding:8px;white-space:nowrap"><span class="${r.error && !sc ? 'mm-chip err' : statusChip}">${sc || (r.error ? 'ERR' : '-')}</span>${r.repeatCount > 1 ? ` <span class="mm-chip" title="Same failure repeated ${r.repeatCount}× — last at ${esc(new Date((r.lastSeenAt || r.timestamp) + 'Z').toLocaleString())}">${r.repeatCount}×</span>` : ''}</td>
-  <td style="padding:8px;color:var(--text2)">${r.durationMs ? fmtMs(r.durationMs) : '-'}</td>
-  <td style="padding:8px;color:var(--text3);font-size:12px">${sz > 0 ? fmtBytes(sz) : '-'}</td>
-  <td style="padding:8px 12px"><span style="color:var(--accent2);font-size:12px">View</span></td>
+      const repeat = r.repeatCount > 1 ? ` <span class="mm-chip" title="Same failure repeated ${r.repeatCount}×">×${r.repeatCount} · last ${esc(new Date((r.lastSeenAt || r.timestamp) + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</span>` : '';
+      return `<tr class="wh-row" style="cursor:pointer" onclick="openReqDetail(${r.id})">
+  <td class="wh-dotcol"><i class="wh-state ${state}"></i></td>
+  <td style="white-space:nowrap;color:var(--text2);font-size:12px">${esc(ts.toLocaleString())}</td>
+  <td style="max-width:460px"><div class="rq-where" title="${esc((name ? name + ' ' : '') + r.path)}"><span class="rq-kind">${esc(kind)}</span><span class="wh-name">${esc(name || '—')}</span><span class="rq-path">${esc(r.path)}</span></div></td>
+  <td style="font-family:var(--font-mono);font-size:12px;color:var(--text2)">${esc(r.method)}</td>
+  <td style="white-space:nowrap"><span class="rq-status ${state}">${sc || (r.error ? 'no response' : '—')}</span>${repeat}</td>
+  <td style="white-space:nowrap"><span class="rq-dur ${durCls}"><i style="width:${ms ? Math.max(2, Math.round(ms / maxMs * 60)) : 0}px"></i>${ms ? fmtMs(ms) : '—'}</span></td>
+  <td style="color:var(--text3);font-size:12px">${sz > 0 ? fmtBytes(sz) : '—'}</td>
 </tr>`;
     }).join('');
   }
@@ -9742,6 +9819,7 @@ function switchNotifTab(tab) {
   document.querySelectorAll('.notif-tabpane').forEach(p => {
     p.style.display = p.getAttribute('data-tab') === tab ? '' : 'none';
   });
+  if (tab === 'sent') fetchNotifSent();
   const isGroupRuleTab = tab === 'groups' || tab === 'rules';
   const addGroupBtn = document.getElementById('notifAddGroupBtn');
   const addRuleBtn = document.getElementById('notifAddRuleBtn');
@@ -9860,7 +9938,7 @@ async function fetchNotifRules() {
     renderNotifRules();
   } catch (e) {
     const body = document.getElementById('notifRulesBody');
-    if (body) body.innerHTML = '<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
+    if (body) body.innerHTML = '<div style="padding:24px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</div>';
   }
 }
 
@@ -9880,6 +9958,13 @@ function _severityPillHtml(sev) {
   return '<span style="font-size:10.5px;padding:3px 8px;border-radius:8px;font-weight:500;letter-spacing:.3px;' + (palette[sev] || palette.info) + '">' + sev + '</span>';
 }
 
+/** "webhook.*" → "any webhook event"; anything else is shown as written. */
+function _notifCategoryText(p) {
+  if (!p || p === '*') return 'anything in Midleman';
+  if (p.endsWith('.*')) return 'any ' + p.slice(0, -2).replace(/[._-]+/g, ' ') + ' event';
+  return p;
+}
+
 function renderNotifRules() {
   const empty = document.getElementById('notifRulesEmpty');
   const card = document.getElementById('notifRulesCard');
@@ -9892,23 +9977,70 @@ function renderNotifRules() {
   }
   empty.style.display = 'none';
   card.style.display = '';
+  const sevText = { info: 'any severity', warning: 'warning or worse', critical: 'critical' };
   body.innerHTML = _notifRules.map(r => {
     const group = _notifGroups.find(g => g.id === r.groupId);
-    const groupLabel = group ? esc(group.name) : '<span style="color:var(--err-text)">missing</span>';
-    return '<tr>'
-      + '<td style="padding:10px 14px;border-top:1px solid var(--border);font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--text2)">' + r.priority + '</td>'
-      + '<td style="padding:10px 14px;border-top:1px solid var(--border);font-family:ui-monospace,Menlo,monospace;font-size:12.5px">' + esc(r.categoryPattern) + (r.name ? '<div style="font-family:inherit;font-size:11px;color:var(--text3);margin-top:2px">' + esc(r.name) + '</div>' : '') + '</td>'
-      + '<td style="padding:10px 14px;border-top:1px solid var(--border)">' + _severityPillHtml(r.minSeverity) + '</td>'
-      + '<td style="padding:10px 14px;border-top:1px solid var(--border)">' + groupLabel + '</td>'
-      + '<td style="padding:10px 14px;border-top:1px solid var(--border)">' + _channelsLabel(r) + '</td>'
-      + '<td style="padding:10px 14px;border-top:1px solid var(--border)">' + (r.enabled
-          ? '<span style="font-size:10.5px;padding:3px 8px;border-radius:8px;background:rgba(34,197,94,0.15);color:var(--ok-text)">enabled</span>'
-          : '<span style="font-size:10.5px;padding:3px 8px;border-radius:8px;background:var(--surface2);color:var(--text3)">disabled</span>') + '</td>'
-      + '<td style="padding:10px 14px;border-top:1px solid var(--border);text-align:right">'
-        + '<button class="btn btn-sm" onclick="editNotifRule(' + r.id + ')">Edit</button> '
-        + '<button class="btn btn-sm" onclick="deleteNotifRule(' + r.id + ')" style="color:var(--err-text)">Delete</button>'
-      + '</td></tr>';
+    const n = group ? (group.memberCount ?? (group.members || []).length) : 0;
+    const who = group ? esc(group.name) + (n ? ` (${n})` : '') : 'a deleted group';
+    const how = r.channelsOverride ? r.channelsOverride.map(c => c === 'sms' ? 'SMS' : 'Email').join(' + ') : (r.minSeverity === 'critical' ? 'Email + SMS' : 'Email');
+    return `<div class="nr-row ${r.enabled ? '' : 'off'}">
+      <input type="checkbox" class="mm-switch" ${r.enabled ? 'checked' : ''} aria-label="Rule on/off" onchange="toggleNotifRule(${r.id}, this.checked)">
+      <button type="button" class="nr-sentence" onclick="editNotifRule(${r.id})" title="Edit rule">
+        When <span class="nr-part" title="${esc(r.categoryPattern)}">${esc(_notifCategoryText(r.categoryPattern))}</span>
+        <span class="nr-part sev-${esc(r.minSeverity)}">${sevText[r.minSeverity] || esc(r.minSeverity)}</span>
+        → tell <span class="nr-part who ${group ? '' : 'bad'}">${who}</span>
+        by <span class="nr-part">${how}</span>${r.channelsOverride ? '' : '<span class="nr-hint" title="info/warning → email; critical → email + SMS"> (by severity)</span>'}
+        ${r.name ? `<span class="nr-name">${esc(r.name)}</span>` : ''}
+      </button>
+      <button type="button" class="btn btn-sm" ${group ? '' : 'disabled'} onclick="withBusy(this, 'Sending…', () => testNotifRule(${r.id}))">Test</button>
+      <button type="button" class="wh-more" aria-label="Delete rule" title="Delete" onclick="deleteNotifRule(${r.id})">×</button>
+    </div>`;
   }).join('');
+}
+
+async function toggleNotifRule(id, enabled) {
+  const res = await api('/admin/notification-rules/' + id, { method: 'PUT', body: JSON.stringify({ enabled }) });
+  if (!res.ok) toast('Could not change the rule', 'error');
+  await fetchNotifRules();
+}
+
+/** Sends a test through the rule's group, so the people and channels are proven, not assumed. */
+async function testNotifRule(id) {
+  const r = _notifRules.find(x => x.id === id);
+  if (!r) return;
+  const res = await api('/admin/notification-groups/' + r.groupId + '/test', { method: 'POST' });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || 'Test failed', 'error');
+  toast(`Test sent — ${d.recipientsOk ?? d.ok ?? '?'} delivered, ${d.recipientsFailed ?? d.failed ?? 0} failed`, (d.recipientsFailed || d.failed) ? 'error' : 'success');
+  if (_notifCurrentTab === 'sent') fetchNotifSent();
+}
+
+async function fetchNotifSent() {
+  const body = document.getElementById('notifSentBody');
+  if (!body) return;
+  try {
+    const res = await api('/admin/notifications/sent?limit=100');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const rows = (await res.json()).sent || [];
+    const day = rows.filter(x => Date.now() - x.createdAt < 86_400_000);
+    const sum = (k) => day.reduce((a, x) => a + (x[k] || 0), 0);
+    document.getElementById('notifSentSummary').innerHTML = `<span><b>${day.length}</b> sent · 24 h</span><span><b class="ok">${sum('ok')}</b> recipients reached</span><span><b class="${sum('failed') ? 'bad' : ''}">${sum('failed')}</b> failed</span>`;
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="5" style="padding:30px;text-align:center;color:var(--text3)">Nothing has been sent yet. Use "Test" on a rule to try one.</td></tr>'; return; }
+    body.innerHTML = rows.map(x => {
+      const res = x.total === 0 ? '<span class="wh-none">no reachable recipient</span>'
+        : x.failed === 0 ? `<span class="ns-ok">${x.ok === 1 ? 'delivered' : x.ok + ' of ' + x.total + ' delivered'}</span>`
+        : `<span class="ns-bad" title="${esc(x.firstError || '')}">${x.ok} of ${x.total} delivered${x.firstError ? ' — ' + esc(x.firstError.slice(0, 60)) : ''}</span>`;
+      return `<tr class="wh-row">
+        <td style="white-space:nowrap;color:var(--text3);font-size:12px">${esc(new Date(x.createdAt).toLocaleString())}</td>
+        <td><div class="wh-name">${esc(x.subject || x.category)}${x.isTest ? ' <span class="wd-paused">TEST</span>' : ''}</div><div class="wh-sub">${esc(x.category)}</div></td>
+        <td><span class="nr-part sev-${esc(x.severity)}">${esc(x.severity)}</span></td>
+        <td>${x.groupName ? esc(x.groupName) : '<span class="wh-none">—</span>'}</td>
+        <td>${res}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    body.innerHTML = '<tr><td colspan="5" style="padding:30px;text-align:center;color:var(--err-text)">Error: ' + esc(e.message) + '</td></tr>';
+  }
 }
 
 // ── Group modal ──────────────────────────────────────────────────────────────

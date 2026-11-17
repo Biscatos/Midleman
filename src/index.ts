@@ -38,10 +38,10 @@ import { PORT_RANGE_START, loadPortAssignments, assignAllPorts, assignProxyPort,
 import { startWebhookServer, stopAllWebhooks, stopWebhookServer, restartWebhook, getWebhookStatus, getDeadLetterQueue, retryFailedFanout, retryAllFailedFanouts, dismissFailedFanout, dismissAllFailedFanouts, flushDlqSync, replayDeliveryJournal, findSelfTarget, setInternalServices, updateWebhookConfig, getPendingRetryQueue, dismissPendingRetry, dismissAllPendingRetry, retryPendingNow, startPendingRetryScheduler, stopPendingRetryScheduler, startSilenceAlertScheduler, stopSilenceAlertScheduler, resetSilenceState, setDlqAuthResolver, listRunningWebhookNames } from './servers/webhook-server';
 import { startSipServer, stopSipServer, stopAllSipServers, restartSipServer, getSipServerStatus, isSipServerRunning } from './servers/sip-server';
 import { challengeStore } from './sip/acme';
-import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserMfaExempt, setProxyUserAdminRole, setProxyUserBlocked, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, cleanupExpiredPasswordResetTokens, findResetCandidateByEmail, logSmsSend,
+import { initAuth, shutdownAuth, hasUsers, createUser, verifyCredentials, generateTotpSecret, verifyTotp, createSession, validateSession, destroySession, checkRateLimit, recordFailedAttempt, MAX_ATTEMPTS_PER_IP, parseCookies, sessionCookie, clearSessionCookie, createLoginChallenge, consumeLoginChallenge, initJwt, getJwks, getOidcDiscovery, createProxyUser, listAllProxyUsers, lastLoginByUser, getProxyUser, deleteProxyUser, updateProxyUserPassword, updateProxyUserInfo, findProxyUserByEmailOrUsername, listProxyUsersForProfile, assignProxyUserToProfile, removeProxyUserFromProfile, removeAllProfileAssociations, listLdapGroupsForProfile, addLdapGroupToProfile, removeLdapGroupFromProfile, getProfileLdapGroupById, removeAllProfileLdapGroups, shadowUserMatchesProfileLdapGroups, listProfilesForProxyUser, disableProxyUserTotp, setProxyUserForce2faSetup, setProxyUserMfaExempt, setProxyUserAdminRole, setProxyUserBlocked, createInviteToken, getInviteToken, listInviteTokens, useInviteToken, revokeInviteToken, listAdmins, getAdmin, countAdmins, createAdditionalAdmin, deleteAdmin, updateAdminPassword, setAdminTotp, getAdminTotpSecret, logAudit, queryAuditLogs, createAdminInvite, getAdminInvite, listAdminInvites, consumeAdminInvite, revokeAdminInvite, upsertLdapShadowAdmin, listAdoptionEvents, countPendingAdoptions, confirmAdoption, revertAdoption, createPasswordResetToken, getPasswordResetToken, consumePasswordResetToken, cleanupExpiredPasswordResetTokens, findResetCandidateByEmail, logSmsSend,
 listNotificationGroups, getNotificationGroup, createNotificationGroup, updateNotificationGroup, deleteNotificationGroup,
 addNotificationGroupMember, removeNotificationGroupMember,
-listNotificationRules, createNotificationRule, updateNotificationRule, deleteNotificationRule,
+listNotificationRules, listRecentNotifications, createNotificationRule, updateNotificationRule, deleteNotificationRule,
 timingSafeEqualStr,
 type NotificationSeverity, type NotificationChannel } from './auth/auth';
 import { emitNotificationEvent, dispatchTestToGroup } from './core/notifications';
@@ -1653,6 +1653,8 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         from: url.searchParams.get('from') || undefined,
                         to: url.searchParams.get('to') || undefined,
                         includeBody: url.searchParams.get('includeBody') === '1',
+                        errorsOnly: url.searchParams.get('errors') === '1',
+                        minDurationMs: parseInt(url.searchParams.get('minDuration') || '0', 10) || undefined,
                     });
                     return jsonRes(200, result as unknown as Record<string, unknown>);
                 }
@@ -3110,10 +3112,12 @@ async function handle(req: Request, srv: any): Promise<Response> {
 
                 // GET /admin/proxy-users — list all global proxy users
                 if (url.pathname === '/admin/proxy-users' && req.method === 'GET') {
+                    const lastLogin = lastLoginByUser();
                     const users = listAllProxyUsers().map(u => {
                         return {
                             ...u,
                             profiles: listProfilesForProxyUser(u.id),
+                            lastLoginAt: lastLogin.get(u.id) || null,
                         };
                     });
                     const me = getAuthedAdmin(req);
@@ -3680,6 +3684,9 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     }
                 }
 
+                if (url.pathname === '/admin/notifications/sent' && req.method === 'GET') {
+                    return jsonRes(200, { sent: listRecentNotifications(Number(url.searchParams.get('limit')) || 100) });
+                }
                 if (url.pathname === '/admin/notification-rules' && req.method === 'GET') {
                     return jsonRes(200, { rules: listNotificationRules() });
                 }
