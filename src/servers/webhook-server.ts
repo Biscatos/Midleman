@@ -4,6 +4,7 @@ import { isIpAllowed, isLoopbackIp, resolveClientIp, getTrustProxyConfig } from 
 import { networkInterfaces } from 'os';
 import { assertResolvedHostAllowed, webhookSsrfPolicy, SsrfBlockedError, type SsrfPolicyOverride } from '../core/ssrf-guard';
 import { timingSafeEqualStr } from '../auth/auth';
+import { apiKeyAllows, apiKeyCovers } from '../core/api-keys';
 
 // Real socket peer IP, captured at the server boundary and looked up in the
 // inbound handler (X-Forwarded-For alone is spoofable).
@@ -993,11 +994,14 @@ async function handleWebhookFanout(
     const startTime = performance.now();
     const requestId = req.headers.get('X-Request-ID') || crypto.randomUUID();
     const url = new URL(req.url);
+    // Auth is required when the webhook has its own token or a shared API key is assigned to it; either one is accepted.
+    const needsAuth = !!webhook.authToken || apiKeyCovers('webhook', webhook.name);
+    const tokenOk = (t: string | null) => (!!webhook.authToken && timingSafeEqualStr(t, webhook.authToken)) || apiKeyAllows(t, 'webhook', webhook.name);
 
     // Meta (Facebook) Webhook Verification Handshake
     if (!replay && req.method === 'GET' && url.searchParams.get('hub.mode') === 'subscribe') {
         const verifyToken = url.searchParams.get('hub.verify_token');
-        if (webhook.authToken && !timingSafeEqualStr(verifyToken, webhook.authToken)) {
+        if (needsAuth && !tokenOk(verifyToken)) {
              console.warn(`❌ [webhook:${webhook.name}] Meta Verification failed: Invalid hub.verify_token`);
              return new Response('Invalid verify_token', { status: 403 });
         }
@@ -1027,9 +1031,9 @@ async function handleWebhookFanout(
     const internal = !!replay || isInternalDispatch(req);
 
     // Auth check (per-webhook token)
-    if (webhook.authToken && !internal) {
+    if (needsAuth && !internal) {
         const providedToken = req.headers.get('X-Forward-Token') || url.searchParams.get('token') || url.searchParams.get('hub.verify_token');
-        if (!timingSafeEqualStr(providedToken, webhook.authToken)) {
+        if (!tokenOk(providedToken)) {
             console.warn(`❌ [webhook:${webhook.name}] Unauthorized ${req.method} from ${req.headers.get('X-Forwarded-For') || 'unknown'}`);
             return jsonResponse(401, {
                 error: 'Unauthorized',

@@ -73,6 +73,12 @@
         <span class="sidebar-link-label">Tunnels</span>
         <span class="sidebar-badge" id="navTunnelBadge">0</span>
       </button>
+      <button class="sidebar-link" data-page="apikeys" data-tooltip="API Keys" onclick="navigate('apikeys')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8" cy="15" r="4"/><path d="M11 12l9-9"/><path d="M16 7l3 3"/>
+        </svg>
+        <span class="sidebar-link-label">API Keys</span>
+      </button>
       <button class="sidebar-link" data-page="webhooks" data-tooltip="Webhooks" onclick="navigate('webhooks')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="6" cy="6" r="2"/>
@@ -1088,6 +1094,85 @@
     </div>
 
     <!-- ═══ TUNNELS ═══ -->
+    <div class="page" id="pageApikeys">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h2>API Keys</h2>
+          <p>One key per partner, assigned to the proxies and webhooks it may call. A new key never replaces one already in use, and each can be revoked on its own.</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchApiKeys(); })">Reload</button>
+          <button class="btn btn-primary btn-sm" onclick="openApiKeyModal()">+ API Key</button>
+        </div>
+      </div>
+      <div class="mm-filterbar">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <label class="mm-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="text" id="akSearch" placeholder="Search name, key prefix, proxy, webhook..." oninput="renderApiKeys()"></label>
+          </div>
+      </div>
+      <div class="card">
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table id="akTable" class="wh-table" style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr>
+                <th class="wh-dotcol"></th>
+                <th>Key</th>
+                <th>Access</th>
+                <th>Created</th>
+                <th>Last used</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="akRows">
+              <tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ API KEY MODAL ═══ -->
+    <div id="apiKeyModal" role="dialog" aria-modal="true" aria-labelledby="akModalTitle" style="display:none;position:fixed;inset:0;z-index:210;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div class="mm-dialog" style="max-width:620px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column;max-height:92vh">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px">
+          <div style="flex:1;min-width:0">
+            <h3 style="margin:0;font-size:16px" id="akModalTitle">New API key</h3>
+            <p style="margin:3px 0 0;font-size:12.5px;color:var(--text2)" id="akModalSub"></p>
+          </div>
+          <button onclick="closeApiKeyModal()" aria-label="Close" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">&times;</button>
+        </div>
+        <!-- Step 1: the form -->
+        <div id="akFormView" style="padding:16px 22px;display:flex;flex-direction:column;gap:14px;overflow-y:auto">
+          <div><label class="mm-label" for="akName">Name *</label><input class="mm-input" id="akName" type="text" maxlength="80" placeholder="Partner name" autocomplete="off" spellcheck="false"></div>
+          <div class="mm-group">
+            <div class="mm-group-title">Access</div>
+            <div id="akScopes" style="display:grid;grid-template-columns:1fr 1fr;gap:16px"></div>
+          </div>
+          <div class="mm-field-hint">Proxies only check keys in "Access Key" auth mode. A webhook without a token starts requiring one as soon as a key is assigned to it.</div>
+        </div>
+        <!-- Step 2: the secret, shown once -->
+        <div id="akSecretView" style="display:none;padding:16px 22px;flex-direction:column;gap:12px;overflow-y:auto">
+          <div class="mm-group">
+            <div class="mm-group-title">Copy this key now</div>
+            <div style="display:flex;gap:8px;align-items:center"><input class="mm-input" id="akSecret" readonly aria-label="API key" style="font:400 12px var(--font-mono)" onclick="this.select()"><button class="btn btn-sm" id="akSecretCopy" onclick="mmCopyFrom(this)">Copy</button></div>
+            <div class="mm-field-hint" style="margin-top:8px">It is not stored and cannot be shown again. If it is lost, create another key — existing ones keep working.</div>
+          </div>
+          <div class="mm-group">
+            <div class="mm-group-title">How the partner sends it</div>
+            <div style="font-size:12.5px;color:var(--text2);display:flex;flex-direction:column;gap:4px">
+              <div>HTTP Proxies — header <code>X-Mid-Api-Key</code> or <code>?key=</code></div>
+              <div>Webhooks — header <code>X-Forward-Token</code> or <code>?token=</code></div>
+            </div>
+          </div>
+        </div>
+        <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn btn-sm" id="akCancelBtn" onclick="closeApiKeyModal()">Cancel</button>
+          <button class="btn btn-primary btn-sm" id="akSaveBtn" onclick="withBusy(this, 'Saving…', saveApiKey)">Create key</button>
+          <button class="btn btn-primary btn-sm" id="akDoneBtn" style="display:none" onclick="closeApiKeyModal()">Done</button>
+        </div>
+      </div>
+    </div>
+
     <div class="page" id="pageTunnels">
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
@@ -3483,9 +3568,12 @@
           </div>
         </div>
         <div class="form-group span-2"><label
-            style="display:flex;justify-content:space-between;align-items:baseline">Incoming Auth Token (optional)<a
+            style="display:flex;justify-content:space-between;align-items:baseline">Incoming Auth Token (optional)<span style="display:flex;gap:12px"><a
+              href="javascript:void(0)" onclick="openApiKeyModal(null, 'webhook:' + document.getElementById('wName').value.trim())"
+              title="Create a key for a partner without replacing this one"
+              style="font-size:11px;font-weight:400;color:var(--accent)">+ shared API key</a><a
               href="javascript:void(0)" onclick="generateKey('wAuthToken')"
-              style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></label><input type="text"
+              style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></span></label><input type="text"
             id="wAuthToken" placeholder="Leave empty for public access"></div>
         <div class="form-group span-2 mm-group" style="margin:0">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
@@ -4542,9 +4630,12 @@
           </select>
         </div>
         <div class="form-group" id="pAccessKeyGroup" style="display:none"><label
-            style="display:flex;justify-content:space-between;align-items:baseline">Access Key<a
+            style="display:flex;justify-content:space-between;align-items:baseline">Access Key<span style="display:flex;gap:12px"><a
+              href="javascript:void(0)" onclick="openApiKeyModal(null, 'proxy:' + document.getElementById('pName').value.trim())"
+              title="Create a key for a partner without replacing this one"
+              style="font-size:11px;font-weight:400;color:var(--accent)">+ shared API key</a><a
               href="javascript:void(0)" onclick="generateKey('pAccessKey')"
-              style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></label><input class="wz-input" type="text"
+              style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></span></label><input class="wz-input" type="text"
             id="pAccessKey" placeholder="Optional">
         </div>
         <div class="form-group" id="pRequire2faGroup" style="display:none">

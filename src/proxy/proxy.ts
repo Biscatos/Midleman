@@ -3,6 +3,7 @@ import { startProxySpan, endProxySpan, recordProxyBlocked, recordProxyRedirect }
 import { logRequest, captureRequestBody, captureResponseBody, headersToRecord, isLoggingEnabledFor } from '../telemetry/request-log';
 import { isIpAllowed, isLoopbackIp, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { verifyJwt, logAudit, timingSafeEqualStr } from '../auth/auth';
+import { apiKeyAllows, apiKeyCovers } from '../core/api-keys';
 import { corsPreflightResponse, applyCorsToResponse } from '../core/cors';
 
 // The real socket peer IP, captured at the server boundary (Bun's
@@ -390,7 +391,9 @@ async function handleProxyRequestInner(
 
     // ── Auth: access key mode ──
     let validatedAccessKey: string | null = null;
-    if (effectiveAuthMode === 'accessKey' && profile.accessKey) {
+    if (effectiveAuthMode === 'accessKey' && (profile.accessKey || apiKeyCovers('proxy', profileName))) {
+        // The profile's own key, or any shared API key assigned to this proxy.
+        const keyOk = (k: string | null | undefined) => (!!profile.accessKey && timingSafeEqualStr(k, profile.accessKey)) || apiKeyAllows(k, 'proxy', profileName);
         const providedKey = url.searchParams.get('key');
         const clientIP = getClientIP(req);
 
@@ -401,13 +404,13 @@ async function handleProxyRequestInner(
 
         // A. X-Mid-Api-Key header — for API clients / Postman (no redirect, no cookie)
         const headerKey = req.headers.get('x-mid-api-key');
-        if (timingSafeEqualStr(headerKey, profile.accessKey)) {
-            validatedAccessKey = profile.accessKey;
+        if (keyOk(headerKey)) {
+            validatedAccessKey = headerKey;
             logAudit({ action: 'proxy.accesskey.success', actorUsername: 'apikey', details: { profile: profileName, via: 'header', path: remainingPath }, ip: clientIP, userAgent: req.headers.get('user-agent') });
         }
 
         // B. Direct ?key= — redirect to strip key from URL and set cookie first.
-        if (!validatedAccessKey && timingSafeEqualStr(providedKey, profile.accessKey)) {
+        if (!validatedAccessKey && keyOk(providedKey)) {
             logAudit({ action: 'proxy.accesskey.success', actorUsername: 'apikey', details: { profile: profileName, via: 'query', path: remainingPath }, ip: clientIP, userAgent: req.headers.get('user-agent') });
             if (isBrowser) {
                 const clean = new URL(url.toString());
@@ -416,19 +419,19 @@ async function handleProxyRequestInner(
                     status: 302,
                     headers: {
                         'Location': clean.pathname + clean.search,
-                        'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(profile.accessKey)}; Path=/proxy/${profileName}/; SameSite=Lax${secureAttr(req)}; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
+                        'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(providedKey!)}; Path=/proxy/${profileName}/; SameSite=Lax${secureAttr(req)}; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
                     },
                 });
             }
-            validatedAccessKey = profile.accessKey;
+            validatedAccessKey = providedKey;
         }
 
         // C. Profile-scoped cookie
         if (!validatedAccessKey && isBrowser) {
             const cookies = req.headers.get('cookie') || '';
             const m = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${escapeRegex(profileName)}=([^;]+)`));
-            if (m && timingSafeEqualStr(decodeURIComponent(m[1]), profile.accessKey)) {
-                validatedAccessKey = profile.accessKey;
+            if (m && keyOk(decodeURIComponent(m[1]))) {
+                validatedAccessKey = decodeURIComponent(m[1]);
             }
         }
 
@@ -933,18 +936,20 @@ async function handleDirectProxyInner(
 
     // ── Access key validation ──
     let validatedAccessKey: string | null = null;
-    if (effectiveAuthMode === 'accessKey' && profile.accessKey) {
+    if (effectiveAuthMode === 'accessKey' && (profile.accessKey || apiKeyCovers('proxy', profileName))) {
+        // The profile's own key, or any shared API key assigned to this proxy.
+        const keyOk = (k: string | null | undefined) => (!!profile.accessKey && timingSafeEqualStr(k, profile.accessKey)) || apiKeyAllows(k, 'proxy', profileName);
         const providedKey = url.searchParams.get('key');
         const clientIP = getClientIP(req);
 
         // A. X-Mid-Api-Key header — for API clients / Postman (no redirect, no cookie)
         const headerKey = req.headers.get('x-mid-api-key');
-        if (timingSafeEqualStr(headerKey, profile.accessKey)) {
-            validatedAccessKey = profile.accessKey;
+        if (keyOk(headerKey)) {
+            validatedAccessKey = headerKey;
         }
 
         // B. Direct ?key= — redirect to strip key from URL and set cookie first.
-        if (!validatedAccessKey && timingSafeEqualStr(providedKey, profile.accessKey)) {
+        if (!validatedAccessKey && keyOk(providedKey)) {
             if (isBrowser) {
                 const clean = new URL(url.toString());
                 clean.searchParams.delete('key');
@@ -952,11 +957,11 @@ async function handleDirectProxyInner(
                     status: 302,
                     headers: {
                         'Location': clean.pathname + clean.search,
-                        'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(profile.accessKey)}; Path=/; SameSite=Lax${secureAttr(req)}; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
+                        'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(providedKey!)}; Path=/; SameSite=Lax${secureAttr(req)}; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
                     },
                 });
             }
-            validatedAccessKey = profile.accessKey;
+            validatedAccessKey = providedKey;
         }
 
         // C. Profile-scoped cookie — only for browser sessions after the initial redirect.
@@ -964,8 +969,8 @@ async function handleDirectProxyInner(
         if (!validatedAccessKey && isBrowser) {
             const cookies = req.headers.get('cookie') || '';
             const m = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${escapeRegex(profileName)}=([^;]+)`));
-            if (m && timingSafeEqualStr(decodeURIComponent(m[1]), profile.accessKey)) {
-                validatedAccessKey = profile.accessKey;
+            if (m && keyOk(decodeURIComponent(m[1]))) {
+                validatedAccessKey = decodeURIComponent(m[1]);
             }
         }
 

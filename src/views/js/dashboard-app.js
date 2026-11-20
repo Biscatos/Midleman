@@ -459,6 +459,7 @@ const PAGE_TITLES = {
   tcpudp: 'TCP/UDP',
   profiles: 'HTTP Proxies',
   tunnels: 'Tunnels',
+  apikeys: 'API Keys',
   webhooks: 'Webhooks',
   monitors: 'Monitors',
   connectors: 'Chat Connectors',
@@ -483,7 +484,7 @@ const PAGE_TITLES = {
 const ROUTABLE_PAGES = new Set([
   'overview','requests','proxyusers','profiles','connectors',
   'oauthclients','consentpages','ldap','email','sms','notifications',
-  'npm','audit','webhooks','monitors','ldap','reports','errors','logsettings','docs','tunnels',
+  'npm','audit','webhooks','monitors','ldap','reports','errors','logsettings','docs','tunnels','apikeys',
 ]);
 
 function navigate(page, opts = {}) {
@@ -547,6 +548,7 @@ function navigate(page, opts = {}) {
   }
   if (page === 'monitors') { fetchMonitors().then(() => { if (hashSuffix && typeof openMonitorDetail === 'function') openMonitorDetail(decodeURIComponent(hashSuffix)); }); }
   if (page === 'tunnels') { fetchTunnels(); }
+  if (page === 'apikeys') { fetchApiKeys(); }
   if (page === 'connectors') { fetchConnectors(); fetchFive9Connectors(); }
   if (page === 'proxyusers') { fetchProxyUsers(); fetchInvites(); }
   if (page === 'oauthclients') { fetchOauthClients(); }

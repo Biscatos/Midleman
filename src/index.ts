@@ -47,6 +47,7 @@ type NotificationSeverity, type NotificationChannel } from './auth/auth';
 import { emitNotificationEvent, dispatchTestToGroup } from './core/notifications';
 import { isPrivateOrLoopbackV4 } from './core/ssrf-guard';
 import { listWallboardKeys, createWallboardKey, revokeWallboardKey, verifyWallboardKey } from './core/wallboard-keys';
+import { listApiKeys, createApiKey, updateApiKey, revokeApiKey, parseScopes } from './core/api-keys';
 import { numbersSeen as metaNumbersSeen, exportNumbersSeen, importNumbersSeen, META_EVENT_KINDS } from './core/meta-router';
 import { tunnelWebSocket, upgradeTunnel, tunnelAgents, tunnelBridges } from './core/agent-tunnel';
 import { startTunnels, listTunnels, getTunnel, saveTunnel, deleteTunnel, testTunnel } from './core/tunnels';
@@ -2642,6 +2643,23 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             callbackUrl: c.five9.callbackUrl,
                             // callbackToken intentionally omitted (secret)
                         },
+                        // Same shape as the GoContact connector: the edit form reads these, and without
+                        // them it showed the IP allowlist / Meta / Smooch settings as empty.
+                        hasVerifyToken: !!c.verifyToken,
+                        allowedIps: c.allowedIps || [],
+                        meta: c.meta ? {
+                            phoneNumberId: c.meta.phoneNumberId,
+                            graphVersion: c.meta.graphVersion || 'v21.0',
+                            hasAccessToken: !!c.meta.accessToken,
+                        } : null,
+                        smooch: c.smooch ? {
+                            appId: c.smooch.appId,
+                            baseUrl: c.smooch.baseUrl || 'https://api.smooch.io',
+                            keyId: c.smooch.keyId || '',
+                            hasKeySecret: !!c.smooch.keySecret,
+                            hasBearerToken: !!c.smooch.bearerToken,
+                            hasWebhookSecret: !!c.smooch.webhookSecret,
+                        } : null,
                         directReply: c.directReply === true,
                         phoneNumberFilter: c.phoneNumberFilter || [],
                         autoReply: c.autoReply || { enabled: false, text: '' },
@@ -2908,6 +2926,9 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             blockedExtensions: profile.blockedExtensions ? Array.from(profile.blockedExtensions) : [],
                             allowedIps: profile.allowedIps || [],
                             allowedPaths: profile.allowedPaths || [],
+                            // The edit form is filled from this response: a field missing here shows as off and is wiped on save.
+                            rateLimit: profile.rateLimit || null,
+                            cors: profile.cors || null,
                             port: getProxyServerPort(profile.name),
                             running: isProxyServerRunning(profile.name),
                             publicHostnames: profile.publicHostnames || [],
@@ -5050,6 +5071,44 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         if (!revokeWallboardKey(wk[1])) return jsonRes(404, { error: 'Key not found' });
                         const me = getAuthedAdmin(req);
                         logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'wallboard.key.revoke', targetType: 'wallboard_key', targetId: wk[1], ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { status: 'revoked' });
+                    }
+                }
+                // ── Shared API keys (one per partner, assigned to proxies / webhooks) ──
+                if (url.pathname === '/admin/api-keys' && req.method === 'GET') {
+                    return jsonRes(200, { keys: listApiKeys() });
+                }
+                if (url.pathname === '/admin/api-keys' && req.method === 'POST') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
+                    const name = typeof body?.name === 'string' ? body.name.trim() : '';
+                    if (!name) return jsonRes(400, { error: '"name" is required (e.g. the partner\'s name)' });
+                    const scopes = parseScopes(body.scopes);
+                    if (!scopes) return jsonRes(400, { error: '"scopes" must be a list of "proxy:<name>" / "webhook:<name>"' });
+                    const me = getAuthedAdmin(req);
+                    const { key, record } = createApiKey({ name, scopes, createdBy: me?.username });
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'apikey.create', targetType: 'api_key', targetId: record.id, details: { name, scopes }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    const out = jsonRes(200, { key: record, secret: key });
+                    out.headers.set('X-Sensitive', '1'); // one-time secret: never compressed
+                    return out;
+                }
+                {
+                    const ak = url.pathname.match(/^\/admin\/api-keys\/([a-f0-9]{12})$/);
+                    if (ak && req.method === 'PUT') {
+                        let body: any;
+                        try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
+                        const scopes = parseScopes(body?.scopes);
+                        if (!scopes) return jsonRes(400, { error: '"scopes" must be a list of "proxy:<name>" / "webhook:<name>"' });
+                        const record = updateApiKey(ak[1], { name: typeof body.name === 'string' ? body.name : undefined, scopes });
+                        if (!record) return jsonRes(404, { error: 'Key not found' });
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'apikey.update', targetType: 'api_key', targetId: ak[1], details: { name: record.name, scopes }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { key: record });
+                    }
+                    if (ak && req.method === 'DELETE') {
+                        if (!revokeApiKey(ak[1])) return jsonRes(404, { error: 'Key not found' });
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'apikey.revoke', targetType: 'api_key', targetId: ak[1], ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                         return jsonRes(200, { status: 'revoked' });
                     }
                 }

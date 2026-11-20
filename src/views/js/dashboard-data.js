@@ -12917,6 +12917,110 @@ async function sendReportNow() {
   } finally { if (btn) btn.disabled = false; }
 }
 
+// ─── Shared API keys ───
+let _apiKeys = [], _akEditing = null;
+async function fetchApiKeys() {
+  const [kr, pr, wr] = await Promise.all([api('/admin/api-keys'), api('/admin/profiles'), api('/admin/webhooks')]);
+  _apiKeys = (await kr.json().catch(() => ({}))).keys || [];
+  if (pr.ok) _allProfiles = (await pr.json().catch(() => ({}))).profiles || [];
+  if (wr.ok) _allWebhooks = (await wr.json().catch(() => ({}))).webhooks || [];
+  renderApiKeys();
+}
+function renderApiKeys() {
+  const c = document.getElementById('akRows'); if (!c) return;
+  const q = (document.getElementById('akSearch').value || '').trim().toLowerCase();
+  const list = _apiKeys.filter(k => !q || [k.name, k.prefix, k.createdBy, ...k.scopes].join(' ').toLowerCase().includes(q));
+  if (!list.length) {
+    c.innerHTML = `<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">${_apiKeys.length ? 'No key matches the search.' : 'No API keys yet. Click "+ API Key".'}</td></tr>`;
+    return;
+  }
+  // A scope pointing at a proxy/webhook that no longer exists (renamed or deleted) is flagged.
+  const known = new Set([...(_allProfiles || []).map(p => 'proxy:' + p.name), ..._allWebhooks.map(w => 'webhook:' + w.name)]);
+  c.innerHTML = list.map(k => {
+    const n = esc(k.name);
+    const chips = k.scopes.map(s => {
+      const i = s.indexOf(':'), kind = s.slice(0, i), gone = !known.has(s);
+      return `<span class="mm-chip${gone ? ' warn' : ''}" style="margin:1px 4px 1px 0"${gone ? ` title="This ${kind} no longer exists"` : ''}>${kind === 'proxy' ? 'Proxy' : 'Webhook'} · ${esc(s.slice(i + 1))}</span>`;
+    }).join('') || '<span class="wh-none">No access yet</span>';
+    return `<tr class="wh-row">
+  <td class="wh-dotcol"><i class="wh-state ${k.scopes.length ? 'ok' : 'off'}"></i></td>
+  <td><div class="wh-name">${n}</div><div class="wh-sub"><span class="mono">${esc(k.prefix)}…</span>${k.createdBy ? ' · by ' + esc(k.createdBy) : ''}</div></td>
+  <td>${chips}</td>
+  <td class="mono">${new Date(k.createdAt).toLocaleDateString()}</td>
+  <td class="mono">${k.lastUsedAt ? _monAgo(k.lastUsedAt) : '<span class="wh-none">never</span>'}</td>
+  <td style="text-align:right;white-space:nowrap"><button class="wh-more" data-id="${esc(k.id)}" onclick="apiKeyMenu(event, this)" aria-label="Actions for ${n}">⋮</button></td>
+</tr>`;
+  }).join('');
+}
+function apiKeyMenu(e, btn) {
+  e.stopPropagation();
+  const k = _apiKeys.find(x => x.id === btn.dataset.id); if (!k) return;
+  showActionMenu(btn, [
+    { label: 'Edit access', fn: () => openApiKeyModal(k.id) },
+    '---',
+    { label: 'Revoke', fn: () => revokeApiKey(k.id), danger: true },
+  ]);
+}
+/** `preset` ("proxy:<name>" / "webhook:<name>") opens a new key with that resource ticked — used by the
+ *  proxy and webhook forms, where the resource may not be saved yet. */
+async function openApiKeyModal(id, preset) {
+  if (preset) {
+    if (/^(proxy|webhook):\s*$/.test(preset)) return toast('Enter the name first', 'error');
+    await fetchApiKeys();
+  }
+  _akEditing = _apiKeys.find(k => k.id === id) || null;
+  const selected = _akEditing ? _akEditing.scopes : preset ? [preset] : [];
+  const names = (kind, list) => { const n = list.map(x => x.name), p = preset && preset.startsWith(kind + ':') ? preset.slice(kind.length + 1) : null; return p && !n.includes(p) ? [p, ...n] : n; };
+  const col = (title, kind, names) => `<div><label class="mm-label">${title}</label>` + (names.length ? names.map(n => {
+    const v = kind + ':' + n;
+    return `<label style="display:flex;gap:8px;align-items:center;font-size:13px;padding:3px 0;cursor:pointer"><input type="checkbox" class="ak-scope" value="${esc(v)}"${selected.includes(v) ? ' checked' : ''}> <span>${esc(n)}</span></label>`;
+  }).join('') : '<div class="wh-none" style="font-size:12.5px">None configured</div>') + '</div>';
+  document.getElementById('akScopes').innerHTML =
+    col('HTTP Proxies', 'proxy', names('proxy', _allProfiles || [])) + col('Webhooks', 'webhook', names('webhook', _allWebhooks));
+  document.getElementById('akName').value = _akEditing ? _akEditing.name : '';
+  document.getElementById('akModalTitle').textContent = _akEditing ? 'Edit ' + _akEditing.name : 'New API key';
+  document.getElementById('akModalSub').textContent = _akEditing
+    ? 'Change what this key opens. The key itself stays the same, so the partner changes nothing.'
+    : "Give it the partner's name and choose what it opens. Access can be changed later without changing the key.";
+  document.getElementById('akSaveBtn').textContent = _akEditing ? 'Save' : 'Create key';
+  _akShowSecret(null);
+  document.getElementById('apiKeyModal').style.display = 'flex';
+  document.getElementById('akName').focus();
+}
+/** Switches the modal between the form and the one-time secret. */
+function _akShowSecret(secret) {
+  document.getElementById('akFormView').style.display = secret ? 'none' : 'flex';
+  document.getElementById('akSecretView').style.display = secret ? 'flex' : 'none';
+  document.getElementById('akCancelBtn').style.display = document.getElementById('akSaveBtn').style.display = secret ? 'none' : '';
+  document.getElementById('akDoneBtn').style.display = secret ? '' : 'none';
+  document.getElementById('akSecret').value = secret || '';
+  document.getElementById('akSecretCopy').dataset.copy = secret || '';
+}
+function closeApiKeyModal() { _akShowSecret(null); document.getElementById('apiKeyModal').style.display = 'none'; }
+async function saveApiKey() {
+  const name = document.getElementById('akName').value.trim();
+  if (!name) { document.getElementById('akName').focus(); return toast('Give the key a name (e.g. the partner)', 'error'); }
+  const scopes = [...document.querySelectorAll('.ak-scope:checked')].map(c => c.value);
+  const res = _akEditing
+    ? await api('/admin/api-keys/' + encodeURIComponent(_akEditing.id), { method: 'PUT', body: JSON.stringify({ name, scopes }) })
+    : await api('/admin/api-keys', { method: 'POST', body: JSON.stringify({ name, scopes }) });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || 'Could not save the key', 'error');
+  if (d.secret) {
+    document.getElementById('akModalTitle').textContent = 'Key created — ' + name;
+    document.getElementById('akModalSub').textContent = 'This is the only time the key is shown.';
+    _akShowSecret(d.secret);
+  } else { closeApiKeyModal(); toast('Access updated'); }
+  await fetchApiKeys();
+}
+async function revokeApiKey(id) {
+  const k = _apiKeys.find(x => x.id === id); if (!k) return;
+  if (!await showConfirm({ title: 'Revoke API key', message: `Revoke the key "${k.name}"?`, detail: 'Whoever uses it loses access immediately. Other keys keep working.', confirmText: 'Revoke', danger: true })) return;
+  const res = await api('/admin/api-keys/' + encodeURIComponent(id), { method: 'DELETE' }); const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || 'Failed', 'error');
+  toast('Key revoked'); await fetchApiKeys();
+}
+
 // ─── Wallboard share links ───
 async function openWbShare() {
   document.getElementById('wbShareModal').style.display = 'flex';
