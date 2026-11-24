@@ -30,7 +30,7 @@
       </button>
       <button class="sidebar-link" data-page="requests" data-tooltip="Requests" onclick="navigate('requests')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+          <path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>
         </svg>
         <span class="sidebar-link-label">Requests</span>
         <span class="sidebar-badge" id="navReqBadge">0</span>
@@ -746,6 +746,7 @@
               <div><label class="mm-label">Allowed IPs (optional)</label><input class="mm-input" id="wbKeyCidrs" type="text" placeholder="10.11.1.0/24"></div>
               <button class="btn btn-primary btn-sm" onclick="wbCreateKey()" style="height:var(--control-h)">Create</button>
             </div>
+            <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12.5px;cursor:pointer"><input type="checkbox" class="mm-switch" id="wbKeyLogs"> Can read container logs <span style="color:var(--text3)">— error and warning lines of server monitors. They may contain customer data: give it only to people who should see them.</span></label>
             <div id="wbKeyNew" style="display:none"></div>
           </div>
           <div>

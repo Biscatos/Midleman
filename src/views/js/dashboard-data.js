@@ -13180,7 +13180,7 @@ async function wbLoadKeys() {
   const rows = document.getElementById('wbKeyRows');
   const keys = d.keys || [];
   rows.innerHTML = keys.length ? keys.map(k => `<tr>
-      <td style="font-weight:500">${esc(k.name)}<div style="font-size:11px;color:var(--text3)">${k.createdBy ? 'by ' + esc(k.createdBy) : ''}</div></td>
+      <td style="font-weight:500">${esc(k.name)}${k.logs ? ' <span class="mm-chip" title="This link can read container logs">logs</span>' : ''}<div style="font-size:11px;color:var(--text3)">${k.createdBy ? 'by ' + esc(k.createdBy) : ''}</div></td>
       <td class="mono">${new Date(k.createdAt).toLocaleDateString()}</td>
       <td class="mono" style="color:${k.expiresAt && k.expiresAt < Date.now() ? 'var(--red)' : 'inherit'}">${k.expiresAt ? new Date(k.expiresAt).toLocaleDateString() : 'never'}</td>
       <td class="mono">${(k.allowedCidrs || []).map(esc).join(', ') || '<span style="color:var(--text3)">any</span>'}</td>
@@ -13190,13 +13190,13 @@ async function wbLoadKeys() {
 }
 async function wbCreateKey() {
   const name = document.getElementById('wbKeyName').value.trim(); if (!name) return toast('Give the link a name', 'error');
-  const body = { name, expiresDays: document.getElementById('wbKeyDays').value || null, allowedCidrs: document.getElementById('wbKeyCidrs').value.split(',').map(x => x.trim()).filter(Boolean) };
+  const body = { name, expiresDays: document.getElementById('wbKeyDays').value || null, allowedCidrs: document.getElementById('wbKeyCidrs').value.split(',').map(x => x.trim()).filter(Boolean), logs: document.getElementById('wbKeyLogs').checked };
   const res = await api('/admin/wallboard-keys', { method: 'POST', body: JSON.stringify(body) }); const d = await res.json().catch(() => ({}));
   if (!res.ok) return toast(d.error || 'Could not create the link', 'error');
   const box = document.getElementById('wbKeyNew'); box.style.display = '';
   box.innerHTML = `<div class="mm-field-hint" style="margin-top:10px">Link for <b>${esc(name)}</b> — shown once; copy it now and open it on the screen. Opening it stores a cookie on that browser, so the screen keeps working after a reboot.</div>
     <div style="display:flex;gap:8px;align-items:center;margin-top:6px"><input class="mm-input" readonly value="${esc(d.url)}" style="font:400 12px var(--font-mono)" onclick="this.select()"><button class="btn btn-sm" data-copy="${esc(d.url)}" onclick="mmCopyFrom(this)">Copy</button></div>`;
-  document.getElementById('wbKeyName').value = ''; document.getElementById('wbKeyCidrs').value = '';
+  document.getElementById('wbKeyName').value = ''; document.getElementById('wbKeyCidrs').value = ''; document.getElementById('wbKeyLogs').checked = false;
   await wbLoadKeys();
 }
 async function wbRevokeKey(id, name) {

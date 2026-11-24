@@ -75,6 +75,12 @@
   .stat .v { font: 600 20px var(--font-display, inherit); margin-top: 2px; }
   .stat .s { font-size: 11px; color: var(--wb-dim); }
   .bigchart .spark { height: 120px; }
+  .logbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 16px 0 8px; font-size: 12.5px; color: var(--wb-dim); }
+  .logbar b { color: var(--wb-text, inherit); font-size: 13px; } .logbar #lgHead { flex: 1; min-width: 160px; }
+  .logbar select, .logbar input[type=search], .logbar button { height: 30px; padding: 0 8px; background: transparent; color: inherit; border: 1px solid var(--wb-line); font: inherit; }
+  .logbar button { cursor: pointer; } .logbar label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .loglines { margin: 0 0 16px; padding: 10px 12px; border: 1px solid var(--wb-line); font: 400 11.5px/1.55 var(--font-mono, monospace); white-space: pre-wrap; word-break: break-word; max-height: 42vh; overflow: auto; }
+  .loglines .ts { color: var(--wb-dim); } .loglines .cn { color: #5FB0EA; } .loglines .wn { color: #F2C14E; }
   table.hist { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   .hist th { text-align: left; font: 500 10.5px var(--font-mono, monospace); letter-spacing: .5px; text-transform: uppercase; color: var(--wb-dim); padding: 6px 8px; border-bottom: 1px solid var(--wb-line); }
   .hist td { padding: 7px 8px; border-bottom: 1px solid var(--wb-line); vertical-align: top; }
@@ -138,6 +144,7 @@
       <div class="bigchart" id="dChart"></div>
       <div id="dPeek" style="display:none"></div>
       <div id="dContainers" style="display:none"></div>
+      <div id="dLogs" style="display:none"></div>
       <table class="hist"><thead><tr><th>Time</th><th>Result</th><th>Value</th><th>Took</th><th>Detail</th></tr></thead><tbody id="dRows"></tbody></table>
     </div>
   </div>
@@ -203,7 +210,7 @@
       const crit = m.criticalContainers || [], watched = crit.length ? r.containers.filter(c => crit.includes(c.name)) : r.containers;
       const down = watched.filter(c => c.status !== 'running' || c.health === 'unhealthy').length + crit.filter(n => !r.containers.some(c => c.name === n)).length;
       const disk = r.host.disks.length ? Math.max(...r.host.disks.map(d => d.pct)) : null;
-      return { big: down, unit: (crit.length ? 'critical ' : '') + (down === 1 ? 'container down' : 'containers down'), aux: [crit.length ? crit.length + ' critical of ' + r.containers.length : r.containers.length + ' containers', disk !== null ? 'disk ' + disk + '%' : '', r.host.memPct !== null ? 'mem ' + r.host.memPct + '%' : '', (r.containers.reduce((a, c) => a + c.errorsInWindow, 0) || '') && r.containers.reduce((a, c) => a + c.errorsInWindow, 0) + ' errors'].filter(Boolean).join(' · ') };
+      return { big: down, unit: (crit.length ? 'critical ' : '') + (down === 1 ? 'container down' : 'containers down'), aux: [crit.length ? crit.length + ' critical of ' + r.containers.length : r.containers.length + ' containers', r.host.cpuPct != null ? 'cpu ' + Math.round(r.host.cpuPct) + '%' : '', r.host.memPct !== null ? 'mem ' + Math.round(r.host.memPct) + '%' : '', disk !== null ? 'disk ' + Math.round(disk) + '%' : '', (r.containers.reduce((a, c) => a + c.errorsInWindow, 0) || '') && r.containers.reduce((a, c) => a + c.errorsInWindow, 0) + ' errors'].filter(Boolean).join(' · ') };
     }
     if (m.type === 'redis' && s.redis) {
       const r = s.redis;
@@ -254,18 +261,52 @@
         stat('Containers', sv.containers.length, sv.containers.filter(c => c.status === 'running').length + ' running') +
         stat('Host memory', sv.host.memPct !== null ? sv.host.memPct + '%' : '—', sv.host.memTotal ? 'of ' + bytes(sv.host.memTotal) : '') +
         stat('Disk', worst ? worst.pct + '%' : '—', worst ? esc(worst.mount) + ' · ' + bytes(worst.used) + ' of ' + bytes(worst.total) : '') +
-        stat('Load', sv.host.load1 != null ? sv.host.load1.toFixed(2) : '—', sv.host.uptimeSec ? 'up ' + Math.floor(sv.host.uptimeSec / 86400) + 'd' : '');
+        stat('Host CPU', sv.host.cpuPct != null ? sv.host.cpuPct + '%' : (sv.host.load1 != null ? 'load ' + sv.host.load1.toFixed(2) : '—'), [sv.host.cpuPct != null && sv.host.load1 != null ? 'load ' + sv.host.load1.toFixed(2) : '', sv.host.uptimeSec ? 'up ' + Math.floor(sv.host.uptimeSec / 86400) + 'd' : ''].filter(Boolean).join(' · '));
       cBox.style.display = '';
       cBox.innerHTML = `<table class="hist ctr"><thead><tr><th>Container</th><th>State</th><th>Restarts</th><th>CPU</th><th>RAM</th><th>Errors</th><th>Last error</th></tr></thead><tbody>` +
         [...sv.containers].sort((a, b) => ((m.criticalContainers || []).includes(b.name) - (m.criticalContainers || []).includes(a.name)) || a.name.localeCompare(b.name)).map(c => { const crit = (m.criticalContainers || []); const isCrit = crit.includes(c.name); const bad = (c.status !== 'running' || c.health === 'unhealthy') && (isCrit || !crit.length);
           return `<tr class="${bad ? 'f' : ''}"${!isCrit && crit.length ? ' style="opacity:.55"' : ''}><td>${esc(c.name)}${isCrit ? ' <span style="font-size:10px;letter-spacing:.4px;color:#5FB0EA">CRITICAL</span>' : ''}<div class="dim">${esc(c.image)}</div></td><td><span class="badge ${bad ? 'al' : 'ok'}">${esc(c.status)}${c.health ? ' · ' + esc(c.health) : ''}</span></td><td class="mono">${c.restartCount}</td><td class="mono">${c.cpuPct != null ? c.cpuPct + '%' : '—'}</td><td class="mono">${c.memBytes != null ? bytes(c.memBytes) : '—'}</td><td class="mono" style="color:${c.errorsInWindow ? 'var(--wb-al)' : 'inherit'}">${c.errorsInWindow}</td><td class="d" title="${esc(c.lastError?.line || '')}">${c.lastError ? esc(c.lastError.line.slice(0, 100)) : '—'}</td></tr>`; }).join('') + '</tbody></table>';
     } else { cBox.style.display = 'none'; cBox.innerHTML = ''; }
+    logsBlock(m);
     document.getElementById('dChart').innerHTML = spark(h, al ? 'var(--wb-al)' : 'var(--wb-ok)', 900, 120);
     document.getElementById('dRows').innerHTML = h.length ? [...h].reverse().map(x => `<tr class="${x.ok ? '' : 'f'}"><td class="mono">${new Date(x.at).toLocaleString()}</td><td><span class="badge ${x.ok ? 'ok' : 'al'}">${x.ok ? 'OK' : 'FAIL'}</span></td><td class="mono">${typeof x.value === 'number' ? fmt(x.value, unit) : '—'}</td><td class="mono">${typeof x.ms === 'number' ? x.ms + ' ms' : '—'}</td><td class="d" title="${esc(x.error || '')}">${x.error ? esc(x.error) : '<span style="color:var(--wb-dim)">healthy</span>'}</td></tr>`).join('')
       : '<tr><td colspan="5" style="text-align:center;color:var(--wb-dim);padding:20px">No checks recorded yet.</td></tr>';
     document.getElementById('ov').classList.add('on');
   }
-  function closeDetail() { document.getElementById('ov').classList.remove('on'); OPEN = null; const p = document.getElementById('dPeek'); p.style.display = 'none'; p.innerHTML = ''; }
+  // ── Container logs (admins, or a share link created with "logs") ──
+  let LOGS_FOR = null, LOG_ROWS = [];
+  function logsBlock(m) {
+    const box = document.getElementById('dLogs');
+    if (!window.WB_LOGS || m.type !== 'server' || !m.status?.server) { box.style.display = 'none'; box.innerHTML = ''; LOGS_FOR = null; return; }
+    if (LOGS_FOR === m.name) return; // the board refreshes every few seconds: keep the lines and filters
+    LOGS_FOR = m.name; LOG_ROWS = [];
+    const names = [...new Set(m.status.server.containers.map(c => c.name))].sort();
+    box.style.display = '';
+    box.innerHTML = `<div class="logbar"><b>Logs</b><span id="lgHead">Loading…</span>
+      <select id="lgCtr" onchange="loadLogs()" aria-label="Container"><option value="">All containers</option>${names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select>
+      <input id="lgQ" type="search" placeholder="Filter lines…" oninput="renderLogs()" aria-label="Filter lines">
+      <label><input type="checkbox" id="lgErr" onchange="renderLogs()"> Errors only</label>
+      <button type="button" onclick="loadLogs()">Refresh</button></div><pre class="loglines" id="lgOut"></pre>`;
+    loadLogs();
+  }
+  async function loadLogs() {
+    const name = LOGS_FOR; if (!name) return;
+    const c = document.getElementById('lgCtr').value;
+    let d = {}, ok = false;
+    try { const r = await fetch('/wallboard/logs?monitor=' + encodeURIComponent(name) + (c ? '&container=' + encodeURIComponent(c) : ''), { credentials: 'same-origin' }); ok = r.ok; d = await r.json(); } catch {}
+    if (LOGS_FOR !== name) return;
+    if (!ok) { document.getElementById('lgHead').textContent = d.error || 'Could not load the logs'; return; }
+    LOG_ROWS = d.errors || []; renderLogs();
+  }
+  function renderLogs() {
+    const out = document.getElementById('lgOut'); if (!out) return;
+    const q = document.getElementById('lgQ').value.trim().toLowerCase(), only = document.getElementById('lgErr').checked;
+    const rows = LOG_ROWS.filter(e => (!only || !e.warn) && (!q || e.line.toLowerCase().includes(q) || e.container.toLowerCase().includes(q)));
+    document.getElementById('lgHead').textContent = LOG_ROWS.length ? `${rows.length} of the last ${LOG_ROWS.length} error and warning lines, newest first` : 'No error or warning line yet.';
+    out.style.display = LOG_ROWS.length ? '' : 'none';
+    out.innerHTML = rows.map(e => `<span class="ts">${new Date(e.at).toLocaleString()}</span> <span class="cn">${esc(e.container)}</span> ${e.warn ? `<span class="wn">${esc(e.line)}</span>` : esc(e.line)}`).join('\n') || '<span class="ts">No line matches the filter.</span>';
+  }
+  function closeDetail() { LOGS_FOR = null; document.getElementById('dLogs').innerHTML = ''; document.getElementById('ov').classList.remove('on'); OPEN = null; const p = document.getElementById('dPeek'); p.style.display = 'none'; p.innerHTML = ''; }
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
   async function errorOp(op, all) {
     const m = LAST.find(x => x.name === OPEN); if (!m) return;
