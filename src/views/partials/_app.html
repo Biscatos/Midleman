@@ -1256,6 +1256,11 @@
             <div id="tunAllowQuick" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"></div>
             <div class="mm-field-hint">IPv4 addresses or networks that may connect, comma separated. Empty = only Midleman itself (<code>127.0.0.1</code>); the port is not reachable from the network.</div>
           </div>
+          <div>
+            <label class="mm-label" for="tunHostname">Internal name <span style="color:var(--text3);font-weight:400">— optional, web apps only</span></label>
+            <input class="mm-input" id="tunHostname" type="text" maxlength="253" placeholder="rabbit.apps.example.local" autocomplete="off" spellcheck="false">
+            <div class="mm-field-hint">A DNS name that opens this app without a port. Midleman creates the host in Nginx Proxy Manager; the company DNS must point the name (or a wildcard such as <code>*.apps.example.local</code>) at NPM. Visitors then arrive through NPM, so NPM's address must be in <b>Allowed from</b>.</div>
+          </div>
           <div><label class="mm-label">Description</label><input class="mm-input" id="tunDescription" type="text" maxlength="200" placeholder="What this tunnel is for"></div>
         </div>
         <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">

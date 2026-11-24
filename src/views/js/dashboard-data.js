@@ -13600,7 +13600,7 @@ function renderTunnels() {
 
     return `<tr class="wh-row tn-row">
   <td class="wh-dotcol"><i class="wh-state ${state}"></i></td>
-  <td><div class="oc-name">${_tunIconHtml(t)}<div><div class="wh-name">${n}</div><div class="wh-sub">${sub}</div></div></div></td>
+  <td><div class="oc-name">${_tunIconHtml(t)}<div><div class="wh-name">${n}</div><div class="wh-sub">${t.hostname ? `<a href="http://${esc(t.hostname)}" target="_blank" rel="noopener" title="Internal name, served through Nginx Proxy Manager">${esc(t.hostname)}</a> · ` : ''}${sub}</div></div></div></td>
   <td>${chain}${problem}</td>
   <td><button type="button" class="tn-spark-btn" onclick="openTunnelActivity('${n}')" title="Open the connection history" aria-label="Connection history of ${n}">${spark}</button></td>
   <td class="wh-rate" title="${t.total} since Midleman started">${t.active} <span class="wh-none">/ ${t.maxConnections}</span></td>
@@ -13713,6 +13713,7 @@ function openTunnelModal(name) {
   g('tunAllowedIps').value = (t?.allowedIps || []).join(', ');
   tunAllowQuick();
   g('tunDescription').value = t?.description || '';
+  g('tunHostname').value = t?.hostname || '';
   g('tunPortHint').innerHTML = `Empty port = first free one from <code>${_tunPortStart}</code>. It must be a port the Midleman container publishes (the compose file publishes <code>4000-4050</code>).`;
   g('tunnelModal').style.display = 'flex';
   setTimeout(() => g(t ? 'tunHost' : 'tunName').focus(), 30);
@@ -13782,10 +13783,11 @@ function closeTunnelModal() { document.getElementById('tunnelModal').style.displ
 
 async function saveTunnel() {
   const v = id => document.getElementById(id).value.trim();
-  const body = { name: v('tunName'), agent: v('tunAgent'), host: v('tunHost'), port: Number(v('tunPort')), listenPort: v('tunListenPort') ? Number(v('tunListenPort')) : '', maxConnections: v('tunMax') ? Number(v('tunMax')) : '', enabled: document.getElementById('tunEnabled').checked, allowedIps: v('tunAllowedIps'), description: v('tunDescription') };
+  const body = { name: v('tunName'), agent: v('tunAgent'), host: v('tunHost'), port: Number(v('tunPort')), listenPort: v('tunListenPort') ? Number(v('tunListenPort')) : '', maxConnections: v('tunMax') ? Number(v('tunMax')) : '', enabled: document.getElementById('tunEnabled').checked, allowedIps: v('tunAllowedIps'), description: v('tunDescription'), hostname: v('tunHostname').toLowerCase() };
   const res = await api('/admin/tunnels' + (_tunEditing ? '/' + encodeURIComponent(_tunEditing.name) : ''), { method: _tunEditing ? 'PUT' : 'POST', body: JSON.stringify(body) });
   if (!res.ok) { toast(await _tunErr(res, 'Could not save the tunnel'), 'error'); return; }
-  const t = (await res.json()).tunnel;
-  toast(`Tunnel "${t.name}" saved — listening on port ${t.listenPort}`);
+  const saved = await res.json(), t = saved.tunnel;
+  if (saved.warning) toast(saved.warning, 'error');
+  else toast(`Tunnel "${t.name}" saved — listening on port ${t.listenPort}${t.hostname ? ', name ' + t.hostname : ''}`);
   closeTunnelModal();
 }

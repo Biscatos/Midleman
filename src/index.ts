@@ -67,6 +67,7 @@ import { resolveClientIp, getTrustProxyConfig } from './core/ip-filter';
 import { getTraffic24h, getOverviewTraffic } from './telemetry/request-log';
 import { journalClose } from './servers/delivery-journal';
 import { auditChanges, auditSnapshot } from './core/audit-diff';
+import { syncTunnelHost } from './npm/tunnel-host';
 import { initReportFeeds, handleReportRequest } from './reports/server';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import QRCode from 'qrcode';
@@ -5038,7 +5039,9 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         if (existing && !tm[2] && req.method === 'DELETE') {
                             const users = config.webhooks.filter(w => w.targets.some(t => typeof t !== 'string' && t.tunnel === existing.name)).map(w => w.name);
                             if (users.length) return jsonRes(409, { error: `Tunnel "${existing.name}" receives deliveries from webhook(s): ${users.join(', ')} — remove those destinations first` });
-                            deleteTunnel(existing.name); audit('tunnel.delete', existing); return jsonRes(200, { status: 'deleted' });
+                            deleteTunnel(existing.name); audit('tunnel.delete', existing);
+                            const warning = await syncTunnelHost(null, existing);
+                            return jsonRes(200, { status: 'deleted', ...(warning ? { warning } : {}) });
                         }
                         if (!tm[2] && ((!existing && req.method === 'POST') || (existing && req.method === 'PUT'))) {
                             let body: any;
@@ -5050,7 +5053,10 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             try {
                                 const t = saveTunnel(input, existing, me?.username);
                                 audit(existing ? 'tunnel.update' : 'tunnel.create', t, existing);
-                                return jsonRes(200, { status: existing ? 'updated' : 'created', tunnel: listTunnels().find(x => x.name === t.name) });
+                                // Only a save that touches the name or the port needs NPM; the on/off switch does not.
+                                const routeChanged = !existing || existing.hostname !== t.hostname || existing.listenPort !== t.listenPort || existing.port !== t.port || (!!t.hostname && !t.npmProxyHostId);
+                                const warning = routeChanged ? await syncTunnelHost(t, existing) : null;
+                                return jsonRes(200, { status: existing ? 'updated' : 'created', tunnel: listTunnels().find(x => x.name === t.name), ...(warning ? { warning } : {}) });
                             } catch (e: any) { return jsonRes(400, { error: e?.message || 'Invalid tunnel' }); }
                         }
                         return jsonRes(405, { error: 'Method not allowed' });
