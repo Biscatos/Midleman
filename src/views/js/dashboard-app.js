@@ -1,3 +1,8 @@
+// Small screens shrink the whole UI with CSS zoom (dashboard.css). Window, pointer and
+// getBoundingClientRect values are in screen px; style px are zoomed. Divide before placing a popup.
+function uiZoom() { return parseFloat(getComputedStyle(document.documentElement).zoom) || 1; }
+function uiRect(el) { const z = uiZoom(), r = el.getBoundingClientRect(); return { left: r.left / z, top: r.top / z, right: r.right / z, bottom: r.bottom / z, width: r.width / z, height: r.height / z }; }
+
 // ─── State ───────────────────────────────────────────────────────────────────
 const THEME_KEY = 'midleman_theme';
 const SIDEBAR_KEY = 'midleman_sidebar_collapsed';

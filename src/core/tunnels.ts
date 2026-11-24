@@ -13,7 +13,8 @@ import { resolve } from 'path';
 import type { TCPSocketListener } from 'bun';
 import { ipInCidrs } from './ssrf-guard';
 import { muxSocket, type MuxStream } from './tunnel-mux';
-import { openTunnelStream, probeTunnel, tunnelConnected } from './agent-tunnel';
+import { openTunnelStream, probeTunnel, tunnelConnected, tunnelLocalPort } from './agent-tunnel';
+import { discoverIcon } from '../auth/app-icon';
 import { getAllAssignedPorts, PORT_RANGE_START, setExternalPorts } from '../servers/port-manager';
 
 export interface Tunnel {
@@ -201,3 +202,35 @@ export function deleteTunnel(name: string): boolean {
 }
 
 export function testTunnel(t: Tunnel) { return probeTunnel(t.agent, t.host, t.port); }
+
+// ─── Service icon ───────────────────────────────────────────────────────────
+// A tunnelled web app's own icon (same discovery as OAuth clients), fetched through
+// the agent and served by Midleman — the browser cannot reach the service itself.
+
+/** Ports that never speak HTTP: an HTTP request there only pollutes the service's log (the list shows a built-in icon instead). */
+const NON_HTTP_PORTS = new Set([22, 25, 53, 1433, 1521, 2181, 3306, 3389, 5432, 5671, 5672, 5900, 6379, 6380, 9042, 9092, 11211, 27017]);
+const ICON_OK_TTL = 6 * 3600_000, ICON_FAIL_TTL = 10 * 60_000, ICON_MAX_BYTES = 512_000;
+const iconCache = new Map<string, { at: number; icon: { type: string; body: Uint8Array } | null }>();
+
+export async function tunnelIcon(t: Tunnel): Promise<{ type: string; body: Uint8Array } | null> {
+    if (!t.enabled || NON_HTTP_PORTS.has(t.port) || !tunnelConnected(t.agent)) return null;
+    const key = `${t.agent.toLowerCase()}|${t.host}:${t.port}`;
+    const hit = iconCache.get(key);
+    if (hit && Date.now() - hit.at < (hit.icon ? ICON_OK_TTL : ICON_FAIL_TTL)) return hit.icon;
+    let icon: { type: string; body: Uint8Array } | null = null;
+    try {
+        const origin = `http://127.0.0.1:${await tunnelLocalPort(t.agent, t.host, t.port)}`;
+        const found = await discoverIcon(origin);
+        // Same-origin icons only: a page may declare an icon on any host, and this fetch runs inside the agent's network.
+        if (found.ok && found.url.startsWith(origin + '/')) {
+            const res = await fetch(found.url, { redirect: 'manual', signal: AbortSignal.timeout(5000) });
+            const type = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+            const body = new Uint8Array(await res.arrayBuffer());
+            if (res.ok && body.length > 0 && body.length <= ICON_MAX_BYTES && (type.startsWith('image/') || type === 'application/octet-stream')) {
+                icon = { type: type.startsWith('image/') ? type : 'image/x-icon', body };
+            }
+        }
+    } catch { /* not a web app, or unreachable: no icon */ }
+    iconCache.set(key, { at: Date.now(), icon });
+    return icon;
+}

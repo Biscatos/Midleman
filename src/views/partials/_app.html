@@ -73,12 +73,6 @@
         <span class="sidebar-link-label">Tunnels</span>
         <span class="sidebar-badge" id="navTunnelBadge">0</span>
       </button>
-      <button class="sidebar-link" data-page="apikeys" data-tooltip="API Keys" onclick="navigate('apikeys')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="8" cy="15" r="4"/><path d="M11 12l9-9"/><path d="M16 7l3 3"/>
-        </svg>
-        <span class="sidebar-link-label">API Keys</span>
-      </button>
       <button class="sidebar-link" data-page="webhooks" data-tooltip="Webhooks" onclick="navigate('webhooks')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="6" cy="6" r="2"/>
@@ -114,6 +108,12 @@
         </svg>
         <span class="sidebar-link-label">OAuth Clients</span>
         <span class="sidebar-badge" id="navOauthBadge">0</span>
+      </button>
+      <button class="sidebar-link" data-page="apikeys" data-tooltip="API Keys" onclick="navigate('apikeys')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8" cy="15" r="4"/><path d="M11 12l9-9"/><path d="M16 7l3 3"/>
+        </svg>
+        <span class="sidebar-link-label">API Keys</span>
       </button>
       <button class="sidebar-link" data-page="consentpages" data-tooltip="OAuth consent pages" onclick="navigate('consentpages')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -775,7 +775,7 @@
         <div style="padding:14px 22px 0;display:grid;grid-template-columns:repeat(4,1fr);gap:10px" id="mdStats"></div>
         <div style="padding:12px 22px 0"><div id="mdChart"></div></div>
         <div id="mdPeek" style="display:none;padding:12px 22px 0"></div>
-        <div id="mdContainers" style="display:none;padding:12px 22px 0"></div>
+        <div id="mdContainers" style="display:none;padding:12px 22px 18px;overflow:auto;min-height:0"></div>
         <div style="padding:12px 22px 18px;overflow:auto;min-height:0" id="mdHistoryWrap">
           <table class="md-table"><thead><tr><th>Time</th><th>Result</th><th>Value</th><th>Took</th><th>Detail</th></tr></thead><tbody id="mdRows"></tbody></table>
         </div>
@@ -1132,7 +1132,7 @@
     </div>
 
     <!-- ═══ API KEY MODAL ═══ -->
-    <div id="apiKeyModal" role="dialog" aria-modal="true" aria-labelledby="akModalTitle" style="display:none;position:fixed;inset:0;z-index:210;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+    <div id="apiKeyModal" role="dialog" aria-modal="true" aria-labelledby="akModalTitle" style="display:none;position:fixed;inset:0;z-index:1300;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
       <div class="mm-dialog" style="max-width:620px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column;max-height:92vh">
         <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px">
           <div style="flex:1;min-width:0">
@@ -1144,11 +1144,14 @@
         <!-- Step 1: the form -->
         <div id="akFormView" style="padding:16px 22px;display:flex;flex-direction:column;gap:14px;overflow-y:auto">
           <div><label class="mm-label" for="akName">Name *</label><input class="mm-input" id="akName" type="text" maxlength="80" placeholder="Partner name" autocomplete="off" spellcheck="false"></div>
-          <div class="mm-group">
-            <div class="mm-group-title">Access</div>
-            <div id="akScopes" style="display:grid;grid-template-columns:1fr 1fr;gap:16px"></div>
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline"><label class="mm-label" for="akFilter">Access</label><span id="akCount" aria-live="polite" style="font-size:11px;color:var(--text3)"></span></div>
+            <div class="ak-picker">
+              <label class="mm-search ak-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input class="mm-input" type="text" id="akFilter" placeholder="Search proxies and webhooks" oninput="akFilterScopes()" autocomplete="off" spellcheck="false"></label>
+              <div id="akScopes" class="ak-list"></div>
+            </div>
+            <div class="mm-field-hint">Proxies only check keys in "Access Key" auth mode. A webhook without a token starts requiring one as soon as a key is assigned to it.</div>
           </div>
-          <div class="mm-field-hint">Proxies only check keys in "Access Key" auth mode. A webhook without a token starts requiring one as soon as a key is assigned to it.</div>
         </div>
         <!-- Step 2: the secret, shown once -->
         <div id="akSecretView" style="display:none;padding:16px 22px;flex-direction:column;gap:12px;overflow-y:auto">
@@ -3181,6 +3184,24 @@
                 <option value="ldap.config.test">ldap.config.test</option>
                 <option value="profile.create">profile.create</option>
                 <option value="profile.update">profile.update</option>
+                <option value="webhook.create">webhook.create</option>
+                <option value="webhook.update">webhook.update</option>
+                <option value="webhook.delete">webhook.delete</option>
+                <option value="connector.create">connector.create</option>
+                <option value="connector.update">connector.update</option>
+                <option value="connector.delete">connector.delete</option>
+                <option value="five9_connector.create">five9_connector.create</option>
+                <option value="five9_connector.update">five9_connector.update</option>
+                <option value="five9_connector.delete">five9_connector.delete</option>
+                <option value="tcpudp.create">tcpudp.create</option>
+                <option value="tcpudp.update">tcpudp.update</option>
+                <option value="tcpudp.delete">tcpudp.delete</option>
+                <option value="tunnel.create">tunnel.create</option>
+                <option value="tunnel.update">tunnel.update</option>
+                <option value="tunnel.delete">tunnel.delete</option>
+                <option value="monitor.create">monitor.create</option>
+                <option value="monitor.update">monitor.update</option>
+                <option value="monitor.delete">monitor.delete</option>
                 <option value="profile.delete">profile.delete</option>
                 <option value="proxy_user.create">proxy_user.create</option>
                 <option value="proxy_user.delete">proxy_user.delete</option>
@@ -3439,12 +3460,12 @@
 
 <!-- Audit detail modal -->
 <div id="auditDetailModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
-  <div class="mm-dialog" style="max-width:560px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+  <div class="mm-dialog" style="max-width:760px;width:100%;max-height:calc(100vh - 48px);display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
     <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
       <h3 style="margin:0;font-size:15px">Audit entry</h3>
       <button onclick="closeAuditDetail()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">&times;</button>
     </div>
-    <div style="padding:22px" id="auditDetailBody"></div>
+    <div style="padding:22px;overflow:auto" id="auditDetailBody"></div>
   </div>
 </div>
 
@@ -3568,13 +3589,11 @@
           </div>
         </div>
         <div class="form-group span-2"><label
-            style="display:flex;justify-content:space-between;align-items:baseline">Incoming Auth Token (optional)<span style="display:flex;gap:12px"><a
+            style="display:flex;justify-content:space-between;align-items:baseline">API Keys<a
               href="javascript:void(0)" onclick="openApiKeyModal(null, 'webhook:' + document.getElementById('wName').value.trim())"
               title="Create a key for a partner without replacing this one"
-              style="font-size:11px;font-weight:400;color:var(--accent)">+ shared API key</a><a
-              href="javascript:void(0)" onclick="generateKey('wAuthToken')"
-              style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></span></label><input type="text"
-            id="wAuthToken" placeholder="Leave empty for public access"></div>
+              style="font-size:11px;font-weight:400;color:var(--accent)">+ shared API key</a></label>
+          <div id="wSharedKeys"></div></div>
         <div class="form-group span-2 mm-group" style="margin:0">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
             <div><div class="mm-group-title" style="margin:0">Meta Cloud API (WhatsApp)</div><div style="font-size:12px;color:var(--text2);margin-top:2px">One app-level callback for all your customers' numbers, routed per phone number and event — Tech Provider style.</div></div>
@@ -4630,13 +4649,11 @@
           </select>
         </div>
         <div class="form-group" id="pAccessKeyGroup" style="display:none"><label
-            style="display:flex;justify-content:space-between;align-items:baseline">Access Key<span style="display:flex;gap:12px"><a
+            style="display:flex;justify-content:space-between;align-items:baseline">API Keys<a
               href="javascript:void(0)" onclick="openApiKeyModal(null, 'proxy:' + document.getElementById('pName').value.trim())"
               title="Create a key for a partner without replacing this one"
-              style="font-size:11px;font-weight:400;color:var(--accent)">+ shared API key</a><a
-              href="javascript:void(0)" onclick="generateKey('pAccessKey')"
-              style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></span></label><input class="wz-input" type="text"
-            id="pAccessKey" placeholder="Optional">
+              style="font-size:11px;font-weight:400;color:var(--accent)">+ shared API key</a></label>
+          <div id="pSharedKeys"></div>
         </div>
         <div class="form-group" id="pRequire2faGroup" style="display:none">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
@@ -4716,6 +4733,27 @@
             </div>
           </div>
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Requests over the limit get a 429 response. Unchecked "per client IP" means the limit is a single shared budget for the whole proxy.</span>
+        </div>
+        <div class="form-group span-2">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input class="wz-input mm-switch" type="checkbox" id="pRetryEnabled" onchange="toggleRetryQueueFields()" style="cursor:pointer;">
+            <span>Retry queue</span>
+          </label>
+          <div id="pRetryFields" style="display:none;margin-top:10px;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:end">
+            <div>
+              <label class="wz-label" for="pRetryPerMin" style="font-size:11.5px;color:var(--text3)">Attempts per minute</label>
+              <input class="wz-input" type="number" id="pRetryPerMin" min="1" max="600" step="1" placeholder="10">
+            </div>
+            <div>
+              <label class="wz-label" for="pRetryNotifyAfter" style="font-size:11.5px;color:var(--text3)">Alert after failed attempts</label>
+              <input class="wz-input" type="number" id="pRetryNotifyAfter" min="1" max="600" step="1" placeholder="10">
+            </div>
+            <div>
+              <label class="wz-label" for="pRetryNotifyEmail" style="font-size:11.5px;color:var(--text3)">Alert email (optional)</label>
+              <input class="wz-input" type="email" id="pRetryNotifyEmail" placeholder="ops@example.com">
+            </div>
+          </div>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">When the upstream answers, the caller always gets that answer. When it cannot be reached (or answers 502, 503, 504), a POST, PUT, PATCH or DELETE is answered <code>202 queued</code> and Midleman keeps delivering it until it succeeds. An upstream that then refuses it with a 4xx moves it to the failed list. GET requests and bodies above 256 KB are never queued.</span>
         </div>
         <div class="form-group span-2">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">

@@ -419,6 +419,8 @@ function enqueuePendingRetry(input: {
     bodyPreview: string | null; bodySize: number; path: string; clientIp: string;
     retryConfig: WebhookRetryConfig | undefined; persistentRetry: WebhookPersistentRetry;
     lastError: string; initialAttempts: number;
+    /** Never merge with an identical entry: two equal proxy requests are two operations, not a duplicate. */
+    noMerge?: boolean;
 }) {
     const now = Date.now();
     // Cap body size identically to the DLQ to avoid disk bloat
@@ -429,7 +431,7 @@ function enqueuePendingRetry(input: {
         body = body.slice(0, DLQ_MAX_BODY_SIZE);
     }
     const fp = pendingFingerprint({ webhookName: input.webhookName, targetUrl: input.targetUrl, method: input.method, body });
-    const same = pendingRetryQueue.find(e => !e.cancelled && pendingFingerprint(e) === fp);
+    const same = input.noMerge ? undefined : pendingRetryQueue.find(e => !e.cancelled && pendingFingerprint(e) === fp);
     if (same) {
         // Same payload to the same destination is already being retried: keep
         // one entry and only record that it happened again.
@@ -522,6 +524,28 @@ async function sendPendingNotification(entry: PendingRetry, kind: 'failure' | 'r
     }
 }
 
+/** Producer name of a proxy's entries in the retry queue and the failed list. */
+export const proxyQueueName = (profile: string) => `proxy:${profile}`;
+
+/**
+ * Queue a request a proxy could not deliver. It is replayed against the proxy's own port, so the
+ * upstream credentials are injected at send time and never stored. False = not queued (proxy not reachable).
+ */
+export function enqueueProxyRetry(input: {
+    profile: string; path: string; method: string; headers: Record<string, string>; body: ArrayBuffer;
+    requestId: string; clientIp: string; persistentRetry: WebhookPersistentRetry; lastError: string;
+}): boolean {
+    const svc = internalServices?.resolve('proxy', input.profile);
+    if (!svc || 'error' in svc) return false;
+    enqueuePendingRetry({
+        webhookName: proxyQueueName(input.profile), requestId: input.requestId,
+        targetUrl: `http://127.0.0.1:${svc.port}${input.path}`, method: input.method, headers: input.headers,
+        body: input.body, bodyPreview: null, bodySize: input.body.byteLength, path: input.path, clientIp: input.clientIp,
+        retryConfig: undefined, persistentRetry: input.persistentRetry, lastError: input.lastError, initialAttempts: 1, noMerge: true,
+    });
+    return true;
+}
+
 async function attemptPendingRetry(entry: PendingRetry): Promise<void> {
     if (entry.running) return;
     entry.running = true;
@@ -552,6 +576,17 @@ async function attemptPendingRetry(entry: PendingRetry): Promise<void> {
             return;
         }
         entry.lastError = `HTTP ${res.status}`;
+        // A proxy's upstream that answers 4xx has received the request and refused it: retrying cannot
+        // help. Park it in the failed list for a person to look at (408 and 429 are worth another try).
+        if (entry.webhookName.startsWith('proxy:') && res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+            enqueueFailedFanout({
+                webhookName: entry.webhookName, requestId: entry.requestId, targetUrl: entry.targetUrl, method: entry.method,
+                headers: entry.headers, body: entry.body, bodyPreview: entry.bodyPreview, bodySize: entry.bodySize, path: entry.path,
+                clientIp: entry.clientIp, retryConfig: undefined, lastError: entry.lastError, totalAttempts: entry.attempts,
+            });
+            dismissPendingRetry(entry.id);
+            return;
+        }
     } catch (err) {
         entry.attempts += 1;
         entry.lastAttemptAt = Date.now();
@@ -1560,7 +1595,7 @@ export function startWebhookServer(webhook: WebhookDistributor): WebhookServer {
                 console.error(`❌ [webhook:${webhook.name}] Error:`, error);
                 return jsonResponse(500, {
                     error: 'Internal Server Error',
-                    message: error instanceof Error ? error.message : 'Unknown error',
+                    message: 'The request could not be processed.', // details stay in the server log
                 });
             } finally {
                 ws.activeRequests--;

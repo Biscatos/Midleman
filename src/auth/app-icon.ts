@@ -174,3 +174,6 @@ export function prefetchAppIcon(redirectUris: string[]): void {
         cache.delete(origin); void resolveOrigin(origin);
     }
 }
+
+/** Icon discovery for one origin, uncached — for callers that proxy the icon themselves (tunnels). */
+export { discover as discoverIcon };

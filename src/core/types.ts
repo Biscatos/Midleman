@@ -29,6 +29,8 @@ export interface ProxyProfile {
   allowSelfSignedTls?: boolean; // If true, skip TLS certificate validation for this upstream (for internal services)
   supabaseMode?: boolean; // If true (with authMode='login'): keeps the static apiKey header (Supabase anon key) AND adds Authorization: Bearer <userJwt> from the login cookie, so Supabase RLS sees the authenticated user.
   rateLimit?: ProxyRateLimitConfig; // Optional cap on requests forwarded to the upstream
+  /** Store-and-retry: a write request the upstream could not take is answered 202 and delivered later by Midleman. */
+  retryQueue?: WebhookPersistentRetry;
   cors?: import('./cors').ProxyCorsConfig; // Optional CORS policy enforced by the proxy (preflight + response headers)
 
   // -- Nginx Proxy Manager integration (optional addon) --

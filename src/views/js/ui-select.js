@@ -166,11 +166,11 @@
 
   function place() {
     if (!open) return;
-    const r = open.trigger.getBoundingClientRect();
+    const r = uiRect(open.trigger), z = uiZoom();
     const p = open.panel;
     p.style.minWidth = Math.round(r.width) + 'px';
-    p.style.left = Math.round(Math.min(r.left, window.innerWidth - Math.max(r.width, p.offsetWidth) - 8)) + 'px';
-    const below = window.innerHeight - r.bottom - 8;
+    p.style.left = Math.round(Math.min(r.left, window.innerWidth / z - Math.max(r.width, p.offsetWidth) - 8)) + 'px';
+    const below = window.innerHeight / z - r.bottom - 8;
     const above = r.top - 8;
     const h = Math.min(p.scrollHeight, 320);
     if (below < h && above > below) {

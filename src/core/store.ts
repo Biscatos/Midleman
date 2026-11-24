@@ -25,6 +25,7 @@ interface StoredProfile {
     allowedIps?: string[];
     allowedPaths?: string[];
     rateLimit?: { requestsPerMinute: number; perIp?: boolean };
+    retryQueue?: { enabled: boolean; maxAttemptsPerMinute?: number; notifyEmail?: string; notifyAfterAttempts?: number };
     cors?: import('./cors').ProxyCorsConfig;
     port?: number;
     forwardPath?: boolean;
@@ -97,6 +98,7 @@ function toRuntime(stored: StoredProfile): ProxyProfile {
     if (stored.allowedIps && stored.allowedIps.length > 0) profile.allowedIps = stored.allowedIps;
     if (stored.allowedPaths && stored.allowedPaths.length > 0) profile.allowedPaths = stored.allowedPaths;
     if (stored.rateLimit && stored.rateLimit.requestsPerMinute > 0) profile.rateLimit = stored.rateLimit;
+    if (stored.retryQueue?.enabled) profile.retryQueue = stored.retryQueue;
     if (stored.cors && typeof stored.cors === 'object') profile.cors = stored.cors;
 
     if (stored.port !== undefined) profile.port = stored.port;
@@ -150,6 +152,7 @@ function toStored(profile: ProxyProfile): StoredProfile {
     if (profile.allowedIps && profile.allowedIps.length > 0) stored.allowedIps = profile.allowedIps;
     if (profile.allowedPaths && profile.allowedPaths.length > 0) stored.allowedPaths = profile.allowedPaths;
     if (profile.rateLimit && profile.rateLimit.requestsPerMinute > 0) stored.rateLimit = profile.rateLimit;
+    if (profile.retryQueue?.enabled) stored.retryQueue = profile.retryQueue;
     if (profile.cors) stored.cors = profile.cors;
 
     if (profile.port !== undefined) stored.port = profile.port;
@@ -318,6 +321,16 @@ export function validateProfileInput(input: unknown): string | null {
         }
     }
 
+    if (p.retryQueue !== undefined && p.retryQueue !== null) {
+        if (typeof p.retryQueue !== 'object' || Array.isArray(p.retryQueue)) return '"retryQueue" must be an object';
+        const rq = p.retryQueue as Record<string, unknown>;
+        if (typeof rq.enabled !== 'boolean') return '"retryQueue.enabled" must be a boolean';
+        for (const k of ['maxAttemptsPerMinute', 'notifyAfterAttempts']) {
+            if (rq[k] !== undefined && (typeof rq[k] !== 'number' || !Number.isInteger(rq[k]) || (rq[k] as number) < 1 || (rq[k] as number) > 600)) return `"retryQueue.${k}" must be a whole number between 1 and 600`;
+        }
+        if (rq.notifyEmail !== undefined && (typeof rq.notifyEmail !== 'string' || rq.notifyEmail.length > 254)) return '"retryQueue.notifyEmail" must be a string';
+        if (rq.enabled && p.authMode === 'login') return 'The retry queue cannot be used on a proxy that requires a user login';
+    }
     if (p.rateLimit !== undefined && p.rateLimit !== null) {
         if (typeof p.rateLimit !== 'object' || Array.isArray(p.rateLimit)) return '"rateLimit" must be an object';
         const rl = p.rateLimit as Record<string, unknown>;

@@ -70,6 +70,7 @@ export function cpuPct(prev: { cpu: number; sys: number } | undefined, cur: { cp
     return Math.round(1000 * (cur.cpu - prev.cpu) / (cur.sys - prev.sys) * cpus) / 10;
 }
 let lastReport = 0;
+let lastHostCpu: { cpu: number; sys: number } | undefined; // host counters of the previous report
 
 async function containerReport(c: any): Promise<any> {
     const id: string = c.Id, name: string = (c.Names?.[0] || c.Id).replace(/^\//, '');
@@ -128,6 +129,11 @@ async function hostReport(): Promise<any> {
         const total = kb('MemTotal'), avail = kb('MemAvailable');
         if (total) { host.memTotal = total * 1024; host.memPct = Math.round(1000 * (total - avail) / total) / 10; }
         host.load1 = Number((await Bun.file('/proc/loadavg').text()).split(' ')[0]);
+        // First line of /proc/stat: cumulative jiffies; idle and iowait are fields 4 and 5.
+        const j = (await Bun.file('/proc/stat').text()).split('\n')[0].trim().split(/\s+/).slice(1).map(Number);
+        const jiffies = j.reduce((a, b) => a + b, 0), cur = { cpu: jiffies - j[3] - (j[4] || 0), sys: jiffies };
+        host.cpuPct = cpuPct(lastHostCpu, cur, 1);
+        lastHostCpu = cur;
         host.uptimeSec = Math.floor(Number((await Bun.file('/proc/uptime').text()).split(' ')[0]));
     } catch {}
     try {
