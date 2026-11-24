@@ -160,6 +160,13 @@ async function startApp(username) {
     fetchTunnels();   // sidebar count
     appIntervals.push(setInterval(() => { if (currentPage === 'tunnels' && document.getElementById('tunnelModal').style.display === 'none') fetchTunnels(); }, 5000));
     appIntervals.push(setInterval(() => { if (currentPage === 'overview' || currentPage === 'monitors') fetchMonitors(); }, 15000));
+    // Live traffic columns of the list pages; a hidden browser tab costs the server nothing.
+    appIntervals.push(setInterval(() => {
+      if (document.hidden) return;
+      if (currentPage === 'profiles') { fetchProfiles(); fetchWebhooks(); } // webhooks: the retry-queue counts
+      else if (currentPage === 'webhooks') fetchWebhooks();
+      else if (currentPage === 'connectors') { fetchConnectors(); fetchFive9Connectors(); }
+    }, 10000));
     appIntervals.push(setInterval(() => {
       if (currentPage === 'requests' && document.getElementById('rlAutoRefresh').checked) fetchRequestLogs();
     }, 5000));

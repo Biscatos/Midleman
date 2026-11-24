@@ -313,6 +313,8 @@ function showContextMenu(e, btn) {
       authMode === 'accessKey' && p.hasAccessKey ? { label: 'Copy Key', fn: () => copyProfileCredential(p.name) } : null,
       authMode === 'login' ? { label: 'Manage Users', fn: () => openProxyUsersModal(p.name) } : null,
       { label: 'Restart', fn: () => restartProfileAction(p.name) },
+      p.retryQueue && p.retryQueue.enabled ? { label: `Retry queue (${_pendingByWebhook['proxy:' + p.name] || 0}) — view or cancel`, fn: () => openPendingRetryModal('proxy:' + p.name) } : null,
+      p.retryQueue && p.retryQueue.enabled ? { label: `Failed requests (${_dlqByWebhook['proxy:' + p.name] || 0})`, fn: () => openDlqModal('proxy:' + p.name) } : null,
       { label: 'Edit', fn: () => editProfile(p.name) },
       canLinkNpm ? { label: 'Link to NPM host…', fn: () => openLinkToNpmModal(p.name) } : null,
       '---',
@@ -1379,12 +1381,6 @@ async function copyProfileCredential(name) {
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
-async function reloadProfiles() {
-  try {
-    const res = await api('/admin/reload', { method: 'POST' }); const d = await res.json();
-    if (res.ok) { toast('Proxies reloaded: ' + (d.profiles || []).join(', ')); await fetchProfiles(); } else toast(d.error || 'Failed', 'error');
-  } catch (e) { toast('Error: ' + e.message, 'error'); }
-}
 async function restartProfileAction(name) {
   try { const res = await api('/admin/profiles/' + encodeURIComponent(name) + '/restart', { method: 'POST' }); if ((await res.json()).status) { toast('Proxy "' + name + '" restarted'); await fetchProfiles(); } } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -6906,13 +6902,13 @@ function renderAuditLogs(logs, total) {
         : (l.targetType || '') + (l.targetId ? ' #' + l.targetId : '');
       const failed = l.action.endsWith('.failed') || l.action.indexOf('error') !== -1;
       const actionStyle = failed ? 'color:var(--err-text);font-weight:500' : '';
-      return '<tr style="border-top:1px solid var(--border)">' +
+      return '<tr class="wh-row" style="border-top:1px solid var(--border);cursor:pointer" onclick="showAuditDetail(' + idx + ')">' +
         '<td style="padding:10px 12px;color:var(--text2);font-size:11.5px;white-space:nowrap">' + esc(when) + '</td>' +
         '<td style="padding:10px 8px;font-weight:500">' + esc(actor) + '</td>' +
         '<td style="padding:10px 8px;font-family:monospace;font-size:11.5px;' + actionStyle + '">' + esc(l.action) + '</td>' +
         '<td style="padding:10px 8px;color:var(--text2);font-size:11.5px">' + esc(target || '—') + '</td>' +
         '<td style="padding:10px 8px;color:var(--text3);font-size:11.5px;font-family:monospace">' + esc(l.ipAddress || '—') + '</td>' +
-        '<td style="padding:10px 12px;text-align:right"><button class="btn btn-sm btn-ghost" onclick="showAuditDetail(' + idx + ')">Details</button></td>' +
+        '<td style="padding:10px 12px;text-align:right"><button class="btn btn-sm btn-ghost">Details</button></td>' +
         '</tr>';
     }).join('');
   }
@@ -13597,16 +13593,19 @@ function renderTunnels() {
     const act = _tunActivity(t), max = Math.max(1, ...act);
     const spark = '<span class="wh-spark" aria-hidden="true">' + act.map(v => `<i style="height:${v ? Math.max(3, Math.round(v / max * 20)) : 1}px"${v ? '' : ' class="z"'}></i>`).join('') + '</span>';
     const cmd = _tunCommand(t);
+    // Web apps open in a new tab: by the internal name when there is one, else by Midleman's port.
+    const web = t.hostname ? 'http://' + t.hostname : /^https?:/.test(cmd) ? cmd : '';
 
     return `<tr class="wh-row tn-row">
   <td class="wh-dotcol"><i class="wh-state ${state}"></i></td>
-  <td><div class="oc-name">${_tunIconHtml(t)}<div><div class="wh-name">${n}</div><div class="wh-sub">${t.hostname ? `<a href="http://${esc(t.hostname)}" target="_blank" rel="noopener" title="Internal name, served through Nginx Proxy Manager">${esc(t.hostname)}</a> · ` : ''}${sub}</div></div></div></td>
+  <td><div class="oc-name">${_tunIconHtml(t)}<div><div class="wh-name">${web ? `<a href="${esc(web)}" target="_blank" rel="noopener" title="Open ${esc(web)}" style="color:inherit">${n}</a>` : n}</div><div class="wh-sub">${t.hostname ? `<a href="http://${esc(t.hostname)}" target="_blank" rel="noopener" title="Internal name, served through Nginx Proxy Manager">${esc(t.hostname)}</a> · ` : ''}${sub}</div></div></div></td>
   <td>${chain}${problem}</td>
   <td><button type="button" class="tn-spark-btn" onclick="openTunnelActivity('${n}')" title="Open the connection history" aria-label="Connection history of ${n}">${spark}</button></td>
   <td class="wh-rate" title="${t.total} since Midleman started">${t.active} <span class="wh-none">/ ${t.maxConnections}</span></td>
   <td class="wh-vol">${fmtBytes(t.bytesUp)} / ${fmtBytes(t.bytesDown)}</td>
   <td style="text-align:right;white-space:nowrap">
     <input type="checkbox" class="mm-switch" ${t.enabled ? 'checked' : ''} title="${t.enabled ? 'Enabled' : 'Disabled'}" aria-label="Enable ${n}" onchange="tunnelToggle('${n}', this)" style="margin-right:8px;vertical-align:middle">
+    ${web ? `<a class="btn btn-sm" href="${esc(web)}" target="_blank" rel="noopener" title="Open ${esc(web)} in a new tab" style="margin-right:6px;vertical-align:middle">Open</a>` : ''}
     <button type="button" class="wh-more tn-act" title="Test target" aria-label="Test target of ${n}" onclick="tunnelTest('${n}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></button>
     <button type="button" class="wh-more tn-act" title="Copy: ${esc(cmd)}" aria-label="Copy connect command for ${n}" onclick="mmCopy('${esc(cmd).replace(/'/g, '&#39;')}', this, 'Copied: ${esc(cmd).replace(/'/g, '&#39;')}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11"/><path d="M5 15V4h11"/></svg></button>
     <button class="wh-more" data-name="${n}" onclick="tunnelMenu(event, this)" aria-label="Actions for ${n}">⋮</button>

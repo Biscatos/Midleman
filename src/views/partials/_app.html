@@ -1184,7 +1184,6 @@
           <p>A Midleman port that reaches a service inside an agent's network — the remote server opens nothing. Use it from the LAN as if the service were local.</p>
         </div>
         <div style="display:flex;gap:8px">
-          <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchTunnels(); })">Reload</button>
           <button class="btn btn-primary btn-sm" onclick="openTunnelModal()">+ Tunnel</button>
         </div>
       </div>
@@ -1309,7 +1308,6 @@
             clients.</p>
         </div>
         <div style="display:flex;gap:8px">
-          <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await reloadProfiles(); })">Reload</button>
           <button class="btn btn-sm" onclick="openNpmImportModal()" id="npmImportBtn" style="display:none">Import from NPM</button>
           <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Loading…', async () => { await openProfileModal(); })">+ HTTP Proxy</button>
         </div>
