@@ -13602,7 +13602,7 @@ function renderTunnels() {
   <td class="wh-dotcol"><i class="wh-state ${state}"></i></td>
   <td><div class="oc-name">${_tunIconHtml(t)}<div><div class="wh-name">${n}</div><div class="wh-sub">${sub}</div></div></div></td>
   <td>${chain}${problem}</td>
-  <td title="${(t.recent || []).length} recent connections">${spark}</td>
+  <td><button type="button" class="tn-spark-btn" onclick="openTunnelActivity('${n}')" title="Open the connection history" aria-label="Connection history of ${n}">${spark}</button></td>
   <td class="wh-rate" title="${t.total} since Midleman started">${t.active} <span class="wh-none">/ ${t.maxConnections}</span></td>
   <td class="wh-vol">${fmtBytes(t.bytesUp)} / ${fmtBytes(t.bytesDown)}</td>
   <td style="text-align:right;white-space:nowrap">
@@ -13615,6 +13615,49 @@ function renderTunnels() {
   }).join('');
 }
 
+let _taName = null, _taRows = [], _taFilter = '';
+/** A tunnel's connection history in its own window (the edit form only edits). */
+function openTunnelActivity(name) {
+  _taName = name; _taRows = []; _taFilter = '';
+  document.getElementById('taSearch').value = '';
+  document.querySelectorAll('#taFilter button').forEach(b => b.classList.toggle('on', b.dataset.f === ''));
+  document.getElementById('taRows').innerHTML = '<tr><td colspan="6" style="color:var(--text3);text-align:center;padding:18px">Loading…</td></tr>';
+  document.getElementById('tunnelActivityModal').style.display = 'flex';
+  loadTunnelActivity();
+}
+function closeTunnelActivity() { document.getElementById('tunnelActivityModal').style.display = 'none'; _taName = null; }
+function taEdit() { const n = _taName; closeTunnelActivity(); openTunnelModal(n); }
+function taSetFilter(f) { _taFilter = f; document.querySelectorAll('#taFilter button').forEach(b => b.classList.toggle('on', b.dataset.f === f)); renderTunnelActivity(); }
+async function loadTunnelActivity() {
+  const name = _taName; if (!name) return;
+  const res = await api('/admin/tunnels/' + encodeURIComponent(name) + '/history');
+  const d = await res.json().catch(() => ({}));
+  if (_taName !== name) return;
+  if (!res.ok) { document.getElementById('taRows').innerHTML = `<tr><td colspan="6" class="md-peek-err" style="padding:14px">${esc(d.error || 'Could not load the history')}</td></tr>`; return; }
+  _taRows = d.connections || [];
+  renderTunnelActivity();
+}
+function renderTunnelActivity() {
+  const g = id => document.getElementById(id);
+  const t = _tunnels.find(x => x.name === _taName); if (!t) return;
+  g('taName').textContent = t.name + ' — activity';
+  g('taTarget').textContent = _tunAddr(t) + '  →  ' + t.agent + '  →  ' + t.host + ':' + t.port;
+  const stat = (l, v, sub) => `<div class="md-ctr-stat"><div class="l">${l}</div><div class="v">${v}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
+  g('taStats').innerHTML = stat('Connections', t.total, 'since Midleman started') + stat('Open now', t.active, 'limit ' + t.maxConnections)
+    + stat('Refused', `<span style="color:${t.rejected ? 'var(--red)' : 'inherit'}">${t.rejected}</span>`, t.lastRejected ? 'last ' + _monAgo(t.lastRejected.at) : 'none')
+    + stat('Sent / received', fmtBytes(t.bytesUp) + ' / ' + fmtBytes(t.bytesDown), t.lastUsed ? 'used ' + _monAgo(t.lastUsed) : 'never used');
+  const line = (k, v) => `<div><span style="color:var(--text3)">${k}</span> ${v}</div>`;
+  g('taNotes').innerHTML = (t.error ? line('Listener', `<span style="color:var(--red)">${esc(t.error)}</span>`) : '')
+    + (t.lastError ? line('Last error', `<span style="color:var(--red)">${esc(t.lastError.msg)}</span>, ${_monAgo(t.lastError.at)}`) : '');
+  const kind = r => r.refused ? 'refused' : r.error ? 'error' : 'ok';
+  const q = g('taSearch').value.trim().toLowerCase();
+  const rows = _taRows.filter(r => (!_taFilter || kind(r) === _taFilter) && (!q || r.ip.toLowerCase().includes(q)));
+  const dur = r => r.refused ? '—' : r.ms < 1000 ? r.ms + ' ms' : r.ms < 60000 ? (r.ms / 1000).toFixed(1) + ' s' : Math.floor(r.ms / 60000) + ' min ' + Math.round(r.ms % 60000 / 1000) + ' s';
+  g('taRows').innerHTML = rows.length ? rows.map(r => `<tr class="${kind(r) === 'ok' ? '' : 'is-fail'}"><td class="mono">${new Date(r.at).toLocaleString()}</td><td class="mono">${esc(r.ip)}</td><td class="mono">${dur(r)}</td><td class="mono">${r.refused ? '—' : fmtBytes(r.up)}</td><td class="mono">${r.refused ? '—' : fmtBytes(r.down)}</td><td class="detail" title="${esc(r.error || '')}">${r.refused ? '<span class="mm-chip err">refused</span> ' + esc(r.error || '') : r.error ? '<span class="mm-chip err">error</span> ' + esc(r.error) : '<span class="mm-chip ok">closed</span>'}</td></tr>`).join('')
+    : `<tr><td colspan="6" style="color:var(--text3);text-align:center;padding:18px">${_taRows.length ? 'No connection matches the filter.' : 'No connection yet.'}</td></tr>`;
+  g('taFoot').textContent = `${rows.length} of ${_taRows.length} connections shown. The last 500 are kept in memory and the history starts again when Midleman restarts. A tunnel carries raw TCP, so individual HTTP requests inside a connection are not visible here.`;
+}
+
 function tunnelMenu(e, btn) {
   e.stopPropagation();
   const t = _tunnels.find(x => x.name === btn.dataset.name); if (!t) return;
@@ -13623,6 +13666,7 @@ function tunnelMenu(e, btn) {
     { label: 'Copy address', fn: () => mmCopy(_tunAddr(t), null, 'Copied: ' + _tunAddr(t)) },
     { label: 'Copy internal address', fn: () => mmCopy(t.host + ':' + t.port, null, 'Copied: ' + t.host + ':' + t.port) },
     { label: 'Copy connect command', fn: () => mmCopy(_tunCommand(t), null, 'Copied: ' + _tunCommand(t)) },
+    { label: 'Activity', fn: () => openTunnelActivity(t.name) },
     { label: 'Edit', fn: () => openTunnelModal(t.name) },
     '---',
     { label: 'Delete', fn: () => tunnelDelete(t.name), danger: true },
@@ -13670,16 +13714,6 @@ function openTunnelModal(name) {
   tunAllowQuick();
   g('tunDescription').value = t?.description || '';
   g('tunPortHint').innerHTML = `Empty port = first free one from <code>${_tunPortStart}</code>. It must be a port the Midleman container publishes (the compose file publishes <code>4000-4050</code>).`;
-  g('tunActivity').style.display = t ? '' : 'none';
-  if (t) {
-    const line = (k, v) => `<div><span style="color:var(--text3)">${k}</span> ${v}</div>`;
-    g('tunActivitySummary').innerHTML = line('Connections', `${t.total} total · ${t.active} open · ${t.rejected} refused`)
-      + (t.lastRejected ? line('Last refused', `${esc(t.lastRejected.ip)} — ${esc(t.lastRejected.why)}, ${_monAgo(t.lastRejected.at)}`) : '')
-      + (t.error ? line('Listener', `<span style="color:var(--red)">${esc(t.error)}</span>`) : '')
-      + (t.lastError ? line('Last error', `<span style="color:var(--red)">${esc(t.lastError.msg)}</span>, ${_monAgo(t.lastError.at)}`) : '');
-    g('tunRecentRows').innerHTML = t.recent.length ? t.recent.map(r => `<tr class="${r.error ? 'is-fail' : ''}"><td class="mono">${new Date(r.at).toLocaleString()}</td><td class="mono">${esc(r.ip)}</td><td class="mono">${r.ms < 1000 ? r.ms + ' ms' : (r.ms / 1000).toFixed(1) + ' s'}</td><td class="mono">${fmtBytes(r.up)}</td><td class="mono">${fmtBytes(r.down)}</td><td class="detail" title="${esc(r.error || '')}">${esc(r.error || 'closed')}</td></tr>`).join('')
-      : '<tr><td colspan="6" style="color:var(--text3);text-align:center;padding:14px">No connection finished yet.</td></tr>';
-  }
   g('tunnelModal').style.display = 'flex';
   setTimeout(() => g(t ? 'tunHost' : 'tunName').focus(), 30);
 }

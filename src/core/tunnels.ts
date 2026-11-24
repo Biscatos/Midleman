@@ -34,7 +34,9 @@ export interface Tunnel {
     updatedAt: number;
     createdBy?: string;
 }
-interface ConnLog { at: number; ip: string; ms: number; up: number; down: number; error?: string }
+interface ConnLog { at: number; ip: string; ms: number; up: number; down: number; error?: string; refused?: boolean }
+/** Connections remembered per tunnel (memory only — the history restarts with Midleman). */
+const HISTORY_MAX = 500;
 interface Runtime {
     listener: TCPSocketListener<any> | null; bound: string; error: string | null;
     active: number; total: number; rejected: number; lastRejected: { ip: string; at: number; why: string } | null;
@@ -77,7 +79,12 @@ function accept(name: string, port: number, everyone: boolean): TCPSocketListene
                 const t = tunnels.get(name), r = runtime.get(name);
                 if (!t || !r) { sock.end(); return; }
                 const ip = (sock.remoteAddress || '').replace(/^::ffff:/, '');
-                const refuse = (why: string) => { r.rejected++; r.lastRejected = { ip, at: Date.now(), why }; sock.end(); };
+                const refuse = (why: string) => {
+                    r.rejected++; r.lastRejected = { ip, at: Date.now(), why };
+                    r.recent.unshift({ at: Date.now(), ip, ms: 0, up: 0, down: 0, error: why, refused: true });
+                    if (r.recent.length > HISTORY_MAX) r.recent.length = HISTORY_MAX;
+                    sock.end();
+                };
                 if (ip !== '127.0.0.1' && !ipInCidrs(ip, t.allowedIps)) return refuse('address not allowed');
                 if (r.active >= t.maxConnections) return refuse('connection limit reached');
                 const at = Date.now();
@@ -86,7 +93,7 @@ function accept(name: string, port: number, everyone: boolean): TCPSocketListene
                     onEnd: (err) => {
                         r.active--;
                         r.recent.unshift({ at, ip, ms: Date.now() - at, up: st?.bytesOut ?? 0, down: st?.bytesIn ?? 0, error: err });
-                        if (r.recent.length > 50) r.recent.length = 50;
+                        if (r.recent.length > HISTORY_MAX) r.recent.length = HISTORY_MAX;
                         if (err) r.lastError = { msg: err, at: Date.now() };
                     },
                 });
@@ -146,9 +153,14 @@ export function listTunnels() {
             ...t,
             status: !t.enabled ? 'disabled' : r.error ? 'error' : tunnelConnected(t.agent) ? 'online' : 'offline',
             error: r.error, active: r.active, total: r.total, rejected: r.rejected, lastRejected: r.lastRejected,
-            bytesUp: r.bytesOut, bytesDown: r.bytesIn, lastUsed: r.lastUsed, lastError: r.lastError, recent: r.recent,
+            bytesUp: r.bytesOut, bytesDown: r.bytesIn, lastUsed: r.lastUsed, lastError: r.lastError, recent: r.recent.filter(c => !c.refused).slice(0, 50),
         };
     });
+}
+
+/** Everything remembered about one tunnel's connections, newest first. */
+export function tunnelHistory(name: string): ConnLog[] {
+    return rt(name).recent;
 }
 export function getTunnel(name: string): Tunnel | undefined { return tunnels.get(name.toLowerCase()); }
 

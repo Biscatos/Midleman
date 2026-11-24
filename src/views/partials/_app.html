@@ -1257,15 +1257,39 @@
             <div class="mm-field-hint">IPv4 addresses or networks that may connect, comma separated. Empty = only Midleman itself (<code>127.0.0.1</code>); the port is not reachable from the network.</div>
           </div>
           <div><label class="mm-label">Description</label><input class="mm-input" id="tunDescription" type="text" maxlength="200" placeholder="What this tunnel is for"></div>
-          <div class="mm-group" id="tunActivity" style="display:none">
-            <div class="mm-group-title">Activity since Midleman started</div>
-            <div id="tunActivitySummary" style="font-size:12.5px;color:var(--text2);display:flex;flex-direction:column;gap:4px"></div>
-            <div class="md-ctr-scroll" style="max-height:220px"><table class="md-table"><thead><tr><th>Time</th><th>From</th><th>Duration</th><th>Sent</th><th>Received</th><th>Detail</th></tr></thead><tbody id="tunRecentRows"></tbody></table></div>
-          </div>
         </div>
         <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn btn-sm" onclick="closeTunnelModal()">Cancel</button>
           <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Saving…', saveTunnel)">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="tunnelActivityModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px" onclick="if(event.target===this)closeTunnelActivity()">
+      <div class="mm-dialog" role="dialog" aria-modal="true" aria-labelledby="taName" style="max-width:920px;width:100%;background:var(--surface);border:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column;max-height:92vh">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px">
+          <div style="flex:1;min-width:0">
+            <h3 style="margin:0;font-size:16px" id="taName"></h3>
+            <div id="taTarget" style="font:400 12px var(--font-mono);color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+          </div>
+          <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', loadTunnelActivity)">Refresh</button>
+          <button class="btn btn-sm" onclick="taEdit()">Edit tunnel</button>
+          <button onclick="closeTunnelActivity()" aria-label="Close" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">&times;</button>
+        </div>
+        <div class="ta-stats" id="taStats"></div>
+        <div id="taNotes" style="padding:0 22px;font-size:12.5px;color:var(--text2);display:flex;flex-direction:column;gap:4px"></div>
+        <div class="md-ctr-bar" style="padding:12px 22px 0;margin:0">
+          <div class="mm-seg-filter" id="taFilter" role="tablist">
+            <button type="button" data-f="" class="on" onclick="taSetFilter(this.dataset.f)">All</button>
+            <button type="button" data-f="ok" onclick="taSetFilter(this.dataset.f)">Completed</button>
+            <button type="button" data-f="error" onclick="taSetFilter(this.dataset.f)">Errors</button>
+            <button type="button" data-f="refused" onclick="taSetFilter(this.dataset.f)">Refused</button>
+          </div>
+          <input class="mm-input md-ctr-search" id="taSearch" type="search" placeholder="Filter by address…" oninput="renderTunnelActivity()" aria-label="Filter by address">
+        </div>
+        <div style="padding:10px 22px 18px;overflow:auto;min-height:0">
+          <table class="md-table"><thead><tr><th>Time</th><th>From</th><th>Duration</th><th>Sent</th><th>Received</th><th>Result</th></tr></thead><tbody id="taRows"></tbody></table>
+          <div class="mm-field-hint" id="taFoot" style="margin-top:8px"></div>
         </div>
       </div>
     </div>

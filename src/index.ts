@@ -50,7 +50,7 @@ import { listWallboardKeys, createWallboardKey, revokeWallboardKey, verifyWallbo
 import { listApiKeys, createApiKey, updateApiKey, revokeApiKey, parseScopes, apiKeyCovers } from './core/api-keys';
 import { numbersSeen as metaNumbersSeen, exportNumbersSeen, importNumbersSeen, META_EVENT_KINDS } from './core/meta-router';
 import { tunnelWebSocket, upgradeTunnel, tunnelAgents, tunnelBridges } from './core/agent-tunnel';
-import { startTunnels, listTunnels, tunnelIcon, getTunnel, saveTunnel, deleteTunnel, testTunnel } from './core/tunnels';
+import { startTunnels, listTunnels, tunnelHistory, tunnelIcon, getTunnel, saveTunnel, deleteTunnel, testTunnel } from './core/tunnels';
 import { listMonitors, getMonitor, getStatus, upsertMonitor, deleteMonitor, publicMonitor, validateMonitorInput, runCheck, peekQueue, listRabbitQueues, errorQueueName, requeueErrorMessages, discardErrorMessages, exportErrorMessages, startMonitorScheduler, stopMonitorScheduler, agentMonitorForToken, agentSourceAllowed, agentReportTooSoon, ingestAgentReport, serverErrors, newAgentToken, hashAgentToken, listIncidents, type AgentReport } from './core/monitors';
 import { getReportSettings, saveReportSettings, buildWeeklyReport, sendWeeklyReport, reportSchedulerTick } from './core/monitor-report';
 import { listTrafficResources } from './telemetry/request-log';
@@ -5017,6 +5017,14 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     const v4 = (x: string) => x.replace(/^::ffff:/, ''), cip = v4(reqClientIp(req));
                     const clientIp = /^\d+\.\d+\.\d+\.\d+$/.test(cip) && (!req.headers.get('x-forwarded-for') || cip !== v4(reqPeerIp.get(req) || '')) ? cip : null;
                     return jsonRes(200, { tunnels: listTunnels(), agents, portRangeStart: PORT_RANGE_START, clientIp });
+                }
+                {
+                    const th = req.method === 'GET' && url.pathname.match(/^\/admin\/tunnels\/([^/]+)\/history$/);
+                    if (th) {
+                        const t = getTunnel(decodeURIComponent(th[1]));
+                        if (!t) return jsonRes(404, { error: 'Tunnel not found' });
+                        return jsonRes(200, { connections: tunnelHistory(t.name) });
+                    }
                 }
                 {
                     const tm = url.pathname.match(/^\/admin\/tunnels(?:\/([^/]+)(\/test)?)?$/);

@@ -4048,6 +4048,9 @@ tr.mm-ctx-row, tr.mm-ctx-row > td, [role="row"].mm-ctx-row { background: var(--a
 .ov-kpi { display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 8px; row-gap: 6px; }
 .ov-kpi-l, .ov-kpi-s { grid-column: 1 / -1; }
 @media (max-width: 1100px) { .ov-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ov-services { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tn-spark-btn { padding: 2px 4px; background: none; border: 1px solid transparent; cursor: pointer; } .tn-spark-btn:hover { border-color: var(--border); }
+.ta-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 14px 22px 10px; }
+@media (max-width: 700px) { .ta-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .wh-queue { margin-left: 6px; padding: 1px 7px; border: 1px solid var(--orange-bdr); background: var(--warning-bg); color: var(--warn-text); font: 500 11px var(--font-mono); cursor: pointer; vertical-align: 1px; }
 .wh-queue.err { border-color: var(--red-bdr); background: var(--err-bg, transparent); color: var(--err-text); }
 .wh-queue:hover { border-color: currentColor; }
