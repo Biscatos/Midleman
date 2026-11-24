@@ -33,6 +33,9 @@ export interface Tunnel {
     createdAt: number;
     updatedAt: number;
     createdBy?: string;
+    /** Internal DNS name of a tunnelled web app; Nginx Proxy Manager forwards it to listenPort (npm/tunnel-host.ts). */
+    hostname?: string;
+    npmProxyHostId?: number;
 }
 interface ConnLog { at: number; ip: string; ms: number; up: number; down: number; error?: string; refused?: boolean }
 /** Connections remembered per tunnel (memory only — the history restarts with Midleman). */
@@ -53,6 +56,8 @@ let reserved: number[] = [];
 setExternalPorts(() => [...tunnels.values()].map(t => t.listenPort));
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,62}$/;
+/** A full DNS name in lower case: at least two labels. */
+export const DNS_NAME_RE = /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/;
 const HOST_RE = /^[a-zA-Z0-9]([a-zA-Z0-9._-]{0,251}[a-zA-Z0-9])?$/;
 const CIDR_RE = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}(\/(\d|[12]\d|3[0-2]))?$/;
 
@@ -195,14 +200,29 @@ export function saveTunnel(input: any, existing?: Tunnel, actor?: string): Tunne
         if (!Number.isInteger(listenPort) || listenPort < 1024 || listenPort > 65535) throw new Error('Midleman port must be 1024–65535 (or empty to pick one)');
         if (portsTaken(name).has(listenPort)) throw new Error(`Port ${listenPort} is already used by Midleman or another tunnel`);
     } else listenPort = existing?.listenPort || freePort(name);
+    const hostname = String(input?.hostname || '').trim().toLowerCase();
+    if (hostname) {
+        if (!DNS_NAME_RE.test(hostname)) throw new Error('Internal name: a full DNS name such as rabbit.apps.example.local');
+        const other = [...tunnels.values()].find(x => x.name !== name && x.hostname === hostname);
+        if (other) throw new Error(`Internal name "${hostname}" is already used by tunnel "${other.name}"`);
+    }
     const now = Date.now();
     const t: Tunnel = {
         name, description: String(input?.description || '').trim().slice(0, 200), agent, host, port, listenPort, allowedIps, maxConnections,
         enabled: input?.enabled === undefined ? (existing?.enabled ?? true) : input.enabled === true,
         createdAt: existing?.createdAt ?? now, updatedAt: now, createdBy: existing?.createdBy ?? actor,
+        ...(hostname ? { hostname } : {}),
+        ...(existing?.npmProxyHostId ? { npmProxyHostId: existing.npmProxyHostId } : {}),
     };
     tunnels.set(name, t); persist(); sync(t);
     return t;
+}
+
+/** Remember (or forget) the NPM proxy host that serves this tunnel's internal name. */
+export function setTunnelNpmHost(name: string, id: number | undefined): void {
+    const t = tunnels.get(name); if (!t) return;
+    if (id) t.npmProxyHostId = id; else delete t.npmProxyHostId;
+    persist();
 }
 
 export function deleteTunnel(name: string): boolean {

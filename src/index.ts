@@ -67,6 +67,7 @@ import { resolveClientIp, getTrustProxyConfig } from './core/ip-filter';
 import { getTraffic24h, getOverviewTraffic } from './telemetry/request-log';
 import { journalClose } from './servers/delivery-journal';
 import { auditChanges, auditSnapshot } from './core/audit-diff';
+import { syncTunnelHost } from './npm/tunnel-host';
 import { initReportFeeds, handleReportRequest } from './reports/server';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import QRCode from 'qrcode';
@@ -1376,11 +1377,12 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     return new Response(null, { status: 302, headers: { Location: '/wallboard', 'Set-Cookie': `mm_wb=${k}; HttpOnly; SameSite=Lax; Path=/wallboard; Max-Age=${maxAge}${isSecureRequest(req) ? '; Secure' : ''}` } });
                 }
                 const admin = !!getAuthedAdmin(req);
-                const shared = !admin && !!verifyWallboardKey(parseCookies(req).mm_wb, ip);
+                const wbKey = admin ? null : verifyWallboardKey(parseCookies(req).mm_wb, ip);
+                const shared = !admin && !!wbKey;
                 if (!admin && !shared) return new Response(null, { status: 302, headers: { Location: '/dashboard' } });
                 const html = withTheme(readFileSync(resolve(import.meta.dir, 'views/wallboard.html'), 'utf-8'))
                     .replace('<!-- MM_LOGO -->', LOGO_GLYPH_SVG)
-                    .replace('</head>', `<script>window.WB_MODE=${JSON.stringify(admin ? 'admin' : 'shared')};</script></head>`);
+                    .replace('</head>', `<script>window.WB_MODE=${JSON.stringify(admin ? 'admin' : 'shared')};window.WB_LOGS=${admin || wbKey?.logs === true};</script></head>`);
                 return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
             }
             // Read-only board data: admin session or a valid share key (cookie set above).
@@ -1388,6 +1390,14 @@ async function handle(req: Request, srv: any): Promise<Response> {
                 const ip = reqClientIp(req);
                 if (!getAuthedAdmin(req) && !verifyWallboardKey(parseCookies(req).mm_wb, ip)) return jsonRes(401, { error: 'unauthorized' });
                 return jsonRes(200, { monitors: listMonitors().map(publicMonitor) });
+            }
+
+            // Container log lines of one server monitor: admins, or a share link created with "logs".
+            if (url.pathname === '/wallboard/logs' && req.method === 'GET') {
+                if (!getAuthedAdmin(req) && verifyWallboardKey(parseCookies(req).mm_wb, reqClientIp(req))?.logs !== true) return jsonRes(403, { error: 'This wallboard link cannot read logs' });
+                const m = getMonitor(String(url.searchParams.get('monitor') || '').toLowerCase());
+                if (!m || m.type !== 'server') return jsonRes(404, { error: 'Server monitor not found' });
+                return jsonRes(200, { errors: serverErrors(m.name, url.searchParams.get('container') || undefined, 300) });
             }
 
             if (url.pathname === '/dashboard' || url.pathname === '/dashboard/') {
@@ -5038,7 +5048,9 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         if (existing && !tm[2] && req.method === 'DELETE') {
                             const users = config.webhooks.filter(w => w.targets.some(t => typeof t !== 'string' && t.tunnel === existing.name)).map(w => w.name);
                             if (users.length) return jsonRes(409, { error: `Tunnel "${existing.name}" receives deliveries from webhook(s): ${users.join(', ')} — remove those destinations first` });
-                            deleteTunnel(existing.name); audit('tunnel.delete', existing); return jsonRes(200, { status: 'deleted' });
+                            deleteTunnel(existing.name); audit('tunnel.delete', existing);
+                            const warning = await syncTunnelHost(null, existing);
+                            return jsonRes(200, { status: 'deleted', ...(warning ? { warning } : {}) });
                         }
                         if (!tm[2] && ((!existing && req.method === 'POST') || (existing && req.method === 'PUT'))) {
                             let body: any;
@@ -5050,7 +5062,10 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             try {
                                 const t = saveTunnel(input, existing, me?.username);
                                 audit(existing ? 'tunnel.update' : 'tunnel.create', t, existing);
-                                return jsonRes(200, { status: existing ? 'updated' : 'created', tunnel: listTunnels().find(x => x.name === t.name) });
+                                // Only a save that touches the name or the port needs NPM; the on/off switch does not.
+                                const routeChanged = !existing || existing.hostname !== t.hostname || existing.listenPort !== t.listenPort || existing.port !== t.port || (!!t.hostname && !t.npmProxyHostId);
+                                const warning = routeChanged ? await syncTunnelHost(t, existing) : null;
+                                return jsonRes(200, { status: existing ? 'updated' : 'created', tunnel: listTunnels().find(x => x.name === t.name), ...(warning ? { warning } : {}) });
                             } catch (e: any) { return jsonRes(400, { error: e?.message || 'Invalid tunnel' }); }
                         }
                         return jsonRes(405, { error: 'Method not allowed' });
@@ -5112,7 +5127,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     const cidrs = Array.isArray(body.allowedCidrs) ? body.allowedCidrs.filter((x: unknown): x is string => typeof x === 'string').map((x: string) => x.trim()).filter(Boolean) : [];
                     for (const c of cidrs) if (!/^\d{1,3}(\.\d{1,3}){3}(\/\d{1,2})?$/.test(c)) return jsonRes(400, { error: `"${c}" is not an IPv4 address or CIDR` });
                     const me = getAuthedAdmin(req);
-                    const { key, record } = createWallboardKey({ name, expiresAt: days ? Date.now() + days * 86400_000 : null, allowedCidrs: cidrs, createdBy: me?.username });
+                    const { key, record } = createWallboardKey({ name, expiresAt: days ? Date.now() + days * 86400_000 : null, allowedCidrs: cidrs, createdBy: me?.username, logs: body.logs === true });
                     logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'wallboard.key.create', targetType: 'wallboard_key', targetId: record.id, details: { name, expiresAt: record.expiresAt, allowedCidrs: cidrs }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                     const out = jsonRes(200, { key: record, url: `${publicLinkBase(req)}/wallboard?k=${key}` });
                     out.headers.set('X-Sensitive', '1'); // one-time secret: never compressed

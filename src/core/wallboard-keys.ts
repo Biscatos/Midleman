@@ -16,6 +16,8 @@ export interface WallboardKey {
     createdBy?: string;
     expiresAt: number | null;
     allowedCidrs?: string[];
+    /** May read the container log lines of server monitors. Off by default: logs can carry customer data. */
+    logs?: boolean;
     lastUsedAt: number | null;
     lastUsedIp?: string;
 }
@@ -41,12 +43,12 @@ export function listWallboardKeys(): Omit<WallboardKey, 'tokenHash'>[] {
     return load().map(({ tokenHash: _h, ...k }) => k);
 }
 
-export function createWallboardKey(input: { name: string; expiresAt: number | null; allowedCidrs?: string[]; createdBy?: string }): { key: string; record: Omit<WallboardKey, 'tokenHash'> } {
+export function createWallboardKey(input: { name: string; expiresAt: number | null; allowedCidrs?: string[]; createdBy?: string; logs?: boolean }): { key: string; record: Omit<WallboardKey, 'tokenHash'> } {
     const key = 'mmwb_' + randomBytes(32).toString('base64url');
     const record: WallboardKey = {
         id: randomBytes(6).toString('hex'), name: input.name.trim().slice(0, 80) || 'Wallboard',
         tokenHash: hash(key), createdAt: Date.now(), createdBy: input.createdBy,
-        expiresAt: input.expiresAt, allowedCidrs: input.allowedCidrs?.length ? input.allowedCidrs : undefined, lastUsedAt: null,
+        expiresAt: input.expiresAt, allowedCidrs: input.allowedCidrs?.length ? input.allowedCidrs : undefined, ...(input.logs ? { logs: true } : {}), lastUsedAt: null,
     };
     load().push(record); persist();
     const { tokenHash: _h, ...pub } = record;
