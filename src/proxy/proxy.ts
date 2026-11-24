@@ -3,7 +3,9 @@ import { startProxySpan, endProxySpan, recordProxyBlocked, recordProxyRedirect }
 import { logRequest, captureRequestBody, captureResponseBody, headersToRecord, isLoggingEnabledFor } from '../telemetry/request-log';
 import { isIpAllowed, isLoopbackIp, resolveClientIp, getTrustProxyConfig } from '../core/ip-filter';
 import { verifyJwt, logAudit, timingSafeEqualStr } from '../auth/auth';
+import { apiKeyAllows, apiKeyCovers } from '../core/api-keys';
 import { corsPreflightResponse, applyCorsToResponse } from '../core/cors';
+import { enqueueProxyRetry } from '../servers/webhook-server';
 
 // The real socket peer IP, captured at the server boundary (Bun's
 // server.requestIP) and looked up here per request. We avoid threading it
@@ -309,11 +311,7 @@ async function handleProxyRequestInner(
             return handleProxyRequest(req, fixedUrl, profiles, startTime, renderLoginHtml);
         }
 
-        const available = Array.from(map.keys()).join(', ') || 'none';
-        return jsonResponse(404, {
-            error: 'Not Found',
-            message: `Proxy profile "${profileName}" not found. Available: ${available}`,
-        });
+        return jsonResponse(404, { error: 'Not Found', message: 'Proxy profile not found.' });
     }
 
     // ── Rate limit (checked before any auth/allowlist work) ──
@@ -390,7 +388,9 @@ async function handleProxyRequestInner(
 
     // ── Auth: access key mode ──
     let validatedAccessKey: string | null = null;
-    if (effectiveAuthMode === 'accessKey' && profile.accessKey) {
+    if (effectiveAuthMode === 'accessKey' && (profile.accessKey || apiKeyCovers('proxy', profileName))) {
+        // The profile's own key, or any shared API key assigned to this proxy.
+        const keyOk = (k: string | null | undefined) => (!!profile.accessKey && timingSafeEqualStr(k, profile.accessKey)) || apiKeyAllows(k, 'proxy', profileName);
         const providedKey = url.searchParams.get('key');
         const clientIP = getClientIP(req);
 
@@ -401,13 +401,13 @@ async function handleProxyRequestInner(
 
         // A. X-Mid-Api-Key header — for API clients / Postman (no redirect, no cookie)
         const headerKey = req.headers.get('x-mid-api-key');
-        if (timingSafeEqualStr(headerKey, profile.accessKey)) {
-            validatedAccessKey = profile.accessKey;
+        if (keyOk(headerKey)) {
+            validatedAccessKey = headerKey;
             logAudit({ action: 'proxy.accesskey.success', actorUsername: 'apikey', details: { profile: profileName, via: 'header', path: remainingPath }, ip: clientIP, userAgent: req.headers.get('user-agent') });
         }
 
         // B. Direct ?key= — redirect to strip key from URL and set cookie first.
-        if (!validatedAccessKey && timingSafeEqualStr(providedKey, profile.accessKey)) {
+        if (!validatedAccessKey && keyOk(providedKey)) {
             logAudit({ action: 'proxy.accesskey.success', actorUsername: 'apikey', details: { profile: profileName, via: 'query', path: remainingPath }, ip: clientIP, userAgent: req.headers.get('user-agent') });
             if (isBrowser) {
                 const clean = new URL(url.toString());
@@ -416,19 +416,19 @@ async function handleProxyRequestInner(
                     status: 302,
                     headers: {
                         'Location': clean.pathname + clean.search,
-                        'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(profile.accessKey)}; Path=/proxy/${profileName}/; SameSite=Lax${secureAttr(req)}; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
+                        'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(providedKey!)}; Path=/proxy/${profileName}/; SameSite=Lax${secureAttr(req)}; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
                     },
                 });
             }
-            validatedAccessKey = profile.accessKey;
+            validatedAccessKey = providedKey;
         }
 
         // C. Profile-scoped cookie
         if (!validatedAccessKey && isBrowser) {
             const cookies = req.headers.get('cookie') || '';
             const m = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${escapeRegex(profileName)}=([^;]+)`));
-            if (m && timingSafeEqualStr(decodeURIComponent(m[1]), profile.accessKey)) {
-                validatedAccessKey = profile.accessKey;
+            if (m && keyOk(decodeURIComponent(m[1]))) {
+                validatedAccessKey = decodeURIComponent(m[1]);
             }
         }
 
@@ -481,7 +481,7 @@ async function handleProxyRequestInner(
     const forwardHeaders = new Headers();
     req.headers.forEach((value, key) => {
         const lower = key.toLowerCase();
-        if (lower !== 'host' && lower !== 'x-forward-token' && lower !== 'x-mid-api-key') {
+        if (lower !== 'host' && lower !== 'x-forward-token' && lower !== 'x-mid-api-key' && lower !== RETRY_HEADER) {
             forwardHeaders.set(key, value);
         }
     });
@@ -533,7 +533,9 @@ async function handleProxyRequestInner(
     });
 
     // Build request body for forwarding — use original stream, not the captured string
-    const forwardBody = req.method !== 'GET' && req.method !== 'HEAD' ? req.body : undefined;
+    const retryBody = await retryBodyFor(req, profile, clientIp);
+    const retryPath = remainingPath + queryString;
+    const forwardBody = retryBody ?? (req.method !== 'GET' && req.method !== 'HEAD' ? req.body : undefined);
 
     try {
         for (let i = 0; i <= maxRedirects; i++) {
@@ -600,12 +602,30 @@ async function handleProxyRequestInner(
             error: fetchError instanceof Error ? fetchError.message : String(fetchError),
         });
 
-        const errMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
+        const queued = retryBody && queueForRetry(req, profile, retryPath, retryBody, requestId, clientIp, fetchError instanceof Error ? fetchError.message : String(fetchError));
+        if (queued) return queued;
+        // The caller never learns the internal address or the raw error (already in the request log above).
         return jsonResponse(502, {
             error: 'Bad Gateway',
-            message: `Cannot reach ${targetUrl} — ${errMsg}`,
-            profile: profileName,
+            message: 'The upstream service could not be reached.',
+            requestId,
         });
+    }
+
+    if (retryBody && RETRYABLE_STATUS.has(targetResponse.status)) {
+        const queued = queueForRetry(req, profile, retryPath, retryBody, requestId, clientIp, `HTTP ${targetResponse.status}`);
+        if (queued) {
+            try { await targetResponse.arrayBuffer(); } catch { /* drain so the socket is released */ }
+            const durationMs = performance.now() - startTime;
+            endProxySpan(otelSpan, profileName, targetResponse.status, durationMs);
+            logRequest({
+                requestId, type: 'proxy', profileName, method: req.method, path: retryPath, targetUrl, clientIp,
+                reqHeaders: headersToRecord(forwardHeaders), reqBody: reqCapture.body, reqBodySize: reqCapture.size,
+                resStatus: targetResponse.status, resStatusText: 'Queued for retry', durationMs,
+                error: `HTTP ${targetResponse.status} from the upstream — queued for retry`,
+            });
+            return queued;
+        }
     }
 
     // Stream the response directly — no buffering in memory
@@ -933,18 +953,20 @@ async function handleDirectProxyInner(
 
     // ── Access key validation ──
     let validatedAccessKey: string | null = null;
-    if (effectiveAuthMode === 'accessKey' && profile.accessKey) {
+    if (effectiveAuthMode === 'accessKey' && (profile.accessKey || apiKeyCovers('proxy', profileName))) {
+        // The profile's own key, or any shared API key assigned to this proxy.
+        const keyOk = (k: string | null | undefined) => (!!profile.accessKey && timingSafeEqualStr(k, profile.accessKey)) || apiKeyAllows(k, 'proxy', profileName);
         const providedKey = url.searchParams.get('key');
         const clientIP = getClientIP(req);
 
         // A. X-Mid-Api-Key header — for API clients / Postman (no redirect, no cookie)
         const headerKey = req.headers.get('x-mid-api-key');
-        if (timingSafeEqualStr(headerKey, profile.accessKey)) {
-            validatedAccessKey = profile.accessKey;
+        if (keyOk(headerKey)) {
+            validatedAccessKey = headerKey;
         }
 
         // B. Direct ?key= — redirect to strip key from URL and set cookie first.
-        if (!validatedAccessKey && timingSafeEqualStr(providedKey, profile.accessKey)) {
+        if (!validatedAccessKey && keyOk(providedKey)) {
             if (isBrowser) {
                 const clean = new URL(url.toString());
                 clean.searchParams.delete('key');
@@ -952,11 +974,11 @@ async function handleDirectProxyInner(
                     status: 302,
                     headers: {
                         'Location': clean.pathname + clean.search,
-                        'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(profile.accessKey)}; Path=/; SameSite=Lax${secureAttr(req)}; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
+                        'Set-Cookie': `__pk_${profileName}=${encodeURIComponent(providedKey!)}; Path=/; SameSite=Lax${secureAttr(req)}; Max-Age=${Math.floor(SESSION_TTL / 1000)}`,
                     },
                 });
             }
-            validatedAccessKey = profile.accessKey;
+            validatedAccessKey = providedKey;
         }
 
         // C. Profile-scoped cookie — only for browser sessions after the initial redirect.
@@ -964,8 +986,8 @@ async function handleDirectProxyInner(
         if (!validatedAccessKey && isBrowser) {
             const cookies = req.headers.get('cookie') || '';
             const m = cookies.match(new RegExp(`(?:^|;\\s*)__pk_${escapeRegex(profileName)}=([^;]+)`));
-            if (m && timingSafeEqualStr(decodeURIComponent(m[1]), profile.accessKey)) {
-                validatedAccessKey = profile.accessKey;
+            if (m && keyOk(decodeURIComponent(m[1]))) {
+                validatedAccessKey = decodeURIComponent(m[1]);
             }
         }
 
@@ -1002,7 +1024,7 @@ async function handleDirectProxyInner(
     const forwardHeaders = new Headers();
     req.headers.forEach((value, key) => {
         const lower = key.toLowerCase();
-        if (lower !== 'host' && lower !== 'x-forward-token' && lower !== 'x-mid-api-key') {
+        if (lower !== 'host' && lower !== 'x-forward-token' && lower !== 'x-mid-api-key' && lower !== RETRY_HEADER) {
             forwardHeaders.set(key, value);
         }
     });
@@ -1038,7 +1060,9 @@ async function handleDirectProxyInner(
         return jsonResponse(403, { error: 'Forbidden', message: 'Your IP address is not allowed to access this resource.' });
     }
 
-    const forwardBody = req.method !== 'GET' && req.method !== 'HEAD' ? req.body : undefined;
+    const retryBody = await retryBodyFor(req, profile, clientIp);
+    const retryPath = url.pathname + url.search;
+    const forwardBody = retryBody ?? (req.method !== 'GET' && req.method !== 'HEAD' ? req.body : undefined);
 
     // ── Telemetry ──
     const otelSpan = startProxySpan({
@@ -1107,12 +1131,30 @@ async function handleDirectProxyInner(
             error: fetchError instanceof Error ? fetchError.message : String(fetchError),
         });
 
-        const errMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
+        const queued = retryBody && queueForRetry(req, profile, retryPath, retryBody, requestId, clientIp, fetchError instanceof Error ? fetchError.message : String(fetchError));
+        if (queued) return queued;
+        // The caller never learns the internal address or the raw error (already in the request log above).
         return jsonResponse(502, {
             error: 'Bad Gateway',
-            message: `Cannot reach ${targetUrl} — ${errMsg}`,
-            profile: profileName,
+            message: 'The upstream service could not be reached.',
+            requestId,
         });
+    }
+
+    if (retryBody && RETRYABLE_STATUS.has(targetResponse.status)) {
+        const queued = queueForRetry(req, profile, retryPath, retryBody, requestId, clientIp, `HTTP ${targetResponse.status}`);
+        if (queued) {
+            try { await targetResponse.arrayBuffer(); } catch { /* drain so the socket is released */ }
+            const durationMs = performance.now() - startTime;
+            endProxySpan(otelSpan, profileName, targetResponse.status, durationMs);
+            logRequest({
+                requestId, type: 'proxy', profileName, method: req.method, path: retryPath, targetUrl, clientIp,
+                reqHeaders: headersToRecord(forwardHeaders), reqBody: reqCapture.body, reqBodySize: reqCapture.size,
+                resStatus: targetResponse.status, resStatusText: 'Queued for retry', durationMs,
+                error: `HTTP ${targetResponse.status} from the upstream — queued for retry`,
+            });
+            return queued;
+        }
     }
 
     // ── Process response ──
@@ -1207,6 +1249,41 @@ async function handleDirectProxyInner(
 /**
  * Helper to create JSON error responses
  */
+// ─── Retry queue ─────────────────────────────────────────────────────────────
+// A proxy with `retryQueue` answers the caller with the upstream's own response whenever there is
+// one. Only when the upstream could not take a write request does the caller get 202 and Midleman
+// keeps delivering it in the background (pending-retry queue, then the failed list).
+const RETRY_HEADER = 'x-midleman-retry';
+const RETRY_MAX_BODY = 256 * 1024; // the queue's own per-entry limit
+/** Answers that mean the upstream never handled the request. */
+const RETRYABLE_STATUS = new Set([502, 503, 504]);
+
+/** The body, held in memory so the request can be queued; null = this request is never queued. */
+async function retryBodyFor(req: Request, profile: ProxyProfile, clientIp: string): Promise<ArrayBuffer | null> {
+    if (!profile.retryQueue?.enabled || req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return null;
+    if (req.headers.has(RETRY_HEADER) && isLoopbackIp(clientIp)) return null; // already one of our own attempts
+    // shortcut: bodies without Content-Length or above 256 KB are forwarded but never queued; raise the queue limit to change it
+    const len = req.body ? Number(req.headers.get('content-length') ?? NaN) : 0;
+    if (!(len <= RETRY_MAX_BODY)) return null;
+    return req.arrayBuffer();
+}
+
+/** Queue the request and build the 202 for the caller; null when it could not be queued. */
+function queueForRetry(req: Request, profile: ProxyProfile, path: string, body: ArrayBuffer, requestId: string, clientIp: string, error: string): Response | null {
+    const headers: Record<string, string> = {};
+    for (const [k, v] of req.headers) {
+        // hop-by-hop headers and the proxy's own access key (added again at send time) are not stored
+        if (!['host', 'content-length', 'connection', 'transfer-encoding', 'x-mid-api-key', 'x-forward-token'].includes(k.toLowerCase())) headers[k] = v;
+    }
+    headers[RETRY_HEADER] = '1';
+    headers['X-Request-ID'] = requestId;
+    // Same key on every attempt: an upstream that did process a timed-out request can recognise the repeat.
+    if (!req.headers.has('idempotency-key')) headers['Idempotency-Key'] = requestId;
+    const queued = enqueueProxyRetry({ profile: profile.name, path, method: req.method, headers, body, requestId, clientIp, persistentRetry: profile.retryQueue!, lastError: error });
+    if (!queued) return null;
+    return jsonResponse(202, { status: 'queued', message: 'The upstream service is unavailable. The request was stored and will be delivered automatically.', requestId });
+}
+
 function jsonResponse(status: number, body: Record<string, unknown>): Response {
     return new Response(JSON.stringify(body), {
         status,

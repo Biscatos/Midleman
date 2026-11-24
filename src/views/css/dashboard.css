@@ -36,7 +36,7 @@ body {
      sitting on top of it */
   background: var(--surface);
   color: var(--text);
-  min-height: 100vh;
+  min-height: calc(100vh / var(--ui-zoom, 1));
   -webkit-font-smoothing: antialiased;
   transition: background var(--transition), color var(--transition);
 }
@@ -49,7 +49,7 @@ body {
 .app {
   display: grid;
   grid-template-columns: 240px 1fr;
-  min-height: 100vh;
+  min-height: calc(100vh / var(--ui-zoom, 1));
   transition: grid-template-columns 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -58,7 +58,7 @@ body {
   background: var(--surface);
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: calc(100vh / var(--ui-zoom, 1));
   position: sticky;
   top: 0;
   z-index: 50;
@@ -420,7 +420,7 @@ body.sidebar-collapsed .sidebar-link:hover[data-tooltip]::after { opacity: 1; }
   min-width: 0;
   /* Own scroll container so the panel (and its rounded corners) stays pinned to
      the viewport instead of scrolling away with the content */
-  height: 100vh;
+  height: calc(100vh / var(--ui-zoom, 1));
   overflow-y: auto;
   overflow-x: hidden;
   display: flex;
@@ -2161,12 +2161,12 @@ body.nav-open .nav-backdrop { display: block; }
   body.nav-open .sidebar { transform: translateX(0); }
 
   /* Full-bleed on mobile — no sidebar to nest against, and let the page scroll
-     natively so mobile browser chrome doesn't fight a 100vh inner scroller */
+     natively so mobile browser chrome doesn't fight a calc(100vh / var(--ui-zoom, 1)) inner scroller */
   .main {
     border-left: none;
     border-radius: 0;
     height: auto;
-    min-height: 100vh;
+    min-height: calc(100vh / var(--ui-zoom, 1));
     overflow: visible;
   }
 
@@ -2303,8 +2303,8 @@ body.nav-open .nav-backdrop { display: block; }
   div[id$="-modal"] > div {
     max-width: 100% !important;
     width: 100% !important;
-    max-height: 100vh !important;
-    height: 100vh !important;
+    max-height: calc(100vh / var(--ui-zoom, 1)) !important;
+    height: calc(100vh / var(--ui-zoom, 1)) !important;
     border-radius: 0 !important;
     margin: 0 !important;
   }
@@ -2384,7 +2384,7 @@ body.nav-open .nav-backdrop { display: block; }
   /* Fixed, not max: the dialog keeps one size across every step, so moving
      between a 2-field pane and a 10-field one doesn't make it jump. Long panes
      scroll inside .wz-body instead. */
-  height: min(680px, calc(100vh - 48px));
+  height: min(680px, calc(calc(100vh / var(--ui-zoom, 1)) - 48px));
   overflow: hidden;
 }
 
@@ -2946,7 +2946,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 
 /* ── Dashboard sign-in / first-run setup: brand panel + framed form ────────── */
 .auth-page { background: var(--bg); }
-.auth-split { display: flex; min-height: 100vh; width: 100%; }
+.auth-split { display: flex; min-height: calc(100vh / var(--ui-zoom, 1)); width: 100%; }
 .auth-hero {
   flex: 1 1 52%;
   min-width: 0;
@@ -3625,10 +3625,10 @@ div[style*="overflow"] > table > thead th {
 
 /* ── One scrollbar: with the app shell on desktop, only .main scrolls ──
    (the window used to get a second scrollbar whenever anything — a menu,
-   a hidden panel, a wide row — poked past 100vh). */
+   a hidden panel, a wide row — poked past calc(100vh / var(--ui-zoom, 1))). */
 @media (min-width: 1024px) {
-  body.app-shell { height: 100vh; overflow: hidden; }
-  body.app-shell .app { height: 100vh; min-height: 0; }
+  body.app-shell { height: calc(100vh / var(--ui-zoom, 1)); overflow: hidden; }
+  body.app-shell .app { height: calc(100vh / var(--ui-zoom, 1)); min-height: 0; }
 }
 
 /* ═══ Webhook destinations — list + editor ═══════════════════════════════ */
@@ -3669,7 +3669,7 @@ div[style*="overflow"] > table > thead th {
 
 /* Editor dialog */
 #destinationEditModal { display: none; position: fixed; inset: 0; z-index: 280; background: var(--overlay); backdrop-filter: blur(3px); align-items: center; justify-content: center; padding: 24px; }
-.wd-dialog { width: 100%; max-width: 1360px; height: calc(100vh - 48px); height: calc(100dvh - 48px); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius-lg, 12px); overflow: hidden; }
+.wd-dialog { width: 100%; max-width: 1360px; height: calc(calc(100vh / var(--ui-zoom, 1)) - 48px); height: calc(100dvh - 48px); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius-lg, 12px); overflow: hidden; }
 .wd-dialog-head { display: flex; align-items: center; gap: 16px; padding: 14px 22px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .wd-eyebrow { font: 400 11px var(--font-mono); letter-spacing: .6px; text-transform: uppercase; color: var(--text3); margin-bottom: 4px; }
 .wd-dialog-title { margin: 0; font: 400 14px var(--font-mono); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -3758,7 +3758,7 @@ div[style*="overflow"] > table > thead th {
 }
 @media (max-width: 720px) {
   #destinationEditModal { padding: 0; }
-  .wd-dialog { height: 100vh; height: 100dvh; border-radius: 0; }
+  .wd-dialog { height: calc(100vh / var(--ui-zoom, 1)); height: 100dvh; border-radius: 0; }
   .wd-cards, .wd-grid3, .wd-grid2 { grid-template-columns: 1fr; }
 }
 .wd-url-row > .mm-select { flex: 0 0 112px; width: 112px; }
@@ -4048,6 +4048,12 @@ tr.mm-ctx-row, tr.mm-ctx-row > td, [role="row"].mm-ctx-row { background: var(--a
 .ov-kpi { display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 8px; row-gap: 6px; }
 .ov-kpi-l, .ov-kpi-s { grid-column: 1 / -1; }
 @media (max-width: 1100px) { .ov-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ov-services { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tn-spark-btn { padding: 2px 4px; background: none; border: 1px solid transparent; cursor: pointer; } .tn-spark-btn:hover { border-color: var(--border); }
+.ta-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 14px 22px 10px; }
+@media (max-width: 700px) { .ta-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.wh-queue { margin-left: 6px; padding: 1px 7px; border: 1px solid var(--orange-bdr); background: var(--warning-bg); color: var(--warn-text); font: 500 11px var(--font-mono); cursor: pointer; vertical-align: 1px; }
+.wh-queue.err { border-color: var(--red-bdr); background: var(--err-bg, transparent); color: var(--err-text); }
+.wh-queue:hover { border-color: currentColor; }
 .wh-more { width: 28px; height: 26px; background: none; border: 1px solid transparent; color: var(--text3); cursor: pointer; }
 .wh-more:hover { border-color: var(--border); color: var(--text); }
 
@@ -4061,6 +4067,13 @@ tr.mm-ctx-row, tr.mm-ctx-row > td, [role="row"].mm-ctx-row { background: var(--a
   .auth-card { max-width: none; padding: 36px; }
   .auth-hero-foot { position: fixed; left: 0; right: 0; bottom: 24px; justify-content: center; }
 }
+
+/* ─── Small screens (laptops at 125–150 % Windows scaling): shrink the whole UI ───
+   One zoom factor instead of a second set of sizes. Every 100vh above is divided by it,
+   because zoomed lengths would otherwise leave the shell short of the window. */
+@media (min-width: 901px) and (max-width: 1500px), (min-width: 901px) and (max-height: 820px) { :root { --ui-zoom: .85; } }
+@media (min-width: 901px) and (max-width: 1150px) { :root { --ui-zoom: .78; } }
+html { zoom: var(--ui-zoom, 1); }
 
 /* ─── Flat: no rounded corners anywhere ──────────────────────────────────────
    Last layer on purpose — overrides tokens, component rules and inline styles.
@@ -4224,6 +4237,14 @@ div:has(> div > #errPrev[disabled]):has(> div > #errNext[disabled]),
 .mon-card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 10px; }
 .mon-card.is-alert { border-color: var(--red-bdr); }
 .mon-card.is-off { opacity: .6; }
+.mon-meters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.mon-meters.is-stale { opacity: .45; }
+.mon-meter { display: grid; grid-template-columns: 1fr auto; row-gap: 4px; font-size: 11.5px; color: var(--text3); }
+.mon-meter b { font: 500 12px var(--font-mono); color: var(--text); }
+.mon-meter i { grid-column: 1 / -1; height: 4px; background: var(--surface2); }
+.mon-meter u { display: block; height: 100%; background: var(--accent); }
+.mon-meter.warn b { color: var(--warn-text); } .mon-meter.warn u { background: var(--orange); }
+.mon-meter.err b { color: var(--err-text); } .mon-meter.err u { background: var(--red); }
 .mon-head { display: flex; align-items: center; gap: 10px; }
 .mon-ico { width: 34px; height: 34px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
 .mon-ico svg { width: 20px; height: 20px; }
@@ -4386,6 +4407,14 @@ body.sidebar-collapsed .sidebar-link .sidebar-ext-icon { display: none !importan
 
 /* ── Monitor detail: containers list scrolls on its own, header stays, filter on the right ── */
 .md-ctr-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.md-tabs { margin-bottom: 12px; } .md-tabs button span { margin-left: 4px; color: var(--text3); font-family: var(--font-mono); font-size: 11px; }
+.md-tabs button span.bad { color: var(--err-text); }
+.md-log-tools { display: flex; align-items: center; gap: 8px; flex: none; }
+.md-log-tools .mm-select { width: 190px; flex: none; } .md-log-tools .md-ctr-search { width: 170px; }
+.md-log-tools select { width: auto; max-width: 220px; } .md-log-only { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); white-space: nowrap; }
+.md-logs { margin-top: 0; max-height: 52vh; }
+.md-log-ctr { padding: 0 5px; border: 1px solid var(--border); background: var(--surface); color: var(--accent); font: inherit; cursor: pointer; }
+.md-log-ctr:hover { border-color: var(--accent); }
 .md-ctr-search { width: 220px; flex: none; height: var(--control-h); padding: 0 10px; font-size: 12.5px; }
 .md-ctr-scroll { max-height: 46vh; overflow: auto; border: 1px solid var(--border); }
 .md-ctr-scroll .md-table thead th { position: sticky; top: 0; background: var(--table-head, var(--surface)); z-index: 1; }
@@ -4429,3 +4458,18 @@ body.sidebar-collapsed .sidebar-brand-name { display: none; }
 .mm-select-search input { width: 100%; height: 28px; padding: 0 8px; box-sizing: border-box; background: var(--surface2); border: 1px solid var(--border); color: var(--text); font: 400 12.5px var(--font-sans); outline: none; }
 .mm-select-search input:focus { border-color: var(--accent); }
 .mm-select-empty { padding: 10px; color: var(--text3); text-align: center; font-size: 12px; }
+
+/* ── API key modal: searchable access picker (one bordered box: search on top, grouped rows below) ── */
+.ak-picker { border: 1px solid var(--border); background: var(--surface); }
+.ak-picker:focus-within { border-color: var(--accent); }
+.ak-search { flex: none; border-bottom: 1px solid var(--border); }
+.ak-search > input.mm-input { border: 0; background: transparent; }
+.ak-list { max-height: 264px; overflow-y: auto; }
+.ak-head { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; padding: 6px 12px; background: var(--surface2); border-bottom: 1px solid var(--border); font: 11px/1.45 var(--font-mono); text-transform: uppercase; letter-spacing: .5px; color: var(--text3); }
+.ak-sec + .ak-sec .ak-head { border-top: 1px solid var(--border); }
+.ak-row { display: flex; align-items: center; gap: 10px; padding: 7px 12px; font-size: 13px; color: var(--text); cursor: pointer; }
+.ak-row:hover { background: var(--accent-bg); }
+.ak-row input { flex: none; margin: 0; }
+.ak-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ak-tag { flex: none; font: 11px/1.45 var(--font-mono); color: var(--text3); }
+.ak-none { padding: 14px 12px; text-align: center; font-size: 12px; color: var(--text3); }

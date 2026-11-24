@@ -47,9 +47,10 @@ type NotificationSeverity, type NotificationChannel } from './auth/auth';
 import { emitNotificationEvent, dispatchTestToGroup } from './core/notifications';
 import { isPrivateOrLoopbackV4 } from './core/ssrf-guard';
 import { listWallboardKeys, createWallboardKey, revokeWallboardKey, verifyWallboardKey } from './core/wallboard-keys';
+import { listApiKeys, createApiKey, updateApiKey, revokeApiKey, parseScopes, apiKeyCovers } from './core/api-keys';
 import { numbersSeen as metaNumbersSeen, exportNumbersSeen, importNumbersSeen, META_EVENT_KINDS } from './core/meta-router';
 import { tunnelWebSocket, upgradeTunnel, tunnelAgents, tunnelBridges } from './core/agent-tunnel';
-import { startTunnels, listTunnels, getTunnel, saveTunnel, deleteTunnel, testTunnel } from './core/tunnels';
+import { startTunnels, listTunnels, tunnelHistory, tunnelIcon, getTunnel, saveTunnel, deleteTunnel, testTunnel } from './core/tunnels';
 import { listMonitors, getMonitor, getStatus, upsertMonitor, deleteMonitor, publicMonitor, validateMonitorInput, runCheck, peekQueue, listRabbitQueues, errorQueueName, requeueErrorMessages, discardErrorMessages, exportErrorMessages, startMonitorScheduler, stopMonitorScheduler, agentMonitorForToken, agentSourceAllowed, agentReportTooSoon, ingestAgentReport, serverErrors, newAgentToken, hashAgentToken, listIncidents, type AgentReport } from './core/monitors';
 import { getReportSettings, saveReportSettings, buildWeeklyReport, sendWeeklyReport, reportSchedulerTick } from './core/monitor-report';
 import { listTrafficResources } from './telemetry/request-log';
@@ -65,6 +66,7 @@ import { claimAgent } from './core/agent-instance';
 import { resolveClientIp, getTrustProxyConfig } from './core/ip-filter';
 import { getTraffic24h, getOverviewTraffic } from './telemetry/request-log';
 import { journalClose } from './servers/delivery-journal';
+import { auditChanges, auditSnapshot } from './core/audit-diff';
 import { initReportFeeds, handleReportRequest } from './reports/server';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import QRCode from 'qrcode';
@@ -374,6 +376,17 @@ function rememberPeerIp(req: Request, peerIp: string | null | undefined): void {
 
 /** Resolves the trusted client IP (socket peer + X-Forwarded-For only when the
  *  peer is a configured trusted proxy). Never trusts raw XFF from untrusted peers. */
+/** Audit a config save or delete with what it was before and what it is now (secrets masked). */
+function auditConfig(req: Request, kind: string, name: string, before: unknown, after: unknown): void {
+    const me = getAuthedAdmin(req);
+    logAudit({
+        actorUserId: me?.id, actorUsername: me?.username,
+        action: `${kind}.${!before ? 'create' : !after ? 'delete' : 'update'}`, targetType: kind, targetId: name,
+        details: !before ? { created: auditSnapshot(after) } : !after ? { deleted: auditSnapshot(before) } : { changes: auditChanges(before, after) ?? {} },
+        ip: reqClientIp(req), userAgent: req.headers.get('user-agent'),
+    });
+}
+
 function reqClientIp(req: Request): string {
     return resolveClientIp(reqPeerIp.get(req), req.headers.get('x-forwarded-for'), getTrustProxyConfig());
 }
@@ -694,7 +707,7 @@ async function handleAgentReport(req: Request): Promise<Response> {
         networks: (Array.isArray(c.networks) ? c.networks : []).slice(0, 20).map((n: any) => ({ name: String(n?.name || '').slice(0, 128), ip: String(n?.ip || '').slice(0, 45) })),
         ports: (Array.isArray(c.ports) ? c.ports : []).slice(0, 50).map(Number).filter((p: number) => Number.isInteger(p) && p > 0 && p < 65536),
     }));
-    body.host = { ...body.host, agentNetworks: (Array.isArray(body.host.agentNetworks) ? body.host.agentNetworks : []).slice(0, 20).map((n: any) => String(n).slice(0, 128)), memPct: Number.isFinite(body.host.memPct) ? Number(body.host.memPct) : null, disks: (Array.isArray(body.host.disks) ? body.host.disks : []).slice(0, 50).map((d: any) => ({ mount: String(d.mount || '/'), pct: Number(d.pct) || 0, total: Number(d.total) || 0, used: Number(d.used) || 0 })) };
+    body.host = { ...body.host, agentNetworks: (Array.isArray(body.host.agentNetworks) ? body.host.agentNetworks : []).slice(0, 20).map((n: any) => String(n).slice(0, 128)), memPct: Number.isFinite(body.host.memPct) ? Number(body.host.memPct) : null, cpuPct: Number.isFinite(body.host.cpuPct) ? Math.max(0, Math.min(100, Number(body.host.cpuPct))) : null, disks: (Array.isArray(body.host.disks) ? body.host.disks : []).slice(0, 50).map((d: any) => ({ mount: String(d.mount || '/'), pct: Number(d.pct) || 0, total: Number(d.total) || 0, used: Number(d.used) || 0 })) };
     const status = await ingestAgentReport(m, body);
     return jsonRes(200, { status: status.state, intervalSeconds: m.intervalSeconds });
 }
@@ -2001,7 +2014,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             name: w.name,
                             targets: redactTargets(w.targets),
                             port: s?.port ?? w.port,
-                            hasAuth: !!w.authToken,
+                            hasAuth: !!w.authToken || apiKeyCovers('webhook', w.name),
                             hasAuthToken: !!w.authToken,
                             meta: { enabled: !!w.meta?.enabled, hasAppSecret: !!w.meta?.appSecret },
                             retry: w.retry,
@@ -2245,7 +2258,8 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         const prev = config.webhooks[existingIdx];
                         // Preserve the existing inbound auth token when the form did not
                         // submit a new one (it is no longer sent back to the client).
-                        if (!webhookWithPort.authToken && prev.authToken) webhookWithPort.authToken = prev.authToken;
+                        // clearAuthToken: the operator dropped the legacy token (shared API keys took over).
+                        if (!webhookWithPort.authToken && prev.authToken && input.clearAuthToken !== true) webhookWithPort.authToken = prev.authToken;
                         if (webhookWithPort.meta && !webhookWithPort.meta.appSecret && prev.meta?.appSecret) webhookWithPort.meta.appSecret = prev.meta.appSecret;
                         // Masked header values (Authorization etc.) come back as SECRET_MASK — restore the stored ones.
                         webhookWithPort.targets = restoreTargetSecrets(webhookWithPort.targets, prev.targets);
@@ -2273,6 +2287,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     }
                     const selfTarget = findSelfTarget(webhookWithPort);
                     if (selfTarget) return jsonRes(400, { error: `Destination "${selfTarget}" points back to this webhook — it would notify itself in a loop.` });
+                    auditConfig(req, 'webhook', webhook.name, existingIdx >= 0 ? config.webhooks[existingIdx] : null, webhookWithPort);
                     if (existingIdx >= 0) {
                         config.webhooks[existingIdx] = webhookWithPort;
                     } else {
@@ -2319,6 +2334,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             console.warn(`[npm] failed to restore NPM forward for webhook "${name}":`, e instanceof Error ? e.message : e);
                         }
                     }
+                    auditConfig(req, 'webhook', name, config.webhooks[idx], null);
                     config.webhooks.splice(idx, 1);
                     persistWebhooks(config.webhooks);
                     await stopWebhookServer(name);
@@ -2598,6 +2614,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     if (prev && !connector.gocontact.hashKey && prev.gocontact?.hashKey) connector.gocontact.hashKey = prev.gocontact.hashKey;
                     const connectorWithPort = { ...connector, port: assignedPort };
 
+                    auditConfig(req, 'connector', connector.name, existingIdx >= 0 ? connectors[existingIdx] : null, connectorWithPort);
                     if (existingIdx >= 0) connectors[existingIdx] = connectorWithPort;
                     else connectors.push(connectorWithPort);
                     persistConnectors(connectors);
@@ -2617,6 +2634,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
                     const idx = connectors.findIndex(c => c.name === name);
                     if (idx === -1) return jsonRes(404, { error: `Connector "${name}" not found` });
+                    auditConfig(req, 'connector', name, connectors[idx], null);
                     connectors.splice(idx, 1);
                     persistConnectors(connectors);
                     await stopConnectorServer(name);
@@ -2642,6 +2660,23 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             callbackUrl: c.five9.callbackUrl,
                             // callbackToken intentionally omitted (secret)
                         },
+                        // Same shape as the GoContact connector: the edit form reads these, and without
+                        // them it showed the IP allowlist / Meta / Smooch settings as empty.
+                        hasVerifyToken: !!c.verifyToken,
+                        allowedIps: c.allowedIps || [],
+                        meta: c.meta ? {
+                            phoneNumberId: c.meta.phoneNumberId,
+                            graphVersion: c.meta.graphVersion || 'v21.0',
+                            hasAccessToken: !!c.meta.accessToken,
+                        } : null,
+                        smooch: c.smooch ? {
+                            appId: c.smooch.appId,
+                            baseUrl: c.smooch.baseUrl || 'https://api.smooch.io',
+                            keyId: c.smooch.keyId || '',
+                            hasKeySecret: !!c.smooch.keySecret,
+                            hasBearerToken: !!c.smooch.bearerToken,
+                            hasWebhookSecret: !!c.smooch.webhookSecret,
+                        } : null,
                         directReply: c.directReply === true,
                         phoneNumberFilter: c.phoneNumberFilter || [],
                         autoReply: c.autoReply || { enabled: false, text: '' },
@@ -2827,6 +2862,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     catch (err) { return jsonRes(400, { error: err instanceof Error ? err.message : String(err) }); }
                     const connectorWithPort = { ...connector, port: assignedPort };
 
+                    auditConfig(req, 'five9_connector', connector.name, existingIdx >= 0 ? five9Connectors[existingIdx] : null, connectorWithPort);
                     if (existingIdx >= 0) five9Connectors[existingIdx] = connectorWithPort;
                     else five9Connectors.push(connectorWithPort);
                     persistFive9Connectors(five9Connectors);
@@ -2846,6 +2882,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
                     const idx = five9Connectors.findIndex(c => c.name === name);
                     if (idx === -1) return jsonRes(404, { error: `Five9 connector "${name}" not found` });
+                    auditConfig(req, 'five9_connector', name, five9Connectors[idx], null);
                     five9Connectors.splice(idx, 1);
                     persistFive9Connectors(five9Connectors);
                     await stopFive9ConnectorServer(name);
@@ -2908,6 +2945,10 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             blockedExtensions: profile.blockedExtensions ? Array.from(profile.blockedExtensions) : [],
                             allowedIps: profile.allowedIps || [],
                             allowedPaths: profile.allowedPaths || [],
+                            // The edit form is filled from this response: a field missing here shows as off and is wiped on save.
+                            rateLimit: profile.rateLimit || null,
+                            retryQueue: profile.retryQueue || null,
+                            cors: profile.cors || null,
                             port: getProxyServerPort(profile.name),
                             running: isProxyServerRunning(profile.name),
                             publicHostnames: profile.publicHostnames || [],
@@ -2935,6 +2976,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         authHeader: p.authHeader,
                         authPrefix: p.authPrefix,
                         hasAccessKey: !!p.accessKey,
+                        hasSharedKey: apiKeyCovers('proxy', p.name),
                         authMode: p.authMode || 'none',
                         require2fa: !!p.require2fa,
                         isWebApp: !!p.isWebApp,
@@ -2944,6 +2986,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         allowedIps: p.allowedIps || [],
                         allowedPaths: p.allowedPaths || [],
                         rateLimit: p.rateLimit || null,
+                        retryQueue: p.retryQueue || null,
                         cors: p.cors || null,
                         forwardPath: p.forwardPath !== false,
                         loginTitle: p.loginTitle || '',
@@ -3013,6 +3056,15 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         );
                     }
                     if (Array.isArray(input.allowedIps) && input.allowedIps.length) profile.allowedIps = input.allowedIps as string[];
+                    if (input.retryQueue && typeof input.retryQueue === 'object' && (input.retryQueue as any).enabled === true) {
+                        const rq = input.retryQueue as Record<string, unknown>;
+                        profile.retryQueue = {
+                            enabled: true,
+                            ...(typeof rq.maxAttemptsPerMinute === 'number' ? { maxAttemptsPerMinute: rq.maxAttemptsPerMinute } : {}),
+                            ...(typeof rq.notifyAfterAttempts === 'number' ? { notifyAfterAttempts: rq.notifyAfterAttempts } : {}),
+                            ...(typeof rq.notifyEmail === 'string' && rq.notifyEmail.trim() ? { notifyEmail: rq.notifyEmail.trim() } : {}),
+                        };
+                    }
                     if (input.rateLimit && typeof input.rateLimit === 'object') {
                         const rl = input.rateLimit as Record<string, unknown>;
                         if (typeof rl.requestsPerMinute === 'number' && rl.requestsPerMinute > 0) {
@@ -3066,12 +3118,13 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         // silently WIPED both credentials. Same rule the webhook and
                         // connector routes already apply to their tokens.
                         if (!profile.apiKey && existing.apiKey) profile.apiKey = existing.apiKey;
-                        if (!profile.accessKey && existing.accessKey) profile.accessKey = existing.accessKey;
+                        if (!profile.accessKey && existing.accessKey && input.clearAccessKey !== true) profile.accessKey = existing.accessKey;
                         if (existing.npmProxyHostId !== undefined && profile.npmProxyHostId === undefined) profile.npmProxyHostId = existing.npmProxyHostId;
                         if (existing.npmCertificateId !== undefined && profile.npmCertificateId === undefined) profile.npmCertificateId = existing.npmCertificateId;
                         if (existing.npmOriginalForwardHost && !profile.npmOriginalForwardHost) profile.npmOriginalForwardHost = existing.npmOriginalForwardHost;
                         if (existing.npmOriginalForwardPort !== undefined && profile.npmOriginalForwardPort === undefined) profile.npmOriginalForwardPort = existing.npmOriginalForwardPort;
                         if (existing.npmOriginalForwardScheme && !profile.npmOriginalForwardScheme) profile.npmOriginalForwardScheme = existing.npmOriginalForwardScheme;
+                        auditConfig(req, 'profile', profile.name, existing, profile);
                         config.proxyProfiles[idx] = profile;
                     }
                     else config.proxyProfiles.push(profile);
@@ -3105,14 +3158,13 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         }
                         await restartProxyServer(profile.name, profile, proxyPort);
                         console.log(`✅ Profile "${profile.name}" updated (port ${proxyPort})`);
-                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'profile.update', targetType: 'profile', targetId: profile.name, details: { targetUrl: profile.targetUrl, authMode: profile.authMode }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                         return jsonRes(200, { status: 'updated', profile: profile.name, port: proxyPort });
                     } else {
                         const excludePorts = getProxyServerStatus().map(s => s.port).filter(Boolean);
                         proxyPort = await assignProxyPort(profile.name, config.port, excludePorts);
                         startProxyServer(profile, proxyPort);
                         console.log(`✅ Profile "${profile.name}" created (port ${proxyPort})`);
-                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'profile.create', targetType: 'profile', targetId: profile.name, details: { targetUrl: profile.targetUrl, authMode: profile.authMode }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        auditConfig(req, 'profile', profile.name, null, profile);
                         return jsonRes(200, { status: 'created', profile: profile.name, port: proxyPort });
                     }
                 }
@@ -3132,6 +3184,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             console.warn(`[npm] failed to unsync "${name}":`, e instanceof Error ? e.message : e);
                         }
                     }
+                    auditConfig(req, 'profile', name, removed, null);
                     config.proxyProfiles.splice(idx, 1);
                     persistProfiles(config.proxyProfiles);
                     invalidateProfileCache();
@@ -3141,7 +3194,6 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     removeAllProfileLdapGroups(name);
                     console.log(`🗑️  Profile "${name}" deleted`);
                     const me = getAuthedAdmin(req);
-                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'profile.delete', targetType: 'profile', targetId: name, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                     return jsonRes(200, { status: 'deleted', profile: name });
                 }
 
@@ -4578,6 +4630,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     let body: any;
                     try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
                     try {
+                        const pageBefore = getConsentPage(id);
                         const page = updateConsentPage(id, {
                             name: typeof body.name === 'string' ? body.name : undefined,
                             title: typeof body.title === 'string' ? body.title : undefined,
@@ -4585,7 +4638,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         });
                         if (!page) return jsonRes(404, { error: 'Page not found' });
                         const me = getAuthedAdmin(req);
-                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'consent_page.update', targetType: 'consent_page', targetId: id, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'consent_page.update', targetType: 'consent_page', targetId: id, details: { changes: auditChanges(pageBefore, page) ?? {} }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                         return jsonRes(200, { page });
                     } catch (err) {
                         return jsonRes(400, { error: err instanceof Error ? err.message : String(err) });
@@ -4691,6 +4744,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         if (!getConsentPage(body.consentPageId)) return jsonRes(400, { error: 'consentPageId references an unknown page' });
                         input.consentPageId = body.consentPageId;
                     }
+                    const clientBefore = getOauthClient(clientId);
                     let result;
                     try { result = updateOauthClient(clientId, input); }
                     catch (err) { return jsonRes(400, { error: err instanceof Error ? err.message : String(err) }); }
@@ -4704,6 +4758,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         actorUserId: me?.id, actorUsername: me?.username,
                         action: 'oauth_client.update', targetType: 'oauth_client', targetId: clientId,
                         details: {
+                            changes: auditChanges(clientBefore, getOauthClient(clientId)) ?? {},
                             changedFields: Object.keys(input),
                             redirectUrisChanged: result.redirectUrisChanged,
                             revokedRefreshTokens: result.revokedRefreshTokens,
@@ -4863,12 +4918,13 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     let body: any;
                     try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON' }); }
                     try {
+                        const ldapBefore = getLdapConfig(id);
                         const cfg = updateLdapConfig(id, body);
                         if (!cfg) return jsonRes(404, { error: 'Config not found' });
                         const me = getAuthedAdmin(req);
                         const changedKeys = Object.keys(body).filter(k => k !== 'bindPassword');
                         const passwordChanged = 'bindPassword' in body;
-                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'ldap.config.update', targetType: 'ldap_config', targetId: id, details: { changed: changedKeys, passwordChanged }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'ldap.config.update', targetType: 'ldap_config', targetId: id, details: { changes: auditChanges(ldapBefore, cfg) ?? {}, changed: changedKeys, passwordChanged }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                         return jsonRes(200, { config: cfg });
                     } catch (err) {
                         return jsonRes(400, { error: err instanceof Error ? err.message : String(err) });
@@ -4944,6 +5000,16 @@ async function handle(req: Request, srv: any): Promise<Response> {
                 // ── TCP/UDP Proxy CRUD ───────────────────────────────────────────────────
 
                 // ── Tunnels (a Midleman port → host:port on an agent's network) ──
+                {
+                    const ti = url.pathname.match(/^\/admin\/tunnels\/([^/]+)\/icon$/);
+                    if (ti && req.method === 'GET') {
+                        const t = getTunnel(decodeURIComponent(ti[1]));
+                        const icon = t ? await tunnelIcon(t) : null;
+                        if (!icon) return new Response(null, { status: 404, headers: { 'Cache-Control': 'private, max-age=600' } });
+                        // Bytes from an internal service on the dashboard's origin: sandboxed so an SVG opened directly cannot run script.
+                        return new Response(icon.body, { headers: { 'Content-Type': icon.type, 'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" } });
+                    }
+                }
                 if (url.pathname === '/admin/tunnels' && req.method === 'GET') {
                     const live = tunnelAgents();
                     const agents = listMonitors().filter(m => m.type === 'server').map(m => { const a = live.find(x => x.name === m.name); const sv = getStatus(m.name).server; return { name: m.name, enabled: m.enabled, connected: !!a, connections: a?.connections ?? 0, streams: a?.streams ?? 0, rttMs: a?.rttMs ?? null, networks: sv?.host.agentNetworks || [], containers: (sv?.containers || []).filter(c => c.status === 'running').map(c => ({ name: c.name, ports: c.ports || [], networks: c.networks || [] })) }; });
@@ -4953,11 +5019,19 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     return jsonRes(200, { tunnels: listTunnels(), agents, portRangeStart: PORT_RANGE_START, clientIp });
                 }
                 {
+                    const th = req.method === 'GET' && url.pathname.match(/^\/admin\/tunnels\/([^/]+)\/history$/);
+                    if (th) {
+                        const t = getTunnel(decodeURIComponent(th[1]));
+                        if (!t) return jsonRes(404, { error: 'Tunnel not found' });
+                        return jsonRes(200, { connections: tunnelHistory(t.name) });
+                    }
+                }
+                {
                     const tm = url.pathname.match(/^\/admin\/tunnels(?:\/([^/]+)(\/test)?)?$/);
                     if (tm && req.method !== 'GET') {
                         const me = getAuthedAdmin(req);
-                        const audit = (action: string, t: { name: string; agent: string; host: string; port: number; listenPort: number; allowedIps: string[]; enabled: boolean }) =>
-                            logAudit({ actorUserId: me?.id, actorUsername: me?.username, action, targetType: 'tunnel', targetId: t.name, details: { agent: t.agent, target: `${t.host}:${t.port}`, listenPort: t.listenPort, allowedIps: t.allowedIps, enabled: t.enabled }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        const audit = (action: string, t: { name: string; agent: string; host: string; port: number; listenPort: number; allowedIps: string[]; enabled: boolean }, before?: unknown) =>
+                            logAudit({ actorUserId: me?.id, actorUsername: me?.username, action, targetType: 'tunnel', targetId: t.name, details: { ...(before ? { changes: auditChanges(before, t) ?? {} } : {}), agent: t.agent, target: `${t.host}:${t.port}`, listenPort: t.listenPort, allowedIps: t.allowedIps, enabled: t.enabled }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                         const existing = tm[1] ? getTunnel(decodeURIComponent(tm[1])) : undefined;
                         if (tm[1] && !existing) return jsonRes(404, { error: `Tunnel "${decodeURIComponent(tm[1])}" not found` });
                         if (existing && tm[2] && req.method === 'POST') return jsonRes(200, await testTunnel(existing));
@@ -4975,7 +5049,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                             if (!ag || ag.type !== 'server') return jsonRes(400, { error: 'Choose a server monitor (agent) that exists in Midleman' });
                             try {
                                 const t = saveTunnel(input, existing, me?.username);
-                                audit(existing ? 'tunnel.update' : 'tunnel.create', t);
+                                audit(existing ? 'tunnel.update' : 'tunnel.create', t, existing);
                                 return jsonRes(200, { status: existing ? 'updated' : 'created', tunnel: listTunnels().find(x => x.name === t.name) });
                             } catch (e: any) { return jsonRes(400, { error: e?.message || 'Invalid tunnel' }); }
                         }
@@ -5053,6 +5127,44 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         return jsonRes(200, { status: 'revoked' });
                     }
                 }
+                // ── Shared API keys (one per partner, assigned to proxies / webhooks) ──
+                if (url.pathname === '/admin/api-keys' && req.method === 'GET') {
+                    return jsonRes(200, { keys: listApiKeys() });
+                }
+                if (url.pathname === '/admin/api-keys' && req.method === 'POST') {
+                    let body: any;
+                    try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
+                    const name = typeof body?.name === 'string' ? body.name.trim() : '';
+                    if (!name) return jsonRes(400, { error: '"name" is required (e.g. the partner\'s name)' });
+                    const scopes = parseScopes(body.scopes);
+                    if (!scopes) return jsonRes(400, { error: '"scopes" must be a list of "proxy:<name>" / "webhook:<name>"' });
+                    const me = getAuthedAdmin(req);
+                    const { key, record } = createApiKey({ name, scopes, createdBy: me?.username });
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'apikey.create', targetType: 'api_key', targetId: record.id, details: { name, scopes }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    const out = jsonRes(200, { key: record, secret: key });
+                    out.headers.set('X-Sensitive', '1'); // one-time secret: never compressed
+                    return out;
+                }
+                {
+                    const ak = url.pathname.match(/^\/admin\/api-keys\/([a-f0-9]{12})$/);
+                    if (ak && req.method === 'PUT') {
+                        let body: any;
+                        try { body = await req.json(); } catch { return jsonRes(400, { error: 'Invalid JSON body' }); }
+                        const scopes = parseScopes(body?.scopes);
+                        if (!scopes) return jsonRes(400, { error: '"scopes" must be a list of "proxy:<name>" / "webhook:<name>"' });
+                        const record = updateApiKey(ak[1], { name: typeof body.name === 'string' ? body.name : undefined, scopes });
+                        if (!record) return jsonRes(404, { error: 'Key not found' });
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'apikey.update', targetType: 'api_key', targetId: ak[1], details: { name: record.name, scopes }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { key: record });
+                    }
+                    if (ak && req.method === 'DELETE') {
+                        if (!revokeApiKey(ak[1])) return jsonRes(404, { error: 'Key not found' });
+                        const me = getAuthedAdmin(req);
+                        logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: 'apikey.revoke', targetType: 'api_key', targetId: ak[1], ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                        return jsonRes(200, { status: 'revoked' });
+                    }
+                }
                 if (url.pathname === '/admin/monitors/rabbit-queues' && req.method === 'POST') {
                     // Browse a broker's queues from the monitor form. Credentials come in the body;
                     // a blank password with `monitor` set reuses that saved monitor's password.
@@ -5078,9 +5190,10 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     if ((v.monitor.type === 'rabbitmq' || v.monitor.type === 'redis') && !v.monitor.password && from && from.type === v.monitor.type && from.password) v.monitor.password = from.password;
                     const minted = v.monitor.type === 'server' && !getMonitor(v.monitor.name) ? newAgentToken() : null;
                     if (minted && v.monitor.type === 'server') v.monitor.agentTokenHash = hashAgentToken(minted);
+                    const monitorBefore = getMonitor(v.monitor.name);
                     const { created } = upsertMonitor(v.monitor);
                     const me = getAuthedAdmin(req);
-                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: created ? 'monitor.create' : 'monitor.update', targetType: 'monitor', targetId: v.monitor.name, details: { type: v.monitor.type }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
+                    logAudit({ actorUserId: me?.id, actorUsername: me?.username, action: created ? 'monitor.create' : 'monitor.update', targetType: 'monitor', targetId: v.monitor.name, details: { type: v.monitor.type, ...(monitorBefore ? { changes: auditChanges(monitorBefore, v.monitor) ?? {} } : { created: auditSnapshot(v.monitor) }) }, ip: reqClientIp(req), userAgent: req.headers.get('user-agent') });
                     if (v.monitor.type !== 'server') void runCheck(v.monitor).catch(() => {});
                     // The agent token is returned exactly once (here or on rotate); it is never readable afterwards.
                     const out = jsonRes(200, { status: created ? 'created' : 'updated', monitor: publicMonitor(v.monitor), ...(minted ? { token: minted } : {}) });
@@ -5261,6 +5374,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                         logConnections: input.logConnections === true,
                     };
 
+                    auditConfig(req, 'tcpudp', name, existingProfile || null, profile);
                     if (isUpdate) {
                         config.tcpUdpProfiles = config.tcpUdpProfiles.map(p => p.name === name ? profile : p);
                         if (isSipServerRunning(name)) await restartSipServer(name, profile);
@@ -5281,6 +5395,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     const name = decodeURIComponent(url.pathname.split('/')[3] || '').toLowerCase();
                     const idx = config.tcpUdpProfiles.findIndex(p => p.name === name);
                     if (idx === -1) return jsonRes(404, { error: `TCP/UDP profile "${name}" not found` });
+                    auditConfig(req, 'tcpudp', name, config.tcpUdpProfiles[idx], null);
                     config.tcpUdpProfiles.splice(idx, 1);
                     await stopSipServer(name);
                     releaseTcpUdpListenerPorts(name);

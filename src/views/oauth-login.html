@@ -37,7 +37,6 @@
     .sub { font-size: 13px; color: var(--text2); text-align: center; margin-top: 6px; line-height: 1.5; }
     .ctx { font-size: 13px; color: var(--text2); text-align: center; margin: 4px 0 22px; line-height: 1.5; }
     .ctx strong { color: var(--text); font-weight: 600; }
-    .ctx .host { display: block; font: 11.5px var(--font-mono); color: var(--text3); margin-top: 2px; }
 
     label {
       display: block; margin: 14px 0 6px;
@@ -148,7 +147,7 @@
       <span class="app-logo"><span class="app-initials">{{CLIENT_INITIALS}}</span><img src="{{CLIENT_LOGO_URL}}" alt="" referrerpolicy="no-referrer" onerror="this.remove()"></span>
     </div>
     <h1 id="heading">Sign in</h1>
-    <p class="ctx"><span id="ctxPrefix">to continue to</span> <strong>{{CLIENT_NAME}}</strong><span class="host">{{CLIENT_HOST}}</span></p>
+    <p class="ctx"><span id="ctxPrefix">to continue to</span> <strong>{{CLIENT_NAME}}</strong></p>
     <p class="sub hidden" id="subText">Enter your credentials to continue.</p>
 
     <!-- Session expired / generic fatal error panel -->

@@ -64,10 +64,9 @@ function clientInitials(name: string): string {
  *  The logo is discovered automatically from the client's first redirect URI
  *  (see app-icon.ts); the template removes a broken <img>, revealing the initials. */
 async function clientBranding(client: { name: string; redirectUris: string[] }, redirectUri: string) {
-    let host = '';
-    try { host = new URL(redirectUri).host; } catch { /* keep empty */ }
+    // The app's hostname is deliberately not shown: it can reveal internal or third-party infrastructure.
     const logo = await getAppIconUrl(client.redirectUris.length ? client.redirectUris : [redirectUri]);
-    return { name: client.name, host, logo, initials: clientInitials(client.name) };
+    return { name: client.name, logo, initials: clientInitials(client.name) };
 }
 
 function getClientIp(req: Request): string {
@@ -284,7 +283,6 @@ export async function handleAuthorize(req: Request, url: URL): Promise<Response>
     const brand = await clientBranding(client, redirectUri);
     const html = withTheme(loginTemplate)
         .replace(/\{\{CLIENT_NAME\}\}/g, () => escapeHtmlAttr(brand.name))
-        .replace(/\{\{CLIENT_HOST\}\}/g, () => escapeHtmlAttr(brand.host))
         .replace(/\{\{CLIENT_LOGO_URL\}\}/g, () => escapeHtmlAttr(brand.logo))
         .replace(/\{\{CLIENT_INITIALS\}\}/g, () => escapeHtmlAttr(brand.initials))
         .replace(/\{\{AUTH_REQUEST\}\}/g, authRequestId)

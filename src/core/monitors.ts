@@ -149,7 +149,7 @@ export interface AgentReport {
     agent: string; at: number; intervalSeconds?: number;
     /** Random id of the agent process (agents before this field send none). */
     instance?: string;
-    host: { hostname?: string; agentNetworks?: string[]; uptimeSec?: number; load1?: number; memPct: number | null; memTotal?: number; disks: { mount: string; pct: number; total: number; used: number }[] };
+    host: { hostname?: string; agentNetworks?: string[]; uptimeSec?: number; load1?: number; cpuPct?: number | null; memPct: number | null; memTotal?: number; disks: { mount: string; pct: number; total: number; used: number }[] };
     containers: AgentContainer[];
 }
 /** Report as kept in the status: per-container error lines summarised, full lines live in State.serverErrors. */

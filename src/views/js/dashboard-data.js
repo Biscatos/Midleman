@@ -1,12 +1,3 @@
-// ─── Key Generator ───────────────────────────────────────────────────────────
-function generateKey(targetInputId, length = 48) {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  const arr = new Uint8Array(length);
-  crypto.getRandomValues(arr);
-  const key = Array.from(arr, b => chars[b % chars.length]).join('');
-  document.getElementById(targetInputId).value = key;
-}
-
 // ─── IP Tag Input ────────────────────────────────────────────────────────────
 const IpTagInput = (() => {
   const instances = new Map();
@@ -197,14 +188,15 @@ function showActionMenu(btn, items) {
 
   document.body.appendChild(menu);
   const mw = menu.offsetWidth, mh = menu.offsetHeight;
-  const vw = window.innerWidth, vh = window.innerHeight, m = 6;
+  const z = uiZoom(), vw = window.innerWidth / z, vh = window.innerHeight / z, m = 6;
   let x, y;
   if (at) {
     // At the cursor; flip left/up when it would leave the window.
+    at.x /= z; at.y /= z;
     x = at.x + mw > vw - m ? Math.max(m, at.x - mw) : at.x;
     y = at.y + mh > vh - m ? Math.max(m, at.y - mh) : at.y;
   } else {
-    const rect = btn.getBoundingClientRect();
+    const rect = uiRect(btn);
     x = Math.min(Math.max(m, rect.right - mw), vw - mw - m);
     y = rect.bottom + 6 + mh > vh - m ? Math.max(m, rect.top - mh - 6) : rect.bottom + 6;
   }
@@ -1036,8 +1028,8 @@ function filterProfiles() {
     if (search && !p.name.toLowerCase().includes(search) && !p.targetUrl.toLowerCase().includes(search)) return false;
     if (authF === 'enabled' && !p.authHeader) return false;
     if (authF === 'passthrough' && p.authHeader) return false;
-    if (accessF === 'protected' && !p.hasAccessKey) return false;
-    if (accessF === 'public' && p.hasAccessKey) return false;
+    if (accessF === 'protected' && !(p.hasAccessKey || p.hasSharedKey)) return false;
+    if (accessF === 'public' && (p.hasAccessKey || p.hasSharedKey)) return false;
     return true;
   });
   renderProfiles(filtered);
@@ -1082,6 +1074,10 @@ function renderProfiles(profiles) {
     if (p.rateLimit && p.rateLimit.requestsPerMinute) sub.push(p.rateLimit.requestsPerMinute + '/min' + (p.rateLimit.perIp ? ' per IP' : ''));
     if (p.cors && p.cors.enabled) sub.push('CORS');
     if (p.blockedExtensions && p.blockedExtensions.length) sub.push('blocks ' + p.blockedExtensions.length + ' ext.');
+    if (p.retryQueue && p.retryQueue.enabled) sub.push('retry queue');
+    const qKey = 'proxy:' + p.name, qPending = _pendingByWebhook[qKey] || 0, qFailed = _dlqByWebhook[qKey] || 0;
+    const qBadges = (qPending ? ` <button type="button" class="wh-queue warn" data-q="${esc(qKey)}" onclick="event.stopPropagation();openPendingRetryModal(this.dataset.q)" title="Requests waiting to be delivered">${qPending} retrying</button>` : '') +
+      (qFailed ? ` <button type="button" class="wh-queue err" data-q="${esc(qKey)}" onclick="event.stopPropagation();openDlqModal(this.dataset.q)" title="Requests the upstream refused">${qFailed} failed</button>` : '');
 
     const okTxt = okPct === null ? '—' : (okPct >= 99.95 ? '100%' : okPct.toFixed(1) + '%');
     const okCls = okPct === null ? 'muted' : okPct < 95 ? 'warn' : '';
@@ -1090,7 +1086,7 @@ function renderProfiles(profiles) {
 
     return '<tr class="wh-row">' +
       '<td class="wh-dotcol"><i class="wh-state ' + state + '" title="' + (p.running ? 'Running' : 'Stopped') + '"></i></td>' +
-      '<td><div class="wh-name">' + esc(p.name) + '</div><div class="wh-sub">' + esc(sub.join(' · ')) + (npm ? ' · ' + npm : '') + '</div></td>' +
+      '<td><div class="wh-name">' + esc(p.name) + qBadges + '</div><div class="wh-sub">' + esc(sub.join(' · ')) + (npm ? ' · ' + npm : '') + '</div></td>' +
       '<td class="wh-port">' + (p.port ? esc(String(p.port)) : '<span class="wh-none">—</span>') + '</td>' +
       '<td class="wh-target" title="' + esc(p.targetUrl) + '">' + esc(p.targetUrl) + '</td>' +
       '<td title="' + (tr ? fmt(tr.received) + ' requests in the last 24 h' : 'No traffic in the last 24 h') + '">' + _webhookSpark(tr ? tr.hours : new Array(24).fill(0)) +
@@ -1104,6 +1100,8 @@ function renderProfiles(profiles) {
 
 // ─── Profile CRUD ────────────────────────────────────────────────────────────
 async function openProfileModal(profile = null) {
+  api('/admin/api-keys').then(r => r.json()).then(d => { _apiKeys = d.keys || []; akRenderForms(); proxyWiz.render(); }).catch(() => {}); // the wizard checks shared keys
+
   // Pages may not be loaded yet on first open — make sure the dropdown has options.
   if (!_consentPages.length) await fetchConsentPages();
   editingProfile = profile;
@@ -1121,8 +1119,8 @@ async function openProfileModal(profile = null) {
   const hasUpstreamAuth = !!(profile && (profile.apiKey || profile.authHeader || profile.authPrefix));
   document.getElementById('pUpstreamAuthToggle').checked = hasUpstreamAuth;
   toggleUpstreamAuthSection();
-  document.getElementById('pAccessKey').value = profile && !isMasked(profile.accessKey) ? (profile.accessKey || '') : '';
-  document.getElementById('pAccessKey').placeholder = profile && isMasked(profile.accessKey) ? '(kept — type to replace)' : '';
+  _akLegacy.proxy = !!(profile && (profile.accessKey || profile.hasAccessKey));
+  akRenderForms();
   document.getElementById('pAuthMode').value = profile ? (profile.authMode || 'none') : 'none';
   if (typeof mmSyncSeg === 'function') mmSyncSeg('pAuthMode');
   document.getElementById('pRequire2fa').checked = profile ? !!profile.require2fa : false;
@@ -1144,6 +1142,12 @@ async function openProfileModal(profile = null) {
   document.getElementById('pRateLimitRpm').value = (profile && profile.rateLimit) ? profile.rateLimit.requestsPerMinute : '';
   document.getElementById('pRateLimitPerIp').checked = !!(profile && profile.rateLimit && profile.rateLimit.perIp);
   toggleRateLimitFields();
+  const rq = profile && profile.retryQueue;
+  document.getElementById('pRetryEnabled').checked = !!(rq && rq.enabled);
+  document.getElementById('pRetryPerMin').value = rq && rq.maxAttemptsPerMinute ? rq.maxAttemptsPerMinute : '';
+  document.getElementById('pRetryNotifyAfter').value = rq && rq.notifyAfterAttempts ? rq.notifyAfterAttempts : '';
+  document.getElementById('pRetryNotifyEmail').value = rq && rq.notifyEmail ? rq.notifyEmail : '';
+  toggleRetryQueueFields();
   const cors = (profile && profile.cors) || null;
   document.getElementById('pCorsEnabled').checked = !!(cors && cors.enabled);
   document.getElementById('pCorsOrigins').value = cors ? (cors.allowedOrigins || []).join('\n') : '';
@@ -1211,6 +1215,9 @@ function toggleCorsFields() {
   const on = document.getElementById('pCorsEnabled').checked;
   document.getElementById('pCorsFields').style.display = on ? 'grid' : 'none';
 }
+function toggleRetryQueueFields() {
+  document.getElementById('pRetryFields').style.display = document.getElementById('pRetryEnabled').checked ? 'grid' : 'none';
+}
 function toggleRateLimitFields() {
   const on = document.getElementById('pRateLimitEnabled').checked;
   document.getElementById('pRateLimitFields').style.display = on ? 'grid' : 'none';
@@ -1256,7 +1263,7 @@ async function saveProfile() {
   if (v('pAuthPrefix')) body.authPrefix = v('pAuthPrefix');
   const authMode = v('pAuthMode');
   body.authMode = authMode;
-  if (authMode === 'accessKey' && v('pAccessKey')) body.accessKey = v('pAccessKey');
+  if (document.getElementById('pClearLegacy')?.checked) body.clearAccessKey = true;
   if (authMode === 'login') {
     body.require2fa = document.getElementById('pRequire2fa').checked;
     body.isWebApp = document.getElementById('pIsWebApp').checked;
@@ -1286,6 +1293,16 @@ async function saveProfile() {
   if (allowedPathsRaw) {
     const paths = allowedPathsRaw.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
     if (paths.length) body.allowedPaths = paths;
+  }
+  if (document.getElementById('pRetryEnabled').checked) {
+    const perMin = Number(v('pRetryPerMin')), after = Number(v('pRetryNotifyAfter'));
+    if ((v('pRetryPerMin') && !(perMin >= 1 && perMin <= 600)) || (v('pRetryNotifyAfter') && !(after >= 1 && after <= 600))) {
+      toast('Retry queue: attempts per minute and the alert threshold must be between 1 and 600.', 'error');
+      return;
+    }
+    body.retryQueue = { enabled: true, ...(perMin ? { maxAttemptsPerMinute: Math.round(perMin) } : {}), ...(after ? { notifyAfterAttempts: Math.round(after) } : {}), ...(v('pRetryNotifyEmail') ? { notifyEmail: v('pRetryNotifyEmail') } : {}) };
+  } else {
+    body.retryQueue = null;
   }
   if (document.getElementById('pRateLimitEnabled').checked) {
     const rpm = Number(v('pRateLimitRpm'));
@@ -2455,6 +2472,7 @@ async function fetchWebhooks() {
       _pendingByTarget = pq.byTarget || {};
     }
 
+    if (_allProfiles.length) filterProfiles(); // proxies with a retry queue show the same counts
     filterWebhooks();
     document.getElementById('navWebhookBadge').textContent = _allWebhooks.length;
   } catch { }
@@ -2707,8 +2725,8 @@ const proxyWiz = Wizard.mount('profileModal', {
     if (creating && Wizard.checked('pUpstreamAuthToggle') && !Wizard.val('pApiKey')) {
       flag('upstream', 'Auth value is required when upstream credentials are on');
     }
-    if (creating && Wizard.val('pAuthMode') === 'accessKey' && !Wizard.val('pAccessKey')) {
-      flag('access', 'Access key is required in Access Key mode');
+    if (creating && Wizard.val('pAuthMode') === 'accessKey' && !_apiKeys.some(k => k.scopes.includes('proxy:' + Wizard.val('pName')))) {
+      flag('access', 'Create a shared API key for this proxy');
     }
     return p;
   },
@@ -3912,7 +3930,7 @@ function renderFilterAutocomplete(inputEl, index, fIndex) {
         </div>
     `).join('');
 
-    const rect = inputEl.getBoundingClientRect();
+    const rect = uiRect(inputEl);
     dropdown.style.left = rect.left + 'px';
     dropdown.style.top = (rect.bottom + 3) + 'px';
     dropdown.style.width = Math.max(rect.width, 240) + 'px';
@@ -5102,11 +5120,9 @@ function openWebhookModal(webhook = null) {
   // The auth token is never sent back to the client. Leave the field empty and
   // signal that one is already configured via the placeholder; submitting an
   // empty field preserves the existing token server-side.
-  const wAuthTokenEl = document.getElementById('wAuthToken');
-  wAuthTokenEl.value = '';
-  wAuthTokenEl.placeholder = (webhook && webhook.hasAuthToken)
-    ? '•••••••• (set — leave empty to keep)'
-    : '';
+  _akLegacy.webhook = !!(webhook && webhook.hasAuthToken);
+  akRenderForms();
+  api('/admin/api-keys').then(r => r.json()).then(d => { _apiKeys = d.keys || []; akRenderForms(); }).catch(() => {});
   IpTagInput.setValue('wAllowedIps', webhook?.allowedIps || []);
   // New webhooks start POST-only; existing ones keep exactly what they have (none = accept all).
   const wMethods = webhook ? (webhook.allowedMethods || []) : ['POST'];
@@ -5287,7 +5303,7 @@ async function saveWebhook(opts = {}) {
     targets: targetsRaw
   };
   if (targetsRaw.length === 0) return toast('At least one valid destination is required', 'error');
-  const at = document.getElementById('wAuthToken').value.trim(); if (at) body.authToken = at;
+  if (document.getElementById('wClearLegacy')?.checked) body.clearAuthToken = true;
   body.meta = { enabled: document.getElementById('wMetaEnabled').checked }; const sec = document.getElementById('wMetaAppSecret').value.trim(); if (sec) body.meta.appSecret = sec;
   const wIps = IpTagInput.getValue('wAllowedIps'); if (wIps.length) body.allowedIps = wIps;
   body.allowedMethods = [...document.querySelectorAll('#wAllowedMethods input:checked')].map(cb => cb.value);
@@ -6923,6 +6939,22 @@ function resetAuditFilters() {
   fetchAuditLogs(true);
 }
 
+/** Before / after table for an audit entry that changed a config (details.changes = { field: { from, to } }). */
+function _auditChangesHtml(details) {
+  const ch = details && details.changes;
+  if (!ch || typeof ch !== 'object') return '';
+  const fields = Object.keys(ch);
+  if (!fields.length) return '<div style="margin-top:10px;color:var(--text3)">Saved without changing any value.</div>';
+  const val = v => v === null || v === undefined || v === '' ? '<span style="color:var(--text3)">(empty)</span>'
+    : esc(typeof v === 'object' ? JSON.stringify(v, null, 1) : String(v));
+  const cell = 'padding:6px 8px;border-top:1px solid var(--border);vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--font-mono);font-size:11px';
+  return '<div style="margin-top:10px"><span style="color:var(--text3)">Changes (' + fields.length + '):</span>' +
+    '<table style="width:100%;border-collapse:collapse;margin-top:4px;border:1px solid var(--border);table-layout:fixed">' +
+    '<thead><tr style="font-size:11px;color:var(--text3);text-align:left"><th style="padding:6px 8px;width:24%">Field</th><th style="padding:6px 8px">Before</th><th style="padding:6px 8px">After</th></tr></thead><tbody>' +
+    fields.map(k => '<tr><td style="' + cell + ';color:var(--text2)">' + esc(k) + '</td><td style="' + cell + ';color:var(--err-text)">' + val(ch[k].from) + '</td><td style="' + cell + ';color:var(--ok-text)">' + val(ch[k].to) + '</td></tr>').join('') +
+    '</tbody></table></div>';
+}
+
 function showAuditDetail(idx) {
   const l = (window._lastAuditLogs || [])[idx];
   if (!l) return;
@@ -6934,6 +6966,7 @@ function showAuditDetail(idx) {
       '<div><span style="color:var(--text3)">Target:</span> ' + (l.targetType === 'midleman' ? 'Midleman' : esc(l.targetType || '—') + (l.targetId ? ' #' + esc(l.targetId) : '')) + '</div>' +
       '<div><span style="color:var(--text3)">IP:</span> <code>' + esc(l.ipAddress || '—') + '</code></div>' +
       '<div><span style="color:var(--text3)">User-Agent:</span> <span style="font-size:11px">' + esc(l.userAgent || '—') + '</span></div>' +
+      _auditChangesHtml(l.details) +
       (l.details ? '<div style="margin-top:10px"><span style="color:var(--text3)">Details:</span><pre style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px;margin-top:4px;font-size:11px;overflow-x:auto">' + esc(JSON.stringify(l.details, null, 2)) + '</pre></div>' : '') +
     '</div>';
   document.getElementById('auditDetailModal').style.display = 'flex';
@@ -12552,7 +12585,7 @@ function openMonitorDetail(name) {
       stat('Containers', sv.containers.length, `${sv.containers.filter(c => c.status === 'running').length} running`) +
       stat('Host memory', sv.host.memPct !== null ? `<span style="color:${sv.host.memPct >= (m.memPct || 101) ? 'var(--red)' : 'inherit'}">${sv.host.memPct}%</span>` : '—', sv.host.memTotal ? 'of ' + _monBytes(sv.host.memTotal) : '') +
       stat('Disk', worst ? `<span style="color:${worst.pct >= (m.diskPct || 101) ? 'var(--red)' : 'inherit'}">${worst.pct}%</span>` : '—', worst ? `${esc(worst.mount)} · ${_monBytes(worst.used)} of ${_monBytes(worst.total)}` : 'mount /:/hostfs:ro to see disks') +
-      stat('Load / uptime', sv.host.load1 != null ? sv.host.load1.toFixed(2) : '—', sv.host.uptimeSec ? 'up ' + _monUptime(sv.host.uptimeSec) : '');
+      stat('Host CPU', sv.host.cpuPct != null ? sv.host.cpuPct + '%' : (sv.host.load1 != null ? 'load ' + sv.host.load1.toFixed(2) : '—'), [sv.host.cpuPct != null && sv.host.load1 != null ? 'load ' + sv.host.load1.toFixed(2) : '', sv.host.uptimeSec ? 'up ' + _monUptime(sv.host.uptimeSec) : ''].filter(Boolean).join(' · '));
   }
   g('mdInstallBtn').style.display = m.type === 'server' ? '' : 'none';
   const cBox = g('mdContainers');
@@ -12560,10 +12593,21 @@ function openMonitorDetail(name) {
   else if (_mdCtr && cBox.querySelector('.md-ctr-head')) { /* a container is open: leave it */ }
   else if (sv) {
     cBox.style.display = '';
+    // One thing at a time below the chart: containers, their log lines, or the check history.
+    const errN = sv.containers.reduce((a, c) => a + c.errorsInWindow, 0);
+    const tab = (id, label) => `<button type="button" role="tab" aria-selected="${_mdTab === id}" class="${_mdTab === id ? 'on' : ''}" onclick="mdSetTab('${id}')">${label}</button>`;
+    const tabs = `<div class="mm-seg-filter md-tabs" role="tablist">${tab('containers', `Containers <span>${sv.containers.length}</span>`)}${tab('logs', `Logs${errN ? ` <span class="bad" title="Error lines in the last ${m.logWindowMinutes} min">${errN}</span>` : ''}`)}${tab('checks', 'Check history')}</div>`;
+    g('mdHistoryWrap').style.display = _mdTab === 'checks' ? '' : 'none';
+    if (_mdTab === 'logs') {
+      // Keep the lines and filters across the periodic refresh; only the tab counters move.
+      if (cBox.querySelector('#mdLogs')) cBox.querySelector('.md-tabs').outerHTML = tabs;
+      else { cBox.innerHTML = tabs + _mdLogsShell(sv); mdLoadLogs(); }
+    } else if (_mdTab === 'checks') cBox.innerHTML = tabs;
+    else {
     const crit = m.criticalContainers || [];
     const missing = crit.filter(n => !sv.containers.some(c => c.name === n)).map(n => ({ name: n, image: '(not on host)', status: 'missing', health: null, restartCount: 0, cpuPct: null, memBytes: null, errorsInWindow: 0, lastError: null, oomKilled: false }));
     const rows = [...missing, ...sv.containers].sort((a, b) => (crit.includes(b.name) - crit.includes(a.name)) || a.name.localeCompare(b.name));
-    cBox.innerHTML = `<div class="md-ctr-bar"><span class="md-peek-head" style="margin:0">${crit.length ? `<b>${crit.length}</b> critical container(s) alert; the others are shown for information.` : 'No critical list: every container Docker should keep up alerts. Mark the ones that matter and only those will alert.'}</span>
+    cBox.innerHTML = tabs + `<div class="md-ctr-bar"><span class="md-peek-head" style="margin:0">${crit.length ? `<b>${crit.length}</b> critical container(s) alert; the others are shown for information.` : 'No critical list: every container Docker should keep up alerts. Mark the ones that matter and only those will alert.'}</span>
         <input class="mm-input md-ctr-search" id="mdCtrSearch" type="search" placeholder="Filter containers…" value="${esc(_mdCtrQ)}" oninput="mdCtrFilter(this.value)"></div>
       <div class="md-ctr-scroll"><table class="md-table md-ctr"><thead><tr><th title="Only critical containers alert when at least one is marked">Critical</th><th>Container</th><th>State</th><th>Restarts</th><th>CPU</th><th>RAM</th><th>Errors (${m.logWindowMinutes} min)</th><th>Last error</th></tr></thead><tbody>` +
       rows.map(c => { const isCrit = crit.includes(c.name); const watched = isCrit || !crit.length; const bad = c.status !== 'running' || c.health === 'unhealthy'; const ign = (m.ignoreContainers || []).includes(c.name);
@@ -12577,8 +12621,9 @@ function openMonitorDetail(name) {
         <td class="detail" title="${esc(c.lastError?.line || '')}">${c.lastError ? `<span class="md-ctr-err">${esc(c.lastError.line.slice(0, 120))}</span><span class="md-ctr-when">${_monAgo(c.lastError.at)}</span>` : '<span style="color:var(--text3)">—</span>'}</td></tr>`; }).join('') +
       `</tbody></table></div>`;
     mdCtrFilter(_mdCtrQ);
-  } else if (m.type === 'server') { cBox.style.display = ''; cBox.innerHTML = '<div class="md-peek-head">No report yet. Click <b>Install agent</b> for the command to run on the server.</div>'; }
-  else { cBox.style.display = 'none'; cBox.innerHTML = ''; }
+    }
+  } else if (m.type === 'server') { g('mdHistoryWrap').style.display = ''; cBox.style.display = ''; cBox.innerHTML = '<div class="md-peek-head">No report yet. Click <b>Install agent</b> for the command to run on the server.</div>'; }
+  else { g('mdHistoryWrap').style.display = ''; cBox.style.display = 'none'; cBox.innerHTML = ''; }
   g('mdChart').innerHTML = _monSpark(h, alert, unit).replace('class="mon-chart', 'class="mon-chart md-chart');
   g('mdRows').innerHTML = h.length ? [...h].reverse().map(x => `<tr class="${x.ok ? '' : 'is-fail'}">
       <td class="mono">${new Date(x.at).toLocaleString()}</td>
@@ -12595,7 +12640,7 @@ function openMonitorDetail(name) {
   if (!document.getElementById('monitorDetailModal').style.display || document.getElementById('monitorDetailModal').style.display === 'none') { const pk = g('mdPeek'); pk.style.display = 'none'; pk.innerHTML = ''; }
   g('monitorDetailModal').style.display = 'flex';
 }
-function closeMonitorDetail() { document.getElementById('monitorDetailModal').style.display = 'none'; document.getElementById('mdHistoryWrap').style.display = ''; _mdName = null; _mdCtr = null; _mdCtrQ = ''; }
+function closeMonitorDetail() { document.getElementById('monitorDetailModal').style.display = 'none'; document.getElementById('mdHistoryWrap').style.display = ''; _mdName = null; _mdCtr = null; _mdCtrQ = ''; _mdTab = 'containers'; _mdLogRows = []; }
 async function mdPeek() {
   const box = document.getElementById('mdPeek'); const btn = document.getElementById('mdPeekBtn');
   box.style.display = ''; box.innerHTML = '<div style="color:var(--text3);font-size:12.5px">Reading queue…</div>'; btn.disabled = true;
@@ -12661,6 +12706,40 @@ function mdCtrFilter(q) {
   const tb = document.querySelector('#mdContainers .md-ctr tbody'); let empty = document.getElementById('mdCtrEmpty');
   if (tb && !shown) { if (!empty) { empty = document.createElement('tr'); empty.id = 'mdCtrEmpty'; empty.innerHTML = '<td colspan="8" style="text-align:center;color:var(--text3);padding:20px">No container matches.</td>'; tb.appendChild(empty); } } else if (empty) empty.remove();
 }
+let _mdTab = 'containers', _mdLogRows = [];
+function mdSetTab(t) { _mdTab = t; document.getElementById('mdContainers').innerHTML = ''; openMonitorDetail(_mdName); }
+/** Logs tab: error and warning lines of every container, newest first, with filters. */
+function _mdLogsShell(sv) {
+  const names = [...new Set(sv.containers.map(c => c.name))].sort();
+  return `<div class="md-ctr-bar"><span class="md-peek-head" style="margin:0" id="mdLogsHead">Loading…</span>
+      <span class="md-log-tools">
+        <select class="mm-input" id="mdLogCtr" onchange="mdLoadLogs()" aria-label="Container"><option value="">All containers</option>${names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select>
+        <input class="mm-input md-ctr-search" id="mdLogQ" type="search" placeholder="Filter lines…" oninput="mdLogRender()" aria-label="Filter lines">
+        <label class="md-log-only"><input type="checkbox" class="mm-switch" id="mdLogErrOnly" onchange="mdLogRender()"> Errors only</label>
+        <button type="button" class="btn btn-sm" onclick="mdLoadLogs()">Refresh</button>
+      </span></div>
+    <pre class="md-ctr-log md-logs" id="mdLogs"></pre>`;
+}
+async function mdLoadLogs() {
+  const name = _mdName, ctr = document.getElementById('mdLogCtr')?.value || '';
+  const res = await api(`/admin/monitors/${encodeURIComponent(name)}/errors?limit=300${ctr ? '&container=' + encodeURIComponent(ctr) : ''}`);
+  const d = await res.json().catch(() => ({}));
+  if (_mdName !== name || !document.getElementById('mdLogs')) return;
+  if (!res.ok) { document.getElementById('mdLogsHead').innerHTML = `<span class="md-peek-err">${esc(d.error || 'Failed')}</span>`; return; }
+  _mdLogRows = d.errors || [];
+  mdLogRender();
+}
+function mdLogRender() {
+  const out = document.getElementById('mdLogs'); if (!out) return;
+  const q = (document.getElementById('mdLogQ').value || '').trim().toLowerCase(), only = document.getElementById('mdLogErrOnly').checked;
+  const rows = _mdLogRows.filter(e => (!only || !e.warn) && (!q || e.line.toLowerCase().includes(q) || e.container.toLowerCase().includes(q)));
+  document.getElementById('mdLogsHead').textContent = !_mdLogRows.length ? 'No error or warning line yet.'
+    : `${rows.length} of the last ${_mdLogRows.length} error and warning lines, newest first`;
+  out.style.display = _mdLogRows.length ? '' : 'none';
+  out.innerHTML = rows.map(e => `<span class="md-ctr-ts">${new Date(e.at).toLocaleString()}</span> <button type="button" class="md-log-ctr" data-c="${esc(e.container)}" onclick="mdLogPick(this.dataset.c)" title="Show only this container">${esc(e.container)}</button> ${e.warn ? `<span style="color:var(--orange)">${esc(e.line)}</span>` : esc(e.line)}`).join('\n')
+    || '<span style="color:var(--text3)">No line matches the filter.</span>';
+}
+function mdLogPick(c) { const s = document.getElementById('mdLogCtr'); s.value = c; s.dispatchEvent(new Event('change', { bubbles: true })); }
 async function mdContainerErrors(container) {
   _mdCtr = container;
   const box = document.getElementById('mdContainers'); if (!box) return;
@@ -12753,10 +12832,29 @@ document.addEventListener('mousemove', ev => {
   dot.setAttribute('cx', cx); dot.setAttribute('cy', cy); dot.style.display = '';
   tip.innerHTML = `<b>${_monFmt(val, chart.dataset.unit)}</b> · ${new Date(at).toLocaleTimeString()} <span class="${ok ? 'ok' : 'al'}">${ok ? 'OK' : 'FAIL'}</span>`;
   tip.style.display = '';
-  const left = Math.max(0, Math.min(r.width - tip.offsetWidth, (cx / W) * r.width - tip.offsetWidth / 2));
+  const cw = chart.offsetWidth; // layout px, like the tip — r is in screen px when the UI is zoomed
+  const left = Math.max(0, Math.min(cw - tip.offsetWidth, (cx / W) * cw - tip.offsetWidth / 2));
   tip.style.left = left + 'px';
   chart.classList.add('is-hover');
 });
+
+/** CPU / memory / disk of a Docker host, on its card. Dimmed when the agent stopped reporting. */
+function _monHostMeters(s, m) {
+  const h = s.server && s.server.host;
+  if (!h) return '';
+  const stale = Date.now() - s.server.at > Math.max(3 * m.intervalSeconds, 90) * 1000;
+  const worst = h.disks && h.disks.length ? h.disks.reduce((a, d) => d.pct > a.pct ? d : a) : null;
+  const meter = (label, pct, limit, title) => {
+    const has = pct !== null && pct !== undefined;
+    const cls = !has ? '' : pct >= limit ? ' err' : pct >= limit - 15 ? ' warn' : '';
+    return `<div class="mon-meter${cls}" title="${esc(title || '')}"><span>${label}</span><b>${has ? Math.round(pct) + '%' : '—'}</b><i><u style="width:${has ? Math.min(100, Math.max(0, pct)) : 0}%"></u></i></div>`;
+  };
+  return `<div class="mon-meters${stale ? ' is-stale' : ''}"${stale ? ' title="Last values before the agent went silent"' : ''}>` +
+    meter('CPU', h.cpuPct, 90, h.cpuPct == null ? 'Needs an updated agent' : (h.load1 != null ? 'load ' + h.load1.toFixed(2) : '')) +
+    meter('Memory', h.memPct, m.memPct || 90, h.memTotal ? 'of ' + _monBytes(h.memTotal) : '') +
+    meter('Disk', worst ? worst.pct : null, m.diskPct || 90, worst ? worst.mount + ' — fullest of ' + h.disks.length : '') +
+    '</div>';
+}
 
 /** Overview card: one compact row per monitor (icon · name · reading · state). */
 function renderOverviewMonitors() {
@@ -12827,6 +12925,7 @@ function renderMonitors() {
     ${chip}
   </div>
   <div class="mon-target" title="${esc(monitorTarget(m))}">${esc(monitorTarget(m))}</div>
+  ${m.type === 'server' ? _monHostMeters(s, m) : ''}
   ${_monSpark(s.history, alert, m.type === 'rabbitmq' ? 'msgs' : m.type === 'server' ? 'errors' : m.type === 'traffic' ? '%' : 'ms')}
   <div class="mon-foot">
     ${foot}
@@ -12915,6 +13014,158 @@ async function sendReportNow() {
     if (!res.ok) return toast('Report not sent: ' + ((d.errors || []).join('; ') || d.error || 'failed'), 'error');
     toast(`Report sent to ${d.sent} recipient(s)`); document.getElementById('rpStatus').textContent = 'Sent just now.';
   } finally { if (btn) btn.disabled = false; }
+}
+
+// ─── Shared API keys ───
+let _apiKeys = [], _akEditing = null;
+async function fetchApiKeys() {
+  const [kr, pr, wr] = await Promise.all([api('/admin/api-keys'), api('/admin/profiles'), api('/admin/webhooks')]);
+  _apiKeys = (await kr.json().catch(() => ({}))).keys || [];
+  if (pr.ok) _allProfiles = (await pr.json().catch(() => ({}))).profiles || [];
+  if (wr.ok) _allWebhooks = (await wr.json().catch(() => ({}))).webhooks || [];
+  renderApiKeys(); akRenderForms();
+}
+// Whether the proxy / webhook open in its form still has a key of its own (set when the form opens).
+const _akLegacy = { proxy: false, webhook: false };
+/** Fills the "API Keys" block of the proxy and webhook forms: the shared keys assigned to that
+ *  resource, and — when it still has a key of its own — the option to drop it on save. */
+function akRenderForms() {
+  for (const [kind, boxId, nameId, clearId] of [['proxy', 'pSharedKeys', 'pName', 'pClearLegacy'], ['webhook', 'wSharedKeys', 'wName', 'wClearLegacy']]) {
+    const box = document.getElementById(boxId); if (!box) continue;
+    const keep = document.getElementById(clearId)?.checked;
+    const scope = kind + ':' + document.getElementById(nameId).value.trim();
+    const mine = _apiKeys.filter(k => k.scopes.includes(scope));
+    box.innerHTML = (mine.length
+        ? mine.map(k => `<span class="mm-chip acc" style="margin:1px 4px 1px 0">${esc(k.name)} · <span class="mono">${esc(k.prefix)}…</span></span>`).join('')
+        : `<span class="wh-none" style="font-size:12.5px">${_akLegacy[kind] ? 'No shared key assigned yet.' : kind === 'webhook' ? 'No key assigned — this webhook is public.' : 'No key assigned yet.'}</span>`)
+      + (_akLegacy[kind] ? `<label style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin-top:8px;cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400"><input type="checkbox" id="${clearId}"${keep ? ' checked' : ''}> <span>This ${kind} still accepts its own older key. Remove that key on save.</span></label>` : '');
+  }
+}
+/** Resources that would be left open if this key lost `dropped` scopes: nothing else protects them. */
+function _akLeftOpen(keyId, dropped) {
+  return dropped.filter(s => {
+    if (_apiKeys.some(k => k.id !== keyId && k.scopes.includes(s))) return false;
+    const i = s.indexOf(':'), name = s.slice(i + 1);
+    if (s.startsWith('proxy:')) { const p = (_allProfiles || []).find(x => x.name === name); return !!p && p.authMode === 'accessKey' && !p.hasAccessKey; }
+    const w = _allWebhooks.find(x => x.name === name); return !!w && !w.hasAuthToken;
+  }).map(s => s.slice(s.indexOf(':') + 1));
+}
+function renderApiKeys() {
+  const c = document.getElementById('akRows'); if (!c) return;
+  const q = (document.getElementById('akSearch').value || '').trim().toLowerCase();
+  const list = _apiKeys.filter(k => !q || [k.name, k.prefix, k.createdBy, ...k.scopes].join(' ').toLowerCase().includes(q));
+  if (!list.length) {
+    c.innerHTML = `<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">${_apiKeys.length ? 'No key matches the search.' : 'No API keys yet. Click "+ API Key".'}</td></tr>`;
+    return;
+  }
+  // A scope pointing at a proxy/webhook that no longer exists (renamed or deleted) is flagged.
+  const known = new Set([...(_allProfiles || []).map(p => 'proxy:' + p.name), ..._allWebhooks.map(w => 'webhook:' + w.name)]);
+  c.innerHTML = list.map(k => {
+    const n = esc(k.name);
+    const chips = k.scopes.map(s => {
+      const i = s.indexOf(':'), kind = s.slice(0, i), gone = !known.has(s);
+      return `<span class="mm-chip${gone ? ' warn' : ''}" style="margin:1px 4px 1px 0"${gone ? ` title="This ${kind} no longer exists"` : ''}>${kind === 'proxy' ? 'Proxy' : 'Webhook'} · ${esc(s.slice(i + 1))}</span>`;
+    }).join('') || '<span class="wh-none">No access yet</span>';
+    return `<tr class="wh-row">
+  <td class="wh-dotcol"><i class="wh-state ${k.scopes.length ? 'ok' : 'off'}"></i></td>
+  <td><div class="wh-name">${n}</div><div class="wh-sub"><span class="mono">${esc(k.prefix)}…</span>${k.createdBy ? ' · by ' + esc(k.createdBy) : ''}</div></td>
+  <td>${chips}</td>
+  <td class="mono">${new Date(k.createdAt).toLocaleDateString()}</td>
+  <td class="mono">${k.lastUsedAt ? _monAgo(k.lastUsedAt) : '<span class="wh-none">never</span>'}</td>
+  <td style="text-align:right;white-space:nowrap"><button class="wh-more" data-id="${esc(k.id)}" onclick="apiKeyMenu(event, this)" aria-label="Actions for ${n}">⋮</button></td>
+</tr>`;
+  }).join('');
+}
+function apiKeyMenu(e, btn) {
+  e.stopPropagation();
+  const k = _apiKeys.find(x => x.id === btn.dataset.id); if (!k) return;
+  showActionMenu(btn, [
+    { label: 'Edit access', fn: () => openApiKeyModal(k.id) },
+    '---',
+    { label: 'Revoke', fn: () => revokeApiKey(k.id), danger: true },
+  ]);
+}
+/** `preset` ("proxy:<name>" / "webhook:<name>") opens a new key with that resource ticked — used by the
+ *  proxy and webhook forms, where the resource may not be saved yet. */
+async function openApiKeyModal(id, preset) {
+  if (preset) {
+    if (/^(proxy|webhook):\s*$/.test(preset)) return toast('Enter the name first', 'error');
+    await fetchApiKeys();
+  }
+  _akEditing = _apiKeys.find(k => k.id === id) || null;
+  const selected = _akEditing ? _akEditing.scopes : preset ? [preset] : [];
+  const names = (kind, list) => { const n = list.map(x => x.name), p = preset && preset.startsWith(kind + ':') ? preset.slice(kind.length + 1) : null; return p && !n.includes(p) ? [p, ...n] : n; };
+  // One list, grouped; ticked rows first so what a key already opens is visible without scrolling.
+  const sec = (title, kind, list, tag) => {
+    const rows = [...names(kind, list)].sort((a, b) => selected.includes(kind + ':' + b) - selected.includes(kind + ':' + a));
+    return `<div class="ak-sec"><div class="ak-head">${title}<span>${rows.length}</span></div>` + (rows.length ? rows.map(n => {
+      const v = kind + ':' + n, r = list.find(x => x.name === n);
+      return `<label class="ak-row"><input type="checkbox" class="ak-scope" value="${esc(v)}" onchange="akFilterScopes()"${selected.includes(v) ? ' checked' : ''}><span class="ak-name">${esc(n)}</span><span class="ak-tag">${r ? tag(r) : 'New'}</span></label>`;
+    }).join('') : '<div class="ak-none">None configured</div>') + '</div>';
+  };
+  document.getElementById('akScopes').innerHTML =
+    sec('HTTP Proxies', 'proxy', _allProfiles || [], p => ({ accessKey: 'Access key', login: 'User login' })[p.authMode] || 'Public')
+    + sec('Webhooks', 'webhook', _allWebhooks, w => w.hasAuth ? 'Protected' : 'Public')
+    + '<div class="ak-none" id="akNoMatch" style="display:none">Nothing matches the search.</div>';
+  document.getElementById('akFilter').value = ''; akFilterScopes();
+  document.getElementById('akName').value = _akEditing ? _akEditing.name : '';
+  document.getElementById('akModalTitle').textContent = _akEditing ? 'Edit ' + _akEditing.name : 'New API key';
+  document.getElementById('akModalSub').textContent = _akEditing
+    ? 'Change what this key opens. The key itself stays the same, so the partner changes nothing.'
+    : "Give it the partner's name and choose what it opens. Access can be changed later without changing the key.";
+  document.getElementById('akSaveBtn').textContent = _akEditing ? 'Save' : 'Create key';
+  _akShowSecret(null);
+  document.getElementById('apiKeyModal').style.display = 'flex';
+  document.getElementById('akName').focus();
+}
+/** Hides the rows that do not match the search (ticked rows keep their state) and updates the count. */
+function akFilterScopes() {
+  const q = document.getElementById('akFilter').value.trim().toLowerCase();
+  let shown = 0;
+  document.querySelectorAll('#akScopes .ak-sec').forEach(sec => {
+    let n = 0;
+    sec.querySelectorAll('.ak-row').forEach(r => { const ok = !q || r.querySelector('.ak-name').textContent.toLowerCase().includes(q); r.style.display = ok ? '' : 'none'; if (ok) n++; });
+    sec.style.display = q && !n ? 'none' : ''; shown += n;
+  });
+  document.getElementById('akNoMatch').style.display = q && !shown ? '' : 'none';
+  const n = document.querySelectorAll('.ak-scope:checked').length;
+  document.getElementById('akCount').textContent = n ? n + ' selected' : 'Nothing selected';
+}
+/** Switches the modal between the form and the one-time secret. */
+function _akShowSecret(secret) {
+  document.getElementById('akFormView').style.display = secret ? 'none' : 'flex';
+  document.getElementById('akSecretView').style.display = secret ? 'flex' : 'none';
+  document.getElementById('akCancelBtn').style.display = document.getElementById('akSaveBtn').style.display = secret ? 'none' : '';
+  document.getElementById('akDoneBtn').style.display = secret ? '' : 'none';
+  document.getElementById('akSecret').value = secret || '';
+  document.getElementById('akSecretCopy').dataset.copy = secret || '';
+}
+function closeApiKeyModal() { _akShowSecret(null); document.getElementById('apiKeyModal').style.display = 'none'; }
+async function saveApiKey() {
+  const name = document.getElementById('akName').value.trim();
+  if (!name) { document.getElementById('akName').focus(); return toast('Give the key a name (e.g. the partner)', 'error'); }
+  const scopes = [...document.querySelectorAll('.ak-scope:checked')].map(c => c.value);
+  const open = _akEditing ? _akLeftOpen(_akEditing.id, _akEditing.scopes.filter(s => !scopes.includes(s))) : [];
+  if (open.length && !await showConfirm({ title: 'This leaves a resource public', message: `No other key protects: ${open.join(', ')}.`, detail: 'Without any key assigned, anyone can call it.', confirmText: 'Save anyway', danger: true })) return;
+  const res = _akEditing
+    ? await api('/admin/api-keys/' + encodeURIComponent(_akEditing.id), { method: 'PUT', body: JSON.stringify({ name, scopes }) })
+    : await api('/admin/api-keys', { method: 'POST', body: JSON.stringify({ name, scopes }) });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || 'Could not save the key', 'error');
+  if (d.secret) {
+    document.getElementById('akModalTitle').textContent = 'Key created — ' + name;
+    document.getElementById('akModalSub').textContent = 'This is the only time the key is shown.';
+    _akShowSecret(d.secret);
+  } else { closeApiKeyModal(); toast('Access updated'); }
+  await fetchApiKeys();
+}
+async function revokeApiKey(id) {
+  const k = _apiKeys.find(x => x.id === id); if (!k) return;
+  const open = _akLeftOpen(k.id, k.scopes);
+  if (!await showConfirm({ title: 'Revoke API key', message: `Revoke the key "${k.name}"?`, detail: 'Whoever uses it loses access immediately. Other keys keep working.' + (open.length ? ` No other key protects ${open.join(', ')} — it becomes public.` : ''), confirmText: 'Revoke', danger: true })) return;
+  const res = await api('/admin/api-keys/' + encodeURIComponent(id), { method: 'DELETE' }); const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || 'Failed', 'error');
+  toast('Key revoked'); await fetchApiKeys();
 }
 
 // ─── Wallboard share links ───
@@ -13259,6 +13510,16 @@ async function fetchTunnels() {
   renderTunnels();
 }
 /** What a client types: the dashboard's own host when the port is open to the network, loopback otherwise. */
+// Built-in marks for services that do not speak HTTP; anything else is asked for its own icon (like OAuth clients).
+const _TUN_SVC = { 6379: 'redis', 6380: 'redis', 5432: 'postgres', 3306: 'mysql', 1433: 'mssql', 5672: 'rabbitmq', 5671: 'rabbitmq', 1521: 'database', 9042: 'database', 27017: 'database' };
+const _tunNoIcon = new Set(); // tunnels whose service has no icon: keep the letter instead of asking again on every render
+function _tunIconHtml(t) {
+  const svc = _TUN_SVC[t.port];
+  if (svc) return `<span class="mon-ico mon-ico-${svc} oc-ico"><svg style="width:14px;height:14px"><use href="#mon-ico-${svc}"/></svg></span>`;
+  const letter = `<span class="oc-ico oc-ico-letter">${esc((t.name || '?').charAt(0).toUpperCase())}</span>`;
+  if (!t.enabled || t.status !== 'online' || _tunNoIcon.has(t.name)) return letter;
+  return `<img class="oc-ico" src="/admin/tunnels/${encodeURIComponent(t.name)}/icon" alt="" loading="lazy" data-tun="${esc(t.name)}" onerror="_tunNoIcon.add(this.dataset.tun); this.outerHTML=${JSON.stringify(letter).replace(/"/g, '&quot;')}">`;
+}
 function _tunAddr(t) { return (t.allowedIps.length ? location.hostname : '127.0.0.1') + ':' + t.listenPort; }
 
 let _tunFilter = 'all';
@@ -13316,7 +13577,7 @@ function renderTunnels() {
     // Service in front, the route under it — only a broken hop gets colour.
     const svcWarn = t.lastError && t.status === 'online' && Date.now() - t.lastError.at < 15 * 60_000;
     const chain =
-      `<div class="tn-svc">${hop(svcWarn ? 'warn' : '', esc(t.host) + ':' + t.port, t.lastError ? `Last error ${_monAgo(t.lastError.at)}: ${t.lastError.msg}` : '')}</div>` +
+      `<div class="tn-svc"><button type="button" class="tn-hop ${svcWarn ? 'warn' : ''} tn-port" title="${esc(`Copy internal address ${t.host}:${t.port}` + (t.lastError ? ` — last error ${_monAgo(t.lastError.at)}: ${t.lastError.msg}` : ''))}" onclick="mmCopy(this.textContent, this, 'Copied: ' + this.textContent)">${esc(t.host)}:${t.port}</button></div>` +
       `<div class="tn-route">` +
         hop(wide ? 'warn' : '', esc(from) + (wide ? ' ⚠' : ''), t.allowedIps.length ? t.allowedIps.join(', ') + (wide ? ' — very wide range' : '') : 'Only Midleman itself (127.0.0.1) can connect') + arrow +
         `<button type="button" class="tn-hop ${t.status === 'error' ? 'err' : ''} tn-port" title="Copy ${esc(addr)}" onclick="mmCopy('${esc(addr)}', this, 'Copied: ${esc(addr)}')">:${t.listenPort}</button>` + arrow +
@@ -13339,9 +13600,9 @@ function renderTunnels() {
 
     return `<tr class="wh-row tn-row">
   <td class="wh-dotcol"><i class="wh-state ${state}"></i></td>
-  <td><div class="wh-name">${n}</div><div class="wh-sub">${sub}</div></td>
+  <td><div class="oc-name">${_tunIconHtml(t)}<div><div class="wh-name">${n}</div><div class="wh-sub">${sub}</div></div></div></td>
   <td>${chain}${problem}</td>
-  <td title="${(t.recent || []).length} recent connections">${spark}</td>
+  <td><button type="button" class="tn-spark-btn" onclick="openTunnelActivity('${n}')" title="Open the connection history" aria-label="Connection history of ${n}">${spark}</button></td>
   <td class="wh-rate" title="${t.total} since Midleman started">${t.active} <span class="wh-none">/ ${t.maxConnections}</span></td>
   <td class="wh-vol">${fmtBytes(t.bytesUp)} / ${fmtBytes(t.bytesDown)}</td>
   <td style="text-align:right;white-space:nowrap">
@@ -13354,13 +13615,58 @@ function renderTunnels() {
   }).join('');
 }
 
+let _taName = null, _taRows = [], _taFilter = '';
+/** A tunnel's connection history in its own window (the edit form only edits). */
+function openTunnelActivity(name) {
+  _taName = name; _taRows = []; _taFilter = '';
+  document.getElementById('taSearch').value = '';
+  document.querySelectorAll('#taFilter button').forEach(b => b.classList.toggle('on', b.dataset.f === ''));
+  document.getElementById('taRows').innerHTML = '<tr><td colspan="6" style="color:var(--text3);text-align:center;padding:18px">Loading…</td></tr>';
+  document.getElementById('tunnelActivityModal').style.display = 'flex';
+  loadTunnelActivity();
+}
+function closeTunnelActivity() { document.getElementById('tunnelActivityModal').style.display = 'none'; _taName = null; }
+function taEdit() { const n = _taName; closeTunnelActivity(); openTunnelModal(n); }
+function taSetFilter(f) { _taFilter = f; document.querySelectorAll('#taFilter button').forEach(b => b.classList.toggle('on', b.dataset.f === f)); renderTunnelActivity(); }
+async function loadTunnelActivity() {
+  const name = _taName; if (!name) return;
+  const res = await api('/admin/tunnels/' + encodeURIComponent(name) + '/history');
+  const d = await res.json().catch(() => ({}));
+  if (_taName !== name) return;
+  if (!res.ok) { document.getElementById('taRows').innerHTML = `<tr><td colspan="6" class="md-peek-err" style="padding:14px">${esc(d.error || 'Could not load the history')}</td></tr>`; return; }
+  _taRows = d.connections || [];
+  renderTunnelActivity();
+}
+function renderTunnelActivity() {
+  const g = id => document.getElementById(id);
+  const t = _tunnels.find(x => x.name === _taName); if (!t) return;
+  g('taName').textContent = t.name + ' — activity';
+  g('taTarget').textContent = _tunAddr(t) + '  →  ' + t.agent + '  →  ' + t.host + ':' + t.port;
+  const stat = (l, v, sub) => `<div class="md-ctr-stat"><div class="l">${l}</div><div class="v">${v}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
+  g('taStats').innerHTML = stat('Connections', t.total, 'since Midleman started') + stat('Open now', t.active, 'limit ' + t.maxConnections)
+    + stat('Refused', `<span style="color:${t.rejected ? 'var(--red)' : 'inherit'}">${t.rejected}</span>`, t.lastRejected ? 'last ' + _monAgo(t.lastRejected.at) : 'none')
+    + stat('Sent / received', fmtBytes(t.bytesUp) + ' / ' + fmtBytes(t.bytesDown), t.lastUsed ? 'used ' + _monAgo(t.lastUsed) : 'never used');
+  const line = (k, v) => `<div><span style="color:var(--text3)">${k}</span> ${v}</div>`;
+  g('taNotes').innerHTML = (t.error ? line('Listener', `<span style="color:var(--red)">${esc(t.error)}</span>`) : '')
+    + (t.lastError ? line('Last error', `<span style="color:var(--red)">${esc(t.lastError.msg)}</span>, ${_monAgo(t.lastError.at)}`) : '');
+  const kind = r => r.refused ? 'refused' : r.error ? 'error' : 'ok';
+  const q = g('taSearch').value.trim().toLowerCase();
+  const rows = _taRows.filter(r => (!_taFilter || kind(r) === _taFilter) && (!q || r.ip.toLowerCase().includes(q)));
+  const dur = r => r.refused ? '—' : r.ms < 1000 ? r.ms + ' ms' : r.ms < 60000 ? (r.ms / 1000).toFixed(1) + ' s' : Math.floor(r.ms / 60000) + ' min ' + Math.round(r.ms % 60000 / 1000) + ' s';
+  g('taRows').innerHTML = rows.length ? rows.map(r => `<tr class="${kind(r) === 'ok' ? '' : 'is-fail'}"><td class="mono">${new Date(r.at).toLocaleString()}</td><td class="mono">${esc(r.ip)}</td><td class="mono">${dur(r)}</td><td class="mono">${r.refused ? '—' : fmtBytes(r.up)}</td><td class="mono">${r.refused ? '—' : fmtBytes(r.down)}</td><td class="detail" title="${esc(r.error || '')}">${r.refused ? '<span class="mm-chip err">refused</span> ' + esc(r.error || '') : r.error ? '<span class="mm-chip err">error</span> ' + esc(r.error) : '<span class="mm-chip ok">closed</span>'}</td></tr>`).join('')
+    : `<tr><td colspan="6" style="color:var(--text3);text-align:center;padding:18px">${_taRows.length ? 'No connection matches the filter.' : 'No connection yet.'}</td></tr>`;
+  g('taFoot').textContent = `${rows.length} of ${_taRows.length} connections shown. The last 500 are kept in memory and the history starts again when Midleman restarts. A tunnel carries raw TCP, so individual HTTP requests inside a connection are not visible here.`;
+}
+
 function tunnelMenu(e, btn) {
   e.stopPropagation();
   const t = _tunnels.find(x => x.name === btn.dataset.name); if (!t) return;
   showActionMenu(btn, [
     { label: 'Test target', fn: () => tunnelTest(t.name) },
     { label: 'Copy address', fn: () => mmCopy(_tunAddr(t), null, 'Copied: ' + _tunAddr(t)) },
+    { label: 'Copy internal address', fn: () => mmCopy(t.host + ':' + t.port, null, 'Copied: ' + t.host + ':' + t.port) },
     { label: 'Copy connect command', fn: () => mmCopy(_tunCommand(t), null, 'Copied: ' + _tunCommand(t)) },
+    { label: 'Activity', fn: () => openTunnelActivity(t.name) },
     { label: 'Edit', fn: () => openTunnelModal(t.name) },
     '---',
     { label: 'Delete', fn: () => tunnelDelete(t.name), danger: true },
@@ -13408,16 +13714,6 @@ function openTunnelModal(name) {
   tunAllowQuick();
   g('tunDescription').value = t?.description || '';
   g('tunPortHint').innerHTML = `Empty port = first free one from <code>${_tunPortStart}</code>. It must be a port the Midleman container publishes (the compose file publishes <code>4000-4050</code>).`;
-  g('tunActivity').style.display = t ? '' : 'none';
-  if (t) {
-    const line = (k, v) => `<div><span style="color:var(--text3)">${k}</span> ${v}</div>`;
-    g('tunActivitySummary').innerHTML = line('Connections', `${t.total} total · ${t.active} open · ${t.rejected} refused`)
-      + (t.lastRejected ? line('Last refused', `${esc(t.lastRejected.ip)} — ${esc(t.lastRejected.why)}, ${_monAgo(t.lastRejected.at)}`) : '')
-      + (t.error ? line('Listener', `<span style="color:var(--red)">${esc(t.error)}</span>`) : '')
-      + (t.lastError ? line('Last error', `<span style="color:var(--red)">${esc(t.lastError.msg)}</span>, ${_monAgo(t.lastError.at)}`) : '');
-    g('tunRecentRows').innerHTML = t.recent.length ? t.recent.map(r => `<tr class="${r.error ? 'is-fail' : ''}"><td class="mono">${new Date(r.at).toLocaleString()}</td><td class="mono">${esc(r.ip)}</td><td class="mono">${r.ms < 1000 ? r.ms + ' ms' : (r.ms / 1000).toFixed(1) + ' s'}</td><td class="mono">${fmtBytes(r.up)}</td><td class="mono">${fmtBytes(r.down)}</td><td class="detail" title="${esc(r.error || '')}">${esc(r.error || 'closed')}</td></tr>`).join('')
-      : '<tr><td colspan="6" style="color:var(--text3);text-align:center;padding:14px">No connection finished yet.</td></tr>';
-  }
   g('tunnelModal').style.display = 'flex';
   setTimeout(() => g(t ? 'tunHost' : 'tunName').focus(), 30);
 }

@@ -109,6 +109,12 @@
         <span class="sidebar-link-label">OAuth Clients</span>
         <span class="sidebar-badge" id="navOauthBadge">0</span>
       </button>
+      <button class="sidebar-link" data-page="apikeys" data-tooltip="API Keys" onclick="navigate('apikeys')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8" cy="15" r="4"/><path d="M11 12l9-9"/><path d="M16 7l3 3"/>
+        </svg>
+        <span class="sidebar-link-label">API Keys</span>
+      </button>
       <button class="sidebar-link" data-page="consentpages" data-tooltip="OAuth consent pages" onclick="navigate('consentpages')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
@@ -769,7 +775,7 @@
         <div style="padding:14px 22px 0;display:grid;grid-template-columns:repeat(4,1fr);gap:10px" id="mdStats"></div>
         <div style="padding:12px 22px 0"><div id="mdChart"></div></div>
         <div id="mdPeek" style="display:none;padding:12px 22px 0"></div>
-        <div id="mdContainers" style="display:none;padding:12px 22px 0"></div>
+        <div id="mdContainers" style="display:none;padding:12px 22px 18px;overflow:auto;min-height:0"></div>
         <div style="padding:12px 22px 18px;overflow:auto;min-height:0" id="mdHistoryWrap">
           <table class="md-table"><thead><tr><th>Time</th><th>Result</th><th>Value</th><th>Took</th><th>Detail</th></tr></thead><tbody id="mdRows"></tbody></table>
         </div>
@@ -1088,6 +1094,88 @@
     </div>
 
     <!-- ═══ TUNNELS ═══ -->
+    <div class="page" id="pageApikeys">
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h2>API Keys</h2>
+          <p>One key per partner, assigned to the proxies and webhooks it may call. A new key never replaces one already in use, and each can be revoked on its own.</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', async () => { await fetchApiKeys(); })">Reload</button>
+          <button class="btn btn-primary btn-sm" onclick="openApiKeyModal()">+ API Key</button>
+        </div>
+      </div>
+      <div class="mm-filterbar">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <label class="mm-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="text" id="akSearch" placeholder="Search name, key prefix, proxy, webhook..." oninput="renderApiKeys()"></label>
+          </div>
+      </div>
+      <div class="card">
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table id="akTable" class="wh-table" style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr>
+                <th class="wh-dotcol"></th>
+                <th>Key</th>
+                <th>Access</th>
+                <th>Created</th>
+                <th>Last used</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="akRows">
+              <tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text3)">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ API KEY MODAL ═══ -->
+    <div id="apiKeyModal" role="dialog" aria-modal="true" aria-labelledby="akModalTitle" style="display:none;position:fixed;inset:0;z-index:1300;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
+      <div class="mm-dialog" style="max-width:620px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column;max-height:92vh">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px">
+          <div style="flex:1;min-width:0">
+            <h3 style="margin:0;font-size:16px" id="akModalTitle">New API key</h3>
+            <p style="margin:3px 0 0;font-size:12.5px;color:var(--text2)" id="akModalSub"></p>
+          </div>
+          <button onclick="closeApiKeyModal()" aria-label="Close" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">&times;</button>
+        </div>
+        <!-- Step 1: the form -->
+        <div id="akFormView" style="padding:16px 22px;display:flex;flex-direction:column;gap:14px;overflow-y:auto">
+          <div><label class="mm-label" for="akName">Name *</label><input class="mm-input" id="akName" type="text" maxlength="80" placeholder="Partner name" autocomplete="off" spellcheck="false"></div>
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline"><label class="mm-label" for="akFilter">Access</label><span id="akCount" aria-live="polite" style="font-size:11px;color:var(--text3)"></span></div>
+            <div class="ak-picker">
+              <label class="mm-search ak-search"><svg class="mm-search-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input class="mm-input" type="text" id="akFilter" placeholder="Search proxies and webhooks" oninput="akFilterScopes()" autocomplete="off" spellcheck="false"></label>
+              <div id="akScopes" class="ak-list"></div>
+            </div>
+            <div class="mm-field-hint">Proxies only check keys in "Access Key" auth mode. A webhook without a token starts requiring one as soon as a key is assigned to it.</div>
+          </div>
+        </div>
+        <!-- Step 2: the secret, shown once -->
+        <div id="akSecretView" style="display:none;padding:16px 22px;flex-direction:column;gap:12px;overflow-y:auto">
+          <div class="mm-group">
+            <div class="mm-group-title">Copy this key now</div>
+            <div style="display:flex;gap:8px;align-items:center"><input class="mm-input" id="akSecret" readonly aria-label="API key" style="font:400 12px var(--font-mono)" onclick="this.select()"><button class="btn btn-sm" id="akSecretCopy" onclick="mmCopyFrom(this)">Copy</button></div>
+            <div class="mm-field-hint" style="margin-top:8px">It is not stored and cannot be shown again. If it is lost, create another key — existing ones keep working.</div>
+          </div>
+          <div class="mm-group">
+            <div class="mm-group-title">How the partner sends it</div>
+            <div style="font-size:12.5px;color:var(--text2);display:flex;flex-direction:column;gap:4px">
+              <div>HTTP Proxies — header <code>X-Mid-Api-Key</code> or <code>?key=</code></div>
+              <div>Webhooks — header <code>X-Forward-Token</code> or <code>?token=</code></div>
+            </div>
+          </div>
+        </div>
+        <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn btn-sm" id="akCancelBtn" onclick="closeApiKeyModal()">Cancel</button>
+          <button class="btn btn-primary btn-sm" id="akSaveBtn" onclick="withBusy(this, 'Saving…', saveApiKey)">Create key</button>
+          <button class="btn btn-primary btn-sm" id="akDoneBtn" style="display:none" onclick="closeApiKeyModal()">Done</button>
+        </div>
+      </div>
+    </div>
+
     <div class="page" id="pageTunnels">
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
@@ -1169,15 +1257,39 @@
             <div class="mm-field-hint">IPv4 addresses or networks that may connect, comma separated. Empty = only Midleman itself (<code>127.0.0.1</code>); the port is not reachable from the network.</div>
           </div>
           <div><label class="mm-label">Description</label><input class="mm-input" id="tunDescription" type="text" maxlength="200" placeholder="What this tunnel is for"></div>
-          <div class="mm-group" id="tunActivity" style="display:none">
-            <div class="mm-group-title">Activity since Midleman started</div>
-            <div id="tunActivitySummary" style="font-size:12.5px;color:var(--text2);display:flex;flex-direction:column;gap:4px"></div>
-            <div class="md-ctr-scroll" style="max-height:220px"><table class="md-table"><thead><tr><th>Time</th><th>From</th><th>Duration</th><th>Sent</th><th>Received</th><th>Detail</th></tr></thead><tbody id="tunRecentRows"></tbody></table></div>
-          </div>
         </div>
         <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn btn-sm" onclick="closeTunnelModal()">Cancel</button>
           <button class="btn btn-primary btn-sm" onclick="withBusy(this, 'Saving…', saveTunnel)">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="tunnelActivityModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px" onclick="if(event.target===this)closeTunnelActivity()">
+      <div class="mm-dialog" role="dialog" aria-modal="true" aria-labelledby="taName" style="max-width:920px;width:100%;background:var(--surface);border:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column;max-height:92vh">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px">
+          <div style="flex:1;min-width:0">
+            <h3 style="margin:0;font-size:16px" id="taName"></h3>
+            <div id="taTarget" style="font:400 12px var(--font-mono);color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+          </div>
+          <button class="btn btn-sm" onclick="withBusy(this, 'Loading…', loadTunnelActivity)">Refresh</button>
+          <button class="btn btn-sm" onclick="taEdit()">Edit tunnel</button>
+          <button onclick="closeTunnelActivity()" aria-label="Close" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">&times;</button>
+        </div>
+        <div class="ta-stats" id="taStats"></div>
+        <div id="taNotes" style="padding:0 22px;font-size:12.5px;color:var(--text2);display:flex;flex-direction:column;gap:4px"></div>
+        <div class="md-ctr-bar" style="padding:12px 22px 0;margin:0">
+          <div class="mm-seg-filter" id="taFilter" role="tablist">
+            <button type="button" data-f="" class="on" onclick="taSetFilter(this.dataset.f)">All</button>
+            <button type="button" data-f="ok" onclick="taSetFilter(this.dataset.f)">Completed</button>
+            <button type="button" data-f="error" onclick="taSetFilter(this.dataset.f)">Errors</button>
+            <button type="button" data-f="refused" onclick="taSetFilter(this.dataset.f)">Refused</button>
+          </div>
+          <input class="mm-input md-ctr-search" id="taSearch" type="search" placeholder="Filter by address…" oninput="renderTunnelActivity()" aria-label="Filter by address">
+        </div>
+        <div style="padding:10px 22px 18px;overflow:auto;min-height:0">
+          <table class="md-table"><thead><tr><th>Time</th><th>From</th><th>Duration</th><th>Sent</th><th>Received</th><th>Result</th></tr></thead><tbody id="taRows"></tbody></table>
+          <div class="mm-field-hint" id="taFoot" style="margin-top:8px"></div>
         </div>
       </div>
     </div>
@@ -3096,6 +3208,24 @@
                 <option value="ldap.config.test">ldap.config.test</option>
                 <option value="profile.create">profile.create</option>
                 <option value="profile.update">profile.update</option>
+                <option value="webhook.create">webhook.create</option>
+                <option value="webhook.update">webhook.update</option>
+                <option value="webhook.delete">webhook.delete</option>
+                <option value="connector.create">connector.create</option>
+                <option value="connector.update">connector.update</option>
+                <option value="connector.delete">connector.delete</option>
+                <option value="five9_connector.create">five9_connector.create</option>
+                <option value="five9_connector.update">five9_connector.update</option>
+                <option value="five9_connector.delete">five9_connector.delete</option>
+                <option value="tcpudp.create">tcpudp.create</option>
+                <option value="tcpudp.update">tcpudp.update</option>
+                <option value="tcpudp.delete">tcpudp.delete</option>
+                <option value="tunnel.create">tunnel.create</option>
+                <option value="tunnel.update">tunnel.update</option>
+                <option value="tunnel.delete">tunnel.delete</option>
+                <option value="monitor.create">monitor.create</option>
+                <option value="monitor.update">monitor.update</option>
+                <option value="monitor.delete">monitor.delete</option>
                 <option value="profile.delete">profile.delete</option>
                 <option value="proxy_user.create">proxy_user.create</option>
                 <option value="proxy_user.delete">proxy_user.delete</option>
@@ -3354,12 +3484,12 @@
 
 <!-- Audit detail modal -->
 <div id="auditDetailModal" style="display:none;position:fixed;inset:0;z-index:200;background:var(--overlay);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:24px 16px">
-  <div class="mm-dialog" style="max-width:560px;width:100%;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+  <div class="mm-dialog" style="max-width:760px;width:100%;max-height:calc(100vh - 48px);display:flex;flex-direction:column;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
     <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
       <h3 style="margin:0;font-size:15px">Audit entry</h3>
       <button onclick="closeAuditDetail()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">&times;</button>
     </div>
-    <div style="padding:22px" id="auditDetailBody"></div>
+    <div style="padding:22px;overflow:auto" id="auditDetailBody"></div>
   </div>
 </div>
 
@@ -3483,10 +3613,11 @@
           </div>
         </div>
         <div class="form-group span-2"><label
-            style="display:flex;justify-content:space-between;align-items:baseline">Incoming Auth Token (optional)<a
-              href="javascript:void(0)" onclick="generateKey('wAuthToken')"
-              style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></label><input type="text"
-            id="wAuthToken" placeholder="Leave empty for public access"></div>
+            style="display:flex;justify-content:space-between;align-items:baseline">API Keys<a
+              href="javascript:void(0)" onclick="openApiKeyModal(null, 'webhook:' + document.getElementById('wName').value.trim())"
+              title="Create a key for a partner without replacing this one"
+              style="font-size:11px;font-weight:400;color:var(--accent)">+ shared API key</a></label>
+          <div id="wSharedKeys"></div></div>
         <div class="form-group span-2 mm-group" style="margin:0">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
             <div><div class="mm-group-title" style="margin:0">Meta Cloud API (WhatsApp)</div><div style="font-size:12px;color:var(--text2);margin-top:2px">One app-level callback for all your customers' numbers, routed per phone number and event — Tech Provider style.</div></div>
@@ -4542,10 +4673,11 @@
           </select>
         </div>
         <div class="form-group" id="pAccessKeyGroup" style="display:none"><label
-            style="display:flex;justify-content:space-between;align-items:baseline">Access Key<a
-              href="javascript:void(0)" onclick="generateKey('pAccessKey')"
-              style="font-size:11px;font-weight:400;color:var(--accent)">generate</a></label><input class="wz-input" type="text"
-            id="pAccessKey" placeholder="Optional">
+            style="display:flex;justify-content:space-between;align-items:baseline">API Keys<a
+              href="javascript:void(0)" onclick="openApiKeyModal(null, 'proxy:' + document.getElementById('pName').value.trim())"
+              title="Create a key for a partner without replacing this one"
+              style="font-size:11px;font-weight:400;color:var(--accent)">+ shared API key</a></label>
+          <div id="pSharedKeys"></div>
         </div>
         <div class="form-group" id="pRequire2faGroup" style="display:none">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
@@ -4625,6 +4757,27 @@
             </div>
           </div>
           <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">Requests over the limit get a 429 response. Unchecked "per client IP" means the limit is a single shared budget for the whole proxy.</span>
+        </div>
+        <div class="form-group span-2">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input class="wz-input mm-switch" type="checkbox" id="pRetryEnabled" onchange="toggleRetryQueueFields()" style="cursor:pointer;">
+            <span>Retry queue</span>
+          </label>
+          <div id="pRetryFields" style="display:none;margin-top:10px;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:end">
+            <div>
+              <label class="wz-label" for="pRetryPerMin" style="font-size:11.5px;color:var(--text3)">Attempts per minute</label>
+              <input class="wz-input" type="number" id="pRetryPerMin" min="1" max="600" step="1" placeholder="10">
+            </div>
+            <div>
+              <label class="wz-label" for="pRetryNotifyAfter" style="font-size:11.5px;color:var(--text3)">Alert after failed attempts</label>
+              <input class="wz-input" type="number" id="pRetryNotifyAfter" min="1" max="600" step="1" placeholder="10">
+            </div>
+            <div>
+              <label class="wz-label" for="pRetryNotifyEmail" style="font-size:11.5px;color:var(--text3)">Alert email (optional)</label>
+              <input class="wz-input" type="email" id="pRetryNotifyEmail" placeholder="ops@example.com">
+            </div>
+          </div>
+          <span style="font-size:11px;color:var(--text3);display:block;margin-top:4px">When the upstream answers, the caller always gets that answer. When it cannot be reached (or answers 502, 503, 504), a POST, PUT, PATCH or DELETE is answered <code>202 queued</code> and Midleman keeps delivering it until it succeeds. An upstream that then refuses it with a 4xx moves it to the failed list. GET requests and bodies above 256 KB are never queued.</span>
         </div>
         <div class="form-group span-2">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">

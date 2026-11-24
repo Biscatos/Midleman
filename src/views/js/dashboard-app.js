@@ -1,3 +1,8 @@
+// Small screens shrink the whole UI with CSS zoom (dashboard.css). Window, pointer and
+// getBoundingClientRect values are in screen px; style px are zoomed. Divide before placing a popup.
+function uiZoom() { return parseFloat(getComputedStyle(document.documentElement).zoom) || 1; }
+function uiRect(el) { const z = uiZoom(), r = el.getBoundingClientRect(); return { left: r.left / z, top: r.top / z, right: r.right / z, bottom: r.bottom / z, width: r.width / z, height: r.height / z }; }
+
 // ─── State ───────────────────────────────────────────────────────────────────
 const THEME_KEY = 'midleman_theme';
 const SIDEBAR_KEY = 'midleman_sidebar_collapsed';
@@ -459,6 +464,7 @@ const PAGE_TITLES = {
   tcpudp: 'TCP/UDP',
   profiles: 'HTTP Proxies',
   tunnels: 'Tunnels',
+  apikeys: 'API Keys',
   webhooks: 'Webhooks',
   monitors: 'Monitors',
   connectors: 'Chat Connectors',
@@ -483,7 +489,7 @@ const PAGE_TITLES = {
 const ROUTABLE_PAGES = new Set([
   'overview','requests','proxyusers','profiles','connectors',
   'oauthclients','consentpages','ldap','email','sms','notifications',
-  'npm','audit','webhooks','monitors','ldap','reports','errors','logsettings','docs','tunnels',
+  'npm','audit','webhooks','monitors','ldap','reports','errors','logsettings','docs','tunnels','apikeys',
 ]);
 
 function navigate(page, opts = {}) {
@@ -547,6 +553,7 @@ function navigate(page, opts = {}) {
   }
   if (page === 'monitors') { fetchMonitors().then(() => { if (hashSuffix && typeof openMonitorDetail === 'function') openMonitorDetail(decodeURIComponent(hashSuffix)); }); }
   if (page === 'tunnels') { fetchTunnels(); }
+  if (page === 'apikeys') { fetchApiKeys(); }
   if (page === 'connectors') { fetchConnectors(); fetchFive9Connectors(); }
   if (page === 'proxyusers') { fetchProxyUsers(); fetchInvites(); }
   if (page === 'oauthclients') { fetchOauthClients(); }
