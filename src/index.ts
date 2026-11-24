@@ -407,23 +407,21 @@ function isSecureRequest(req: Request): boolean {
 
 // ─── Async startup: assign ports, then start per-profile and per-target servers ─
 
-// Build listener keys: "profileName:transport" for each listener across all profiles
-const tcpUdpListenerKeys = config.tcpUdpProfiles.flatMap(p =>
-    p.listeners.map(l => `${p.name}:${l.transport}`)
-);
-
-const portAssignments = await assignAllPorts(
+// One call for boot and /admin/reload: a caller that leaves a family out erases its ports from ports.json.
+const assignConfiguredPorts = () => assignAllPorts(
     config.proxyProfiles.map(p => p.name),
     config.webhooks.map(w => w.name),
-    tcpUdpListenerKeys,
+    config.tcpUdpProfiles.flatMap(p => p.listeners.map(l => `${p.name}:${l.transport}`)),
     config.port,
     // Both connector families share the portMap.connectors namespace. Five9
     // connectors MUST be included here: otherwise their entry is dropped from
     // ports.json on every boot and Bun.serve({ port: undefined }) silently
     // falls back to process.env.PORT (= the admin port) → EADDRINUSE.
     [...connectors.map(c => c.name), ...five9Connectors.map(c => c.name)],
-    Object.fromEntries(five9Connectors.filter(c => c.port > 0).map(c => [c.name, c.port])),
+    // The port saved with each connector restores it when ports.json has lost the entry.
+    Object.fromEntries([...connectors, ...five9Connectors].filter(c => c.port > 0).map(c => [c.name, c.port])),
 );
+const portAssignments = await assignConfiguredPorts();
 
 // Track profiles whose dedicated port shifted at boot — the upcoming NPM
 // reconcile needs to push the new forward_port to NPM, otherwise an upstream
@@ -1619,12 +1617,7 @@ async function handle(req: Request, srv: any): Promise<Response> {
                     config.webhooks = loadPersistedWebhooks();
 
                     // Reassign all ports
-                    const newPorts = await assignAllPorts(
-                        config.proxyProfiles.map(p => p.name),
-                        config.webhooks.map(w => w.name),
-                        config.tcpUdpProfiles.map(p => p.name),
-                        config.port,
-                    );
+                    const newPorts = await assignConfiguredPorts();
 
                     // Restart all proxy servers
                     await stopAllProxyServers();
